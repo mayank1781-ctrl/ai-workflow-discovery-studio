@@ -1,0 +1,76 @@
+{
+  "schemaVersion": "1.0",
+  "defaultConnectorMode": "mock",
+  "recommendedMvpAccess": {
+    "operationMode": "read-only",
+    "dataBoundary": "one approved SharePoint site, OneDrive folder, or workbook",
+    "writeBackEnabled": false,
+    "adminConsentExpected": true
+  },
+  "permissionLadder": [
+    {
+      "phase": "mock-review",
+      "permissions": [],
+      "purpose": "Review generated connector contracts without live Microsoft 365 access.",
+      "approvalGate": "Package review"
+    },
+    {
+      "phase": "sign-in",
+      "permissions": [
+        "User.Read"
+      ],
+      "purpose": "Validate user sign-in and tenant context.",
+      "approvalGate": "Identity admin approval"
+    },
+    {
+      "phase": "delegated-read-only-pilot",
+      "permissions": [
+        "Files.Read.All",
+        "Sites.Read.All"
+      ],
+      "purpose": "Read approved files or sites available to the signed-in pilot user.",
+      "approvalGate": "Data owner and security reviewer approval"
+    },
+    {
+      "phase": "selected-site-hardening",
+      "permissions": [
+        "Sites.Selected"
+      ],
+      "purpose": "Limit app access to approved SharePoint sites when app-only access is needed.",
+      "approvalGate": "SharePoint admin and security reviewer approval"
+    },
+    {
+      "phase": "write-back",
+      "permissions": [
+        "Files.ReadWrite.All",
+        "Sites.ReadWrite.All"
+      ],
+      "purpose": "Write outputs back to Microsoft 365.",
+      "approvalGate": "Separate write-back approval; disabled for MVP"
+    }
+  ],
+  "openidScopes": [
+    "openid",
+    "profile",
+    "email",
+    "offline_access"
+  ],
+  "blockedForMvp": [
+    "mail read/write access",
+    "calendar read/write access",
+    "Teams message read/write access",
+    "SharePoint write-back",
+    "tenant-wide unattended read/write access"
+  ],
+  "evidenceRequired": [
+    "business owner",
+    "data classification",
+    "approved source location",
+    "allowed operations",
+    "permission scope",
+    "pilot user group",
+    "retention expectation",
+    "audit owner",
+    "fallback mode"
+  ]
+}

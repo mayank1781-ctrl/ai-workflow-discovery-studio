@@ -1,0 +1,31 @@
+{
+  "name": "ai-workflow-discovery-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local AI Workflow Discovery Studio for workflow intake, analysis, handoff outputs, and pilot testing.",
+  "scripts": {
+    "start": "node scripts/start-local.mjs",
+    "start:5177": "PORT=5177 node scripts/start-local.mjs",
+    "check": "node --check discovery-intake-webapp/app.js && node --check discovery-intake-webapp/server.mjs && node --check discovery-intake-webapp/scripts/regression-interview-flow.mjs && node --check scripts/check-local-setup.mjs && node --check scripts/start-local.mjs",
+    "check:setup": "node scripts/check-local-setup.mjs",
+    "enterprise:check": "node scripts/check-enterprise-transfer-kit.mjs",
+    "work:check": "node scripts/check-work-environment-readiness.mjs",
+    "work:check:strict": "node scripts/check-work-environment-readiness.mjs --work-strict",
+    "health": "node scripts/check-local-setup.mjs --health",
+    "package:review": "node scripts/build-review-package.mjs",
+    "package:doctor": "node scripts/check-review-package.mjs",
+    "package:install-check": "node scripts/check-review-package-install.mjs --copy-local-env",
+    "test:stabilization": "node scripts/run-stabilization-checks.mjs",
+    "test:layout": "node scripts/check-discovery-layout.mjs",
+    "test:evidence": "node scripts/check-evidence-linkage.mjs",
+    "test:reviewer": "node scripts/check-reviewer-decision.mjs",
+    "test:templates": "node scripts/check-template-alignment.mjs",
+    "test:interview": "node discovery-intake-webapp/scripts/regression-interview-flow.mjs",
+    "test:phase1": "cd discovery-intake-webapp && node scripts/run-phase1-live-tests.mjs",
+    "test:enterprise-baselines": "cd discovery-intake-webapp && node scripts/evaluate-enterprise-baselines.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.60.0"
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "schemaVersion": "1.0",
+  "environmentName": "enterprise-local-mvp",
+  "app": {
+    "name": "AI Workflow Discovery Studio",
+    "baseUrl": "http://localhost:5177",
+    "runtime": "node-local",
+    "nodeMajorVersionMinimum": 18,
+    "enterpriseMode": "on",
+    "connectorMode": "mock"
+  },
+  "ai": {
+    "provider": "OpenAI or approved enterprise AI provider",
+    "keyStorage": "work-machine .env.local or approved secret manager",
+    "liveAiRequiredForReview": false,
+    "models": {
+      "realtime": "gpt-realtime-2",
+      "transcription": "gpt-4o-transcribe",
+      "extraction": "gpt-5.5"
+    }
+  },
+  "microsoft365": {
+    "tenantId": "",
+    "clientId": "",
+    "redirectUri": "http://localhost:5177/auth/microsoft/callback",
+    "graphScopes": [
+      "User.Read",
+      "Files.Read.All",
+      "Sites.Read.All",
+      "offline_access"
+    ],
+    "sharePointHostname": "",
+    "sharePointSitePath": "",
+    "siteId": "",
+    "driveId": "",
+    "folderPath": "",
+    "writeBackEnabled": false
+  },
+  "github": {
+    "repository": "",
+    "defaultBranch": "main",
+    "visibility": "private",
+    "actionsWorkflow": ".github/workflows/enterprise-transfer-check.yml",
+    "secretsConfigured": false
+  },
+  "dataPolicy": {
+    "allowedForFirstRun": [
+      "synthetic data",
+      "sanitized internal examples",
+      "approved pilot data with named owner"
+    ],
+    "blockedUnlessApproved": [
+      "client confidential data",
+      "regulated personal data",
+      "MNPI",
+      "PCI",
+      "PHI",
+      "production client data"
+    ],
+    "localGeneratedDataPath": "discovery-intake-webapp/data/",
+    "reviewPackageIncludesGeneratedData": false
+  },
+  "controls": {
+    "noSecretsInGit": true,
+    "packageDoctorRequired": true,
+    "transferKitCheckRequired": true,
+    "connectorApprovalRequired": true,
+    "writeBackRequiresSeparateApproval": true
+  }
+}

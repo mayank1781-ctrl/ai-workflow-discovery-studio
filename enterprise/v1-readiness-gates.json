@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "1.0",
+  "gates": [
+    {
+      "id": "package-hygiene",
+      "owner": "technical owner",
+      "decision": "required",
+      "evidence": [
+        "node scripts/check-enterprise-transfer-kit.mjs",
+        "node scripts/build-review-package.mjs",
+        "node scripts/check-review-package.mjs"
+      ]
+    },
+    {
+      "id": "private-source-control",
+      "owner": "repository owner",
+      "decision": "required",
+      "evidence": [
+        "private repository",
+        ".env.local absent from Git",
+        "review access limited"
+      ]
+    },
+    {
+      "id": "work-local-runtime",
+      "owner": "technical owner",
+      "decision": "required",
+      "evidence": [
+        "node scripts/check-local-setup.mjs --no-health",
+        "node scripts/start-local.mjs",
+        "health endpoint reviewed"
+      ]
+    },
+    {
+      "id": "safe-data",
+      "owner": "business pilot owner",
+      "decision": "required",
+      "evidence": [
+        "safe sample used first",
+        "data classification recorded",
+        "retention expectation recorded"
+      ]
+    },
+    {
+      "id": "microsoft-365-connector",
+      "owner": "Microsoft 365 admin reviewer",
+      "decision": "required before live connector",
+      "evidence": [
+        "connector mode remains mock until approval",
+        "Entra app registration reviewed",
+        "Graph permissions approved",
+        "source location approved"
+      ]
+    },
+    {
+      "id": "pilot-promotion",
+      "owner": "release owner",
+      "decision": "required before broader sharing",
+      "evidence": [
+        "Reviewer Decision Summary",
+        "Enterprise Readiness Brief",
+        "Connector Promotion Decision Packet"
+      ]
+    }
+  ]
+}

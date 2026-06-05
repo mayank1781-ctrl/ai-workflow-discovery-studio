@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Discovery Intake Studio</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./styles.css?v=20260525-phase26" />
+    <link rel="stylesheet" href="./cockpit.css?v=20260525-phase26" />
+    <link rel="stylesheet" href="./future.css?v=20260527-phase38" />
+    <script src="./vendor/lucide.js"></script>
+    <script src="./vendor/mermaid.min.js"></script>
+    <script src="./vendor/xlsx.full.min.js"></script>
+  </head>
+  <body>
+    <div class="app-shell session-shell">
+      <main class="workspace">
+        <header class="topbar session-topbar">
+          <div class="session-brand" aria-label="AI Workflow Discovery">
+            <div class="brand-mark">AI</div>
+            <span id="aiStatus" class="status-pill">AI checking</span>
+          </div>
+          <nav class="mode-switch" aria-label="Experience mode">
+            <button class="mode-tab active" data-app-mode="interview" type="button">
+              <i data-lucide="mic-2"></i>
+              Discovery
+            </button>
+            <button class="mode-tab" data-app-mode="analysis" type="button">
+              <i data-lucide="panel-right-open"></i>
+              Analysis Studio
+            </button>
+          </nav>
+          <details class="help-menu">
+            <summary class="ai-turn-status help-status" title="Open a quick visual guide for using the discovery app">
+              <i data-lucide="circle-help"></i>
+              Help
+            </summary>
+            <div class="help-popover" role="dialog" aria-label="How to use this app">
+              <p class="eyebrow">How to use this app</p>
+              <h3>Run the interview, then package the handoff</h3>
+              <ol>
+                <li><strong>Start Talking</strong><span>Answer the current question naturally. Speak one answer at a time.</span></li>
+                <li><strong>Stop Talking</strong><span>The AI transcribes, thinks silently, summarizes what it heard, and asks you to confirm.</span></li>
+                <li><strong>Confirm or correct</strong><span>Say yes if the summary is right, or explain what to change.</span></li>
+                <li><strong>Add Attachment</strong><span>Upload screenshots, PDFs, docs, decks, or trackers only when they help clarify the workflow.</span></li>
+                <li><strong>Analysis Studio</strong><span>Review the structured handoff, process matrix, Product questions, and Engineering questions.</span></li>
+              </ol>
+            </div>
+          </details>
+          <div class="topbar-actions">
+            <button class="icon-button" id="saveButton" title="Save locally" type="button">
+              <i data-lucide="save"></i>
+            </button>
+            <button class="icon-button" id="resetButton" title="Reset session" type="button">
+              <i data-lucide="rotate-ccw"></i>
+            </button>
+            <button class="primary-button" id="exportButton" type="button">
+              <i data-lucide="download"></i>
+              Export Excel
+            </button>
+          </div>
+        </header>
+        <input
+          id="evidenceFileInput"
+          type="file"
+          multiple
+          hidden
+          accept=".png,.jpg,.jpeg,.webp,.gif,.txt,.md,.csv,.json,.pdf,.docx,.xlsx,.xls,.pptx,image/*,text/*,application/pdf"
+        />
+        <input
+          id="workbookImportInput"
+          type="file"
+          hidden
+          accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+        />
+
+        <section class="interview-room discovery-cockpit" data-app-panel="interview">
+          <section class="interview-stage" aria-label="Voice interview">
+            <div class="question-stage-card discovery-hero-card">
+              <div class="discovery-hero-grid">
+                <div class="discovery-question-area">
+                  <div class="stage-topline">
+                    <span id="voiceStatus" class="status-pill">Voice idle</span>
+                    <label class="voice-toggle" title="Read AI responses aloud">
+                      <input id="voiceReplyToggle" type="checkbox" />
+                      <span>AI speaks back</span>
+                    </label>
+                    <div id="discoveryCompletionPill" class="discovery-completion-pill" title="Overall discovery session completion">
+                      <span id="discoveryCompletionLabel">Session 0%</span>
+                      <div class="discovery-completion-track" aria-hidden="true">
+                        <i id="discoveryCompletionFill"></i>
+                      </div>
+                    </div>
+                    <button class="secondary-button compact discovery-start-button" id="newDiscoveryButton" type="button" title="Start a clean Discovery session">
+                      <i data-lucide="file-plus-2"></i>
+                      New
+                    </button>
+                  </div>
+                  <div class="current-question-card" data-help="This is the question the colleague should answer next. The AI updates it as it learns the workflow.">
+                    <div>
+                      <p>Current Question</p>
+                      <h2 id="currentQuestion">What is this workflow called?</h2>
+                      <div id="questionLensBar" class="question-lens-bar" aria-live="polite"></div>
+                      <p id="questionSource" class="question-source">Intake guide</p>
+                      <div id="questionQueuePreview" class="question-queue-preview" aria-live="polite"></div>
+                    </div>
+                  </div>
+                  <div id="currentStepPanel" class="step-workspace-card"></div>
+                  <div class="voice-actions main-turn-actions secondary-voice-actions">
+                    <button class="primary-button" id="startRecordingButton" type="button" title="Begin recording the answer to the current question">
+                      <i data-lucide="mic"></i>
+                      Dictate
+                    </button>
+                    <button class="secondary-button" id="endRecordingButton" type="button" disabled title="Stop recording and send this answer to the AI">
+                      <i data-lucide="square"></i>
+                      Stop
+                    </button>
+                    <label class="secondary-button main-attachment-button" for="evidenceFileInput" title="Upload optional docs, screenshots, PDFs, decks, or trackers as context">
+                      <i data-lucide="paperclip"></i>
+                      Add Attachment
+                    </label>
+                    <button class="secondary-button" id="startRealtimeButton" type="button">
+                      <i data-lucide="radio"></i>
+                      AI Voice On
+                    </button>
+                    <button class="secondary-button" id="stopRealtimeButton" type="button" disabled>
+                      <i data-lucide="phone-off"></i>
+                      AI Voice Off
+                    </button>
+                  </div>
+                  <p id="voiceHint" class="hint">
+                    Optional dictation. The primary flow is typing a concise answer, then accepting it for analysis.
+                  </p>
+                  <textarea id="answerInput" rows="3" placeholder="Voice draft buffer. Typed intake happens in the Text Intake panel."></textarea>
+                  <div class="support-actions quiet-actions">
+                    <button class="secondary-button" id="aiExtractButton" type="button">
+                      <i data-lucide="sparkles"></i>
+                      Analyze Answer
+                    </button>
+                    <button class="secondary-button" id="saveAnswerButton" type="button">
+                      <i data-lucide="check"></i>
+                      Save Note
+                    </button>
+                    <button class="secondary-button" id="showProgressButton" type="button">
+                      <i data-lucide="activity"></i>
+                      Coverage
+                    </button>
+                    <button class="secondary-button" id="showMapButton" type="button">
+                      <i data-lucide="map"></i>
+                      Map
+                    </button>
+                  </div>
+                </div>
+
+                <aside class="embedded-transcript-card" aria-label="Live transcript" data-help="This rail shows the running conversation and gives users a typing fallback when they do not want to use voice.">
+                  <div class="conversation-card">
+                    <div class="conversation-heading">
+                      <div>
+                        <p class="eyebrow">Conversation</p>
+                        <h2>Live transcript</h2>
+                      </div>
+                    </div>
+                    <div id="conversationLog" class="conversation-log" aria-live="polite"></div>
+                    <div id="liveSpeechDraft" class="live-speech-draft" aria-live="polite"></div>
+                    <div class="transcript-composer">
+                      <div class="conversation-heading compact">
+                        <div>
+                          <p class="eyebrow">Text Intake</p>
+                          <h2>Type the next answer</h2>
+                        </div>
+                        <i data-lucide="keyboard"></i>
+                      </div>
+                      <div id="textIntakeAssist" class="text-intake-assist" aria-live="polite"></div>
+                      <div id="aiChatLog" class="ai-chat-log" aria-live="polite"></div>
+                      <div class="chat-composer">
+                        <textarea id="aiChatInput" rows="5" placeholder="Type an answer, rough notes, or a numbered workflow..."></textarea>
+                        <div id="answerNudges" class="answer-nudges" aria-live="polite"></div>
+                        <p class="composer-hint">Press Enter to accept and analyze. Press Shift+Enter for a new line.</p>
+                        <div class="voice-actions">
+                          <button class="primary-button compact" id="sendChatButton" type="button">
+                            <i data-lucide="check"></i>
+                            Accept & Analyze
+                          </button>
+                          <button class="secondary-button compact" id="processChatButton" type="button">
+                            <i data-lucide="scan-text"></i>
+                            Analyze
+                          </button>
+                          <button class="secondary-button compact" id="captureFeedbackQuickButton" type="button">
+                            <i data-lucide="message-square-text"></i>
+                            Capture Feedback
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </aside>
+              </div>
+              <div id="turnSignalPanel" class="turn-signal-panel session-pulse-discovery" aria-live="polite"></div>
+            </div>
+
+            <div id="discoveryInferenceLens" class="discovery-inference-strip" aria-live="polite"></div>
+            <div id="analysisMatrixMap" class="analysis-matrix-map discovery-matrix-section" aria-live="polite"></div>
+          </section>
+        </section>
+
+        <section class="analysis-studio" data-app-panel="analysis" hidden>
+          <section class="analysis-console-hero" aria-label="Analysis console overview">
+            <div class="analysis-console-title">
+              <p class="eyebrow">Analysis Studio</p>
+              <h2>Analysis Studio dashboard</h2>
+              <p>Track the live session, handoff builder, readiness inspector, and output package from one dynamic view.</p>
+            </div>
+            <div class="demo-case-loader">
+              <label for="demoCaseSelect">Review sample case</label>
+              <div>
+                <select id="demoCaseSelect">
+                  <option value="banking-payments">Banking payments exception research</option>
+                  <option value="insurance-workshop-synthesis">Insurance workshop synthesis</option>
+                  <option value="strategy-workshop-prep">Strategy workshop prep (cross-practice)</option>
+                </select>
+                <button class="primary-button compact" id="loadDemoCaseButton" type="button">
+                  <i data-lucide="database-zap"></i>
+                  Load Case
+                </button>
+              </div>
+            </div>
+            <div id="demoCaseSummaryMetrics" class="console-metric-strip"></div>
+          </section>
+
+          <div class="analysis-zone-strip workspace-picker grouped-workspace-picker" aria-label="Analysis work zones">
+            <details class="analysis-zone-group merged-zone-group" open>
+              <summary>
+                <span>Discovery Session + Handoff</span>
+                <strong>Intake, structure, inspect, and package the opportunity</strong>
+              </summary>
+              <div class="analysis-zone-group-body">
+                <button class="analysis-zone-card compact" data-workbench-tab="library" type="button">
+                  <span>01</span>
+                  <i data-lucide="folder-clock"></i>
+                  <strong>Live Session + Library</strong>
+                  <p>Current captured data, fields, steps, evidence, and session state.</p>
+                </button>
+                <button class="analysis-zone-card compact" data-workbench-tab="handoff" type="button">
+                  <span>02</span>
+                  <i data-lucide="list-checks"></i>
+                  <strong>Handoff Builder</strong>
+                  <p>Convert captured facts into PDR-ready handoff fields.</p>
+                </button>
+                <button class="analysis-zone-card compact" data-workbench-tab="inspector" type="button">
+                  <span>03</span>
+                  <i data-lucide="panel-right"></i>
+                  <strong>Readiness Inspector</strong>
+                  <p>Document readiness, missing fields, routing, and next action.</p>
+                </button>
+                <button class="analysis-zone-card compact" data-workbench-tab="blueprint" type="button">
+                  <span>04</span>
+                  <i data-lucide="files"></i>
+                  <strong>Outputs</strong>
+                  <p>Product, Engineering, Business, governance inputs, and export package.</p>
+                </button>
+                <button class="analysis-zone-card compact" data-workbench-tab="business" type="button">
+                  <span>05</span>
+                  <i data-lucide="settings-2"></i>
+                  <strong>Testing & Release</strong>
+                  <p>Self testing, colleague sharing, and enterprise release readiness.</p>
+                </button>
+              </div>
+            </details>
+          </div>
+
+          <section class="analysis-workspace" aria-label="Analytics and processing workspace">
+          <section class="workbench-shell unified-workbench-shell" aria-label="Detailed intake workbench">
+            <article class="panel workbench-panel session-library-panel" data-workbench-panel="library" hidden>
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Live Session + Library</p>
+                  <h3>Current captured data ledger</h3>
+                </div>
+                <div class="session-library-toolbar">
+                  <button class="secondary-button compact" id="newSessionButton" type="button">
+                    <i data-lucide="file-plus-2"></i>
+                    New
+                  </button>
+                  <button class="secondary-button compact" id="duplicateSessionButton" type="button">
+                    <i data-lucide="copy-plus"></i>
+                    Duplicate
+                  </button>
+                  <label class="secondary-button compact" for="workbookImportInput" title="Import a previously exported AI Workflow Discovery Studio workbook">
+                    <i data-lucide="file-up"></i>
+                    Import Workbook
+                  </label>
+                  <button class="primary-button compact" id="saveSessionLibraryButton" type="button">
+                    <i data-lucide="save"></i>
+                    Save Session
+                  </button>
+                  <button class="secondary-button compact" id="createPackageButton" type="button">
+                    <i data-lucide="package-check"></i>
+                    Create Package
+                  </button>
+                </div>
+              </div>
+              <div class="session-meta-grid">
+                <label>
+                  <span>Session name</span>
+                  <input id="sessionNameInput" type="text" placeholder="Name this discovery session..." />
+                </label>
+                <label>
+                  <span>Owner / interviewer</span>
+                  <input id="sessionOwnerInput" type="text" placeholder="AI Infusion team member..." />
+                </label>
+                <label>
+                  <span>Data classification</span>
+                  <select id="sessionDataClassificationSelect">
+                    <option value="Unknown">Unknown</option>
+                    <option value="No client data">No client data</option>
+                    <option value="Internal only">Internal only</option>
+                    <option value="Client confidential">Client confidential</option>
+                    <option value="Regulated / PII">Regulated / PII</option>
+                    <option value="Synthetic / sample">Synthetic / sample</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Status</span>
+                  <select id="sessionStatusSelect">
+                    <option value="Discovery">Discovery</option>
+                    <option value="Needs follow-up">Needs follow-up</option>
+                    <option value="Ready for review">Ready for review</option>
+                    <option value="Exported">Exported</option>
+                  </select>
+                </label>
+              </div>
+              <div id="sessionMetaSummary" class="session-meta-summary"></div>
+              <div id="liveIntakeLedger" class="live-intake-ledger"></div>
+              <details class="analysis-diagnostics-drawer">
+                <summary>
+                  <span><i data-lucide="activity"></i> Session diagnostics</span>
+                  <strong>Progress flow and process matrix</strong>
+                </summary>
+                <section class="embedded-session-pulse-workbench">
+                  <div class="panel-heading compact-heading">
+                    <div>
+                      <p class="eyebrow">Session Pulse</p>
+                      <h3>Progress and validation flow</h3>
+                    </div>
+                    <strong id="progressPercentMirror">0%</strong>
+                  </div>
+                  <div class="progress-track">
+                    <div id="progressFill" class="progress-fill"></div>
+                  </div>
+                  <div class="pulse-content-grid">
+                    <div id="validationFlow" class="validation-flow-card"></div>
+                    <div class="pulse-side-note">
+                      <p class="eyebrow">Coverage</p>
+                      <h3 id="progressPercent">0%</h3>
+                      <p>Use this page to decide whether to keep interviewing, inspect gaps, or package the handoff.</p>
+                    </div>
+                  </div>
+                </section>
+                <section class="embedded-matrix-workbench">
+                  <div class="panel-heading compact-heading">
+                    <div>
+                      <p class="eyebrow">Process Matrix</p>
+                      <h3>Step-by-step confidence map</h3>
+                    </div>
+                  </div>
+                  <div id="stepMatrixPreview" class="step-matrix-preview"></div>
+                </section>
+              </details>
+              <section class="embedded-evidence-workbench">
+                <div class="panel-heading compact-heading">
+                  <div>
+                    <p class="eyebrow">Evidence</p>
+                    <h3>Optional artifacts connected to this session</h3>
+                  </div>
+                  <label class="secondary-button compact evidence-upload-button" for="evidenceFileInput">
+                    <i data-lucide="upload"></i>
+                    Add Evidence
+                  </label>
+                </div>
+                <div id="evidenceWorkbench" class="evidence-workbench"></div>
+              </section>
+              <details class="saved-intakes-drawer">
+                <summary>
+                  <span><i data-lucide="folder-clock"></i> Saved intakes</span>
+                  <strong>Load, copy, or clean up prior sessions</strong>
+                </summary>
+                <div id="sessionLibraryList" class="session-library-list compact-library-list"></div>
+              </details>
+            </article>
+
+            <article class="panel workbench-panel business-panel" data-workbench-panel="business" hidden>
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Testing & Release</p>
+                  <h3>Three-mode testing tracker</h3>
+                </div>
+              </div>
+              <div class="business-readiness-grid pilot-settings-grid">
+                <div id="liveTestCommandCenter" class="live-test-command-center"></div>
+                <details class="pilot-settings-drawer release-support-drawer" data-live-test-drawer="feedback">
+                  <summary>
+                    <span><i data-lucide="message-square-text"></i> Feedback snapshots</span>
+                    <strong>Capture what changed after each test</strong>
+                  </summary>
+                  <div id="pilotFeedbackPanel" class="pilot-feedback-panel"></div>
+                  <div id="pilotInsightsPanel" class="pilot-insights-panel"></div>
+                </details>
+                <details class="pilot-settings-drawer release-support-drawer" data-live-test-drawer="controls">
+                  <summary>
+                    <span><i data-lucide="shield-check"></i> Setup checks</span>
+                    <strong>Owner, data boundary, storage, auth, and package gates</strong>
+                  </summary>
+                  <div id="pilotControlSummary" class="pilot-control-summary"></div>
+                  <div id="pilotReadinessGates" class="pilot-readiness-gates"></div>
+                  <div id="pilotControlForm" class="pilot-control-form"></div>
+                </details>
+                <details class="pilot-settings-drawer release-support-drawer" data-live-test-drawer="assets">
+                  <summary>
+                    <span><i data-lucide="clipboard-check"></i> Testing assets</span>
+                    <strong>Script, colleague handoff, and runbook when needed</strong>
+                  </summary>
+                  <div id="liveTestScriptPanel" class="pilot-runbook"></div>
+                  <div id="liveTestHandoffPanel" class="pilot-runbook"></div>
+                  <div id="pilotRunbook" class="pilot-runbook"></div>
+                </details>
+              </div>
+            </article>
+
+            <article class="panel workbench-panel handoff-builder-panel" data-workbench-panel="handoff">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Handoff Builder</p>
+                  <h3 id="sectionTitle">Workflow Frame</h3>
+                </div>
+                <button class="secondary-button compact" id="nextSectionButton" type="button">
+                  Next
+                  <i data-lucide="arrow-right"></i>
+                </button>
+              </div>
+              <div id="handoffBridge" class="handoff-bridge"></div>
+              <details class="capture-summary-drawer">
+                <summary>
+                  <span><i data-lucide="panel-bottom-open"></i> Capture details</span>
+                  <strong>Signals, progress, and full intake areas</strong>
+                </summary>
+                <div class="capture-summary" id="captureSummary"></div>
+              </details>
+              <details class="advanced-field-editor">
+                <summary>
+                  <span><i data-lucide="sliders-horizontal"></i> Advanced field editor</span>
+                  <strong>Edit raw intake fields when needed</strong>
+                </summary>
+                <div id="sectionForm"></div>
+              </details>
+            </article>
+
+            <article class="panel workbench-panel" data-workbench-panel="inspector" hidden>
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Readiness Inspector</p>
+                  <h3>Readiness blockers and routed questions</h3>
+                </div>
+              </div>
+              <div id="blueprintInspector" class="blueprint-inspector blueprint-inspector-full"></div>
+            </article>
+
+            <article class="panel workbench-panel" data-workbench-panel="blueprint" hidden>
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Outputs</p>
+                  <h3>Current output briefs and downloads</h3>
+                </div>
+                <div class="output-action-row">
+                  <button class="secondary-button compact" data-output-action="package" type="button">
+                    <i data-lucide="package-check"></i>
+                    Create Package
+                  </button>
+                  <button class="primary-button compact" data-output-action="excel" type="button">
+                    <i data-lucide="download"></i>
+                    Export Excel
+                  </button>
+                </div>
+              </div>
+              <div id="templateHandoffStudio" class="template-handoff-studio"></div>
+              <details class="legacy-output-logic">
+                <summary>
+                  <span><i data-lucide="blocks"></i> Advanced output logic</span>
+                  <strong>Checklist, draft text, backlog seed, and parked ideas</strong>
+                </summary>
+              <div class="product-handoff-grid">
+                <section>
+                  <div id="solutionBlueprint" class="solution-blueprint"></div>
+                </section>
+                <section>
+                  <div class="panel-heading compact-heading">
+                    <div>
+                      <p class="eyebrow">Product PDR Preview</p>
+                      <h3>Draft handoff</h3>
+                    </div>
+                  </div>
+                  <div id="pdrPreview" class="preview-box"></div>
+                </section>
+                <section>
+                  <div class="panel-heading compact-heading">
+                    <div>
+                      <p class="eyebrow">Ideas Parking Lot</p>
+                      <h3>Future-state ideas kept separate</h3>
+                    </div>
+                  </div>
+                  <div class="inline-add">
+                    <input id="ideaInput" type="text" placeholder="Future-state idea to park..." />
+                    <button class="secondary-button compact" id="addIdeaButton" type="button">Add</button>
+                  </div>
+                  <div id="ideasList" class="list-stack"></div>
+                </section>
+              </div>
+              </details>
+            </article>
+
+            <article class="panel workbench-panel pilot-controls-panel" data-workbench-panel="controls" hidden>
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Pilot Controls</p>
+                  <h3>Enterprise pilot setup guardrails</h3>
+                </div>
+              </div>
+              <div class="panel-empty-note">Pilot controls now live in Testing & Release.</div>
+            </article>
+
+          </section>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast" class="toast" role="status"></div>
+    <script src="./app.js?v=20260527-phase38"></script>
+  </body>
+</html>

@@ -1,0 +1,1763 @@
+import http from "node:http";
+import fsSync from "node:fs";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function loadLocalEnv() {
+  const envPath = path.join(__dirname, ".env.local");
+  if (!fsSync.existsSync(envPath)) return;
+
+  const lines = fsSync.readFileSync(envPath, "utf8").split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("=")) continue;
+    const separatorIndex = trimmed.indexOf("=");
+    const key = trimmed.slice(0, separatorIndex).trim();
+    let value = trimmed.slice(separatorIndex + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (key && !process.env[key]) process.env[key] = value;
+  }
+}
+
+loadLocalEnv();
+
+const PORT = Number(process.env.PORT || 5173);
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+const REALTIME_MODEL = process.env.REALTIME_MODEL || "gpt-realtime-2";
+const REALTIME_VOICE = process.env.REALTIME_VOICE || "marin";
+const REALTIME_REASONING_EFFORT = process.env.REALTIME_REASONING_EFFORT || "low";
+const TRANSCRIPTION_MODEL = process.env.TRANSCRIPTION_MODEL || "gpt-4o-transcribe";
+const EXTRACTION_MODEL = process.env.EXTRACTION_MODEL || process.env.OPENAI_MODEL || "gpt-5.5";
+const EXTRACTION_REASONING_EFFORT = process.env.EXTRACTION_REASONING_EFFORT || "medium";
+const EXTRACTION_VERBOSITY = process.env.EXTRACTION_VERBOSITY || "low";
+const CHAT_REASONING_EFFORT = process.env.CHAT_REASONING_EFFORT || "low";
+const CHAT_VERBOSITY = process.env.CHAT_VERBOSITY || "low";
+const APP_ENV = process.env.APP_ENV || "local";
+const APP_BASE_URL = process.env.APP_BASE_URL || `http://localhost:${PORT}`;
+const ENTERPRISE_MODE = process.env.ENTERPRISE_MODE || "off";
+const CONNECTOR_MODE = process.env.CONNECTOR_MODE || "mock";
+const MICROSOFT_TENANT_ID = process.env.MICROSOFT_TENANT_ID || "";
+const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID || "";
+const MICROSOFT_REDIRECT_URI = process.env.MICROSOFT_REDIRECT_URI || "";
+const MICROSOFT_GRAPH_SCOPES = process.env.MICROSOFT_GRAPH_SCOPES || "";
+const MICROSOFT_SHAREPOINT_HOSTNAME = process.env.MICROSOFT_SHAREPOINT_HOSTNAME || "";
+const MICROSOFT_SHAREPOINT_SITE_PATH = process.env.MICROSOFT_SHAREPOINT_SITE_PATH || "";
+const MICROSOFT_GRAPH_SITE_ID = process.env.MICROSOFT_GRAPH_SITE_ID || "";
+const MICROSOFT_GRAPH_DRIVE_ID = process.env.MICROSOFT_GRAPH_DRIVE_ID || "";
+const MICROSOFT_GRAPH_FOLDER_PATH = process.env.MICROSOFT_GRAPH_FOLDER_PATH || "";
+const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY || "";
+const GITHUB_DEFAULT_BRANCH = process.env.GITHUB_DEFAULT_BRANCH || "main";
+const GITHUB_ACTIONS_ENABLED = process.env.GITHUB_ACTIONS_ENABLED || "false";
+const DATA_DIR = path.join(__dirname, "data");
+const SESSIONS_DIR = path.join(DATA_DIR, "sessions");
+const PACKAGES_DIR = path.join(DATA_DIR, "packages");
+
+const mimeTypes = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".txt": "text/plain; charset=utf-8",
+  ".md": "text/markdown; charset=utf-8",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".zip": "application/zip"
+};
+
+const intakeFieldKeys = [
+  "submittedIdea",
+  "submittedWorkflowTask",
+  "submittedWhereToday",
+  "submittedFrequency",
+  "submittedCurrentEffort",
+  "submittedCandidateAiAssist",
+  "submittedHumanReviewNeeded",
+  "submittedRepeatability",
+  "submittedExpectedImpact",
+  "submittedNotes",
+  "useCaseArchetype",
+  "workflowCategory",
+  "recordType",
+  "practice",
+  "unitOfAnalysis",
+  "ideaValidationStatus",
+  "buildReadiness",
+  "primaryTimeDriver",
+  "candidateAiAssistValidation",
+  "productClarifications",
+  "engineeringClarifications",
+  "commercialValuePath",
+  "projectType",
+  "priority",
+  "automationPotential",
+  "gateDecision",
+  "workflowName",
+  "domain",
+  "engagementProjectType",
+  "projectPhase",
+  "intervieweeRole",
+  "deliverableType",
+  "outputConsumer",
+  "availableTooling",
+  "commercialContext",
+  "businessOwner",
+  "stakeholders",
+  "businessOutcome",
+  "valueHypothesis",
+  "startPoint",
+  "endPoint",
+  "definitionOfDone",
+  "currentStateSummary",
+  "workshopType",
+  "expectedWorkshopOutput",
+  "participantProfile",
+  "prepArtifactsNeeded",
+  "reusableCollateralSource",
+  "facilitationTechnique",
+  "humanJudgmentArea",
+  "triggerType",
+  "triggerSource",
+  "triggerFrequency",
+  "entryConditions",
+  "runsPerPeriod",
+  "averageDuration",
+  "peopleInvolved",
+  "roleMix",
+  "capacityTeamCompositionImpact",
+  "reworkNotes",
+  "qualityVariability",
+  "reusePotential",
+  "businessImpact",
+  "biggestPain",
+  "hoursSavedHypothesis",
+  "marginImpactHypothesis",
+  "qualityImpactHypothesis",
+  "kpiTypes",
+  "qualityBenefits",
+  "eqIqDemand",
+  "changeImpact",
+  "playbackConfirmed",
+  "mostValuableStep",
+  "mostRiskyStep",
+  "pilotCandidate",
+  "evidenceArtifacts",
+  "followUpOwner",
+  "reusePermission",
+  "recommendedNextStep",
+  "solutionHypothesis",
+  "mvpScope",
+  "userStories",
+  "acceptanceCriteria",
+  "successMetrics",
+  "toolFitRecommendation",
+  "openQuestions",
+  "engineeringUnknowns",
+  "solutionType",
+  "msaBoundary",
+  "dataSensitivity",
+  "deploymentEnvironment",
+  "governancePath",
+  "lifecycleStage",
+  "lifecycleStatus",
+  "stageOwner",
+  "fieldConfidence"
+];
+
+const extractionSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "summary",
+    "confidence",
+    "fields",
+    "newRecords",
+    "ideas",
+    "progressNotes",
+    "nextQuestion",
+    "mapCheckpointRecommended"
+  ],
+  properties: {
+    summary: { type: "string" },
+    confidence: { type: "string", enum: ["low", "medium", "high"] },
+    fields: {
+      type: "object",
+      additionalProperties: false,
+      required: intakeFieldKeys,
+      properties: Object.fromEntries(intakeFieldKeys.map((key) => [key, { type: "string" }]))
+    },
+    newRecords: {
+      type: "object",
+      additionalProperties: false,
+      required: ["steps", "data", "systems", "decisions", "patterns"],
+      properties: {
+        steps: {
+          type: "array",
+          items: objectSchema(["name", "actor", "tool", "accessMode", "action", "input", "dataHandling", "output", "handoff", "trigger", "time", "decision", "pain", "risk", "exceptions", "dataSensitivity", "pattern", "toolFit", "evidenceConfidence", "interviewNotes", "openQuestions"])
+        },
+        data: {
+          type: "array",
+          items: objectSchema(["category", "source", "format", "sensitivity", "usageMode", "processing", "tool", "storage", "access", "avoidRaw", "splitNotes"])
+        },
+        systems: {
+          type: "array",
+          items: objectSchema(["name", "purpose", "access", "owner", "integration", "clientData"])
+        },
+        decisions: {
+          type: "array",
+          items: objectSchema(["decision", "owner", "criteria", "risk", "approval", "escalation"])
+        },
+        patterns: {
+          type: "array",
+          items: objectSchema(["step", "pattern", "riskNote", "toolFit"])
+        }
+      }
+    },
+    ideas: {
+      type: "array",
+      items: objectSchema(["idea", "source", "notes"])
+    },
+    progressNotes: { type: "string" },
+    nextQuestion: { type: "string" },
+    mapCheckpointRecommended: { type: "boolean" }
+  }
+};
+
+const evidenceSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "summary",
+    "confidence",
+    "artifactType",
+    "sourceKind",
+    "suggestedFieldUpdates",
+    "suggestedRecords",
+    "suggestedIdeas",
+    "followUpQuestions",
+    "confirmationPrompt",
+    "warnings"
+  ],
+  properties: {
+    summary: { type: "string" },
+    confidence: { type: "string", enum: ["low", "medium", "high"] },
+    artifactType: { type: "string" },
+    sourceKind: { type: "string", enum: ["document", "screenshot", "spreadsheet", "notes", "other"] },
+    suggestedFieldUpdates: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["key", "value", "rationale"],
+        properties: {
+          key: { type: "string", enum: intakeFieldKeys },
+          value: { type: "string" },
+          rationale: { type: "string" }
+        }
+      }
+    },
+    suggestedRecords: {
+      type: "object",
+      additionalProperties: false,
+      required: ["steps", "data", "systems", "decisions", "patterns"],
+      properties: {
+        steps: {
+          type: "array",
+          items: objectSchema(["name", "actor", "tool", "accessMode", "action", "input", "dataHandling", "output", "handoff", "trigger", "time", "decision", "pain", "risk", "exceptions", "dataSensitivity", "pattern", "toolFit", "evidenceConfidence", "interviewNotes", "openQuestions"])
+        },
+        data: {
+          type: "array",
+          items: objectSchema(["category", "source", "format", "sensitivity", "usageMode", "processing", "tool", "storage", "access", "avoidRaw", "splitNotes"])
+        },
+        systems: {
+          type: "array",
+          items: objectSchema(["name", "purpose", "access", "owner", "integration", "clientData"])
+        },
+        decisions: {
+          type: "array",
+          items: objectSchema(["decision", "owner", "criteria", "risk", "approval", "escalation"])
+        },
+        patterns: {
+          type: "array",
+          items: objectSchema(["step", "pattern", "riskNote", "toolFit"])
+        }
+      }
+    },
+    suggestedIdeas: {
+      type: "array",
+      items: objectSchema(["idea", "source", "notes"])
+    },
+    followUpQuestions: {
+      type: "array",
+      items: { type: "string" }
+    },
+    confirmationPrompt: { type: "string" },
+    warnings: {
+      type: "array",
+      items: { type: "string" }
+    }
+  }
+};
+
+function objectSchema(keys) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: keys,
+    properties: Object.fromEntries(keys.map((key) => [key, { type: "string" }]))
+  };
+}
+
+function splitConfigList(value) {
+  return String(value || "")
+    .split(/[\s,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function buildEnterpriseConfigStatus() {
+  return {
+    appEnv: APP_ENV,
+    appBaseUrl: APP_BASE_URL,
+    enterpriseMode: ENTERPRISE_MODE,
+    connectorMode: CONNECTOR_MODE,
+    microsoftConfigured: Boolean(MICROSOFT_TENANT_ID && MICROSOFT_CLIENT_ID),
+    microsoftRedirectConfigured: Boolean(MICROSOFT_REDIRECT_URI),
+    microsoftGraphScopes: splitConfigList(MICROSOFT_GRAPH_SCOPES),
+    microsoftSharePointConfigured: Boolean(
+      MICROSOFT_SHAREPOINT_HOSTNAME ||
+      MICROSOFT_SHAREPOINT_SITE_PATH ||
+      MICROSOFT_GRAPH_SITE_ID ||
+      MICROSOFT_GRAPH_DRIVE_ID ||
+      MICROSOFT_GRAPH_FOLDER_PATH
+    ),
+    githubConfigured: Boolean(GITHUB_REPOSITORY),
+    githubRepository: GITHUB_REPOSITORY,
+    githubDefaultBranch: GITHUB_DEFAULT_BRANCH,
+    githubActionsEnabled: /^(true|1|yes)$/i.test(GITHUB_ACTIONS_ENABLED),
+    secretsExposed: false
+  };
+}
+
+const server = http.createServer(async (req, res) => {
+  try {
+    const requestUrl = new URL(req.url, `http://localhost:${PORT}`);
+    if (req.method === "GET" && requestUrl.pathname === "/api/health") {
+      return sendJson(res, 200, {
+        ok: true,
+        aiConfigured: Boolean(OPENAI_API_KEY),
+        model: REALTIME_MODEL,
+        extractionModel: EXTRACTION_MODEL,
+        primaryModel: REALTIME_MODEL,
+        realtimeConfigured: Boolean(OPENAI_API_KEY),
+        realtimeModel: REALTIME_MODEL,
+        realtimeVoice: REALTIME_VOICE,
+        transcriptionConfigured: Boolean(OPENAI_API_KEY),
+        transcriptionModel: TRANSCRIPTION_MODEL,
+        extractionReasoningEffort: EXTRACTION_REASONING_EFFORT,
+        extractionVerbosity: EXTRACTION_VERBOSITY,
+        enterprise: buildEnterpriseConfigStatus()
+      });
+    }
+
+    if (req.method === "GET" && requestUrl.pathname === "/api/enterprise/config-status") {
+      return sendJson(res, 200, {
+        ok: true,
+        enterprise: buildEnterpriseConfigStatus()
+      });
+    }
+
+    if (requestUrl.pathname === "/api/sessions") {
+      if (req.method === "GET") return await handleListSessions(req, res);
+      if (req.method === "POST") return await handleSaveSession(req, res);
+    }
+
+    if (requestUrl.pathname.startsWith("/api/sessions/")) {
+      const sessionId = requestUrl.pathname.split("/").pop();
+      if (req.method === "GET") return await handleGetSession(req, res, sessionId);
+      if (req.method === "DELETE") return await handleDeleteSession(req, res, sessionId);
+    }
+
+    if (requestUrl.pathname === "/api/packages" && req.method === "POST") {
+      return await handleCreatePackage(req, res);
+    }
+
+    if (requestUrl.pathname === "/api/packages" && req.method === "GET") {
+      return await handleListPackages(req, res);
+    }
+
+    if (requestUrl.pathname.startsWith("/api/packages/") && requestUrl.pathname.endsWith("/download") && req.method === "GET") {
+      const packageName = decodeURIComponent(requestUrl.pathname.split("/").at(-2) || "");
+      return await handleDownloadPackageZip(req, res, packageName);
+    }
+
+    if (req.method === "POST" && requestUrl.pathname === "/api/extract") {
+      return await handleExtract(req, res);
+    }
+
+    if (req.method === "POST" && requestUrl.pathname === "/api/evidence/analyze") {
+      return await handleEvidenceAnalyze(req, res);
+    }
+
+    if (req.method === "POST" && requestUrl.pathname === "/api/chat") {
+      return await handleChat(req, res);
+    }
+
+    if (req.method === "POST" && requestUrl.pathname === "/api/realtime/session") {
+      return await handleRealtimeSession(req, res);
+    }
+
+    if (req.method === "POST" && requestUrl.pathname === "/api/transcribe/audio") {
+      return await handleTranscribeAudio(req, res);
+    }
+
+    if (req.method !== "GET") {
+      return sendJson(res, 405, { error: "Method not allowed" });
+    }
+
+    return await serveStatic(req, res);
+  } catch (error) {
+    console.error(error);
+    const status = error.statusCode || error.status || 500;
+    return sendJson(res, status, { error: status === 400 ? "Invalid request" : "Server error", detail: String(error.message || error) });
+  }
+});
+
+async function handleExtract(req, res) {
+  if (!OPENAI_API_KEY) {
+    return sendJson(res, 400, {
+      error: "OPENAI_API_KEY is not configured. Set it in your terminal and restart the server."
+    });
+  }
+
+  const body = await readJson(req);
+  const payload = {
+    currentSection: body.currentSection,
+    transcript: body.transcript,
+    answer: body.answer,
+    state: pruneState(body.state)
+  };
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: EXTRACTION_MODEL,
+      reasoning: {
+        effort: EXTRACTION_REASONING_EFFORT
+      },
+      instructions: extractionInstructions(),
+      input: JSON.stringify(payload),
+      text: {
+        verbosity: EXTRACTION_VERBOSITY,
+        format: {
+          type: "json_schema",
+          name: "discovery_intake_extraction",
+          strict: true,
+          schema: extractionSchema
+        }
+      }
+    })
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    return sendJson(res, response.status, {
+      error: data.error?.message || "OpenAI API request failed",
+      detail: data
+    });
+  }
+
+  const outputText = extractOutputText(data);
+  let parsed;
+  try {
+    parsed = JSON.parse(outputText);
+  } catch (error) {
+    return sendJson(res, 500, {
+      error: "Model returned non-JSON output",
+      outputText
+    });
+  }
+
+  return sendJson(res, 200, parsed);
+}
+
+async function handleEvidenceAnalyze(req, res) {
+  if (!OPENAI_API_KEY) {
+    return sendJson(res, 400, {
+      error: "OPENAI_API_KEY is not configured. Set it in your terminal and restart the server."
+    });
+  }
+
+  const body = await readJson(req);
+  const evidence = body.evidence || {};
+  const metadata = {
+    fileName: evidence.fileName,
+    mimeType: evidence.mimeType,
+    size: evidence.size,
+    sourceKind: evidence.sourceKind,
+    artifactType: evidence.artifactType,
+    text: evidence.text || "",
+    state: pruneState(body.state)
+  };
+  const content = [
+    {
+      type: "input_text",
+      text: JSON.stringify(metadata)
+    }
+  ];
+
+  if (evidence.dataUrl && String(evidence.mimeType || "").startsWith("image/")) {
+    content.push({
+      type: "input_image",
+      image_url: evidence.dataUrl,
+      detail: "high"
+    });
+  } else if (evidence.dataUrl) {
+    content.push({
+      type: "input_file",
+      filename: evidence.fileName || "evidence-file",
+      file_data: evidence.dataUrl
+    });
+  }
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: EXTRACTION_MODEL,
+      reasoning: {
+        effort: EXTRACTION_REASONING_EFFORT
+      },
+      instructions: evidenceInstructions(),
+      input: [
+        {
+          role: "user",
+          content
+        }
+      ],
+      text: {
+        verbosity: EXTRACTION_VERBOSITY,
+        format: {
+          type: "json_schema",
+          name: "evidence_intake_analysis",
+          strict: true,
+          schema: evidenceSchema
+        }
+      }
+    })
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    return sendJson(res, response.status, {
+      error: data.error?.message || "OpenAI API request failed",
+      detail: data
+    });
+  }
+
+  const outputText = extractOutputText(data);
+  let parsed;
+  try {
+    parsed = JSON.parse(outputText);
+  } catch (error) {
+    return sendJson(res, 500, {
+      error: "Model returned non-JSON output",
+      outputText
+    });
+  }
+
+  return sendJson(res, 200, parsed);
+}
+
+async function handleChat(req, res) {
+  if (!OPENAI_API_KEY) {
+    return sendJson(res, 400, {
+      error: "OPENAI_API_KEY is not configured. Set it in your terminal and restart the server."
+    });
+  }
+
+  const body = await readJson(req);
+  const payload = {
+    message: body.message,
+    chatHistory: body.chatHistory || [],
+    state: pruneState(body.state)
+  };
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: EXTRACTION_MODEL,
+      reasoning: {
+        effort: CHAT_REASONING_EFFORT
+      },
+      instructions: chatInstructions(),
+      input: JSON.stringify(payload),
+      text: {
+        verbosity: CHAT_VERBOSITY
+      }
+    })
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    return sendJson(res, response.status, {
+      error: data.error?.message || "OpenAI API request failed",
+      detail: data
+    });
+  }
+
+  return sendJson(res, 200, {
+    reply: extractOutputText(data)
+  });
+}
+
+async function handleRealtimeSession(req, res) {
+  if (!OPENAI_API_KEY) {
+    return sendJson(res, 400, {
+      error: "OPENAI_API_KEY is not configured. Set it in your terminal and restart the server."
+    });
+  }
+
+  const sdp = await readText(req);
+  const formData = new FormData();
+  formData.set("sdp", sdp);
+  formData.set(
+    "session",
+    JSON.stringify({
+      type: "realtime",
+      model: REALTIME_MODEL,
+      instructions: realtimeInstructions(),
+      reasoning: {
+        effort: REALTIME_REASONING_EFFORT
+      },
+      audio: {
+        output: {
+          voice: REALTIME_VOICE
+        }
+      }
+    })
+  );
+
+  const response = await fetch("https://api.openai.com/v1/realtime/calls", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      "OpenAI-Safety-Identifier": "local-discovery-intake"
+    },
+    body: formData
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    res.writeHead(response.status, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store"
+    });
+    res.end(text);
+    return;
+  }
+
+  res.writeHead(200, {
+    "Content-Type": "application/sdp",
+    "Cache-Control": "no-store"
+  });
+  res.end(text);
+}
+
+async function handleTranscribeAudio(req, res) {
+  if (!OPENAI_API_KEY) {
+    return sendJson(res, 400, {
+      error: "OPENAI_API_KEY is not configured. Set it in your terminal and restart the server."
+    });
+  }
+
+  const audioBuffer = await readBuffer(req, 30_000_000);
+  if (!audioBuffer.length) {
+    return sendJson(res, 400, { error: "No audio was received." });
+  }
+
+  const contentType = String(req.headers["content-type"] || "audio/webm");
+  const extension = audioExtensionForContentType(contentType);
+  const currentQuestion = decodeHeaderValue(req.headers["x-current-question"] || "");
+  const domainTerms = decodeHeaderValue(req.headers["x-domain-terms"] || "");
+  const file = new Blob([audioBuffer], { type: contentType });
+  const formData = new FormData();
+  formData.set("file", file, `discovery-turn.${extension}`);
+  formData.set("model", TRANSCRIPTION_MODEL);
+  formData.set("response_format", "json");
+  formData.set("prompt", transcriptionPrompt({ currentQuestion, domainTerms }));
+
+  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`
+    },
+    body: formData
+  });
+
+  const text = await response.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { text };
+  }
+
+  if (!response.ok) {
+    return sendJson(res, response.status, {
+      error: data.error?.message || "OpenAI transcription request failed",
+      detail: data
+    });
+  }
+
+  return sendJson(res, 200, {
+    transcript: String(data.text || data.transcript || "").trim(),
+    model: TRANSCRIPTION_MODEL
+  });
+}
+
+async function handleListSessions(req, res) {
+  await ensureDataDirs();
+  const entries = await fs.readdir(SESSIONS_DIR, { withFileTypes: true }).catch(() => []);
+  const summaries = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+    try {
+      const payload = JSON.parse(await fs.readFile(path.join(SESSIONS_DIR, entry.name), "utf8"));
+      summaries.push(payload.summary || summarizeSession(payload.state || {}));
+    } catch (error) {
+      console.warn(`Could not read session ${entry.name}:`, error.message);
+    }
+  }
+  summaries.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  return sendJson(res, 200, { sessions: summaries });
+}
+
+async function handleGetSession(req, res, sessionId) {
+  const safeId = safeIdentifier(sessionId);
+  if (!safeId) return sendJson(res, 400, { error: "Invalid session id" });
+  await ensureDataDirs();
+  try {
+    const payload = JSON.parse(await fs.readFile(path.join(SESSIONS_DIR, `${safeId}.json`), "utf8"));
+    return sendJson(res, 200, payload);
+  } catch {
+    return sendJson(res, 404, { error: "Session not found" });
+  }
+}
+
+async function handleSaveSession(req, res) {
+  const body = await readJson(req);
+  const state = body.state || {};
+  const summary = summarizeSession(state);
+  if (!summary.id) return sendJson(res, 400, { error: "Session id is required" });
+  await ensureDataDirs();
+  const payload = {
+    version: 1,
+    savedAt: new Date().toISOString(),
+    summary,
+    state
+  };
+  await fs.writeFile(path.join(SESSIONS_DIR, `${safeIdentifier(summary.id)}.json`), JSON.stringify(payload, null, 2));
+  return sendJson(res, 200, { ok: true, summary });
+}
+
+async function handleDeleteSession(req, res, sessionId) {
+  const safeId = safeIdentifier(sessionId);
+  if (!safeId) return sendJson(res, 400, { error: "Invalid session id" });
+  await ensureDataDirs();
+  await fs.rm(path.join(SESSIONS_DIR, `${safeId}.json`), { force: true });
+  return sendJson(res, 200, { ok: true });
+}
+
+async function handleListPackages(req, res) {
+  await ensureDataDirs();
+  const entries = await fs.readdir(PACKAGES_DIR, { withFileTypes: true }).catch(() => []);
+  const packages = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const packageDir = path.join(PACKAGES_DIR, entry.name);
+    try {
+      const manifest = JSON.parse(await fs.readFile(path.join(packageDir, "package-manifest.json"), "utf8"));
+      const stats = await fs.stat(packageDir);
+      packages.push({
+        packageName: entry.name,
+        relativePath: path.relative(__dirname, packageDir),
+        createdAt: manifest.createdAt || stats.mtime.toISOString(),
+        updatedAt: stats.mtime.toISOString(),
+        summary: manifest.summary || {},
+        files: Array.isArray(manifest.files) ? manifest.files : []
+      });
+    } catch (error) {
+      console.warn(`Could not read package ${entry.name}:`, error.message);
+    }
+  }
+  packages.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+  return sendJson(res, 200, { packages });
+}
+
+async function handleDownloadPackageZip(req, res, packageName) {
+  await ensureDataDirs();
+  const safeName = safePackageName(packageName);
+  if (!safeName) return sendJson(res, 400, { error: "Invalid package name" });
+
+  const packageDir = path.resolve(PACKAGES_DIR, safeName);
+  const packagesRoot = path.resolve(PACKAGES_DIR);
+  if (!packageDir.startsWith(`${packagesRoot}${path.sep}`)) {
+    return sendJson(res, 400, { error: "Invalid package path" });
+  }
+
+  const entries = await fs.readdir(packageDir, { withFileTypes: true }).catch(() => null);
+  if (!entries) return sendJson(res, 404, { error: "Package not found" });
+
+  const zipEntries = {};
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    zipEntries[`${safeName}/${entry.name}`] = await fs.readFile(path.join(packageDir, entry.name));
+  }
+
+  const zipBuffer = createZipBuffer(zipEntries);
+  const filename = `${safeName}.zip`;
+  res.writeHead(200, {
+    "Content-Type": "application/zip",
+    "Content-Length": zipBuffer.length,
+    "Content-Disposition": `attachment; filename="${filename}"`
+  });
+  return res.end(zipBuffer);
+}
+
+async function handleCreatePackage(req, res) {
+  const body = await readJson(req);
+  const state = body.state || {};
+  const summary = summarizeSession(state);
+  if (!summary.id) return sendJson(res, 400, { error: "Session id is required" });
+  await ensureDataDirs();
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const packageName = `${fileSafe(summary.name || summary.workflowName || "discovery-intake")}-${stamp}`;
+  const packageDir = path.join(PACKAGES_DIR, packageName);
+  await fs.mkdir(packageDir, { recursive: true });
+
+  const files = {
+    "README.md": buildPackageReadme(summary),
+    "session.json": JSON.stringify(state, null, 2),
+    "blueprint.json": JSON.stringify(body.blueprint || {}, null, 2),
+    "pdr-draft.md": String(body.pdr || ""),
+    "product-pdr-template.json": JSON.stringify(body.productBrief || {}, null, 2),
+    "product-pdr-template.md": String(body.productBrief?.markdown || ""),
+    "product-pdr-template.docx": createDocxBuffer(body.productBrief?.title || "Product PDR", body.productBrief?.markdown || ""),
+    "engineering-brief-template.json": JSON.stringify(body.engineeringBrief || {}, null, 2),
+    "engineering-brief-template.md": String(body.engineeringBrief?.markdown || ""),
+    "engineering-brief-template.docx": createDocxBuffer(body.engineeringBrief?.title || "Engineering Brief", body.engineeringBrief?.markdown || ""),
+    "business-value-template.json": JSON.stringify(body.businessBrief || {}, null, 2),
+    "business-value-template.md": String(body.businessBrief?.markdown || ""),
+    "business-value-template.docx": createDocxBuffer(body.businessBrief?.title || "Business Value", body.businessBrief?.markdown || ""),
+    "governance-inputs-template.json": JSON.stringify(body.governanceBrief || {}, null, 2),
+    "governance-inputs-template.md": String(body.governanceBrief?.markdown || ""),
+    "governance-inputs-template.docx": createDocxBuffer(body.governanceBrief?.title || "Governance Inputs", body.governanceBrief?.markdown || ""),
+    "solution-build-recipe.json": JSON.stringify(body.solutionBuildRecipe || {}, null, 2),
+    "solution-build-recipe.md": String(body.solutionBuildRecipe?.markdown || ""),
+    "solution-build-recipe.docx": createDocxBuffer(body.solutionBuildRecipe?.title || "Solution Build Recipe", body.solutionBuildRecipe?.markdown || ""),
+    "solution-build-recipe-rows.json": JSON.stringify(body.solutionBuildRecipeRows || [], null, 2),
+    "solution-build-spec.json": JSON.stringify(body.solutionBuildSpec || {}, null, 2),
+    "solution-build-spec-rows.json": JSON.stringify(body.solutionBuildSpecRows || [], null, 2),
+    "solution-capability-plan.json": JSON.stringify(body.solutionCapabilityPlan || {}, null, 2),
+    "solution-capability-plan-rows.json": JSON.stringify(body.solutionCapabilityPlanRows || [], null, 2),
+    "solution-execution-plan.json": JSON.stringify(body.solutionExecutionPlan || {}, null, 2),
+    "solution-execution-plan.md": String(body.solutionExecutionPlanMarkdown || body.solutionExecutionBrief?.markdown || ""),
+    "solution-execution-plan.docx": createDocxBuffer(body.solutionExecutionBrief?.title || "Solution Execution Plan", body.solutionExecutionPlanMarkdown || body.solutionExecutionBrief?.markdown || ""),
+    "solution-execution-plan-rows.json": JSON.stringify(body.solutionExecutionPlanRows || [], null, 2),
+    "enterprise-connector-contracts.json": JSON.stringify(body.enterpriseConnectorContracts || {}, null, 2),
+    "enterprise-connector-contracts.md": String(body.enterpriseConnectorContractsMarkdown || ""),
+    "enterprise-connector-contracts.docx": createDocxBuffer("Enterprise Connector Contracts", body.enterpriseConnectorContractsMarkdown || ""),
+    "enterprise-connector-contract-rows.json": JSON.stringify(body.enterpriseConnectorContractRows || [], null, 2),
+    "connector-approval-checklist.json": JSON.stringify(body.connectorApprovalChecklist || {}, null, 2),
+    "connector-approval-checklist.md": String(body.connectorApprovalChecklistMarkdown || ""),
+    "connector-approval-checklist.docx": createDocxBuffer("Connector Approval Checklist", body.connectorApprovalChecklistMarkdown || ""),
+    "connector-approval-checklist-rows.json": JSON.stringify(body.connectorApprovalChecklistRows || [], null, 2),
+    "connector-validation-plan.json": JSON.stringify(body.connectorValidationPlan || {}, null, 2),
+    "connector-validation-plan.md": String(body.connectorValidationPlanMarkdown || ""),
+    "connector-validation-plan.docx": createDocxBuffer("Connector Validation Plan", body.connectorValidationPlanMarkdown || ""),
+    "connector-validation-plan-rows.json": JSON.stringify(body.connectorValidationPlanRows || [], null, 2),
+    "connector-validation-evidence-log.json": JSON.stringify(body.connectorValidationEvidenceLog || {}, null, 2),
+    "connector-validation-evidence-log.md": String(body.connectorValidationEvidenceLogMarkdown || ""),
+    "connector-validation-evidence-log.docx": createDocxBuffer("Connector Validation Evidence Log", body.connectorValidationEvidenceLogMarkdown || ""),
+    "connector-validation-evidence-log-rows.json": JSON.stringify(body.connectorValidationEvidenceLogRows || [], null, 2),
+    "connector-build-request-pack.json": JSON.stringify(body.connectorBuildRequestPack || {}, null, 2),
+    "connector-build-request-pack.md": String(body.connectorBuildRequestMarkdown || ""),
+    "connector-build-request-pack.docx": createDocxBuffer("Connector Build Request Pack", body.connectorBuildRequestMarkdown || ""),
+    "connector-build-request-pack-rows.json": JSON.stringify(body.connectorBuildRequestRows || [], null, 2),
+    "connector-pilot-runbook.json": JSON.stringify(body.connectorPilotRunbook || {}, null, 2),
+    "connector-pilot-runbook.md": String(body.connectorPilotRunbookMarkdown || ""),
+    "connector-pilot-runbook.docx": createDocxBuffer("Connector Pilot Runbook", body.connectorPilotRunbookMarkdown || ""),
+    "connector-pilot-runbook-rows.json": JSON.stringify(body.connectorPilotRunbookRows || [], null, 2),
+    "connector-promotion-decision-packet.json": JSON.stringify(body.connectorPromotionDecisionPacket || {}, null, 2),
+    "connector-promotion-decision-packet.md": String(body.connectorPromotionDecisionMarkdown || ""),
+    "connector-promotion-decision-packet.docx": createDocxBuffer("Connector Promotion Decision Packet", body.connectorPromotionDecisionMarkdown || ""),
+    "connector-promotion-decision-packet-rows.json": JSON.stringify(body.connectorPromotionDecisionRows || [], null, 2),
+    "enterprise-readiness-brief.json": JSON.stringify(body.enterpriseReadinessBrief || {}, null, 2),
+    "enterprise-readiness-brief.md": String(body.enterpriseReadinessBriefMarkdown || body.enterpriseReadinessBrief?.markdown || ""),
+    "enterprise-readiness-brief.docx": createDocxBuffer("Enterprise Readiness Brief", body.enterpriseReadinessBriefMarkdown || body.enterpriseReadinessBrief?.markdown || ""),
+    "enterprise-readiness-brief-rows.json": JSON.stringify(body.enterpriseReadinessBriefRows || [], null, 2),
+    "combined-handoff-packet.json": JSON.stringify(body.combinedHandoff || {}, null, 2),
+    "combined-handoff-packet.md": String(body.combinedHandoff?.markdown || ""),
+    "combined-handoff-packet.docx": createDocxBuffer(body.combinedHandoff?.title || "Combined Handoff Packet", body.combinedHandoff?.markdown || ""),
+    "template-alignment-contract.json": JSON.stringify(body.templateAlignmentContract || {}, null, 2),
+    "template-alignment-contract-rows.json": JSON.stringify(body.templateAlignmentRows || [], null, 2),
+    "output-manifest.json": JSON.stringify(body.outputManifest || [], null, 2),
+    "output-manifest-rows.json": JSON.stringify(body.outputManifestRows || [], null, 2),
+    "connector-registry.json": JSON.stringify(body.connectorRegistry || [], null, 2),
+    "connector-registry-rows.json": JSON.stringify(body.connectorRegistryRows || [], null, 2),
+    "live-data-setup.json": JSON.stringify(body.liveDataSetup || {}, null, 2),
+    "live-data-setup-rows.json": JSON.stringify(body.liveDataSetupRows || [], null, 2),
+    "mvp-host-readiness.json": JSON.stringify(body.mvpHostReadiness || {}, null, 2),
+    "mvp-host-readiness-rows.json": JSON.stringify(body.mvpHostReadinessRows || [], null, 2),
+    "question-routing.json": JSON.stringify(body.questionRouting || [], null, 2),
+    "question-routing.md": String(body.questionRoutingMarkdown || ""),
+    "question-routing.docx": createDocxBuffer("Open Question Routing", body.questionRoutingMarkdown || ""),
+    "process-matrix.json": JSON.stringify(body.processMatrix || [], null, 2),
+    "handoff-checklist.json": JSON.stringify(body.handoffChecklist || [], null, 2),
+    "handoff-questions.json": JSON.stringify(body.handoffQuestions || {}, null, 2),
+    "completion-questions.json": JSON.stringify(body.completionQuestions || [], null, 2),
+    "handoff-snapshot.json": JSON.stringify(body.handoffSnapshot || [], null, 2),
+    "session-metadata.json": JSON.stringify(body.sessionMetadata || [], null, 2),
+    "lifecycle-status.json": JSON.stringify(body.lifecycleStatus || [], null, 2),
+    "gate-a-score.json": JSON.stringify(body.gateScore || [], null, 2),
+    "governance-route.json": JSON.stringify(body.governanceRoute || [], null, 2),
+    "inference-lens.json": JSON.stringify(body.inferenceLens || [], null, 2),
+    "reference-dropdowns.json": JSON.stringify(body.referenceDropdowns || [], null, 2),
+    "live-test-plan.json": JSON.stringify(body.liveTestPlan || [], null, 2),
+    "live-test-plan.md": String(body.liveTestPlanMarkdown || ""),
+    "live-test-script-rubric.json": JSON.stringify(body.liveTestScript || [], null, 2),
+    "live-test-script-rubric.md": String(body.liveTestScriptMarkdown || ""),
+    "live-test-colleague-handoff.json": JSON.stringify(body.liveTestHandoff || [], null, 2),
+    "live-test-colleague-handoff.md": String(body.liveTestHandoffMarkdown || ""),
+    "pilot-round-tracker.json": JSON.stringify(body.pilotRoundTracker || [], null, 2),
+    "pilot-round-tracker.md": String(body.pilotRoundTrackerMarkdown || ""),
+    "small-team-pilot-kit.json": JSON.stringify(body.smallTeamPilotKit || [], null, 2),
+    "small-team-pilot-kit.md": String(body.smallTeamPilotKitMarkdown || ""),
+    "guided-pilot.json": JSON.stringify(body.pilotGuide || [], null, 2),
+    "guided-pilot.md": String(body.pilotGuideMarkdown || ""),
+    "pilot-controls.json": JSON.stringify(body.pilotControls || [], null, 2),
+    "pilot-runbook.md": String(body.pilotRunbook || ""),
+    "pilot-feedback.json": JSON.stringify(body.pilotFeedback || [], null, 2),
+    "pilot-feedback.md": String(body.pilotFeedbackMarkdown || ""),
+    "pilot-insights.json": JSON.stringify(body.pilotInsights || [], null, 2),
+    "pilot-insights.md": String(body.pilotInsightsMarkdown || ""),
+    "reviewer-decision-summary.json": JSON.stringify(body.reviewerDecisionSummary || {}, null, 2),
+    "reviewer-decision-summary-rows.json": JSON.stringify(body.reviewerDecisionRows || [], null, 2),
+    "reviewer-decision-summary.md": String(body.reviewerDecisionMarkdown || ""),
+    "evidence-summary.md": String(body.evidenceSummary || "No evidence summary captured."),
+    "evidence-linkage.json": JSON.stringify(body.evidenceLinkage || {}, null, 2),
+    "evidence-linkage-rows.json": JSON.stringify(body.evidenceLinkageRows || [], null, 2),
+    "evidence-linkage.md": String(body.evidenceLinkageMarkdown || ""),
+    "package-manifest.json": JSON.stringify({
+      version: 1,
+      createdAt: new Date().toISOString(),
+      summary,
+      files: [
+        "README.md",
+        "session.json",
+        "blueprint.json",
+        "pdr-draft.md",
+        "product-pdr-template.json",
+        "product-pdr-template.md",
+        "product-pdr-template.docx",
+        "engineering-brief-template.json",
+        "engineering-brief-template.md",
+        "engineering-brief-template.docx",
+        "business-value-template.json",
+        "business-value-template.md",
+        "business-value-template.docx",
+        "governance-inputs-template.json",
+        "governance-inputs-template.md",
+        "governance-inputs-template.docx",
+        "solution-build-recipe.json",
+        "solution-build-recipe.md",
+        "solution-build-recipe.docx",
+        "solution-build-recipe-rows.json",
+        "solution-build-spec.json",
+        "solution-build-spec-rows.json",
+        "solution-capability-plan.json",
+        "solution-capability-plan-rows.json",
+        "solution-execution-plan.json",
+        "solution-execution-plan.md",
+        "solution-execution-plan.docx",
+        "solution-execution-plan-rows.json",
+        "enterprise-connector-contracts.json",
+        "enterprise-connector-contracts.md",
+        "enterprise-connector-contracts.docx",
+        "enterprise-connector-contract-rows.json",
+        "connector-approval-checklist.json",
+        "connector-approval-checklist.md",
+        "connector-approval-checklist.docx",
+        "connector-approval-checklist-rows.json",
+        "connector-validation-plan.json",
+        "connector-validation-plan.md",
+        "connector-validation-plan.docx",
+        "connector-validation-plan-rows.json",
+        "connector-validation-evidence-log.json",
+        "connector-validation-evidence-log.md",
+        "connector-validation-evidence-log.docx",
+        "connector-validation-evidence-log-rows.json",
+        "connector-build-request-pack.json",
+        "connector-build-request-pack.md",
+        "connector-build-request-pack.docx",
+        "connector-build-request-pack-rows.json",
+        "connector-pilot-runbook.json",
+        "connector-pilot-runbook.md",
+        "connector-pilot-runbook.docx",
+        "connector-pilot-runbook-rows.json",
+        "connector-promotion-decision-packet.json",
+        "connector-promotion-decision-packet.md",
+        "connector-promotion-decision-packet.docx",
+        "connector-promotion-decision-packet-rows.json",
+        "enterprise-readiness-brief.json",
+        "enterprise-readiness-brief.md",
+        "enterprise-readiness-brief.docx",
+        "enterprise-readiness-brief-rows.json",
+        "combined-handoff-packet.json",
+        "combined-handoff-packet.md",
+        "combined-handoff-packet.docx",
+        "template-alignment-contract.json",
+        "template-alignment-contract-rows.json",
+        "output-manifest.json",
+        "output-manifest-rows.json",
+        "connector-registry.json",
+        "connector-registry-rows.json",
+        "live-data-setup.json",
+        "live-data-setup-rows.json",
+        "mvp-host-readiness.json",
+        "mvp-host-readiness-rows.json",
+        "question-routing.json",
+        "question-routing.md",
+        "question-routing.docx",
+        "process-matrix.json",
+        "handoff-checklist.json",
+        "handoff-questions.json",
+        "completion-questions.json",
+        "handoff-snapshot.json",
+        "session-metadata.json",
+        "lifecycle-status.json",
+        "gate-a-score.json",
+        "governance-route.json",
+        "inference-lens.json",
+        "reference-dropdowns.json",
+        "live-test-plan.json",
+        "live-test-plan.md",
+        "live-test-script-rubric.json",
+        "live-test-script-rubric.md",
+        "live-test-colleague-handoff.json",
+        "live-test-colleague-handoff.md",
+        "pilot-round-tracker.json",
+        "pilot-round-tracker.md",
+        "small-team-pilot-kit.json",
+        "small-team-pilot-kit.md",
+        "guided-pilot.json",
+        "guided-pilot.md",
+        "pilot-controls.json",
+        "pilot-runbook.md",
+        "pilot-feedback.json",
+        "pilot-feedback.md",
+        "pilot-insights.json",
+        "pilot-insights.md",
+        "reviewer-decision-summary.json",
+        "reviewer-decision-summary-rows.json",
+        "reviewer-decision-summary.md",
+        "evidence-summary.md",
+        "evidence-linkage.json",
+        "evidence-linkage-rows.json",
+        "evidence-linkage.md",
+        "package-manifest.json"
+      ]
+    }, null, 2)
+  };
+
+  for (const [fileName, content] of Object.entries(files)) {
+    await fs.writeFile(path.join(packageDir, fileName), content);
+  }
+
+  return sendJson(res, 200, {
+    ok: true,
+    packageName,
+    packagePath: packageDir,
+    relativePath: path.relative(__dirname, packageDir),
+    zipUrl: `/api/packages/${encodeURIComponent(packageName)}/download`,
+    files: Object.keys(files)
+  });
+}
+
+async function ensureDataDirs() {
+  await fs.mkdir(SESSIONS_DIR, { recursive: true });
+  await fs.mkdir(PACKAGES_DIR, { recursive: true });
+}
+
+function summarizeSession(state = {}) {
+  const meta = state.sessionMeta || {};
+  const fields = state.fields || {};
+  const now = new Date().toISOString();
+  return {
+    id: safeIdentifier(meta.id) || `session-${Date.now().toString(36)}`,
+    name: meta.name || fields.workflowName || fields.submittedWorkflowTask || "Untitled discovery",
+    owner: meta.owner || "",
+    source: meta.source || "Live discovery",
+    dataClassification: meta.dataClassification || "Unknown",
+    status: meta.status || "Discovery",
+    createdAt: meta.createdAt || now,
+    updatedAt: meta.updatedAt || now,
+    workflowName: fields.workflowName || fields.submittedWorkflowTask || "",
+    category: fields.workflowCategory && fields.workflowCategory !== "unknown" ? fields.workflowCategory : "Category TBD",
+    recordType: fields.recordType || "Live Opportunity",
+    practice: fields.practice || "unknown",
+    projectType: fields.projectType || "unknown",
+    lifecycleStage: fields.lifecycleStage || "2 - Problem Deep Dive and Intake",
+    lifecycleStatus: fields.lifecycleStatus || "Intake In Progress",
+    priority: fields.priority || "Medium",
+    gateDecision: fields.gateDecision || "More discovery",
+    domain: fields.domain || "",
+    readiness: fields.buildReadiness || "unknown",
+    stepCount: Array.isArray(state.steps) ? state.steps.length : 0,
+    dataCount: Array.isArray(state.data) ? state.data.length : 0,
+    systemCount: Array.isArray(state.systems) ? state.systems.length : 0,
+    decisionCount: Array.isArray(state.decisions) ? state.decisions.length : 0,
+    serverStored: true
+  };
+}
+
+function buildPackageReadme(summary) {
+  return [
+    `# ${summary.name || "Discovery Intake Package"}`,
+    "",
+    "This local package is generated by the AI Workflow Discovery Studio for Product and Engineering handoff review.",
+    "",
+    "## Session",
+    `- Session ID: ${summary.id}`,
+    `- Workflow: ${summary.workflowName || "TBD"}`,
+    `- Category: ${summary.category || "TBD"}`,
+    `- Domain: ${summary.domain || "TBD"}`,
+    `- Status: ${summary.status || "TBD"}`,
+    `- Data classification: ${summary.dataClassification || "Unknown"}`,
+    `- Updated: ${summary.updatedAt || "TBD"}`,
+    "",
+    "## Files",
+    "- `session.json`: full saved application state.",
+    "- `blueprint.json`: Product/Engineering blueprint JSON.",
+    "- `pdr-draft.md`: readable PDR-style draft.",
+    "- `product-pdr-template.docx` / `.json` / `.md`: Product PDR handoff aligned to the implementation template.",
+    "- `engineering-brief-template.docx` / `.json` / `.md`: Engineering / Solution Architecture brief aligned to the implementation template.",
+    "- `business-value-template.docx` / `.json` / `.md`: Business Value brief aligned to the implementation template.",
+    "- `governance-inputs-template.docx` / `.json` / `.md`: basic data boundary, deployment, human review, and later governance review inputs.",
+    "- `solution-build-recipe.docx` / `.json` / `.md` / `-rows.json`: practical ChatGPT and Microsoft Copilot implementation recipe, including platform route, prompt pack, connector plan, controls, MVP steps, and pilot test script.",
+    "- `solution-build-spec.json` / `solution-build-spec-rows.json`: machine-readable ChatGPT/Copilot build contract for route logic, platform responsibilities, connector candidates, controls, MVP steps, and test criteria.",
+    "- `solution-capability-plan.json` / `solution-capability-plan-rows.json`: feature-level plan mapping ChatGPT capabilities, Microsoft Copilot surfaces, human checkpoints, and enterprise hardening phases.",
+    "- `solution-execution-plan.docx` / `.json` / `.md` / `-rows.json`: builder-facing runbook mapping each ChatGPT/Copilot capability to required data inputs, permissions, enterprise controls, human checkpoints, package evidence, and expected output.",
+    "- `enterprise-connector-contracts.docx` / `.md` / `.json` / `-rows.json`: enterprise connector contract pack covering source systems, source locations, permission scope, allowed/blocked operations, approval gates, pilot data policy, fallback mode, setup steps, and test criteria.",
+    "- `connector-approval-checklist.docx` / `.md` / `.json` / `-rows.json`: decision checklist for source owner, platform owner, governance, permission, evidence, and fallback approval before connector build.",
+    "- `connector-validation-plan.docx` / `.md` / `.json` / `-rows.json`: executable validation plan for source reachability, permission boundaries, blocked operations, safe pilot data, audit evidence, human review gates, fallback mode, and write/action safeguards.",
+    "- `connector-validation-evidence-log.docx` / `.md` / `.json` / `-rows.json`: reviewer evidence log for validation proof, evidence owner, result options, decision impact, package target, and fallback routing.",
+    "- `connector-build-request-pack.docx` / `.md` / `.json` / `-rows.json`: ticket-ready connector build or approval request pack with requested decision, minimum build scope, owners, controls, evidence package, and out-of-scope behavior.",
+    "- `connector-pilot-runbook.docx` / `.md` / `.json` / `-rows.json`: controlled safe-sample pilot runbook with preflight, sample setup, access setup, validation, evidence capture, human signoff, fallback drill, promotion decision, stop triggers, and package evidence.",
+    "- `connector-promotion-decision-packet.docx` / `.md` / `.json` / `-rows.json`: reviewer decision packet for promote/defer/block recommendations, evidence gaps, fallback posture, enterprise handoff, stop criteria, and package evidence.",
+    "- `enterprise-readiness-brief.docx` / `.json` / `.md` / `-rows.json`: approval-style enterprise readiness brief covering release gates, owners, testing evidence, connector approvals, data/storage/auth/audit posture, and next actions.",
+    "- `combined-handoff-packet.docx` / `.json` / `.md`: combined Product, Engineering, Business, and routing packet.",
+    "- `template-alignment-contract.json` / `template-alignment-contract-rows.json`: shared contract for template routes, workbook sheets, package files, required sections, and output surfaces.",
+    "- `output-manifest.json` / `output-manifest-rows.json`: export contract showing each downloadable output, owner, readiness, source of truth, and supplement-later flag.",
+    "- `connector-registry.json` / `connector-registry-rows.json`: source and endpoint planning contract for local intake, evidence, Microsoft 365, Finance/Ops supplements, and package storage.",
+    "- `live-data-setup.json` / `live-data-setup-rows.json`: mode-by-mode checklist for local self testing, colleague sharing, and enterprise source setup.",
+    "- `mvp-host-readiness.json` / `mvp-host-readiness-rows.json`: compact hostability gates for local self testing, share testing, and later enterprise deployment.",
+    "- `question-routing.docx` / `.md` / `.json`: standalone open question routing by Product, Engineering, Business, Governance Inputs, Finance/Ops, and Domain Sponsor.",
+    "- `process-matrix.json`: process matrix rows for the intake template.",
+    "- `handoff-checklist.json`: color-status checklist for Product, Engineering, Business, and basic Governance Input readiness.",
+    "- `handoff-questions.json`: open Product, Engineering, Business, and Governance Input questions.",
+    "- `completion-questions.json`: top missing questions before handoff readiness.",
+    "- `handoff-snapshot.json`: Product, Engineering, and Governance Input snapshot rows.",
+    "- `session-metadata.json`: session metadata rows.",
+    "- `lifecycle-status.json`: AI Infusion lifecycle stage status and required outputs.",
+    "- `gate-a-score.json`: prioritization/build gate score and recommended decision.",
+    "- `governance-route.json`: MSA boundary, data sensitivity, deployment, and later review path.",
+    "- `inference-lens.json`: known facts, AI approximations, and top completion questions.",
+    "- `reference-dropdowns.json`: lifecycle and classification dropdown reference values.",
+    "- `live-test-plan.json` / `live-test-plan.md`: live usability test status, controls, steps, and benchmark context.",
+    "- `live-test-script-rubric.json` / `live-test-script-rubric.md`: facilitator script, output-review tasks, and feedback scoring rubric.",
+    "- `live-test-colleague-handoff.json` / `live-test-colleague-handoff.md`: short pre-read and decision checklist for a colleague tester.",
+    "- `pilot-round-tracker.json` / `pilot-round-tracker.md`: first-round pilot run plan, evidence targets, package history, and decision criteria.",
+    "- `small-team-pilot-kit.json` / `small-team-pilot-kit.md`: 3-5 colleague MVP pilot plan, safe data rules, success criteria, and decision gates.",
+    "- `guided-pilot.json`: guided pilot mode status and completion signals.",
+    "- `guided-pilot.md`: readable guided pilot walkthrough status.",
+    "- `pilot-controls.json`: local pilot control settings and readiness gates.",
+    "- `pilot-runbook.md`: facilitator runbook for a colleague pilot.",
+    "- `pilot-feedback.json`: structured feedback rows from colleague pilots.",
+    "- `pilot-feedback.md`: readable feedback summary from colleague pilots.",
+    "- `pilot-insights.json`: feedback-derived themes and improvement backlog.",
+    "- `pilot-insights.md`: readable pilot insights and recommended next fixes.",
+    "- `reviewer-decision-summary.json` / `reviewer-decision-summary-rows.json` / `reviewer-decision-summary.md`: compact coworker review decision, reviewer snapshots, quality signals, and comment-derived backlog items.",
+    "- `evidence-summary.md`: optional evidence summary.",
+    "- `evidence-linkage.json` / `evidence-linkage-rows.json` / `evidence-linkage.md`: optional evidence-to-field, step, system, risk, and open-question mapping.",
+    "",
+    "Use the website's Export Excel button to generate the Excel workbook for the same session."
+  ].join("\n");
+}
+
+function createDocxBuffer(title, markdown) {
+  const now = new Date().toISOString();
+  const entries = {
+    "[Content_Types].xml": docxContentTypesXml(),
+    "_rels/.rels": docxRootRelationshipsXml(),
+    "docProps/core.xml": docxCoreXml(title, now),
+    "docProps/app.xml": docxAppXml(),
+    "word/styles.xml": docxStylesXml(),
+    "word/document.xml": docxDocumentXml(title, markdown)
+  };
+  return createZipBuffer(entries);
+}
+
+function docxContentTypesXml() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+</Types>`;
+}
+
+function docxRootRelationshipsXml() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
+</Relationships>`;
+}
+
+function docxCoreXml(title, timestamp) {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <dc:title>${escapeXml(title || "Discovery handoff")}</dc:title>
+  <dc:creator>AI Workflow Discovery Studio</dc:creator>
+  <cp:lastModifiedBy>AI Workflow Discovery Studio</cp:lastModifiedBy>
+  <dcterms:created xsi:type="dcterms:W3CDTF">${escapeXml(timestamp)}</dcterms:created>
+  <dcterms:modified xsi:type="dcterms:W3CDTF">${escapeXml(timestamp)}</dcterms:modified>
+</cp:coreProperties>`;
+}
+
+function docxAppXml() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+  <Application>AI Workflow Discovery Studio</Application>
+</Properties>`;
+}
+
+function docxStylesXml() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
+    <w:name w:val="Normal"/>
+    <w:qFormat/>
+    <w:rPr><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="Title">
+    <w:name w:val="Title"/>
+    <w:basedOn w:val="Normal"/>
+    <w:qFormat/>
+    <w:rPr><w:b/><w:sz w:val="36"/><w:szCs w:val="36"/><w:color w:val="111827"/></w:rPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="Heading1">
+    <w:name w:val="heading 1"/>
+    <w:basedOn w:val="Normal"/>
+    <w:qFormat/>
+    <w:rPr><w:b/><w:sz w:val="28"/><w:szCs w:val="28"/><w:color w:val="111827"/></w:rPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="Heading2">
+    <w:name w:val="heading 2"/>
+    <w:basedOn w:val="Normal"/>
+    <w:qFormat/>
+    <w:rPr><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/><w:color w:val="1f2937"/></w:rPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="Heading3">
+    <w:name w:val="heading 3"/>
+    <w:basedOn w:val="Normal"/>
+    <w:qFormat/>
+    <w:rPr><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/><w:color w:val="374151"/></w:rPr>
+  </w:style>
+</w:styles>`;
+}
+
+function docxDocumentXml(title, markdown) {
+  const paragraphs = markdownToDocxParagraphs(title, markdown);
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    ${paragraphs.join("\n    ")}
+    <w:sectPr>
+      <w:pgSz w:w="12240" w:h="15840"/>
+      <w:pgMar w:top="1440" w:right="1200" w:bottom="1440" w:left="1200" w:header="720" w:footer="720" w:gutter="0"/>
+    </w:sectPr>
+  </w:body>
+</w:document>`;
+}
+
+function markdownToDocxParagraphs(title, markdown) {
+  const lines = String(markdown || "").split(/\r?\n/);
+  const titleText = stripMarkdownSyntax(lines[0]?.replace(/^#\s+/, "") || title || "Discovery handoff");
+  const paragraphs = [docxParagraph(titleText, "Title")];
+  lines.slice(1).forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      paragraphs.push(docxParagraph(""));
+      return;
+    }
+    if (/^###\s+/.test(trimmed)) {
+      paragraphs.push(docxParagraph(stripMarkdownSyntax(trimmed.replace(/^###\s+/, "")), "Heading3"));
+      return;
+    }
+    if (/^##\s+/.test(trimmed)) {
+      paragraphs.push(docxParagraph(stripMarkdownSyntax(trimmed.replace(/^##\s+/, "")), "Heading2"));
+      return;
+    }
+    if (/^#\s+/.test(trimmed)) {
+      paragraphs.push(docxParagraph(stripMarkdownSyntax(trimmed.replace(/^#\s+/, "")), "Heading1"));
+      return;
+    }
+    if (/^[-*]\s+/.test(trimmed)) {
+      const bulletText = escapeXml(stripMarkdownSyntax(trimmed.replace(/^[-*]\s+/, "")));
+      paragraphs.push(docxParagraph(`&#8226; ${bulletText}`, "Normal", { preEscaped: true }));
+      return;
+    }
+    paragraphs.push(docxParagraph(stripMarkdownSyntax(trimmed)));
+  });
+  return paragraphs;
+}
+
+function docxParagraph(text, style = "Normal", options = {}) {
+  const body = options.preEscaped ? String(text || "") : escapeXml(text || "");
+  return `<w:p><w:pPr><w:pStyle w:val="${style}"/><w:spacing w:after="120"/></w:pPr><w:r><w:t xml:space="preserve">${body}</w:t></w:r></w:p>`;
+}
+
+function stripMarkdownSyntax(text) {
+  return String(text || "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/__(.*?)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\[(.*?)\]\((.*?)\)/g, "$1")
+    .replace(/^>\s*/, "");
+}
+
+function createZipBuffer(entries) {
+  const encoder = new TextEncoder();
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+  Object.entries(entries).forEach(([name, value]) => {
+    const nameBytes = encoder.encode(name);
+    const dataBytes = value instanceof Uint8Array ? value : encoder.encode(String(value || ""));
+    const crc = crc32(dataBytes);
+    const { time, date } = zipDosDateTime(new Date());
+    const localHeader = new Uint8Array(30 + nameBytes.length);
+    const localView = new DataView(localHeader.buffer);
+    localView.setUint32(0, 0x04034b50, true);
+    localView.setUint16(4, 20, true);
+    localView.setUint16(6, 0, true);
+    localView.setUint16(8, 0, true);
+    localView.setUint16(10, time, true);
+    localView.setUint16(12, date, true);
+    localView.setUint32(14, crc, true);
+    localView.setUint32(18, dataBytes.length, true);
+    localView.setUint32(22, dataBytes.length, true);
+    localView.setUint16(26, nameBytes.length, true);
+    localView.setUint16(28, 0, true);
+    localHeader.set(nameBytes, 30);
+    localParts.push(localHeader, dataBytes);
+
+    const centralHeader = new Uint8Array(46 + nameBytes.length);
+    const centralView = new DataView(centralHeader.buffer);
+    centralView.setUint32(0, 0x02014b50, true);
+    centralView.setUint16(4, 20, true);
+    centralView.setUint16(6, 20, true);
+    centralView.setUint16(8, 0, true);
+    centralView.setUint16(10, 0, true);
+    centralView.setUint16(12, time, true);
+    centralView.setUint16(14, date, true);
+    centralView.setUint32(16, crc, true);
+    centralView.setUint32(20, dataBytes.length, true);
+    centralView.setUint32(24, dataBytes.length, true);
+    centralView.setUint16(28, nameBytes.length, true);
+    centralView.setUint16(30, 0, true);
+    centralView.setUint16(32, 0, true);
+    centralView.setUint16(34, 0, true);
+    centralView.setUint16(36, 0, true);
+    centralView.setUint32(38, 0, true);
+    centralView.setUint32(42, offset, true);
+    centralHeader.set(nameBytes, 46);
+    centralParts.push(centralHeader);
+    offset += localHeader.length + dataBytes.length;
+  });
+  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+  const endRecord = new Uint8Array(22);
+  const endView = new DataView(endRecord.buffer);
+  endView.setUint32(0, 0x06054b50, true);
+  endView.setUint16(4, 0, true);
+  endView.setUint16(6, 0, true);
+  endView.setUint16(8, centralParts.length, true);
+  endView.setUint16(10, centralParts.length, true);
+  endView.setUint32(12, centralSize, true);
+  endView.setUint32(16, offset, true);
+  endView.setUint16(20, 0, true);
+  return Buffer.concat([...localParts, ...centralParts, endRecord].map((part) => Buffer.from(part)));
+}
+
+function zipDosDateTime(date) {
+  const year = Math.max(1980, date.getFullYear());
+  return {
+    time: (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2),
+    date: ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate()
+  };
+}
+
+const crc32Table = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i += 1) {
+    let c = i;
+    for (let k = 0; k < 8; k += 1) {
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    table[i] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < bytes.length; i += 1) {
+    crc = crc32Table[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function escapeXml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function safeIdentifier(value) {
+  return String(value || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 120);
+}
+
+function safePackageName(value) {
+  return String(value || "").replace(/[^a-zA-Z0-9._-]/g, "").slice(0, 160);
+}
+
+function fileSafe(value) {
+  return String(value || "discovery-intake")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .slice(0, 80) || "discovery-intake";
+}
+
+function extractionInstructions() {
+  return [
+    "You extract structured current-state repetitive workflow intake details from interview text.",
+    "The user works in a finance-industry-focused management consulting environment. North star: understand real current-state work across client delivery, pre-delivery, pursuit, internal delivery enablement, and post-delivery synthesis, then turn it into Product/Engineering-ready AI opportunities. Business-case metrics such as capacity, margin, volume, cost rate, and project economics can often be supplemented later by Finance, Operations, PMO, Account Reporting, or practice leadership.",
+    "Do not assume every idea is client delivery execution. Always classify workflowCategory as Client delivery execution, Pre-delivery / workshop prep, Pursuit / revenue enablement, Internal delivery enablement, Post-delivery synthesis, Other, or unknown.",
+    "Also classify the opportunity using the AI Infusion lifecycle fields when supported: recordType (Live Opportunity, Example Seed, Backlog Candidate, Merged/Duplicate, Archived), practice (Banking, Insurance, Fraud & Risk, Cybersecurity, Business Consulting, Strategy, Data, Tech, Tech & Engineering, Project Governance, Testing, FRRF, Banking & Payments, Capital Markets, Wealth Asset Management), projectType (Regulatory / Compliance, Risk / Controls, Data / Analytics, Technology Delivery, Process Transformation, PMO / Delivery Management, Model / Analytics Validation, Client Reporting, Operations / Run-the-bank, Strategy / Advisory), unitOfAnalysis (Individual Role, End-to-End Workflow, Both), lifecycleStage, lifecycleStatus, priority, automationPotential, and gateDecision.",
+    "Classify useCaseArchetype when supported by the submitted idea or current-state facts. Use exact values such as Testing / QA automation, Requirements / traceability, Project governance summaries, Agile ceremony / PI planning, Document review and system upload, Data quality / exception resolution, Risk assessment and controls, Analytics and market insights, UAT test script automation, Research / benchmarking, Workshop acceleration, Pursuit / proposal response, Post-delivery reusable assets, or unknown.",
+    "For dropdown-like fields, use exact app values. lifecycleStatus must be one of Not Started, Intake In Progress, In Review, Approved, Backlog, Build, Pilot, Scaled, On Hold, Rejected, Complete. gateDecision must be one of Build now, Backlog, Merge, Hold, Reject, More discovery, Approved, Conditionally approved, Blocked, Scaled. dataSensitivity must be Public, Internal, Confidential, Client Confidential, PII, MNPI, PCI, PHI, Regulated model/data, or Unknown. governancePath must be No governance review, Standard AI review, Data privacy review, Model risk review, Cybersecurity review, Legal/MSA review, Client approval required, or Multiple / TBD.",
+    "For lifecycleStage, default live discovery sessions to 2 - Problem Deep Dive and Intake until commercial value is clear, then 3 - Business Validation, then 4 - AI Fit Assessment & Solution Designing. Only suggest Gate A - Prioritization / Build Gate when workflow steps, value, and AI/tool fit are sufficiently clear. Capture governance inputs, but do not treat governance as the main preparedness driver.",
+    "Capture commercialContext and commercialValuePath only when the user clearly provides them. If they are unclear, leave them Unknown and put the gap in business follow-up or openQuestions; do not keep interrogating the workflow SME for Finance-owned or account-owned metrics.",
+    "Capture KPI and value fields when supported: kpiTypes (Time saved, Delivery acceleration, Rework reduction, Quality / accuracy, SLA improvement, Risk reduction, Adoption, Client experience), qualityBenefits, eqIqDemand, changeImpact, and fieldConfidence. Treat detailed volume, margin, cost rate, fixed-fee impact, and staffing mix as supplement-later fields unless the user volunteers them.",
+    "Capture governance routing fields when supported: msaBoundary, dataSensitivity, deploymentEnvironment, and governancePath. Use Unknown or Multiple / TBD when the evidence is not clear. If sensitive, regulated, PII, MNPI, PCI, PHI, client confidential, or model-risk data appears, surface this as basic governance input, productClarifications, engineeringClarifications, or openQuestions rather than treating it as the primary build-readiness blocker.",
+    "For Pre-delivery / workshop prep, capture workshopType, expectedWorkshopOutput, participantProfile, prepArtifactsNeeded, reusableCollateralSource, facilitationTechnique, and humanJudgmentArea when mentioned or ask nextQuestion to fill the most important missing workshop field. Treat Strategy-origin workshop prep as a cross-practice, lower-technical-density benchmark that can apply before client work or during active client delivery.",
+    "Capture workflows from Banking, Insurance, Strategy, FRRF, Capital Markets, Wealth Management, Cyber, and related domains.",
+    "Many sessions start from a Domain-submitted idea row. Preserve the submitted idea fields separately from validated workflow facts, including submittedExpectedImpact and submittedNotes when present. Treat submitted candidate AI assist/agent language and expected impact as hypotheses until the workflow evidence validates them.",
+    "The initial intake workbook examples show rough opportunities across testing/QA, requirements/traceability, governance summaries, PI planning, document review/CRM upload, data quality exceptions, architecture risk assessment, analytics insights, UAT test scripts, research/benchmarking, and workshop acceleration. Use this as routing context for better questions, not as proof that the idea is build-ready.",
+    "When the answer is only a thin topic label such as 'workshop use case', 'claims workflow', 'testing use case', or another short opener, preserve it as submittedIdea/submittedWorkflowTask and optionally infer useCaseArchetype/workflowCategory only when obvious. Do not fill workflowName, commercialContext, commercialValuePath, value fields, data boundary, governance path, systems, or process steps from a thin opener.",
+    "Capture ideaValidationStatus as Validated, Needs clarification, Split into multiple workflows, Not enough evidence, or Not a good AI candidate when the text supports it. Capture buildReadiness as High, Medium, Low, or Blocked when supported.",
+    "Choose nextQuestion according to this validation flow whenever possible: Idea, Validate, Workflow, Evidence, Value, AI Fit, Blueprint, Review.",
+    "Assume most client environments can provide Microsoft 365 Copilot and ChatGPT Enterprise. Prefer solution fit notes around ChatGPT Enterprise, ChatGPT projects/GPTs/connectors/skills, Microsoft 365 Copilot, Copilot agents, Copilot Studio, and multi-agent workflows before custom API builds.",
+    "The target deliverable is a product-style PDR handoff plus a skill-compatible step-by-step matrix: Workflow Step, Persona/Actors, Systems/Tools, Access/Source Mode, Input, In Process Data Handling, Output, Handoffs, Triggers, Time Taken, Frequency/Volume, Capacity/Team Composition Impact, Pain/Friction, Exceptions/Variations, Data Sensitivity, AI Pattern, Evidence Confidence, Interview Notes, and Open Questions.",
+    "Use a broad-to-specific intake logic. After the opening topic is captured, first frame the workflow boundary: name, start, end, and output. Before detailed step drilldown, ask for a top-level component overview: big phases, main inputs, main data types, overall tools/systems, access/source modes, and final outputs. Use that overview to route later questions. If the user gives broad phases without numbers, treat them as workflow context and ask for a rough numbered A-to-Z process only when step anchors are still unclear.",
+    "After a rough skeleton is captured, do not ask permission to proceed or ask whether to move into step confirmation. Treat the skeleton as a working draft, note that the user can correct, add, remove, rename, merge, split, or reorder steps anytime, and set nextQuestion to the first incomplete step drill-down question. Start with Step 1 or the first incomplete step and enrich it with actor, tool, accessMode, action, input, dataHandling, output, handoff, trigger, time, decision, pain, risk, exceptions, dataSensitivity, evidenceConfidence, interviewNotes, and openQuestions.",
+    "Treat spoken markers such as Step 1, Step one, first step, second step, third step, and numbered lists like 1), 2), or 1. as strong process-step anchors. Create one step record per anchor, preserve the order, and then use later answers to enrich each anchored step.",
+    "When enriching a step, make the nextQuestion feel conversational rather than like a form. Ask for grouped details in this order: who/where (actor, tools, access mode), inputs/data (input, handling, sensitivity), outputs/flow (trigger, output, handoff), time/judgment (duration, review, approval, escalation), then friction/variants (pain, risk, exceptions).",
+    "When the user answers a step drill-down question, do not repeat the same broad question back. Compare the answer against the fields already captured for the current step, then ask only for the next missing field or cluster. Stay on Step 1 until its core who/where, inputs/data, outputs/handoff, and time/judgment details are reasonably captured, unless the user explicitly names a different step.",
+    "When the current question asks for a specific item and the user provides that item, summarize what was captured and advance to the next missing primary intake question. Do not set nextQuestion to the same question again. If the current question is answered before any A-to-Z process exists, prefer the broad workflow/component overview and rough numbered A-to-Z process before governance, data-boundary, commercial, or detailed value questions.",
+    "Every two or three substantive answers, include a short playback of the components captured so far, such as workflow, steps, tools, data, outputs, and unresolved gaps. Keep it concise and continue with the next best question; do not ask permission to proceed.",
+    "If the user gives a rough numbered list, create one step record per item even if the details are incomplete. Preserve the order and use concise names.",
+    "If later text adds details for an existing step, return a step record with the same or similar step name and fill only the newly learned fields.",
+    "Translate messy spoken consulting language into the structured intake schema. For example, 'we pull the tracker and compare changes' implies a process step, a tracker data category, likely Excel/SharePoint/email or unknown source tooling, a comparison action, possible version-control pain, and a next question about access mode, sensitivity, and timing.",
+    "When you infer a field from context rather than direct confirmation, keep the language qualified in interviewNotes, openQuestions, productClarifications, or engineeringClarifications. Do not overstate inferred facts as confirmed.",
+    "For every substantial answer, prioritize the nextQuestion around the most handoff-critical missing detail: workflow boundary, A-to-Z step gap, actor/tool/access gap, data sensitivity/access mode, output/handoff, human approval, step friction, or MVP scope. Business value questions should be lightweight and supplementable.",
+    "Use the handoff checklist as routing logic for nextQuestion: Product gaps include problem boundary, original ask, validated facts, users, MVP slice, and output definition; Engineering gaps include A-Z process, step matrix, systems/tools, access mode, data boundary, and output contract. Business gaps such as commercial context, value path, frequency/time baseline, hours or dollars, and capacity/team mix should be surfaced as supplement-later unless the user already knows them. Governance input gaps should capture only basic data boundary, environment, human review, evidence trace, and obvious risk flags before post-build review.",
+    "Do not make the user feel like they are filling a form. Turn the highest-priority checklist gap into one natural conversational question, and keep it grounded in the step or workflow currently being discussed.",
+    "Insurance/workshop synthesis and banking exception research examples show two recurring needs: source traceability for generated findings and data policy clarity for sensitive client artifacts. Capture these as engineering/governance questions when relevant.",
+    "Workshop prep examples often lack ready-to-run output definition. If the workflowCategory is Pre-delivery / workshop prep, prioritize workshop output, participants, source materials, reusable collateral, and human judgment. Ask commercial context lightly only if it is clearly needed for downstream business review.",
+    "Do not prematurely design the future-state solution before current-state intake is clear. After enough intake context exists, infer a concise solution hypothesis, MVP scope, success metrics, tool fit recommendation, user stories, and acceptance criteria when supported by the text.",
+    "Capture directional value hypotheses across time saved, faster delivery, quality/rework reduction, risk reduction, and reusable assets. Capacity, staffing mix, fixed-fee margin, and project economics are important for business review but should not dominate the live discovery interview.",
+    "Do not ask for or invent raw client data. Capture data categories, processing actions, systems/tools, permissions, access mode, and constraints. accessMode should explain whether the step uses direct system access, Microsoft 365 files, exports, screenshots, transcripts, manual client responses, or unknown access.",
+    "Only include facts that are present or strongly implied. Leave unknown strings blank.",
+    "Use concise business language suitable for PDR and engineering handoff.",
+    "When the user gives a sequence of actions, create process step records. Also map inputs, outputs, handoffs, triggers, time, and human decisions to the relevant step whenever possible.",
+    "When the user mentions files, reports, emails, trackers, systems, data types, or repositories, capture data/system records as appropriate.",
+    "For each step, capture exceptions or variations and data sensitivity directly on the step record when mentioned. Uploaded screenshots or files are optional supporting evidence, never a requirement for the intake to work. Mark evidenceConfidence as High only when the user confirms; otherwise use Medium or Low.",
+    "AI patterns are post-intake enrichment. Fill pattern only when it is obvious from the step; otherwise leave it blank until the intake is complete. Use retrieve, search, extract, transform/normalize, summarize, classify, compare, generate, review/QA, recommend, orchestrate/automate, human approval, or no AI pattern.",
+    "Return only JSON matching the schema."
+  ].join(" ");
+}
+
+function evidenceInstructions() {
+  return [
+    "You analyze one optional evidence artifact for a repetitive-work AI intake interview.",
+    "The artifact may be a screenshot, tracker, spreadsheet, SOP, process note, PDF, or office document. It is an add-on, not required for the intake to work. Extract only workflow-relevant facts and proposed updates; do not treat evidence as confirmed until the user applies it.",
+    "This intake is for finance-industry management consulting engagement workflows across Banking, Insurance, Strategy, FRRF, Capital Markets, Wealth Management, Cyber, and related domains. Workflows may happen before client work, during client delivery, or after delivery.",
+    "North star: preserve the original submitted idea, classify the workflow category, validate the current-state workflow, and only then validate the candidate AI assist or agent. Keep submitted assumptions separate from validated facts. Capture commercial context/value path only when clearly visible; otherwise flag it as supplement-later.",
+    "Look for submitted idea row fields: submitted idea, workflow/task, where it happens today, frequency, current effort, candidate AI assist/agent, human review needed, repeatability.",
+    "Look for current-state workflow facts: workflow category, workflow name, domain, where the work happens, project phase, start/end boundary, steps, actors, tools, systems, access/source mode, data inputs, in-process handling, outputs, handoffs, triggers, time, human decisions, pain, risks, exceptions, data sensitivity, evidence confidence, product clarifications, and engineering clarifications. Commercial and value fields are useful but can be supplemented later.",
+    "If this is workshop prep, look for workshop type, expected workshop output, participant profile, prep artifacts needed, reusable collateral source, facilitation technique, human judgment area, and whether the pattern is before client work or embedded in active delivery.",
+    "For screenshots, infer visible tools, tables, process labels, and data categories, but mark confidence lower if the image is incomplete or ambiguous.",
+    "For documents/spreadsheets, extract concise workflow facts. If a file appears to contain sensitive or client-confidential details, warn the user and summarize data categories rather than reproducing raw data.",
+    "Do not invent missing steps. If evidence suggests a step but details are incomplete, put the gap in openQuestions or followUpQuestions.",
+    "Return suggestedFieldUpdates only for fields where the artifact provides useful evidence. Return suggestedRecords for process steps, data, systems, decisions, or patterns only when the artifact supports them.",
+    "AI pattern tagging is secondary. Use it only when obvious from the artifact; otherwise leave pattern fields blank.",
+    "The confirmationPrompt should ask one crisp question the interviewer can ask next to confirm or correct the evidence findings.",
+    "Return only JSON matching the schema."
+  ].join(" ");
+}
+
+function chatInstructions() {
+  return [
+    "You are an embedded ChatGPT-style intake copilot inside a workflow discovery website.",
+    "Help the user clarify current-state time-heavy engagement workflow details for AI automation discovery in a finance-industry consulting firm. The workflow may be client delivery, pre-delivery/workshop prep, pursuit/revenue enablement, internal delivery enablement, post-delivery synthesis, or other.",
+    "If there is a submitted domain idea, treat it as a hypothesis. Help validate whether it matches the actual current-state workflow, needs clarification, should be split, or is not a good AI candidate.",
+    "Assume Microsoft 365 Copilot and ChatGPT Enterprise are available. Keep recommendations anchored in those tools, including ChatGPT projects/GPTs/connectors/skills, Copilot, Copilot agents, Copilot Studio, and multi-agent workflows.",
+    "Use the AI Infusion lifecycle as background structure: Ideas/Exploration, Problem Deep Dive and Intake, Business Validation, AI Fit Assessment & Solution Designing, Gate A, Solution Design, MVP Build, Governance, Value/KPI, Testing, Pilot, Enablement, Scale, and KPI Tracking. The user conversation should stay simple, but your answers should help prepare Product and Engineering handoff fields.",
+    "Follow the same broad-to-specific logic as the voice interviewer: frame the workflow first, capture a top-level component overview second, capture or clarify the A-to-Z numbered process steps third, then enrich the current step with actor, tools, access/source mode, input, in-process data handling, output, handoff, trigger, time, decisions, pain, exceptions, data sensitivity, confidence, notes, and open questions.",
+    "The component overview should cover the big phases, main inputs, main data types, systems/tools, access/source modes, and final outputs. Use it to make later step questions smarter instead of asking isolated form fields.",
+    "When the user gives a loose statement, explain briefly what it maps to in the intake before asking the next question. Example: 'I am treating that as a process step, one data source, and a human review point.'",
+    "Use the validation sequence: Idea, Validate, Workflow, Evidence, Value, AI Fit, Blueprint, Review.",
+    "When the category is Pre-delivery / workshop prep, ask naturally about workshop type, ready-to-run output, participant profile, prep artifacts, reusable collateral, facilitation technique, human judgment, and whether the pattern is before client work or embedded in active delivery.",
+    "Stay focused on intake: client delivery context, domain, where the work happens, project phase, deliverable type, triggers, process steps, data handling, systems/tools, human decisions, timing, pain points, exceptions, data sensitivity, risks, directional value hypothesis, and missing information. Do not press the user for staffing mix, margin, fixed-fee impact, cost rate, or pilot ownership unless they volunteer it.",
+    "When useful, mention what would still be needed for Gate A: clear workflow, AI/tool fit, confidence, output definition, and directional value. Mention detailed business metrics and governance as supplement-later or post-build review input rather than heavily weighted live-interview blockers.",
+    "Ask one crisp follow-up question when more information is needed. Every couple of substantive answers, briefly play back the captured components and then continue with the next best question.",
+    "If the user asks what a button or field means, explain it in plain language.",
+    "Do not ask for raw client data. Ask for categories, examples, sensitivity, and handling rules instead. Treat uploaded files and screenshots as optional add-ons, not prerequisites.",
+    "Do not claim you updated the structured intake unless the user clicks the website's AI Analyze Answer action."
+  ].join(" ");
+}
+
+function realtimeInstructions() {
+  return [
+    "# Role and Objective",
+    "You are a voice-first discovery intake interviewer for repetitive-work AI automation opportunities.",
+    "Your job is to collect current-state time-heavy engagement workflow information that can later become a product-style PDR, engineering handoff, Excel intake table, and process map.",
+    "The workflow may be client delivery execution, pre-delivery/workshop prep, pursuit/revenue enablement, internal delivery enablement, post-delivery synthesis, or other. Do not force workshop prep or pursuit ideas into client delivery.",
+    "Assume the available client tooling is Microsoft 365 Copilot and ChatGPT Enterprise unless the user says otherwise.",
+    "If the session starts from a domain-submitted idea, preserve it as the original hypothesis and validate it against the current-state workflow before accepting the proposed AI assist.",
+    "",
+    "# Conversation Style",
+    "Be warm, concise, helpful, and curious. Use a pleasant female-presenting voice style. Ask one question at a time. Keep spoken responses to 1-2 short sentences unless the user asks for more.",
+    "Do not narrate internal analysis, extraction, scoring, or field mapping. If you need time, pause briefly; the UI will show Thinking or Analyzing.",
+    "After the user finishes an answer, give only a short acknowledgement of what was captured and ask the next most useful follow-up. Do not ask whether to proceed, and do not ask 'Is that correct?' unless you are explicitly playing back a whole process map for review.",
+    "Do not design the future-state solution too early. If the user shares solution ideas, acknowledge them as ideas to park until the current-state process is clear.",
+    "",
+    "# Intake Priorities",
+    "Follow this order: Idea, Validate, Workflow, Evidence, Value, AI Fit, Blueprint, Review.",
+    "In Idea and Validate, start with the work itself: what task or workflow the user wants to discuss, what happens, what output it creates, and what outcome it supports. For workshop prep, collect workshop type, ready-to-run output, participants, prep artifacts, reusable collateral, facilitation technique, and human judgment areas.",
+    "Also listen for lifecycle metadata without making it feel like a form: practice/domain, where the work happens today, unit of analysis, automation potential, quality benefit, data boundary, and likely post-build governance path. Commercial context, KPI type, staffing mix, and project economics can be supplemented later.",
+    "Use a broad-to-specific discovery style. After the starting topic, ask for workflow boundary first, then a top-level component overview: big phases, main inputs, data types, systems/tools, access/source modes, and final outputs. Then ask for the overall workflow as a rough numbered A-to-Z list if the steps are still unclear. Treat phrases like Step 1, Step one, first step, second step, and numbered list markers as process-step anchors. Once a rough skeleton exists, do not ask permission to move on. Treat it as a working skeleton, tell the user they can correct the steps anytime, and automatically start walking Step 1 or the first incomplete step. Ask for actor, systems/tools, access/source mode, action performed, input, in-process data handling, output, handoff, trigger/dependency, time taken, human decisions, pain, exceptions/variations, and data sensitivity.",
+    "When walking a step, group questions so it feels natural: who/where first, then input/data, then output/handoff, then timing/decisioning, then friction/variants.",
+    "When users answer naturally instead of filling a form, acknowledge the captured detail briefly and ask the next question. Keep category mapping and missing-detail logic in the UI rather than saying every internal step.",
+    "Collect workflow name, practice/domain, where the work happens today, client project phase when known, deliverable type, output consumer, business outcome, trigger, start point, end point, process steps from start to finish, data categories, data handling actions, tools and systems, human decisions, timing, pain points, exceptions, risks, directional value hypothesis, and open questions.",
+    "Do not lead with AI patterns. AI pattern mapping happens after the intake is complete.",
+    "Avoid asking for raw client data. Ask for data categories, sensitivity, processing actions, and whether raw data can be avoided or anonymized.",
+    "",
+    "# Reasoning",
+    "Use low-latency reasoning. Think before asking follow-up questions when the user gives a dense answer, but do not narrate private reasoning.",
+    "Avoid filler preambles such as 'I am analyzing' or 'I am mapping this.' The app status indicator handles that silently.",
+    "",
+    "# Confirmation Boundaries",
+    "Periodically play back the captured components in plain language: workflow boundary, major steps, tools, data, outputs, and remaining gaps. Ask the user to correct anything that is off, then continue with the next best question. If screenshots or files are available, mention they can optionally improve confidence, but do not make them feel required.",
+    "Before claiming the intake is complete, ask whether any steps, data handoffs, approvals, or systems are missing.",
+    "",
+    "# Output Awareness",
+    "The website has separate buttons for structured extraction and Excel export. Your voice role is to help the user produce clear answers that those tools can capture for Product and Engineering."
+  ].join("\n");
+}
+
+function pruneState(state = {}) {
+  return {
+    activeSection: state.activeSection,
+    fields: state.fields,
+    steps: state.steps,
+    data: state.data,
+    systems: state.systems,
+    decisions: state.decisions,
+    ideas: state.ideas,
+    evidenceArtifacts: (state.evidenceArtifacts || []).map((artifact) => ({
+      fileName: artifact.fileName,
+      sourceKind: artifact.sourceKind,
+      status: artifact.status,
+      summary: artifact.summary,
+      confidence: artifact.confidence,
+      applied: artifact.applied
+    }))
+  };
+}
+
+function extractOutputText(data) {
+  if (typeof data.output_text === "string") return data.output_text;
+  const chunks = [];
+  for (const item of data.output || []) {
+    for (const content of item.content || []) {
+      if (content.type === "output_text" && typeof content.text === "string") {
+        chunks.push(content.text);
+      }
+    }
+  }
+  return chunks.join("");
+}
+
+async function serveStatic(req, res) {
+  const url = new URL(req.url, `http://localhost:${PORT}`);
+  const pathname = decodeURIComponent(url.pathname);
+  const safePath = pathname === "/" ? "/index.html" : pathname;
+  const filePath = path.normalize(path.join(__dirname, safePath));
+
+  if (!filePath.startsWith(__dirname)) {
+    return sendJson(res, 403, { error: "Forbidden" });
+  }
+
+  try {
+    const content = await fs.readFile(filePath);
+    const ext = path.extname(filePath);
+    res.writeHead(200, {
+      "Content-Type": mimeTypes[ext] || "application/octet-stream",
+      "Cache-Control": "no-store"
+    });
+    res.end(content);
+  } catch {
+    sendJson(res, 404, { error: "Not found" });
+  }
+}
+
+function readJson(req) {
+  return new Promise((resolve, reject) => {
+    let raw = "";
+    req.on("data", (chunk) => {
+      raw += chunk;
+      if (raw.length > 20_000_000) {
+        reject(new Error("Request body too large"));
+      }
+    });
+    req.on("end", () => {
+      try {
+        resolve(raw ? JSON.parse(raw) : {});
+      } catch (error) {
+        error.status = 400;
+        reject(error);
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+function readText(req) {
+  return new Promise((resolve, reject) => {
+    let raw = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => {
+      raw += chunk;
+      if (raw.length > 5_000_000) {
+        reject(new Error("Request body too large"));
+      }
+    });
+    req.on("end", () => resolve(raw));
+    req.on("error", reject);
+  });
+}
+
+function readBuffer(req, maxBytes = 30_000_000) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        const error = new Error("Request body too large");
+        error.status = 413;
+        reject(error);
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+function audioExtensionForContentType(contentType = "") {
+  const normalized = String(contentType).toLowerCase();
+  if (normalized.includes("mp4") || normalized.includes("m4a")) return "m4a";
+  if (normalized.includes("mpeg") || normalized.includes("mp3")) return "mp3";
+  if (normalized.includes("wav")) return "wav";
+  if (normalized.includes("ogg")) return "ogg";
+  return "webm";
+}
+
+function decodeHeaderValue(value = "") {
+  try {
+    return decodeURIComponent(String(value || ""));
+  } catch {
+    return String(value || "");
+  }
+}
+
+function transcriptionPrompt({ currentQuestion = "", domainTerms = "" } = {}) {
+  return [
+    "Transcribe a workflow discovery interview for a finance-industry consulting AI intake app.",
+    "Preserve concrete nouns, acronyms, tool names, and numbered steps. Use punctuation and sentence breaks.",
+    "Common terms include Capco, PDR, MSA, FRRF, SharePoint, Teams, Outlook, PowerPoint, Word, Excel, Miro, Mural, Jira, Confluence, ChatGPT Enterprise, Microsoft 365 Copilot, Copilot Studio, SME, PMO, UAT, QA, and engagement lead.",
+    domainTerms ? `Session terms: ${domainTerms}.` : "",
+    currentQuestion ? `The user is answering this question: ${currentQuestion}` : ""
+  ].filter(Boolean).join(" ");
+}
+
+function sendJson(res, status, payload) {
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store"
+  });
+  res.end(JSON.stringify(payload));
+}
+
+server.listen(PORT, () => {
+  console.log(`Discovery Intake Studio running at http://localhost:${PORT}`);
+  console.log(OPENAI_API_KEY ? `Primary live voice enabled with model ${REALTIME_MODEL}` : "Realtime voice disabled: OPENAI_API_KEY is not set");
+  console.log(OPENAI_API_KEY ? `Structured extraction enabled with model ${EXTRACTION_MODEL} at ${EXTRACTION_REASONING_EFFORT} reasoning` : "AI extraction disabled: OPENAI_API_KEY is not set");
+});

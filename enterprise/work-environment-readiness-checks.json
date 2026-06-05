@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "1.0",
+  "checker": "scripts/check-work-environment-readiness.mjs",
+  "modes": [
+    {
+      "id": "baseline",
+      "command": "node scripts/check-work-environment-readiness.mjs",
+      "purpose": "Verify the unzipped package has required files, safe defaults, and no obvious local setup blockers."
+    },
+    {
+      "id": "github-required",
+      "command": "node scripts/check-work-environment-readiness.mjs --github-required",
+      "purpose": "Verify the work repository is initialized, has a remote, and does not track .env.local."
+    },
+    {
+      "id": "work-strict",
+      "command": "node scripts/check-work-environment-readiness.mjs --work-strict",
+      "purpose": "Verify work-local enterprise mode, .env.local presence, GitHub posture, and mock connector safety."
+    },
+    {
+      "id": "connector-approved",
+      "command": "node scripts/check-work-environment-readiness.mjs --work-strict --connector-approved",
+      "purpose": "Verify Microsoft 365 connector values exist after approval, while keeping write scopes out unless separately approved."
+    }
+  ],
+  "requiredEvidence": [
+    "Node.js 18 or newer",
+    "private or approved work GitHub repository",
+    ".env.local present only on the work machine",
+    ".env.local not tracked by Git",
+    "CONNECTOR_MODE remains mock until Microsoft 365 approval",
+    "Microsoft Entra app registration approval before live connector use",
+    "package doctor passes before sharing"
+  ],
+  "blockedConditions": [
+    ".env.local tracked by Git",
+    "non-placeholder secret in docs or package files",
+    "connector mode set to live without tenant/client configuration",
+    "Microsoft Graph write scope present before separate write-back approval",
+    "review ZIP contains generated app data or local machine paths"
+  ]
+}

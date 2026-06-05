@@ -1,0 +1,42 @@
+name: Enterprise transfer check
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Syntax checks
+        run: |
+          node --check discovery-intake-webapp/app.js
+          node --check discovery-intake-webapp/server.mjs
+          node --check discovery-intake-webapp/scripts/regression-interview-flow.mjs
+          node --check scripts/check-enterprise-transfer-kit.mjs
+          node --check scripts/check-work-environment-readiness.mjs
+
+      - name: Enterprise transfer-kit check
+        run: node scripts/check-enterprise-transfer-kit.mjs
+
+      - name: Work environment readiness check
+        run: node scripts/check-work-environment-readiness.mjs
+
+      - name: Build sanitized review package
+        run: node scripts/build-review-package.mjs
+
+      - name: Review package doctor
+        run: node scripts/check-review-package.mjs

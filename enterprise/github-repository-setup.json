@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "1.0",
+  "repository": {
+    "suggestedName": "ai-workflow-discovery-studio",
+    "visibility": "private",
+    "defaultBranch": "main",
+    "source": "sanitized review ZIP contents"
+  },
+  "access": {
+    "adminOwner": "approved technical owner",
+    "writeAccess": "small build group",
+    "reviewAccess": [
+      "code reviewer",
+      "security reviewer",
+      "Microsoft 365 admin reviewer",
+      "business pilot owner"
+    ],
+    "preferTeamsOverIndividuals": true
+  },
+  "branchControls": {
+    "requirePullRequest": true,
+    "requiredReviewCount": 1,
+    "requireStatusChecks": true,
+    "restrictDirectPushToMain": true
+  },
+  "actions": {
+    "workflowPath": ".github/workflows/enterprise-transfer-check.yml",
+    "purpose": "validate syntax, enterprise transfer kit, and review package hygiene",
+    "deploymentEnabled": false
+  },
+  "secrets": {
+    "startWithNoSecrets": true,
+    "futureSecretNames": [
+      "OPENAI_API_KEY",
+      "MICROSOFT_TENANT_ID",
+      "MICROSOFT_CLIENT_ID",
+      "MICROSOFT_CLIENT_SECRET"
+    ],
+    "requiresApprovalBeforeUse": true
+  },
+  "ignoredPaths": [
+    "discovery-intake-webapp/.env.local",
+    "discovery-intake-webapp/data/",
+    "dist/",
+    "node_modules/",
+    "test-results/",
+    "playwright-report/"
+  ]
+}
