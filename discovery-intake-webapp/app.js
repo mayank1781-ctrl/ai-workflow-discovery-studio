@@ -3622,8 +3622,66 @@ async function runDocumentExtraction() {
   state.uploadedDocument.status = "extracted";
   state.documentEntry.started = true;
   pendingUploadFile = null;
+  // Context-aware opening: acknowledge the document and steer straight to the
+  // gaps (Pain/Friction first) instead of the generic opening question. Set
+  // currentQuestionOverride explicitly AFTER the message so it wins over any
+  // auto-sync inside addConversationMessage.
+  const recap = buildDocumentExtractionRecap(state.workflowGrid);
+  addConversationMessage("assistant", recap.recapText, "Document recap");
+  state.currentQuestionOverride = recap.firstQuestion;
+  state.currentQuestionSource = "Document recap";
   persistState();
   render();
+}
+
+// Builds a deterministic opening recap after a document is extracted: what was
+// captured (step names, pre-filled field count, confidence band) plus the first
+// gap question. Pain/Friction comes first because documents never contain it.
+function buildDocumentExtractionRecap(grid) {
+  const steps = Array.isArray(grid?.steps) ? grid.steps : [];
+  const stepNames = steps
+    .map((step) => step.cells?.name?.value)
+    .filter((name) => typeof name === "string" && name.trim());
+
+  const confidences = [];
+  let filledFields = 0;
+  const tally = (cell, key) => {
+    if (key === "aiPattern") return;
+    if (cell && cell.value) {
+      filledFields += 1;
+      if (typeof cell.confidence === "number") confidences.push(cell.confidence);
+    }
+  };
+  steps.forEach((step) => Object.entries(step.cells || {}).forEach(([key, cell]) => tally(cell, key)));
+  tally(grid?.dataSensitivityBaseline, "dataSensitivityBaseline");
+
+  const avg = confidences.length ? confidences.reduce((sum, n) => sum + n, 0) / confidences.length : 0;
+  const band = avg >= 0.8 ? "high" : avg >= 0.6 ? "medium" : "low";
+  const workflowName = (grid?.workflowName || "").trim();
+
+  // No clear steps came back — acknowledge that and build from scratch.
+  if (!stepNames.length) {
+    const firstQuestion = "I read your document but couldn't pull out clear workflow steps. Let's build it together — what's the first step of this workflow?";
+    const lead = workflowName
+      ? `I read your document on "${workflowName}" but couldn't extract distinct steps.`
+      : "I read your document but couldn't extract distinct workflow steps.";
+    return { recapText: `${lead} ${firstQuestion}`, firstQuestion };
+  }
+
+  const parts = [];
+  parts.push(workflowName
+    ? `I read your document on "${workflowName}" and pre-filled the workflow grid.`
+    : "I read your document and pre-filled the workflow grid.");
+  const preview = stepNames.slice(0, 6).join(", ");
+  const more = stepNames.length > 6 ? `, plus ${stepNames.length - 6} more` : "";
+  parts.push(`I found ${stepNames.length} step${stepNames.length === 1 ? "" : "s"}: ${preview}${more}.`);
+  if (filledFields) {
+    parts.push(`That pre-filled ${filledFields} field${filledFields === 1 ? "" : "s"} at ${band} confidence.`);
+  }
+  const firstQuestion = "Documents can't tell me where the work actually hurts — which of these steps is the most painful, slow, or error-prone in practice?";
+  parts.push(firstQuestion);
+
+  return { recapText: parts.join(" "), firstQuestion };
 }
 
 // Maps the server document-extraction payload (POST /api/extract-document) into
@@ -23593,7 +23651,30 @@ function calculateDiscoverySessionProgress(sectionProgressPercent = 0) {
   if (state.steps.some((step) => isCapturedValue(step.tool)) || state.systems.length) score += 3;
 
   score += Math.round(sectionProgressPercent * 0.04);
-  return Math.max(0, Math.min(100, score));
+  // A document pre-fill populates state.workflowGrid (not legacy state.steps),
+  // so reflect that captured data too. Math.max avoids double-counting and
+  // keeps the bar from dropping as the live interview later fills legacy steps.
+  return Math.max(0, Math.min(100, Math.max(score, gridSessionScore())));
+}
+
+// Session-progress contribution from a pre-filled workflowGrid. A fully
+// pre-filled document (every doc-extractable field captured) reads ~60%.
+// Pain/Friction and aiPattern are excluded — neither comes from a document.
+function gridSessionScore() {
+  const steps = state.workflowGrid?.steps;
+  if (!Array.isArray(steps) || steps.length === 0) return 0;
+  const excluded = new Set(["aiPattern", "painFriction"]);
+  let total = 0;
+  let filled = 0;
+  steps.forEach((step) => {
+    Object.entries(step.cells || {}).forEach(([key, cell]) => {
+      if (excluded.has(key)) return;
+      total += 1;
+      if (cell && cell.value) filled += 1;
+    });
+  });
+  if (!total) return 20;
+  return Math.max(0, Math.min(100, 20 + Math.round((filled / total) * 40)));
 }
 
 function updateProgressUi() {
