@@ -12248,6 +12248,58 @@ body[data-app-mode="interview"] .discovery-start-button {
   font-size: 0.82rem;
 }
 
+.document-upload-status.error {
+  color: var(--future-red);
+}
+
+.document-upload-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--future-space-4);
+  padding: var(--future-space-5);
+  border: 1px solid var(--future-line);
+  border-radius: 14px;
+  background: rgba(90, 167, 255, 0.06);
+  color: var(--future-white);
+  font-size: 0.95rem;
+}
+
+.document-upload-spinner {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(90, 167, 255, 0.25);
+  border-top-color: var(--future-blue);
+  animation: document-upload-spin 0.8s linear infinite;
+}
+
+@keyframes document-upload-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .document-upload-spinner {
+    animation-duration: 2s;
+  }
+}
+
+.document-upload-error {
+  display: flex;
+  align-items: center;
+  gap: var(--future-space-4);
+  padding: var(--future-space-4);
+  border: 1px solid rgba(255, 107, 138, 0.4);
+  border-radius: 14px;
+  background: rgba(255, 107, 138, 0.08);
+}
+
+.document-upload-error .document-upload-file-icon i {
+  color: var(--future-red);
+}
+
 .document-upload-remove {
   flex-shrink: 0;
   border: none;
