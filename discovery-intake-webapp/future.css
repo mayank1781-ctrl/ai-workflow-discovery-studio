@@ -10677,6 +10677,119 @@ body[data-app-mode="interview"] #sendChatButton {
   gap: 12px;
 }
 
+.addons-setup-runbook {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  border-radius: 8px;
+  background: rgba(8, 21, 27, 0.58);
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.16);
+}
+
+.addons-setup-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+}
+
+.addons-setup-head h3 {
+  margin: 0;
+  color: rgba(249, 251, 255, 0.96);
+  font-size: 17px;
+}
+
+.addons-setup-head p {
+  margin: 8px 0 0;
+  max-width: 860px;
+  color: rgba(225, 236, 255, 0.72);
+  line-height: 1.5;
+}
+
+.addons-setup-grid,
+.addons-setup-body,
+.addons-setup-sequence {
+  display: grid;
+  gap: 10px;
+}
+
+.addons-setup-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.addons-setup-body {
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+}
+
+.addons-setup-sequence {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.addons-setup-grid article,
+.addons-setup-sequence article,
+.addons-setup-block {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.64);
+}
+
+.addons-setup-grid span,
+.addons-setup-block span,
+.addons-setup-sequence span {
+  display: block;
+  margin-bottom: 5px;
+  color: rgba(226, 232, 240, 0.56);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.addons-setup-grid strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.addons-setup-grid p,
+.addons-setup-sequence p {
+  margin: 6px 0 0;
+  color: rgba(226, 232, 240, 0.68);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.addons-setup-block pre {
+  min-height: 86px;
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: rgba(241, 245, 249, 0.9);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.addons-setup-sequence span {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  color: #052e1a;
+  background: #86efac;
+}
+
+.addons-setup-sequence strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
 .addon-test-empty {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -11293,6 +11406,8 @@ body[data-app-mode="interview"] #sendChatButton {
 @media (max-width: 1180px) {
   .addons-hero,
   .addons-test-head,
+  .addons-setup-head,
+  .addons-setup-body,
   .addons-next-steps ol,
   .addons-provider-grid,
   .addon-test-result,
@@ -11306,6 +11421,8 @@ body[data-app-mode="interview"] #sendChatButton {
   }
 
   .addons-score-grid,
+  .addons-setup-grid,
+  .addons-setup-sequence,
   .addon-test-summary-grid,
   .workflow-map-stats {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -11322,6 +11439,8 @@ body[data-app-mode="interview"] #sendChatButton {
 
 @media (max-width: 760px) {
   .addons-score-grid,
+  .addons-setup-grid,
+  .addons-setup-sequence,
   .addon-test-summary-grid,
   .workflow-map-stats {
     grid-template-columns: minmax(0, 1fr);

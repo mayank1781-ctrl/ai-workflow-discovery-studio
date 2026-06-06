@@ -9628,6 +9628,8 @@ function outputDownloadPayload(type) {
   const solutionBuildSpec = deriveSolutionBuildSpec(solutionBuildRecipe);
   const workflowMapStudio = solutionBuildSpec.workflowMapStudio || deriveWorkflowMapStudio();
   const addOnProviderPlan = solutionBuildSpec.addOnProviderPlan || deriveAddOnProviderPlan();
+  const addOnTestResults = deriveAddOnTestResults();
+  const addOnSetupRunbook = deriveAddOnSetupRunbook();
   const agentBuildPack = solutionBuildSpec.agentBuildPack || deriveAgentBuildPack(solutionBuildSpec);
   const solutionCapabilityPlan = deriveSolutionCapabilityPlan(solutionBuildSpec);
   const solutionExecutionPlan = deriveSolutionExecutionPlan(solutionBuildSpec);
@@ -10257,6 +10259,7 @@ function deriveOutputManifest(productBrief = deriveProductBrief(), engineeringBr
   const agentBuildPack = solutionBuildSpec.agentBuildPack || deriveAgentBuildPack(solutionBuildSpec);
   const addOnProviderPlan = solutionBuildSpec.addOnProviderPlan || deriveAddOnProviderPlan();
   const addOnTestResults = deriveAddOnTestResults();
+  const addOnSetupRunbook = deriveAddOnSetupRunbook();
   const workflowMapStudio = solutionBuildSpec.workflowMapStudio || deriveWorkflowMapStudio();
   const reviewerOnePage = deriveReviewerOnePageSummary();
   const solutionCapabilityPlan = deriveSolutionCapabilityPlan(solutionBuildSpec);
@@ -10348,6 +10351,22 @@ function deriveOutputManifest(productBrief = deriveProductBrief(), engineeringBr
       sourceOfTruth: "Latest Add-on Test Lab evidence for local configuration checks and optional safe provider preflight checks",
       supplementLater: "No",
       nextAction: addOnTestResults.results.length ? "Review failed or missing providers before enterprise pilot." : "Run config checks before packaging the next review build."
+    },
+    {
+      output: "Add-On Setup Runbook",
+      readiness: `${addOnSetupRunbook.missingEnvVars.length} values missing`,
+      status: "Provider setup guide",
+      contractId: "add-on-setup-runbook",
+      route: "Enterprise Add-ons",
+      owner: "AI Engineering / Platform owner",
+      format: "DOCX / Markdown / JSON / Excel sheet",
+      packageFile: "add-on-setup-runbook.json",
+      packageFiles: "add-on-setup-runbook.json; add-on-setup-runbook.md; add-on-setup-runbook.docx; add-on-setup-runbook-rows.json",
+      workbookSheet: "Add-On Setup Runbook",
+      outputSurfaces: "Workbench; Workbook sheet; Package JSON; Package Markdown; Package DOCX",
+      sourceOfTruth: "Provider setup sequence, missing env vars, restart command, safe live-check guardrails, and approval steps",
+      supplementLater: "No",
+      nextAction: "Add approved values to .env.local, restart, run config checks, then safe live checks."
     },
     {
       output: "Reviewer One-Page Summary",
@@ -12142,6 +12161,129 @@ function addOnTestResultsMarkdown(testRun = deriveAddOnTestResults()) {
     "",
     "## Guardrails",
     ...(testRun.guardrails || []).map((item) => `- ${item}`)
+  ].join("\n");
+}
+
+function deriveAddOnSetupRunbook(status = getAddOnProviderStatus()) {
+  const providers = status.providers || [];
+  const optionalProviders = providers.filter((provider) => provider.defaultUse !== "native" && provider.id !== "mermaid-workflow-map");
+  const missingProviders = optionalProviders.filter((provider) => !provider.configured);
+  const configuredProviders = providers.filter((provider) => provider.configured || provider.status === "included");
+  const missingEnvVars = [...new Set(missingProviders.flatMap((provider) => provider.envVars || []))];
+  const configuredEnvVars = [...new Set(configuredProviders.flatMap((provider) => provider.envVars || []))];
+  const placeholderLines = missingEnvVars.length
+    ? missingEnvVars.map((envVar) => `${envVar}=`)
+    : ["# All registered add-on provider values are configured locally."];
+  return {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    title: "Turn provider contracts into live checks",
+    summary: "Add only approved provider values to .env.local, restart the local app, run config checks, then run safe live preflight checks before any pilot with real artifacts.",
+    configuredProviderCount: configuredProviders.length,
+    optionalProviderCount: optionalProviders.length,
+    missingProviderCount: missingProviders.length,
+    configuredEnvVars,
+    missingEnvVars,
+    envPlaceholderBlock: [
+      "# Add only approved provider values. Do not commit this file.",
+      ...placeholderLines
+    ].join("\n"),
+    restartCommand: "/Applications/Codex.app/Contents/Resources/node scripts/start-local.mjs",
+    liveCheckPolicy: {
+      label: "Preflight only",
+      detail: "Safe live checks ping auth/list/info endpoints and do not send workflow content, uploaded evidence, screenshots, or secret values to the browser."
+    },
+    sequence: [
+      {
+        step: "1",
+        action: "Get enterprise approval for each provider.",
+        detail: "Confirm vendor, retention, data boundary, and who owns the credential before adding any key."
+      },
+      {
+        step: "2",
+        action: "Add approved values to discovery-intake-webapp/.env.local.",
+        detail: "Use the copied placeholder block, paste real values only on the local/work machine, and keep .env.local out of GitHub."
+      },
+      {
+        step: "3",
+        action: "Restart the app and run config checks.",
+        detail: "Config checks prove the server can see required env vars without calling external provider APIs."
+      },
+      {
+        step: "4",
+        action: "Run safe live checks, then package the evidence.",
+        detail: "Live checks call provider preflight endpoints only. Create a fresh package afterward so reviewers can see the result."
+      }
+    ],
+    providerSetup: optionalProviders.map((provider) => ({
+      id: provider.id,
+      label: provider.label,
+      provider: provider.provider,
+      category: provider.category,
+      configured: Boolean(provider.configured),
+      envVars: provider.envVars || [],
+      nextAction: provider.configured
+        ? "Run safe live check after approval."
+        : `Add approved values for ${(provider.envVars || []).join(", ")}.`,
+      enterpriseGate: provider.enterpriseGate || "Approval required before production use",
+      blockedUntil: provider.blockedUntil || []
+    })),
+    guardrails: [
+      "Never paste provider keys into chat, screenshots, GitHub, review ZIPs, or package markdown.",
+      "Keep first live checks synthetic or sanitized.",
+      "Use Azure/Microsoft-native document and PII services first when work-tenant governance prefers Microsoft controls.",
+      "Use voice add-ons for narration/training only after voice retention and generated-voice policy are approved."
+    ]
+  };
+}
+
+function addOnSetupRunbookRows(runbook = deriveAddOnSetupRunbook()) {
+  return [
+    ["Section", "Provider ID", "Label", "Provider", "Configured", "Env Vars", "Next Action", "Enterprise Gate", "Blocked Until"],
+    ["Summary", "", runbook.title, "", "", "", runbook.summary, runbook.liveCheckPolicy.label, runbook.liveCheckPolicy.detail],
+    ...runbook.sequence.map((item) => ["Sequence", "", item.action, "", "", "", item.detail, `Step ${item.step}`, ""]),
+    ...runbook.providerSetup.map((provider) => [
+      "Provider",
+      provider.id,
+      provider.label,
+      provider.provider,
+      provider.configured ? "Yes" : "No",
+      (provider.envVars || []).join("\n"),
+      provider.nextAction,
+      provider.enterpriseGate,
+      (provider.blockedUntil || []).join("\n")
+    ]),
+    ...runbook.guardrails.map((item) => ["Guardrail", "", item, "", "", "", "", "", ""])
+  ];
+}
+
+function addOnSetupRunbookMarkdown(runbook = deriveAddOnSetupRunbook()) {
+  return [
+    "# Add-On Setup Runbook",
+    "",
+    runbook.summary,
+    "",
+    "## Missing Environment Values",
+    ...(runbook.missingEnvVars.length ? runbook.missingEnvVars.map((envVar) => `- ${envVar}`) : ["- None"]),
+    "",
+    "## Placeholder Block",
+    "```env",
+    runbook.envPlaceholderBlock,
+    "```",
+    "",
+    "## Restart Command",
+    "```bash",
+    runbook.restartCommand,
+    "```",
+    "",
+    "## Sequence",
+    ...runbook.sequence.map((item) => `- ${item.step}. ${item.action} ${item.detail}`),
+    "",
+    "## Provider Setup",
+    ...runbook.providerSetup.map((provider) => `- ${provider.label} (${provider.provider}): ${provider.configured ? "Configured" : "Missing config"}. ${provider.nextAction}`),
+    "",
+    "## Guardrails",
+    ...runbook.guardrails.map((item) => `- ${item}`)
   ].join("\n");
 }
 
@@ -19938,6 +20080,7 @@ function renderOperatorAddOnsPanel() {
         ${renderAddOnTestResults()}
       </div>
     </section>
+    ${renderAddOnSetupRunbook()}
     <div class="addons-provider-groups">
       ${addOnProviderGroups(status).map(([category, items]) => `
         <section class="addons-provider-group">
@@ -20082,6 +20225,73 @@ function latestAddOnTestResult(providerId) {
   return (addOnTestRun.results || []).find((result) => result.id === providerId);
 }
 
+function renderAddOnSetupRunbook() {
+  const runbook = deriveAddOnSetupRunbook();
+  return `
+    <section class="addons-setup-runbook">
+      <div class="addons-setup-head">
+        <div>
+          <p class="eyebrow">Live Testing Setup</p>
+          <h3>${escapeHtml(runbook.title)}</h3>
+          <p>${escapeHtml(runbook.summary)}</p>
+        </div>
+        <div class="addons-test-actions">
+          <button class="secondary-button compact" type="button" data-addon-copy="env">
+            <i data-lucide="copy"></i>
+            Copy env block
+          </button>
+          <button class="secondary-button compact" type="button" data-addon-copy="restart">
+            <i data-lucide="terminal"></i>
+            Copy restart
+          </button>
+        </div>
+      </div>
+      <div class="addons-setup-grid">
+        <article>
+          <span>Missing provider values</span>
+          <strong>${escapeHtml(runbook.missingEnvVars.length)}</strong>
+          <p>${escapeHtml(runbook.missingEnvVars.length ? runbook.missingEnvVars.slice(0, 8).join(", ") : "All registered provider values are present locally.")}</p>
+        </article>
+        <article>
+          <span>Configured provider values</span>
+          <strong>${escapeHtml(runbook.configuredProviderCount)}</strong>
+          <p>${escapeHtml(runbook.configuredProviderCount ? "Config checks can confirm local readiness now." : "Add approved values before live provider checks.")}</p>
+        </article>
+        <article>
+          <span>Safe live behavior</span>
+          <strong>${escapeHtml(runbook.liveCheckPolicy.label)}</strong>
+          <p>${escapeHtml(runbook.liveCheckPolicy.detail)}</p>
+        </article>
+      </div>
+      <div class="addons-setup-body">
+        <div class="addons-setup-block">
+          <span>Placeholder values for .env.local</span>
+          <pre>${escapeHtml(runbook.envPlaceholderBlock)}</pre>
+        </div>
+        <div class="addons-setup-block">
+          <span>Restart command</span>
+          <pre>${escapeHtml(runbook.restartCommand)}</pre>
+        </div>
+      </div>
+      <div class="addons-setup-sequence">
+        ${runbook.sequence.map((item) => `
+          <article>
+            <span>${escapeHtml(item.step)}</span>
+            <strong>${escapeHtml(item.action)}</strong>
+            <p>${escapeHtml(item.detail)}</p>
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function addonCopyText(kind) {
+  const runbook = deriveAddOnSetupRunbook();
+  if (kind === "restart") return runbook.restartCommand;
+  return runbook.envPlaceholderBlock;
+}
+
 function addOnStatusTone(provider) {
   if (provider.configured) return "configured";
   if (provider.status === "included" || provider.defaultUse === "native") return "included";
@@ -20125,6 +20335,12 @@ function recommendedAddOnRolloutPath(status = getAddOnProviderStatus()) {
 }
 
 async function handleAddOnTestAction(event) {
+  const copyButton = event.target.closest("[data-addon-copy]");
+  if (copyButton) {
+    await copyAddOnSetupText(copyButton.dataset.addonCopy || "env");
+    return;
+  }
+
   const runButton = event.target.closest("[data-addon-test-run]");
   const providerButton = event.target.closest("[data-addon-test-provider]");
   if (!runButton && !providerButton) return;
@@ -20180,6 +20396,25 @@ async function runAddOnProviderTests({ providerId = "", allowLiveChecks = false 
     toast(`Add-on check failed: ${error.message}`);
   }
   renderOperatorAddOnsPanel();
+}
+
+async function copyAddOnSetupText(kind) {
+  const text = addonCopyText(kind);
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(kind === "restart" ? "Restart command copied." : "Add-on env placeholder block copied.");
+  } catch {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    textarea.remove();
+    toast(kind === "restart" ? "Restart command copied." : "Add-on env placeholder block copied.");
+  }
 }
 
 function summarizeClientAddOnTestResults(results = []) {
@@ -21933,6 +22168,8 @@ function exportWorkbook() {
   const solutionBuildSpec = deriveSolutionBuildSpec(solutionBuildRecipe);
   const workflowMapStudio = solutionBuildSpec.workflowMapStudio || deriveWorkflowMapStudio();
   const addOnProviderPlan = solutionBuildSpec.addOnProviderPlan || deriveAddOnProviderPlan();
+  const addOnTestResults = deriveAddOnTestResults();
+  const addOnSetupRunbook = deriveAddOnSetupRunbook();
   const agentBuildPack = solutionBuildSpec.agentBuildPack || deriveAgentBuildPack(solutionBuildSpec);
   const solutionCapabilityPlan = deriveSolutionCapabilityPlan(solutionBuildSpec);
   const solutionExecutionPlan = deriveSolutionExecutionPlan(solutionBuildSpec);
@@ -21979,7 +22216,8 @@ function exportWorkbook() {
   addSheetToWorkbook(wb, "Solution Build Spec", solutionBuildSpecRows(solutionBuildSpec));
   addSheetToWorkbook(wb, "Agent Build Pack", agentBuildPackRows(agentBuildPack));
   addSheetToWorkbook(wb, "Add-On Provider Plan", addOnProviderPlanRows(addOnProviderPlan));
-  addSheetToWorkbook(wb, "Add-On Test Results", addOnTestResultsRows());
+  addSheetToWorkbook(wb, "Add-On Test Results", addOnTestResultsRows(addOnTestResults));
+  addSheetToWorkbook(wb, "Add-On Setup Runbook", addOnSetupRunbookRows(addOnSetupRunbook));
   addSheetToWorkbook(wb, "Workflow Map Studio", workflowMapStudioRows(workflowMapStudio));
   addSheetToWorkbook(wb, "Reviewer One Page", reviewerOnePageRows(reviewerOnePage));
   addSheetToWorkbook(wb, "Solution Capability Plan", solutionCapabilityPlanRows(solutionCapabilityPlan));
@@ -22830,6 +23068,8 @@ async function createHandoffPackage() {
   const solutionBuildSpec = deriveSolutionBuildSpec(solutionBuildRecipe);
   const workflowMapStudio = solutionBuildSpec.workflowMapStudio || deriveWorkflowMapStudio();
   const addOnProviderPlan = solutionBuildSpec.addOnProviderPlan || deriveAddOnProviderPlan();
+  const addOnTestResults = deriveAddOnTestResults();
+  const addOnSetupRunbook = deriveAddOnSetupRunbook();
   const agentBuildPack = solutionBuildSpec.agentBuildPack || deriveAgentBuildPack(solutionBuildSpec);
   const solutionCapabilityPlan = deriveSolutionCapabilityPlan(solutionBuildSpec);
   const solutionExecutionPlan = deriveSolutionExecutionPlan(solutionBuildSpec);
@@ -22872,6 +23112,9 @@ async function createHandoffPackage() {
         addOnTestResults,
         addOnTestResultsRows: addOnTestResultsRows(addOnTestResults),
         addOnTestResultsMarkdown: addOnTestResultsMarkdown(addOnTestResults),
+        addOnSetupRunbook,
+        addOnSetupRunbookRows: addOnSetupRunbookRows(addOnSetupRunbook),
+        addOnSetupRunbookMarkdown: addOnSetupRunbookMarkdown(addOnSetupRunbook),
         agentBuildPack,
         agentBuildPackRows: agentBuildPackRows(agentBuildPack),
         agentBuildPackMarkdown: agentBuildPackMarkdown(agentBuildPack),
