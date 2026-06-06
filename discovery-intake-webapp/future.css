@@ -9391,6 +9391,7 @@ body[data-app-mode="interview"] .discovery-completion-pill {
   grid-template-columns: auto minmax(132px, 210px);
   gap: 10px;
   padding-inline: 12px;
+  margin-left: auto;
 }
 
 body[data-app-mode="interview"] .discovery-start-button {
