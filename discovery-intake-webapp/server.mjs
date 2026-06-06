@@ -3,6 +3,7 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { detectConnectors, formatForRecipe } from "./connectors/connector-detector.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -896,6 +897,20 @@ function buildEnterpriseConfigStatus() {
   };
 }
 
+async function handleDetectConnectors(req, res) {
+  const body = await readJson(req);
+  const sessionState = body.sessionState || {};
+  // This server talks to OpenAI through raw fetch and has no OpenAI SDK client
+  // object, so there is none to pass. The detector then runs keyword-only
+  // detection and skips the optional AI-enhancement pass.
+  const result = await detectConnectors(sessionState, null);
+  return sendJson(res, 200, {
+    ok: true,
+    ...result,
+    recipe: formatForRecipe(result)
+  });
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const requestUrl = new URL(req.url, `http://localhost:${PORT}`);
@@ -926,6 +941,10 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && requestUrl.pathname === "/api/add-ons/test") {
       return await handleAddOnProviderTest(req, res);
+    }
+
+    if (req.method === "POST" && requestUrl.pathname === "/api/detect-connectors") {
+      return await handleDetectConnectors(req, res);
     }
 
     if (requestUrl.pathname === "/api/sessions") {
