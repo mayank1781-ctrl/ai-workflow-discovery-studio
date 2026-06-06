@@ -12146,3 +12146,215 @@ body[data-app-mode="interview"] .discovery-start-button {
   right: 0;
   transform: none;
 }
+
+/* --- Stage 1a: document-first upload entry point ------------------------- */
+.document-upload-panel {
+  margin-bottom: var(--future-space-5);
+}
+
+.document-upload-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--future-space-4);
+  padding: var(--future-space-5);
+  border: 1px solid var(--future-line);
+  border-radius: 18px;
+  background: linear-gradient(160deg, var(--future-panel-2), var(--future-panel));
+  box-shadow: var(--future-shadow);
+}
+
+.document-upload-head h2 {
+  margin: 0 0 var(--future-space-1);
+  font-size: 1.05rem;
+}
+
+.document-upload-head p {
+  margin: 0;
+  color: var(--future-muted);
+  font-size: 0.9rem;
+}
+
+.document-upload-dropzone {
+  display: flex;
+  align-items: center;
+  gap: var(--future-space-4);
+  width: 100%;
+  padding: var(--future-space-5);
+  border: 1px dashed var(--future-line-strong);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--future-white);
+  cursor: pointer;
+  text-align: left;
+}
+
+.document-upload-dropzone:hover {
+  border-color: var(--future-blue);
+  background: rgba(90, 167, 255, 0.08);
+}
+
+.document-upload-dropzone-icon i {
+  width: 28px;
+  height: 28px;
+  color: var(--future-blue);
+}
+
+.document-upload-dropzone-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.document-upload-dropzone-text small {
+  color: var(--future-muted);
+}
+
+.document-upload-selected {
+  display: flex;
+  align-items: center;
+  gap: var(--future-space-4);
+  padding: var(--future-space-4);
+  border: 1px solid var(--future-line);
+  border-radius: 14px;
+  background: rgba(120, 242, 179, 0.06);
+}
+
+.document-upload-file-icon i {
+  width: 26px;
+  height: 26px;
+  color: var(--future-green);
+}
+
+.document-upload-file-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.document-upload-file-meta strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-upload-file-meta small {
+  color: var(--future-subtle);
+}
+
+.document-upload-status {
+  color: var(--future-green);
+  font-size: 0.82rem;
+}
+
+.document-upload-remove {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: var(--future-muted);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.document-upload-remove:hover {
+  color: var(--future-red);
+}
+
+.document-upload-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.document-upload-skip {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  color: var(--future-muted);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 0.88rem;
+  padding: 0;
+}
+
+.document-upload-skip:hover {
+  color: var(--future-white);
+}
+
+/* While the upload entry panel is active, suppress the interview question and
+   turn controls without touching the interview flow logic. */
+body[data-discovery-entry="upload"] .current-question-card,
+body[data-discovery-entry="upload"] .main-turn-actions {
+  display: none;
+}
+
+/* Disclosure modal */
+.doc-disclosure-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--future-space-4);
+  background: rgba(2, 4, 12, 0.68);
+  backdrop-filter: blur(8px);
+}
+
+.doc-disclosure-overlay[hidden] {
+  display: none;
+}
+
+.doc-disclosure-modal {
+  width: min(440px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--future-space-4);
+  padding: var(--future-space-6);
+  border: 1px solid var(--future-line-strong);
+  border-radius: 18px;
+  background: linear-gradient(160deg, var(--future-panel-3), var(--future-panel));
+  box-shadow: var(--future-shadow);
+}
+
+.doc-disclosure-modal h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.doc-disclosure-modal p {
+  margin: 0;
+  color: var(--future-muted);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.doc-disclosure-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--future-space-3);
+}
+
+@media (max-width: 640px) {
+  .document-upload-card {
+    padding: var(--future-space-4);
+  }
+
+  .document-upload-dropzone {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .document-upload-selected {
+    flex-wrap: wrap;
+  }
+
+  .doc-disclosure-actions {
+    flex-direction: column-reverse;
+  }
+
+  .doc-disclosure-actions button {
+    width: 100%;
+  }
+}
