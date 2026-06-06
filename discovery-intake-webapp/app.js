@@ -1040,6 +1040,8 @@ const defaultState = {
   patterns: [],
   ideas: [],
   evidenceArtifacts: [],
+  detectedConnectors: [],
+  agentBoundaries: [],
   evidenceWorkbench: {
     draftText: "",
     lastAnalyzedAt: "",
