@@ -1167,7 +1167,7 @@ const els = {
   currentQuestion: document.getElementById("currentQuestion"),
   questionSource: document.getElementById("questionSource"),
   questionLensBar: document.getElementById("questionLensBar"),
-  questionQueuePreview: document.getElementById("questionQueuePreview"),
+  frameAnchorStrip: document.getElementById("frameAnchorStrip"),
   currentStepPanel: document.getElementById("currentStepPanel"),
   turnSignalPanel: document.getElementById("turnSignalPanel"),
   sectionTitle: document.getElementById("sectionTitle"),
@@ -3330,6 +3330,7 @@ function render() {
   if (state.activeSection !== section.id) state.activeSection = section.id;
   renderHeaderContext();
   renderCurrentStepPanel();
+  renderFrameAnchorStrip();
   renderCurrentQuestion(section);
   renderTurnSignalPanel();
   renderInterviewGuide(section);
@@ -4171,7 +4172,6 @@ function renderCurrentQuestion(section = getActiveSection()) {
   els.currentQuestion.textContent = cleanQuestionLabel(question.text);
   if (els.questionSource) els.questionSource.textContent = question.source;
   renderQuestionLensBar(question);
-  renderQuestionQueuePreview();
 }
 
 const OPENING_DISCOVERY_QUESTION = "What task or workflow do you want to talk about? Briefly describe what happens, the business outcome, and the main output.";
@@ -4224,25 +4224,38 @@ function renderQuestionLensBar(question = {}) {
   `;
 }
 
-function renderQuestionQueuePreview() {
-  if (!els.questionQueuePreview) return;
-  const items = topCompletionQuestionItems(3, { includeSupplemental: true });
-  if (!items.length) {
-    els.questionQueuePreview.innerHTML = "";
+// Phase 1 Frame Builder — State 3 (Phase 2 handoff). The confirmed frame lives
+// on as a slim, display-only anchor strip across the top of the interview, with
+// the current step highlighted ("now"). It replaces the old Next/Queue 2/Queue 3
+// preview row and gives the deep dive a persistent map of where we are.
+function renderFrameAnchorStrip() {
+  if (!els.frameAnchorStrip) return;
+  const showStrip = state.drilldown?.status === "active" && state.steps.length > 0;
+  if (!showStrip) {
+    els.frameAnchorStrip.hidden = true;
+    els.frameAnchorStrip.innerHTML = "";
     return;
   }
-  els.questionQueuePreview.innerHTML = items
-    .map((item, index) => {
-      const className = item.bucket === "supplement" ? "supplement" : item.bucket === "infer" ? "infer" : "ask";
+  const currentIndex = getCurrentStepIndex();
+  const pills = state.steps
+    .map((step, index) => {
+      const label = step.name || step.action || `Step ${index + 1}`;
+      const isCurrent = index === currentIndex;
       return `
-        <article class="${className}">
-          <span>${index === 0 ? "Next" : `Queue ${index + 1}`}</span>
-          <strong>${escapeHtml(item.treatment)}</strong>
-          <p>${escapeHtml(truncateUi(item.question, 112))}</p>
-        </article>
+        <li class="frame-anchor-pill ${isCurrent ? "current" : ""}">
+          <span class="frame-anchor-pill-number">${index + 1}</span>
+          <span class="frame-anchor-pill-label">${escapeHtml(label)}</span>
+          ${isCurrent ? `<span class="frame-anchor-pill-now">now</span>` : ""}
+        </li>
       `;
     })
     .join("");
+  els.frameAnchorStrip.hidden = false;
+  els.frameAnchorStrip.innerHTML = `
+    <span class="frame-anchor-strip-label">Workflow</span>
+    <ol class="frame-anchor-strip-list">${pills}</ol>
+  `;
+  refreshIcons();
 }
 
 function renderCurrentStepPanel() {
@@ -4293,10 +4306,6 @@ function renderCurrentStepPanel() {
       ${stepFieldStatusList(step).map((item) => stepFieldChip(item)).join("")}
     </div>
     ${stepIntakeSnapshotHtml(step, activeCluster)}
-    <div class="step-next-question">
-      <span><i data-lucide="corner-down-right"></i></span>
-      <p>${escapeHtml(stepInterviewQuestion())}</p>
-    </div>
     <div class="step-workspace-actions">
       <button class="secondary-button compact" id="previousStepButton" type="button" ${index === 0 ? "disabled" : ""}>
         <i data-lucide="arrow-left"></i>
@@ -4322,95 +4331,176 @@ function renderCurrentStepPanel() {
   refreshIcons();
 }
 
+// Phase 1 Frame Builder — State 2 (Confirm). The three simple in-card anchors.
+// Handoff/wait is intentionally NOT here yet (Stage 2). Each anchor maps onto an
+// existing step field so edits here pre-fill the Phase 2 deep dive.
+const FRAME_ANCHORS = [
+  { key: "tool", label: "Tools", icon: "wrench" },
+  { key: "input", label: "Data", icon: "database" },
+  { key: "actor", label: "People", icon: "user" }
+];
+
+function frameAnchorValue(step, key) {
+  return String(step?.[key] || "").trim();
+}
+
+// State 2 — the rough frame reflected back as editable step columns (left to
+// right, with connectors), an "add step" card, and an honest confirm bar.
 function renderWorkflowSkeletonPanel() {
-  const stepRows = state.steps.map((step, index) => workflowSkeletonRow(step, index)).join("");
+  const columns = state.steps.map((step, index) => workflowFrameColumn(step, index)).join("");
   els.currentStepPanel.innerHTML = `
-    <div class="skeleton-confirmation-panel">
-      <div class="skeleton-confirmation-header">
+    <div class="frame-confirm-panel">
+      <div class="frame-confirm-header">
         <div>
-          <p class="eyebrow">Workflow Skeleton</p>
-          <h3>Confirm the major A-to-Z steps</h3>
-          <p>I captured these as the big process steps. Edit anything that is off; the interview will keep moving into step details.</p>
+          <p class="eyebrow">Workflow Frame</p>
+          <h3>Here's the rough shape I heard</h3>
+          <p>Click any card to fix it, or confirm to go step by step.</p>
         </div>
-        <span class="skeleton-step-count">${state.steps.length} steps</span>
+        <span class="frame-step-count">${state.steps.length} step${state.steps.length === 1 ? "" : "s"}</span>
       </div>
-      <div class="skeleton-step-list" aria-label="Captured workflow skeleton">
-        ${stepRows}
-      </div>
-      <div class="skeleton-next-question">
-        <span><i data-lucide="message-circle-question"></i></span>
-        <p>${escapeHtml(skeletonConfirmationQuestion())}</p>
-      </div>
-      <div class="skeleton-step-actions">
-        <button class="primary-button compact" id="confirmSkeletonButton" type="button">
-          <i data-lucide="badge-check"></i>
-          Confirm Skeleton
+      <div class="frame-column-rail" aria-label="Workflow frame steps">
+        ${columns}
+        <button class="frame-add-step" id="frameAddStepButton" type="button" title="Add a step I missed">
+          <span class="frame-add-step-icon"><i data-lucide="plus"></i></span>
+          <span class="frame-add-step-label">Add step</span>
         </button>
-        <button class="secondary-button compact" id="reviseSkeletonButton" type="button">
-          <i data-lucide="pencil"></i>
-          Revise Steps
+      </div>
+      <div class="frame-confirm-bar">
+        <button class="primary-button" id="frameConfirmButton" type="button">
+          <i data-lucide="check-circle-2"></i>
+          Looks right — go step by step
+        </button>
+        <button class="secondary-button" id="frameKeepTalkingButton" type="button">
+          <i data-lucide="mic"></i>
+          Keep talking
         </button>
       </div>
     </div>
   `;
-  document.getElementById("confirmSkeletonButton")?.addEventListener("click", confirmWorkflowSkeleton);
-  document.getElementById("reviseSkeletonButton")?.addEventListener("click", reviseWorkflowSkeleton);
-  els.currentStepPanel.querySelectorAll("[data-skeleton-action]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const index = Number(button.dataset.stepIndex);
-      const action = button.dataset.skeletonAction;
-      if (action === "focus") setCurrentStepIndex(index);
-      if (action === "up") moveMapStep(index, -1, { silent: true });
-      if (action === "down") moveMapStep(index, 1, { silent: true });
-      if (action === "remove") removeMapStep(index, { confirmRemoval: false });
-    });
-  });
-  els.currentStepPanel.querySelectorAll("[data-skeleton-step-name]").forEach((input) => {
-    input.addEventListener("change", () => {
-      const index = Number(input.dataset.skeletonStepName);
-      const step = state.steps[index];
-      if (!step) return;
-      const value = input.value.trim();
-      if (!value) {
-        input.value = step.name || step.action || `Step ${index + 1}`;
-        return;
-      }
-      step.name = value;
-      if (!String(step.action || "").trim()) step.action = value;
-      step.evidenceConfidence = step.evidenceConfidence || "Medium";
-      persistState();
-      render();
-    });
-  });
+  document.getElementById("frameConfirmButton")?.addEventListener("click", confirmWorkflowSkeleton);
+  document.getElementById("frameKeepTalkingButton")?.addEventListener("click", keepTalkingFromFrame);
+  document.getElementById("frameAddStepButton")?.addEventListener("click", addFrameStep);
+  wireFrameInlineEdits();
   refreshIcons();
 }
 
-function workflowSkeletonRow(step, index) {
+function workflowFrameColumn(step, index) {
   const label = step.name || step.action || `Step ${index + 1}`;
-  const status = step.action ? "Captured" : "Needs label";
+  const anchors = FRAME_ANCHORS.map((anchor) => {
+    const value = frameAnchorValue(step, anchor.key);
+    const filled = Boolean(value);
+    return `
+      <button class="frame-anchor ${filled ? "filled" : "empty"}" type="button" data-frame-edit="anchor" data-step-index="${index}" data-anchor-key="${anchor.key}" title="Edit ${anchor.label.toLowerCase()}">
+        <span class="frame-anchor-icon"><i data-lucide="${anchor.icon}"></i></span>
+        <span class="frame-anchor-body">
+          <small>${anchor.label}</small>
+          <span class="frame-anchor-value">${filled ? escapeHtml(value) : "—"}</span>
+        </span>
+      </button>
+    `;
+  }).join("");
   return `
-    <div class="skeleton-step-row ${index === getCurrentStepIndex() ? "active" : ""}">
-      <span class="skeleton-step-number">${index + 1}</span>
-      <div class="skeleton-step-main">
-        <input data-skeleton-step-name="${index}" value="${escapeHtml(label)}" aria-label="Step ${index + 1} name" />
-        <small>${escapeHtml(status)}${step.evidenceConfidence ? ` · ${escapeHtml(step.evidenceConfidence)} confidence` : ""}</small>
+    <div class="frame-column ${index === getCurrentStepIndex() ? "active" : ""}">
+      <div class="frame-column-head">
+        <span class="frame-step-number">${index + 1}</span>
+        <button class="frame-step-name" type="button" data-frame-edit="name" data-step-index="${index}" title="Rename step">
+          <span>${escapeHtml(label)}</span>
+          <i data-lucide="pencil"></i>
+        </button>
       </div>
-      <div class="skeleton-mini-actions">
-        <button class="mini-button" data-skeleton-action="focus" data-step-index="${index}" type="button" title="Focus this step">
-          <i data-lucide="message-circle-question"></i>
-        </button>
-        <button class="mini-button" data-skeleton-action="up" data-step-index="${index}" type="button" title="Move step up" ${index === 0 ? "disabled" : ""}>
-          <i data-lucide="arrow-up"></i>
-        </button>
-        <button class="mini-button" data-skeleton-action="down" data-step-index="${index}" type="button" title="Move step down" ${index === state.steps.length - 1 ? "disabled" : ""}>
-          <i data-lucide="arrow-down"></i>
-        </button>
-        <button class="mini-button" data-skeleton-action="remove" data-step-index="${index}" type="button" title="Remove step">
-          <i data-lucide="x"></i>
-        </button>
+      <div class="frame-anchor-stack">
+        ${anchors}
       </div>
     </div>
   `;
+}
+
+// Inline edit: swap the clicked name/anchor for an input, commit on Enter/blur,
+// cancel on Escape. Anchors may be cleared back to a dim dash.
+function wireFrameInlineEdits() {
+  els.currentStepPanel.querySelectorAll("[data-frame-edit]").forEach((node) => {
+    node.addEventListener("click", () => beginFrameEdit(node));
+  });
+}
+
+function beginFrameEdit(node) {
+  const index = Number(node.dataset.stepIndex);
+  const step = state.steps[index];
+  if (!step) return;
+  const editType = node.dataset.frameEdit;
+  const key = editType === "name" ? "name" : node.dataset.anchorKey;
+  const current = editType === "name"
+    ? (step.name || step.action || `Step ${index + 1}`)
+    : frameAnchorValue(step, key);
+  const input = document.createElement("input");
+  input.className = "frame-inline-input";
+  input.value = current;
+  input.setAttribute("aria-label", editType === "name" ? `Step ${index + 1} name` : `Step ${index + 1} ${key}`);
+  node.replaceWith(input);
+  input.focus();
+  input.select();
+  let settled = false;
+  const commit = (save) => {
+    if (settled) return;
+    settled = true;
+    if (save) {
+      const value = input.value.trim();
+      if (editType === "name") {
+        if (value) {
+          step.name = value;
+          if (!String(step.action || "").trim()) step.action = value;
+          step.evidenceConfidence = step.evidenceConfidence || "Medium";
+        }
+      } else {
+        step[key] = value;
+      }
+      persistState();
+    }
+    render();
+  };
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commit(true);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      commit(false);
+    }
+  });
+  input.addEventListener("blur", () => commit(true));
+}
+
+function addFrameStep() {
+  ensureDrilldownState();
+  const step = { ...newRecord("steps"), name: "", action: "", evidenceConfidence: "Low", interviewNotes: "Added from frame confirm" };
+  state.steps.push(step);
+  const newIndex = state.steps.length - 1;
+  state.activeStepIndex = newIndex;
+  state.drilldown.status = "confirmSkeleton";
+  state.drilldown.skeletonConfirmed = false;
+  state.activeSection = "workflow";
+  persistState();
+  render();
+  const nameNode = els.currentStepPanel?.querySelector(`[data-frame-edit="name"][data-step-index="${newIndex}"]`);
+  if (nameNode) beginFrameEdit(nameNode);
+}
+
+// "Keep talking" — stay in the confirm view and invite more of the broad
+// overview. New answers extend the frame (syncGuidedDrilldownAfterExtraction
+// keeps us in confirmSkeleton) instead of jumping into the deep dive.
+function keepTalkingFromFrame() {
+  ensureDrilldownState();
+  state.drilldown.status = "confirmSkeleton";
+  state.drilldown.skeletonConfirmed = false;
+  state.drilldown.manualStepFocus = false;
+  state.activeSection = "workflow";
+  state.currentQuestionOverride = "No problem — keep going. Add any steps, tools, data, or people I missed and I'll extend the frame.";
+  state.currentQuestionSource = "Keep talking";
+  state.drilldown.lastPrompt = state.currentQuestionOverride;
+  persistState();
+  render();
+  els.aiChatInput?.focus();
+  toast("Keep going — tell me what else happens and I'll extend the frame.");
 }
 
 function stepFieldChip(item) {
@@ -5473,6 +5563,15 @@ function syncGuidedDrilldownAfterExtraction({ beforeStepCount = 0, touchedStepIn
   if (!state.drilldown.enabled || !state.steps.length) return false;
   state.drilldown.manualStepFocus = false;
 
+  // Phase 1 Frame Builder — State 2. While the rough frame is awaiting the user's
+  // explicit confirmation, keep merging captured steps into it but never auto-
+  // advance into the Phase 2 deep dive. The user advances via the confirm bar
+  // ("Looks right — go step by step") or a "yes" answer.
+  if (state.drilldown.status === "confirmSkeleton" && !force) {
+    state.activeSection = "workflow";
+    return true;
+  }
+
   const hadNewSkeleton = beforeStepCount === 0 && state.steps.length > 0;
   const currentIndex = getCurrentStepIndex();
   const currentStillNeedsDetail = state.steps[currentIndex] && stepMissingFields(state.steps[currentIndex]).length > 0;
@@ -5481,14 +5580,15 @@ function syncGuidedDrilldownAfterExtraction({ beforeStepCount = 0, touchedStepIn
     targetIndex = currentIndex;
   }
   if (hadNewSkeleton && !force && !state.drilldown.skeletonConfirmed) {
+    // Phase 1 Frame Builder — State 2. The broad overview just produced the rough
+    // frame for the first time; surface the confirm view instead of jumping
+    // straight into the step-by-step deep dive.
     state.activeSection = "workflow";
     state.activeStepIndex = 0;
-    state.drilldown.skeletonConfirmed = true;
-    state.drilldown.status = "active";
-    const cluster = currentDrilldownCluster(getCurrentStep());
-    state.drilldown.currentClusterId = cluster?.id || "";
-    state.currentQuestionOverride = stepInterviewQuestion();
-    state.currentQuestionSource = "Guided step drill-down";
+    state.drilldown.skeletonConfirmed = false;
+    state.drilldown.status = "confirmSkeleton";
+    state.currentQuestionOverride = skeletonConfirmationQuestion();
+    state.currentQuestionSource = "Frame confirmation";
     state.drilldown.lastPrompt = state.currentQuestionOverride;
     return true;
   }
@@ -23174,7 +23274,11 @@ function normalizeLoadedState(parsed = {}) {
     merged.currentQuestionSource = "A-Z process";
     merged.activeSection = "workflow";
   }
-  if (merged.steps.length && (merged.drilldown.status === "confirmSkeleton" || isProceedPermissionQuestion(merged.currentQuestionOverride))) {
+  // Phase 1 Frame Builder: a persisted "confirmSkeleton" status is the rough
+  // frame awaiting confirmation (State 2) and must survive a reload, so it is no
+  // longer auto-advanced here. Only the proceed-permission shortcut still jumps
+  // straight into the step-by-step deep dive.
+  if (merged.steps.length && isProceedPermissionQuestion(merged.currentQuestionOverride)) {
     merged.drilldown.status = "active";
     merged.drilldown.skeletonConfirmed = true;
     merged.activeSection = "workflow";
