@@ -1038,6 +1038,7 @@ const defaultState = {
   systems: [],
   decisions: [],
   patterns: [],
+  workflowGrid: newWorkflowGrid(),
   ideas: [],
   evidenceArtifacts: [],
   detectedConnectors: [],
@@ -23178,6 +23179,107 @@ function getActiveSection() {
   return section.postIntake ? sections[0] : section;
 }
 
+// --- Workflow grid (Stage 0 plumbing) ----------------------------------
+// Parallel data model behind the "intelligent interview" workflow grid:
+// columns are ordered STEPS, rows are a fixed 15-field SCHEMA. Each cell
+// carries a value plus a state and confidence signal (drives later
+// color-coding / escalation). This is additive and runs PARALLEL to the
+// existing `state.steps` array — nothing here touches the live render path.
+
+// Ordered schema keys for a grid step's cells (rows of the grid).
+const GRID_CELL_KEYS = [
+  "name",               // 1  Workflow Step (name)
+  "description",        // 2  Description
+  "personaActors",      // 3  Persona/Actors
+  "systemsTools",       // 4  Systems/Tools
+  "dataProcessing",     // 5  Data Processing
+  "rulesDecisionLogic", // 6  Rules/Decision logic
+  "output",             // 7  Output
+  "trigger",            // 8  Trigger
+  "handoff",            // 9  Handoff
+  "humanCheckpoint",    // 10 Human checkpoint
+  "timeTaken",          // 11 Time Taken
+  "frequencyVolume",    // 12 Frequency/Volume
+  "painFriction",       // 13 Pain/Friction
+  "dataSensitivity",    // 14 Data Sensitivity (step-level)
+  "aiPattern"           // 15 AI Pattern (value = array of newAiPatternEntry())
+];
+
+// Uniform cell shape so later color-coding/escalation can treat all 15
+// fields the same way.
+// state:      "empty" | "harvested" | "inferred" | "confirmed"
+// confidence: ""      | "Low" | "Medium" | "High"   (referenceLists.confidence)
+function newGridCell() {
+  return { value: "", state: "empty", confidence: "" };
+}
+
+// One entry inside an aiPattern cell's value array (multiple patterns, each
+// with its own confidence rating). pattern ∈ referenceLists.aiPatterns.
+function newAiPatternEntry() {
+  return { pattern: "", confidence: "" };
+}
+
+// An ordered grid step: a stable id, an explicit chain link (this step's
+// Output conceptually flows to the next step's Trigger), and the 15 cells.
+function newGridStep() {
+  const cells = {};
+  GRID_CELL_KEYS.forEach((key) => {
+    cells[key] = newGridCell();
+  });
+  return {
+    id: makeId("gridstep"),
+    nextStepId: "", // chain: this step's Output -> next step's Trigger
+    cells
+  };
+}
+
+// Workflow-level container: a migration anchor, the one workflow-level field
+// (overall Data Sensitivity baseline, itself a cell so it can be inferred/
+// confirmed too), and the ordered array of steps.
+function newWorkflowGrid() {
+  return {
+    schemaVersion: 1,
+    dataSensitivityBaseline: newGridCell(),
+    steps: []
+  };
+}
+
+function normalizeGridCell(cell) {
+  const base = newGridCell();
+  if (!cell || typeof cell !== "object") return base;
+  return { ...base, ...cell };
+}
+
+function normalizeGridStep(step) {
+  const base = newGridStep();
+  if (!step || typeof step !== "object") return base;
+  const cells = {};
+  GRID_CELL_KEYS.forEach((key) => {
+    cells[key] = normalizeGridCell(step.cells?.[key]);
+  });
+  return {
+    ...base,
+    ...step,
+    id: step.id || base.id,
+    nextStepId: step.nextStepId || "",
+    cells
+  };
+}
+
+// Backward-compatible loader: old sessions have no `workflowGrid` key and get
+// a fresh empty default; partially-written grids get every cell back-filled.
+function normalizeWorkflowGrid(grid) {
+  const base = newWorkflowGrid();
+  if (!grid || typeof grid !== "object") return base;
+  return {
+    ...base,
+    ...grid,
+    schemaVersion: grid.schemaVersion || base.schemaVersion,
+    dataSensitivityBaseline: normalizeGridCell(grid.dataSensitivityBaseline),
+    steps: Array.isArray(grid.steps) ? grid.steps.map(normalizeGridStep) : []
+  };
+}
+
 function newRecord(type) {
   const templates = {
     steps: { name: "", actor: "", tool: "", accessMode: "", action: "", input: "", dataHandling: "", output: "", handoff: "", trigger: "", time: "", decision: "", pain: "", risk: "", exceptions: "", dataSensitivity: "", pattern: "", toolFit: "", evidenceConfidence: "", interviewNotes: "", openQuestions: "" },
@@ -23314,6 +23416,7 @@ function normalizeLoadedState(parsed = {}) {
     systems: (parsed.systems || []).map((item) => ({ ...newRecord("systems"), ...item })),
     decisions: (parsed.decisions || []).map((item) => ({ ...newRecord("decisions"), ...item })),
     patterns: (parsed.patterns || []).map((item) => ({ ...newRecord("patterns"), ...item })),
+    workflowGrid: normalizeWorkflowGrid(parsed.workflowGrid),
     drilldown: {
       ...structuredClone(defaultState.drilldown),
       ...(parsed.drilldown || {})
