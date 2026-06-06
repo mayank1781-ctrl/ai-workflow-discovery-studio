@@ -1066,6 +1066,8 @@ const defaultState = {
   questionFocus: "auto",
   currentQuestionOverride: "",
   currentQuestionSource: "Intake guide",
+  pendingFollowUp: null,
+  askedFollowUp: false,
   intakeDeltas: [],
   testLab: {
     scenarioId: "banking-payments",
@@ -4175,7 +4177,25 @@ function renderCurrentQuestion(section = getActiveSection()) {
 const OPENING_DISCOVERY_QUESTION = "What task or workflow do you want to talk about? Briefly describe what happens, the business outcome, and the main output.";
 const DOMAIN_CONTEXT_QUESTION = "What practice or domain does this task or workflow usually belong to? If it spans multiple practices, name them.";
 const WORK_CONTEXT_QUESTION = "Where is this work done today: internally at Capco, on a client delivery project, for business development, at the client site, or somewhere else?";
-const WORKFLOW_FRAME_QUESTION = "What is this workflow called, where does it start, where does it end, and what output does it create?";
+const WORKFLOW_FRAME_PRIMARY_QUESTION = "What do you call this workflow?";
+// Back-compat alias: existing routing references WORKFLOW_FRAME_QUESTION as the
+// "frame" question. It now resolves to the single primary question only.
+const WORKFLOW_FRAME_QUESTION = WORKFLOW_FRAME_PRIMARY_QUESTION;
+// One-question-at-a-time model for the workflow frame (prototype scope).
+// The primary asks only for the name; the remaining frame details become
+// ordered, optional single-question follow-ups. The output follow-up reuses
+// matrixPromptFor("output"); startPoint/endPoint have no matrixPromptFor entry,
+// so they are phrased from their field labels.
+const WORKFLOW_FRAME_QUESTION_MODEL = {
+  id: "workflow-frame",
+  primary: WORKFLOW_FRAME_PRIMARY_QUESTION,
+  targetField: "workflowName",
+  followUps: [
+    { field: "startPoint", text: "Where does this workflow start?" },
+    { field: "endPoint", text: "Where does this workflow end?" },
+    { field: "deliverableType", text: `${matrixPromptFor("output").replace(/^./, (c) => c.toUpperCase())}?` }
+  ]
+};
 const WORKFLOW_COMPONENT_OVERVIEW_QUESTION = "Before we go step by step, can you describe the workflow at the top level: the big phases, main inputs, main data types, tools or systems used, and final outputs?";
 const WORKFLOW_DATA_TOOLS_OVERVIEW_QUESTION = "Before we drill into Step 1, what are the main inputs, data types, tools or systems, and outputs involved across the workflow overall?";
 const PROCESS_MAP_QUESTION = "Can you give me the rough numbered A-to-Z process from trigger to final output?";
@@ -6190,6 +6210,13 @@ function extractQuestionFromText(text) {
   return matches[matches.length - 1].trim();
 }
 
+function sanitizeAiQuestion(text) {
+  const cleaned = String(text || "").trim();
+  if (!cleaned) return "";
+  // Collapse a bundled multi-question suggestion down to a single question.
+  return extractQuestionFromText(cleaned) || cleaned;
+}
+
 function renderSectionForm(section) {
   const wrap = document.createElement("div");
   wrap.className = "section-capture-stack";
@@ -6600,6 +6627,9 @@ function sanitizeExtractionResult(result = {}, options = {}) {
 }
 
 function applyExtraction(result, options = {}) {
+  if (typeof result.nextQuestion === "string") {
+    result.nextQuestion = sanitizeAiQuestion(result.nextQuestion);
+  }
   const extractedFields = result.fields || {};
   for (const [key, value] of Object.entries(extractedFields)) {
     if (typeof value === "string" && value.trim()) {
@@ -6645,6 +6675,7 @@ function applyExtraction(result, options = {}) {
     beforeStepCount: options.beforeStepCount || 0,
     touchedStepIndex: shouldPreserveCurrentStep ? beforeActiveStepIndex : explicitStepIndex >= 0 ? explicitStepIndex : touchedStepIndex
   });
+  advanceWorkflowFrameGate(options.askedQuestion || result._askedQuestion || "");
   routeNextQuestionAfterExtraction(result);
 
   if (result.mapCheckpointRecommended) {
@@ -6719,7 +6750,10 @@ function workflowOverviewQuestion(avoidQuestions = []) {
   };
   const signals = workflowOverviewSignals();
   if (!signals.frameCaptured) {
-    return route(WORKFLOW_FRAME_QUESTION, "Workflow overview");
+    const frameRoute = workflowFrameQuestionRoute(avoidQuestions);
+    if (frameRoute) return frameRoute;
+    // Frame gate spent (primary asked + at most one follow-up): fall through so
+    // the overview advances instead of re-asking the frame question.
   }
   if (!state.steps.length && !signals.componentOverviewCaptured) {
     return route(componentOverviewQuestionText(signals), "Workflow overview");
@@ -6777,6 +6811,53 @@ function componentOverviewQuestionText(signals = workflowOverviewSignals()) {
   if (!signals.outputCaptured) missing.push("final outputs");
   if (!missing.length) return WORKFLOW_COMPONENT_OVERVIEW_QUESTION;
   return `Before the A-to-Z list, what ${joinNaturalList(missing)} should we capture across the workflow overall?`;
+}
+
+// Pure (no side effects) — safe to call during render. Decides which workflow
+// frame question to show given the current gate state.
+function workflowFrameQuestionRoute(avoidQuestions = []) {
+  const model = WORKFLOW_FRAME_QUESTION_MODEL;
+  const avoid = (text) => !text || avoidQuestions.some((q) => isSameQuestion(text, q));
+  // An in-flight follow-up wins until it is answered.
+  if (state.pendingFollowUp?.questionId === model.id) {
+    return avoid(state.pendingFollowUp.text)
+      ? null
+      : { text: state.pendingFollowUp.text, source: "Workflow frame follow-up" };
+  }
+  // Our single follow-up was already used → let the interview move on.
+  if (state.askedFollowUp) return null;
+  // Primary stage: ask only for the name while it is still missing.
+  if (!isCapturedValue(state.fields[model.targetField])) {
+    return avoid(model.primary) ? null : { text: model.primary, source: "Workflow overview" };
+  }
+  // Name captured, nothing pending → nothing more to ask at the frame.
+  return null;
+}
+
+// Side-effecting — called once per answer (from applyExtraction). Transitions
+// the one-follow-up gate: primary -> (optional single follow-up) -> done.
+function advanceWorkflowFrameGate(askedQuestion = "") {
+  const model = WORKFLOW_FRAME_QUESTION_MODEL;
+  // Case 1: the user just answered our single follow-up → close the gate.
+  if (state.pendingFollowUp?.questionId === model.id
+      && isSameQuestion(askedQuestion, state.pendingFollowUp.text)) {
+    state.pendingFollowUp = null;
+    return;
+  }
+  // Only react to the primary (name) question from here on.
+  if (!isSameQuestion(askedQuestion, model.primary)) return;
+  // Case 2a: extraction captured the name → advance with no follow-up.
+  if (isCapturedValue(state.fields[model.targetField])) {
+    state.pendingFollowUp = null;
+    return;
+  }
+  // Case 2b: name still missing and follow-up not yet used → ask exactly one.
+  if (!state.askedFollowUp) {
+    const followUp = model.followUps.find((f) => !isCapturedValue(state.fields[f.field]))
+      || model.followUps[0];
+    state.pendingFollowUp = { questionId: model.id, field: followUp.field, text: followUp.text };
+    state.askedFollowUp = true;
+  }
 }
 
 function processSkeletonStillNeededAfterAnswer(answer = "", askedQuestion = "", result = {}) {
