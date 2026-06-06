@@ -12410,3 +12410,146 @@ body[data-discovery-entry="upload"] .main-turn-actions {
     width: 100%;
   }
 }
+
+/* --- Stage 2: live workflow grid panel ---------------------------------- */
+.live-grid-panel {
+  margin-top: var(--future-space-5);
+  padding: var(--future-space-5);
+  border: 1px solid var(--future-line);
+  border-radius: 18px;
+  background: linear-gradient(160deg, var(--future-panel-2), var(--future-panel));
+  box-shadow: var(--future-shadow);
+}
+
+.live-grid-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: var(--future-space-4);
+}
+
+.live-grid-head .eyebrow {
+  color: var(--future-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+}
+
+.live-grid-head h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.live-grid-placeholder {
+  margin: 0;
+  padding: var(--future-space-5);
+  border: 1px dashed var(--future-line);
+  border-radius: 12px;
+  color: var(--future-muted);
+  text-align: center;
+  font-size: 0.92rem;
+}
+
+.live-grid-scroll {
+  overflow-x: auto;
+  border-radius: 12px;
+}
+
+.live-grid-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: max-content;
+  min-width: 100%;
+  font-size: 0.82rem;
+}
+
+.live-grid-table th,
+.live-grid-table td {
+  border: 1px solid var(--future-line);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-grid-table thead th {
+  background: var(--future-panel-3);
+  color: var(--future-white);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+/* Sticky first column (row labels) so they stay visible while scrolling. */
+.live-grid-row-label,
+.live-grid-corner {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--future-panel-3);
+  color: var(--future-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.live-grid-table thead .live-grid-corner {
+  z-index: 3;
+}
+
+/* State colours: empty = muted, inferred = amber, confirmed = teal. */
+.live-grid-cell {
+  color: var(--future-white);
+}
+
+.live-grid-cell[data-cell-state="empty"],
+.live-grid-cell.is-empty {
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--future-subtle);
+}
+
+.live-grid-cell[data-cell-state="inferred"] {
+  background: rgba(255, 209, 102, 0.16);
+  box-shadow: inset 3px 0 0 var(--future-amber);
+}
+
+.live-grid-cell[data-cell-state="harvested"] {
+  background: rgba(255, 209, 102, 0.12);
+  box-shadow: inset 3px 0 0 var(--future-amber);
+}
+
+.live-grid-cell[data-cell-state="confirmed"] {
+  background: rgba(100, 244, 255, 0.16);
+  box-shadow: inset 3px 0 0 var(--future-cyan);
+}
+
+/* Subtle fade-in for populated cells when the grid updates. */
+.live-grid-cell:not(.is-empty) {
+  animation: liveGridCellIn 280ms ease;
+}
+
+@keyframes liveGridCellIn {
+  from {
+    opacity: 0.35;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-grid-cell:not(.is-empty) {
+    animation: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .live-grid-panel {
+    padding: var(--future-space-4);
+  }
+}

@@ -3365,6 +3365,7 @@ function render() {
   renderTextIntakeAssist();
   renderLiveSpeechDraft();
   renderDiscoveryInferenceLens();
+  renderWorkflowGridPanel();
   els.sectionTitle.textContent = section.label;
   renderConversation();
   renderAiChat();
@@ -3891,6 +3892,91 @@ function createGridStepFromHarvest(raw = {}) {
   }
   if (applyFieldUpdatesToStep(step, raw.fieldUpdates || raw.cells)) touched = true;
   return touched ? step : null;
+}
+
+// --- Stage 2: live workflow grid panel (read-only visualization) -----------
+// Shows the workflowGrid filling in during the interview: steps as columns, a
+// fixed subset of fields as rows, each cell coloured by its capture state.
+// Purely a view of state.workflowGrid — no logic or data changes here.
+
+const LIVE_GRID_ROWS = [
+  { key: "personaActors", label: "Persona/Actors" },
+  { key: "systemsTools", label: "Systems/Tools" },
+  { key: "output", label: "Output" },
+  { key: "humanCheckpoint", label: "Human checkpoint" },
+  { key: "painFriction", label: "Pain/Friction" },
+  { key: "aiPattern", label: "AI Pattern" } // empty until Stage 1c; kept for forward-compat
+];
+
+let lastWorkflowGridSignature = null;
+
+function gridCellDisplay(cell) {
+  if (!cell) return { text: "", state: "empty" };
+  let value = cell.value;
+  if (Array.isArray(value)) {
+    // aiPattern (future): array of { pattern, confidence } entries.
+    value = value.map((entry) => (entry && entry.pattern) || "").filter(Boolean).join(", ");
+  }
+  const text = typeof value === "string" ? value : value ? String(value) : "";
+  return { text, state: cell.state || "empty" };
+}
+
+function renderWorkflowGridPanel() {
+  const panel = document.getElementById("liveWorkflowGridPanel");
+  if (!panel) return;
+  panel.hidden = false;
+
+  const grid = state.workflowGrid || {};
+  const steps = Array.isArray(grid.steps) ? grid.steps : [];
+  const workflowName = (grid.workflowName || "").trim();
+
+  // Only rebuild when the displayed data actually changes — avoids flicker and
+  // keeps cell fade-ins from re-triggering on unrelated renders.
+  const signature = JSON.stringify({
+    workflowName,
+    steps: steps.map((step) => ({
+      n: step.cells?.name?.value || "",
+      c: LIVE_GRID_ROWS.map((row) => {
+        const cell = step.cells?.[row.key];
+        return [gridCellDisplay(cell).text, cell?.state || "empty"];
+      })
+    }))
+  });
+  if (signature === lastWorkflowGridSignature) return;
+  lastWorkflowGridSignature = signature;
+
+  // Workflow name header only when set — otherwise omit it entirely.
+  const header = `<div class="live-grid-head"><span class="eyebrow">Live workflow grid</span>${workflowName ? `<h3>${escapeHtml(workflowName)}</h3>` : ""}</div>`;
+
+  if (!steps.length) {
+    panel.innerHTML = `${header}<p class="live-grid-placeholder">Grid filling in as you talk...</p>`;
+    return;
+  }
+
+  const headerCells = steps.map((step, index) => {
+    const name = step.cells?.name?.value?.trim() || `Step ${index + 1}`;
+    return `<th scope="col" title="${escapeHtml(name)}">${escapeHtml(truncateUi(name, 40))}</th>`;
+  }).join("");
+
+  const rowsHtml = LIVE_GRID_ROWS.map((row) => {
+    const cells = steps.map((step) => {
+      const { text, state: cellState } = gridCellDisplay(step.cells?.[row.key]);
+      const emptyClass = text ? "" : " is-empty";
+      return `<td class="live-grid-cell${emptyClass}" data-cell-state="${escapeHtml(cellState)}" title="${escapeHtml(text)}">${escapeHtml(truncateUi(text, 80))}</td>`;
+    }).join("");
+    return `<tr><th scope="row" class="live-grid-row-label">${escapeHtml(row.label)}</th>${cells}</tr>`;
+  }).join("");
+
+  panel.innerHTML = `
+    ${header}
+    <div class="live-grid-scroll">
+      <table class="live-grid-table">
+        <thead><tr><th scope="col" class="live-grid-corner">Field</th>${headerCells}</tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>
+  `;
+  refreshIcons();
 }
 
 function renderAppMode() {
