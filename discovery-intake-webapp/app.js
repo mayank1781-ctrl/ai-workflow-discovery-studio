@@ -1253,7 +1253,6 @@ const els = {
   liveIntakeLedger: document.getElementById("liveIntakeLedger"),
   sessionLibraryList: document.getElementById("sessionLibraryList"),
   newSessionButton: document.getElementById("newSessionButton"),
-  newDiscoveryButton: document.getElementById("newDiscoveryButton"),
   duplicateSessionButton: document.getElementById("duplicateSessionButton"),
   saveSessionLibraryButton: document.getElementById("saveSessionLibraryButton"),
   createPackageButton: document.getElementById("createPackageButton"),
@@ -1299,14 +1298,6 @@ function bindEvents() {
   document.getElementById("saveButton").addEventListener("click", () => {
     persistState();
     toast("Session saved locally.");
-  });
-
-  document.getElementById("resetButton").addEventListener("click", () => {
-    if (!confirm("Reset this local session?")) return;
-    state = structuredClone(defaultState);
-    persistState();
-    render();
-    toast("Session reset.");
   });
 
   document.getElementById("topbarNewButton")?.addEventListener("click", () => createNewSession({ appMode: "interview", activeWorkbenchTab: "handoff" }));
@@ -1357,7 +1348,6 @@ function bindEvents() {
   els.sessionDataClassificationSelect?.addEventListener("change", updateSessionMetadataFromControls);
   els.sessionStatusSelect?.addEventListener("change", updateSessionMetadataFromControls);
   els.newSessionButton?.addEventListener("click", createNewSession);
-  els.newDiscoveryButton?.addEventListener("click", () => createNewSession({ appMode: "interview", activeWorkbenchTab: "handoff" }));
   els.duplicateSessionButton?.addEventListener("click", () => duplicateCurrentSession());
   els.saveSessionLibraryButton?.addEventListener("click", () => {
     persistState();
@@ -23885,7 +23875,6 @@ function applyHoverHelp() {
     [".mode-tab[data-app-mode='interview']", "Discovery is the participant-facing interview space for voice, typing, transcript, and next question."],
     [".mode-tab[data-app-mode='analysis']", "Analysis Studio is the operator space for structuring the conversation into handoff outputs."],
     ["#saveButton", "Save the current discovery session locally and to the local app data folder."],
-    ["#resetButton", "Start fresh while preserving saved sessions in the local session library."],
     ["#topbarNewButton", "Start a clean Discovery session without leaving the top bar."],
     ["#voiceStatus", "Shows whether the browser is idle, listening, or processing the spoken answer."],
     [".voice-toggle", "Turn spoken AI replies on or off. The AI still updates the transcript either way."],
