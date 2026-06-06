@@ -36,6 +36,8 @@ const REALTIME_MODEL = process.env.REALTIME_MODEL || "gpt-realtime-2";
 const REALTIME_VOICE = process.env.REALTIME_VOICE || "marin";
 const REALTIME_REASONING_EFFORT = process.env.REALTIME_REASONING_EFFORT || "low";
 const TRANSCRIPTION_MODEL = process.env.TRANSCRIPTION_MODEL || "gpt-4o-transcribe";
+const TTS_MODEL = process.env.TTS_MODEL || "gpt-4o-mini-tts";
+const TTS_VOICE = process.env.TTS_VOICE || "alloy";
 const EXTRACTION_MODEL = process.env.EXTRACTION_MODEL || process.env.OPENAI_MODEL || "gpt-5.5";
 const EXTRACTION_REASONING_EFFORT = process.env.EXTRACTION_REASONING_EFFORT || "medium";
 const EXTRACTION_VERBOSITY = process.env.EXTRACTION_VERBOSITY || "low";
@@ -926,6 +928,9 @@ const server = http.createServer(async (req, res) => {
         realtimeVoice: REALTIME_VOICE,
         transcriptionConfigured: Boolean(OPENAI_API_KEY),
         transcriptionModel: TRANSCRIPTION_MODEL,
+        ttsConfigured: Boolean(OPENAI_API_KEY),
+        ttsModel: TTS_MODEL,
+        ttsVoice: TTS_VOICE,
         extractionReasoningEffort: EXTRACTION_REASONING_EFFORT,
         extractionVerbosity: EXTRACTION_VERBOSITY,
         enterprise: buildEnterpriseConfigStatus()
@@ -989,6 +994,10 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && requestUrl.pathname === "/api/transcribe/audio") {
       return await handleTranscribeAudio(req, res);
+    }
+
+    if (req.method === "POST" && requestUrl.pathname === "/api/tts/speak") {
+      return await handleTextToSpeech(req, res);
     }
 
     if (req.method !== "GET") {
@@ -1305,6 +1314,59 @@ async function handleTranscribeAudio(req, res) {
     transcript: String(data.text || data.transcript || "").trim(),
     model: TRANSCRIPTION_MODEL
   });
+}
+
+async function handleTextToSpeech(req, res) {
+  if (!OPENAI_API_KEY) {
+    return sendJson(res, 400, {
+      error: "OPENAI_API_KEY is not configured. Set it in your terminal and restart the server."
+    });
+  }
+
+  const body = await readJson(req);
+  const text = String(body.text || "").trim();
+  if (!text) {
+    return sendJson(res, 400, { error: "No text was provided to speak." });
+  }
+  // Voice is env-configurable (TTS_VOICE); the request may override per call,
+  // but we fall back to the server default so it works with no client changes.
+  const voice = String(body.voice || TTS_VOICE).trim() || TTS_VOICE;
+
+  const response = await fetch("https://api.openai.com/v1/audio/speech", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: TTS_MODEL,
+      voice,
+      input: text.slice(0, 4000),
+      response_format: "mp3"
+    })
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    let parsed = {};
+    try {
+      parsed = detail ? JSON.parse(detail) : {};
+    } catch {
+      parsed = { raw: detail };
+    }
+    return sendJson(res, response.status, {
+      error: parsed.error?.message || "OpenAI text-to-speech request failed",
+      detail: parsed
+    });
+  }
+
+  const audioBuffer = Buffer.from(await response.arrayBuffer());
+  res.writeHead(200, {
+    "Content-Type": "audio/mpeg",
+    "Content-Length": audioBuffer.length,
+    "Cache-Control": "no-store"
+  });
+  return res.end(audioBuffer);
 }
 
 async function handleListSessions(req, res) {
