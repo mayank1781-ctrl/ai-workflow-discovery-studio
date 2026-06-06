@@ -108,6 +108,42 @@ Document ingestion (below) adds a `source` signal to the cell so the product
 can tell a document-derived inference apart from a conversation-derived one.
 That is a planned extension of the Stage 0 cell, not built yet.
 
+## Universal Confidence Framework
+
+Every captured value carries a **confidence** signal, expressed as a **raw
+number from 0 to 1**. This is the canonical representation across the whole app
+(human-readable labels, if shown, are derived from the number — never the
+reverse). It supersedes the earlier `"Low" | "Medium" | "High"` placeholder in
+the cell shape above.
+
+The same scale applies to **all input types without exception** — document
+extraction, live conversation, voice, typed notes, and future attachment types:
+
+| Confidence | Meaning |
+|------------|---------|
+| **0.9+** | Explicitly stated ("we use SAP", "it takes 2 hours"). |
+| **0.7** | Clearly implied by context. |
+| **0.5** | Reasonably inferred. |
+| **< 0.5** | Do not capture — leave the value as an empty string. |
+
+### Special rules (constant regardless of input source)
+
+- **Pain/Friction** is only captured when a real person expresses actual
+  frustration or difficulty. It is **never inferred** and **never extracted from
+  documents** — SOPs describe how things should work, not where they hurt. "This
+  is really slow" → 0.9; a guess → do not capture.
+- **AI Pattern** is **never harvested** from any input. It is always generated
+  later by the system from the completed grid.
+
+### Cell state after capture
+
+- **`confirmed`** — the user stated it directly.
+- **`inferred`** — implied or harvested from context.
+- **`empty`** — nothing captured yet (anything below 0.5 stays empty).
+
+This framework governs document extraction (Stage 1a), conversation harvesting
+(Stage 1b), and any future capture source.
+
 ## Document Ingestion — a First-Class Entry Point
 
 Document upload is a **first-class session entry point, equal to

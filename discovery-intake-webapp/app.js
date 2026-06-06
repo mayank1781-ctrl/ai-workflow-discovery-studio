@@ -3685,6 +3685,156 @@ function buildWorkflowGridFromExtraction(extracted = {}) {
   return grid;
 }
 
+// --- Stage 1b: grid-aware conversation harvesting --------------------------
+
+// Summary of what the grid already knows, sent with each /api/extract request
+// so the live interview asks only about gaps. Returns null for conversation-
+// only sessions (no steps) so the AI falls back to open-ended discovery.
+// aiPattern is excluded from both lists — it is never asked or harvested.
+function buildGridContext() {
+  const grid = state.workflowGrid;
+  if (!grid || !Array.isArray(grid.steps) || grid.steps.length === 0) return null;
+  return {
+    workflowName: grid.workflowName || "",
+    steps: grid.steps.map((step) => {
+      const entries = Object.entries(step.cells || {}).filter(([key]) => key !== "aiPattern");
+      return {
+        id: step.id,
+        name: step.cells?.name?.value || "",
+        populatedFields: entries
+          .filter(([, cell]) => cell && cell.value && typeof cell.confidence === "number" && cell.confidence >= 0.7)
+          .map(([key]) => key),
+        emptyOrWeakFields: entries
+          .filter(([, cell]) => !cell || !cell.value || typeof cell.confidence !== "number" || cell.confidence < 0.7)
+          .map(([key]) => key)
+      };
+    })
+  };
+}
+
+// Maps a harvest fieldKey to a canonical grid cell key. Treats the document-
+// extraction vocabulary (e.g. workflowStep) as an alias of the internal keys
+// (e.g. name); unknown keys are dropped.
+function normalizeGridFieldKey(rawKey) {
+  if (typeof rawKey !== "string") return null;
+  if (GRID_CELL_KEYS.includes(rawKey)) return rawKey;
+  if (EXTRACTION_CELL_KEY_MAP[rawKey]) return EXTRACTION_CELL_KEY_MAP[rawKey];
+  return null;
+}
+
+// Fire-and-forget: harvest grid updates from the full conversation after each
+// answer. Never awaited by the caller; all failures are silent (console only)
+// and never interrupt the interview.
+async function harvestGridFromConversation(latestAnswer) {
+  try {
+    const payload = await requestJson("/api/harvest-grid", {
+      method: "POST",
+      body: {
+        transcript: state.conversation || [],
+        currentGrid: state.workflowGrid || null,
+        latestAnswer: latestAnswer || ""
+      }
+    });
+    if (applyHarvestUpdates(payload)) {
+      persistState();
+      render();
+    }
+  } catch (error) {
+    console.warn("Grid harvest skipped:", error.message || error);
+  }
+}
+
+// Applies harvested stepUpdates and newSteps to state.workflowGrid. Returns
+// true if anything changed. Confidence/state gating matches the universal
+// framework: only improve a cell when the new confidence beats the existing
+// one or the cell is still empty.
+function applyHarvestUpdates(payload = {}) {
+  const grid = state.workflowGrid;
+  if (!grid || !Array.isArray(grid.steps)) return false;
+  let changed = false;
+
+  const stepUpdates = Array.isArray(payload.stepUpdates) ? payload.stepUpdates : [];
+  stepUpdates.forEach((update) => {
+    if (!update || typeof update !== "object") return;
+    const step = findGridStepForUpdate(grid, update);
+    if (step) {
+      if (applyFieldUpdatesToStep(step, update.fieldUpdates)) changed = true;
+      return;
+    }
+    // No match (e.g. stepId "new") — treat as a newly mentioned step.
+    const created = createGridStepFromHarvest(update);
+    if (created) {
+      grid.steps.push(created);
+      changed = true;
+    }
+  });
+
+  const newSteps = Array.isArray(payload.newSteps) ? payload.newSteps : [];
+  newSteps.forEach((raw) => {
+    const created = createGridStepFromHarvest(raw);
+    if (created) {
+      grid.steps.push(created);
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    // Re-chain Output -> next Trigger by array order using factory ids.
+    grid.steps.forEach((step, index) => {
+      step.nextStepId = index < grid.steps.length - 1 ? grid.steps[index + 1].id : "";
+    });
+  }
+  return changed;
+}
+
+function findGridStepForUpdate(grid, update) {
+  if (update.stepId && update.stepId !== "new") {
+    const byId = grid.steps.find((step) => step.id === update.stepId);
+    if (byId) return byId;
+  }
+  const name = String(update.stepName || "").trim().toLowerCase();
+  if (name) {
+    const byName = grid.steps.find((step) => String(step.cells?.name?.value || "").trim().toLowerCase() === name);
+    if (byName) return byName;
+  }
+  return null;
+}
+
+function applyFieldUpdatesToStep(step, fieldUpdates) {
+  if (!fieldUpdates || typeof fieldUpdates !== "object") return false;
+  let changed = false;
+  Object.entries(fieldUpdates).forEach(([rawKey, update]) => {
+    const key = normalizeGridFieldKey(rawKey);
+    if (!key || key === "aiPattern") return; // aiPattern is never harvested
+    if (!update || typeof update !== "object") return;
+    const value = typeof update.value === "string" ? update.value.trim() : "";
+    if (!value) return;
+    const confidence = typeof update.confidence === "number" ? update.confidence : 0;
+    if (confidence < 0.5) return; // universal floor: below 0.5 = do not capture
+    const cell = step.cells[key] || newGridCell();
+    const existingConfidence = typeof cell.confidence === "number" ? cell.confidence : -1;
+    const isEmpty = cell.state === "empty";
+    if (!isEmpty && confidence <= existingConfidence) return; // only improve
+    const cellState = update.state === "confirmed" ? "confirmed" : "inferred";
+    step.cells[key] = { value, confidence, state: cellState };
+    changed = true;
+  });
+  return changed;
+}
+
+function createGridStepFromHarvest(raw = {}) {
+  if (!raw || typeof raw !== "object") return null;
+  const step = newGridStep();
+  let touched = false;
+  const name = raw.stepName || raw.name;
+  if (typeof name === "string" && name.trim()) {
+    step.cells.name = { value: name.trim(), confidence: 0.7, state: "inferred" };
+    touched = true;
+  }
+  if (applyFieldUpdatesToStep(step, raw.fieldUpdates || raw.cells)) touched = true;
+  return touched ? step : null;
+}
+
 function renderAppMode() {
   const active = state.appMode === "analysis" ? "analysis" : "interview";
   document.body.dataset.appMode = active;
@@ -6927,6 +7077,7 @@ async function aiExtractAnswer(options = {}) {
         answer,
         transcript: state.transcript,
         currentQuestion: askedQuestion,
+        gridContext: buildGridContext(),
         state
       }
     });
@@ -6957,6 +7108,9 @@ async function aiExtractAnswer(options = {}) {
     els.answerInput.value = "";
     persistState();
     render();
+    // Stage 1b: harvest grid updates from the conversation in the background.
+    // Fire-and-forget — never awaited, never blocks the interview.
+    harvestGridFromConversation(answer);
     toast(state.currentQuestionOverride ? `Captured. Next: ${state.currentQuestionOverride}` : "AI extraction applied.");
   } catch (error) {
     setCaptureStage("idle", "Voice idle");
