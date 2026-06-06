@@ -240,32 +240,38 @@
                   <strong>Live Session + Library</strong>
                   <p>Current captured data, fields, steps, evidence, and session state.</p>
                 </button>
-                <button class="analysis-zone-card compact" data-workbench-tab="addons" type="button">
+                <button class="analysis-zone-card compact" data-workbench-tab="evidence" type="button">
                   <span>02</span>
+                  <i data-lucide="scan-text"></i>
+                  <strong>Evidence Analysis</strong>
+                  <p>Typed, spoken, and uploaded workflow artifacts routed into handoff outputs.</p>
+                </button>
+                <button class="analysis-zone-card compact" data-workbench-tab="addons" type="button">
+                  <span>03</span>
                   <i data-lucide="plug-zap"></i>
                   <strong>Operator Add-ons</strong>
                   <p>Provider gates, config checks, and safe live preflight tests.</p>
                 </button>
                 <button class="analysis-zone-card compact" data-workbench-tab="handoff" type="button">
-                  <span>03</span>
+                  <span>04</span>
                   <i data-lucide="list-checks"></i>
                   <strong>Handoff Builder</strong>
                   <p>Convert captured facts into PDR-ready handoff fields.</p>
                 </button>
                 <button class="analysis-zone-card compact" data-workbench-tab="inspector" type="button">
-                  <span>04</span>
+                  <span>05</span>
                   <i data-lucide="panel-right"></i>
                   <strong>Readiness Inspector</strong>
                   <p>Document readiness, missing fields, routing, and next action.</p>
                 </button>
                 <button class="analysis-zone-card compact" data-workbench-tab="blueprint" type="button">
-                  <span>05</span>
+                  <span>06</span>
                   <i data-lucide="files"></i>
                   <strong>Outputs</strong>
                   <p>Product, Engineering, Business, governance inputs, and export package.</p>
                 </button>
                 <button class="analysis-zone-card compact" data-workbench-tab="business" type="button">
-                  <span>06</span>
+                  <span>07</span>
                   <i data-lucide="settings-2"></i>
                   <strong>Testing & Release</strong>
                   <p>Self testing, colleague sharing, and enterprise release readiness.</p>
@@ -392,6 +398,66 @@
                 </summary>
                 <div id="sessionLibraryList" class="session-library-list compact-library-list"></div>
               </details>
+            </article>
+
+            <article class="panel workbench-panel evidence-analysis-panel" data-workbench-panel="evidence" hidden>
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Evidence Analysis Workbench</p>
+                  <h3>Workflow evidence intake and extraction</h3>
+                </div>
+                <div class="evidence-panel-toolbar">
+                  <label class="secondary-button compact evidence-upload-button" for="evidenceFileInput">
+                    <i data-lucide="upload"></i>
+                    Upload
+                  </label>
+                  <button class="secondary-button compact" id="useDiscoveryDraftEvidenceButton" type="button">
+                    <i data-lucide="copy-plus"></i>
+                    Use Draft
+                  </button>
+                </div>
+              </div>
+              <div class="evidence-analysis-layout">
+                <section class="evidence-capture-surface" aria-label="Evidence note capture">
+                  <div class="evidence-capture-head">
+                    <span><i data-lucide="scan-text"></i></span>
+                    <div>
+                      <strong>Notes, transcripts, screenshots, PDFs, Word docs, and Excel trackers</strong>
+                      <p>Workflow facts stay reviewable before they update the session ledger.</p>
+                    </div>
+                  </div>
+                  <textarea id="evidenceNoteInput" rows="9" placeholder="Paste SOP notes, Teams transcript excerpts, workshop notes, tracker rows, approval notes, or a rough A-to-Z workflow..."></textarea>
+                  <div class="evidence-note-actions">
+                    <button class="primary-button compact" id="analyzeEvidenceNoteButton" type="button">
+                      <i data-lucide="sparkles"></i>
+                      Analyze Note
+                    </button>
+                    <button class="secondary-button compact" id="dictateEvidenceNoteButton" type="button">
+                      <i data-lucide="mic"></i>
+                      Dictate
+                    </button>
+                    <button class="secondary-button compact" id="clearEvidenceNoteButton" type="button">
+                      <i data-lucide="eraser"></i>
+                      Clear
+                    </button>
+                  </div>
+                  <div class="evidence-target-grid" aria-label="Extraction targets">
+                    <span><i data-lucide="list-tree"></i> Workflow steps</span>
+                    <span><i data-lucide="database"></i> Data inputs</span>
+                    <span><i data-lucide="workflow"></i> Systems</span>
+                    <span><i data-lucide="git-branch"></i> Decisions</span>
+                    <span><i data-lucide="clock-3"></i> Triggers</span>
+                    <span><i data-lucide="handshake"></i> Handoffs</span>
+                    <span><i data-lucide="badge-check"></i> Approvals</span>
+                    <span><i data-lucide="shield-alert"></i> Risks</span>
+                    <span><i data-lucide="bot"></i> Automation candidates</span>
+                  </div>
+                </section>
+                <section class="evidence-review-surface" aria-label="Evidence extraction review">
+                  <div id="evidenceWorkbenchMetrics" class="evidence-workbench-metrics"></div>
+                  <div id="evidenceWorkbenchFull" class="evidence-workbench full-evidence-workbench"></div>
+                </section>
+              </div>
             </article>
 
             <article class="panel workbench-panel operator-addons-panel" data-workbench-panel="addons" hidden>

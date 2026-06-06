@@ -1040,6 +1040,11 @@ const defaultState = {
   patterns: [],
   ideas: [],
   evidenceArtifacts: [],
+  evidenceWorkbench: {
+    draftText: "",
+    lastAnalyzedAt: "",
+    lastSource: ""
+  },
   mapReviews: [],
   voiceCheckpoints: [],
   captureStage: "idle",
@@ -1111,6 +1116,10 @@ let postTurnRecorderStream = null;
 let postTurnAudioChunks = [];
 let transcriptionAvailable = false;
 let transcriptionModel = "gpt-4o-transcribe";
+let evidenceRecognition = null;
+let evidenceDictationActive = false;
+let evidenceDictationFinal = "";
+let evidenceDictationInterim = "";
 
 function normalizeTranscriptText(text) {
   return String(text || "").replace(/\s+/g, " ").trim();
@@ -1200,6 +1209,13 @@ const els = {
   workbookImportInput: document.getElementById("workbookImportInput"),
   evidenceReviewPanel: document.getElementById("evidenceReviewPanel"),
   evidenceWorkbench: document.getElementById("evidenceWorkbench"),
+  evidenceWorkbenchFull: document.getElementById("evidenceWorkbenchFull"),
+  evidenceWorkbenchMetrics: document.getElementById("evidenceWorkbenchMetrics"),
+  evidenceNoteInput: document.getElementById("evidenceNoteInput"),
+  analyzeEvidenceNoteButton: document.getElementById("analyzeEvidenceNoteButton"),
+  dictateEvidenceNoteButton: document.getElementById("dictateEvidenceNoteButton"),
+  useDiscoveryDraftEvidenceButton: document.getElementById("useDiscoveryDraftEvidenceButton"),
+  clearEvidenceNoteButton: document.getElementById("clearEvidenceNoteButton"),
   operatorAddOnsPanel: document.getElementById("operatorAddOnsPanel"),
   demoCaseSelect: document.getElementById("demoCaseSelect"),
   loadDemoCaseButton: document.getElementById("loadDemoCaseButton"),
@@ -1263,6 +1279,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   bindEvents();
   setupVoice();
+  setupEvidenceDictation();
   setupBrowserVoices();
   checkAiStatus();
   syncSessionsFromServer();
@@ -1301,6 +1318,11 @@ function bindEvents() {
   els.processChatButton.addEventListener("click", processChatIntoIntake);
   els.captureFeedbackQuickButton?.addEventListener("click", () => openPilotSettingsDrawer("feedback"));
   els.evidenceFileInput?.addEventListener("change", handleEvidenceUpload);
+  els.evidenceNoteInput?.addEventListener("input", updateEvidenceWorkbenchDraft);
+  els.analyzeEvidenceNoteButton?.addEventListener("click", analyzeEvidenceWorkbenchNote);
+  els.dictateEvidenceNoteButton?.addEventListener("click", toggleEvidenceDictation);
+  els.useDiscoveryDraftEvidenceButton?.addEventListener("click", useDiscoveryDraftForEvidence);
+  els.clearEvidenceNoteButton?.addEventListener("click", clearEvidenceWorkbenchDraft);
   els.workbookImportInput?.addEventListener("change", handleWorkbookImport);
   els.loadDemoCaseButton?.addEventListener("click", loadSelectedDemoCase);
   els.demoCaseSelect?.addEventListener("change", (event) => {
@@ -1532,6 +1554,79 @@ function setupVoice() {
       setCaptureStage("listening", "Listening...");
     }
   };
+}
+
+function setupEvidenceDictation() {
+  if (!els.dictateEvidenceNoteButton) return;
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    els.dictateEvidenceNoteButton.disabled = true;
+    els.dictateEvidenceNoteButton.title = "Browser dictation is not available here. Paste or type the evidence note instead.";
+    return;
+  }
+
+  evidenceRecognition = new SpeechRecognition();
+  evidenceRecognition.lang = "en-US";
+  evidenceRecognition.interimResults = true;
+  evidenceRecognition.continuous = true;
+
+  evidenceRecognition.onstart = () => {
+    evidenceDictationActive = true;
+    evidenceDictationFinal = normalizeTranscriptText(els.evidenceNoteInput?.value || "");
+    evidenceDictationInterim = "";
+    setEvidenceDictationButton(true);
+  };
+
+  evidenceRecognition.onend = () => {
+    evidenceDictationActive = false;
+    evidenceDictationInterim = "";
+    updateEvidenceWorkbenchDraft();
+    setEvidenceDictationButton(false);
+  };
+
+  evidenceRecognition.onresult = (event) => {
+    const finalChunks = [];
+    const interimChunks = [];
+    for (let i = event.resultIndex; i < event.results.length; i += 1) {
+      const text = event.results[i][0].transcript;
+      if (event.results[i].isFinal) finalChunks.push(text);
+      else interimChunks.push(text);
+    }
+    const finalText = normalizeTranscriptText(finalChunks.join(" "));
+    const interimText = normalizeTranscriptText(interimChunks.join(" "));
+    if (finalText) evidenceDictationFinal = appendTranscriptChunk(evidenceDictationFinal, finalText);
+    evidenceDictationInterim = interimText;
+    const draft = [evidenceDictationFinal, evidenceDictationInterim].filter(Boolean).join(" ");
+    if (els.evidenceNoteInput) els.evidenceNoteInput.value = draft;
+    ensureEvidenceWorkbenchState();
+    state.evidenceWorkbench.draftText = draft;
+  };
+}
+
+function toggleEvidenceDictation() {
+  if (!evidenceRecognition) {
+    toast("Browser dictation is not available here. Paste or type the evidence note instead.");
+    return;
+  }
+  if (evidenceDictationActive) {
+    evidenceRecognition.stop();
+    return;
+  }
+  if (isListening && recognition) recognition.stop();
+  try {
+    evidenceRecognition.start();
+  } catch {
+    toast("Evidence dictation is already active.");
+  }
+}
+
+function setEvidenceDictationButton(active) {
+  if (!els.dictateEvidenceNoteButton) return;
+  els.dictateEvidenceNoteButton.classList.toggle("active", Boolean(active));
+  els.dictateEvidenceNoteButton.innerHTML = active
+    ? `<i data-lucide="square"></i> Stop`
+    : `<i data-lucide="mic"></i> Dictate`;
+  refreshIcons();
 }
 
 function setupBrowserVoices() {
@@ -1822,24 +1917,27 @@ async function handleEvidenceUpload(event) {
   }
 }
 
-async function analyzeEvidenceFile(file) {
+async function analyzeEvidenceFile(file, options = {}) {
   if (file.size > 14_000_000) {
     toast(`${file.name} is too large for this local prototype. Try a smaller screenshot or excerpt.`);
     return;
   }
 
   const descriptor = await prepareEvidenceFile(file);
+  const displayName = options.fileName || file.name;
+  const sourceKind = options.sourceKind || descriptor.sourceKind;
+  const artifactType = options.artifactType || descriptor.artifactType;
   const artifact = {
     id: makeId("ev"),
-    fileName: file.name,
+    fileName: displayName,
     fileType: file.type || fileExtension(file.name) || "unknown",
     fileSize: file.size,
-    sourceKind: descriptor.sourceKind,
+    sourceKind,
     uploadedAt: new Date().toISOString(),
     status: aiAvailable ? "analyzing" : "uploaded",
     summary: aiAvailable ? "AI analysis in progress..." : "Uploaded. Start the server with OPENAI_API_KEY to analyze this evidence.",
     confidence: "unknown",
-    artifactType: descriptor.artifactType,
+    artifactType,
     textPreview: descriptor.textPreview,
     suggestedFieldUpdates: [],
     suggestedRecords: emptySuggestedRecords(),
@@ -1866,11 +1964,11 @@ async function analyzeEvidenceFile(file) {
       method: "POST",
       body: {
         evidence: {
-          fileName: file.name,
+          fileName: displayName,
           mimeType: file.type,
           size: file.size,
-          sourceKind: descriptor.sourceKind,
-          artifactType: descriptor.artifactType,
+          sourceKind,
+          artifactType,
           text: descriptor.text,
           dataUrl: descriptor.dataUrl
         },
@@ -1881,8 +1979,8 @@ async function analyzeEvidenceFile(file) {
       status: "reviewed",
       summary: result.summary || "Evidence analyzed.",
       confidence: result.confidence || "medium",
-      artifactType: result.artifactType || descriptor.artifactType,
-      sourceKind: result.sourceKind || descriptor.sourceKind,
+      artifactType: result.artifactType || artifactType,
+      sourceKind: result.sourceKind || sourceKind,
       suggestedFieldUpdates: Array.isArray(result.suggestedFieldUpdates) ? result.suggestedFieldUpdates : [],
       suggestedRecords: normalizeSuggestedRecords(result.suggestedRecords),
       suggestedIdeas: Array.isArray(result.suggestedIdeas) ? result.suggestedIdeas : [],
@@ -1891,12 +1989,12 @@ async function analyzeEvidenceFile(file) {
       warnings: Array.isArray(result.warnings) ? result.warnings : []
     });
     artifact.evidenceLinks = evidenceLinksForArtifact(artifact);
-    const reply = `I reviewed ${file.name}. ${artifact.summary} ${artifact.confirmationPrompt || "Review the suggestions before applying them to the intake."}`;
+    const reply = `I reviewed ${displayName}. ${artifact.summary} ${artifact.confirmationPrompt || "Review the suggestions before applying them to the intake."}`;
     addConversationMessage("assistant", reply, "Evidence");
     syncCurrentQuestionFromText(artifact.confirmationPrompt, "evidence review");
     persistState();
     render();
-    toast(`Evidence analyzed: ${file.name}`);
+    toast(`Evidence analyzed: ${displayName}`);
   } catch (error) {
     artifact.status = "error";
     artifact.summary = String(error.message || error);
@@ -1904,7 +2002,7 @@ async function analyzeEvidenceFile(file) {
     persistState();
     renderEvidenceReviewPanel();
     renderEvidenceWorkbench();
-    toast(`Could not analyze ${file.name}: ${String(error.message || error)}`);
+    toast(`Could not analyze ${displayName}: ${String(error.message || error)}`);
   }
 }
 
@@ -1967,6 +2065,107 @@ async function spreadsheetToText(file) {
     return `Sheet: ${sheetName}\n${csv.split("\n").slice(0, 160).join("\n")}`;
   });
   return truncateEvidenceText(sheets.join("\n\n"));
+}
+
+function ensureEvidenceWorkbenchState() {
+  state.evidenceWorkbench = {
+    ...structuredClone(defaultState.evidenceWorkbench),
+    ...(state.evidenceWorkbench || {})
+  };
+  return state.evidenceWorkbench;
+}
+
+function updateEvidenceWorkbenchDraft() {
+  const workbench = ensureEvidenceWorkbenchState();
+  workbench.draftText = els.evidenceNoteInput?.value || "";
+  workbench.lastSource = evidenceDictationActive ? "Dictated note" : "Typed note";
+  if (!evidenceDictationActive) {
+    evidenceDictationFinal = "";
+    evidenceDictationInterim = "";
+  }
+  persistState();
+  renderEvidenceWorkbench();
+}
+
+function useDiscoveryDraftForEvidence() {
+  const text = latestEvidenceDraftCandidate();
+  if (!text) {
+    toast("No Discovery draft or recent typed answer is available.");
+    return;
+  }
+  ensureEvidenceWorkbenchState();
+  state.evidenceWorkbench.draftText = text;
+  state.evidenceWorkbench.lastSource = "Discovery draft";
+  if (els.evidenceNoteInput) els.evidenceNoteInput.value = text;
+  persistState();
+  renderEvidenceWorkbench();
+  toast("Discovery draft moved into the Evidence Analysis Workbench.");
+}
+
+function clearEvidenceWorkbenchDraft() {
+  if (evidenceDictationActive && evidenceRecognition) evidenceRecognition.stop();
+  ensureEvidenceWorkbenchState();
+  state.evidenceWorkbench.draftText = "";
+  state.evidenceWorkbench.lastSource = "";
+  evidenceDictationFinal = "";
+  evidenceDictationInterim = "";
+  if (els.evidenceNoteInput) els.evidenceNoteInput.value = "";
+  persistState();
+  renderEvidenceWorkbench();
+}
+
+async function analyzeEvidenceWorkbenchNote() {
+  const text = (els.evidenceNoteInput?.value || state.evidenceWorkbench?.draftText || "").trim();
+  if (!text) {
+    toast("Add a workflow note before running evidence analysis.");
+    return;
+  }
+  ensureEvidenceWorkbenchState();
+  state.evidenceWorkbench.draftText = text;
+  state.evidenceWorkbench.lastAnalyzedAt = new Date().toISOString();
+  state.evidenceWorkbench.lastSource = evidenceDictationFinal ? "Dictated note" : "Typed note";
+  persistState();
+
+  const button = els.analyzeEvidenceNoteButton;
+  const original = button?.innerHTML || "";
+  if (button) {
+    button.disabled = true;
+    button.innerHTML = `<i data-lucide="loader"></i> Analyzing`;
+    refreshIcons();
+  }
+
+  try {
+    const file = new File([text], evidenceWorkbenchNoteFileName(), { type: "text/plain" });
+    await analyzeEvidenceFile(file, {
+      sourceKind: "note",
+      artifactType: "Typed / spoken workflow evidence note"
+    });
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.innerHTML = original;
+      refreshIcons();
+    }
+    renderEvidenceWorkbench();
+  }
+}
+
+function evidenceWorkbenchNoteFileName() {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `evidence-note-${stamp}.txt`;
+}
+
+function latestEvidenceDraftCandidate() {
+  const recentUserConversation = [...(state.conversation || [])].reverse().find((message) => message.role === "user")?.text || "";
+  const recentUserChat = [...(state.aiChat || [])].reverse().find((message) => message.role === "user")?.text || "";
+  const recentTranscript = String(state.transcript || "").split(/\n{2,}/).filter(Boolean).pop() || "";
+  return [
+    els.answerInput?.value,
+    liveSpeechDraftText,
+    recentUserChat,
+    recentUserConversation,
+    recentTranscript
+  ].map((item) => String(item || "").trim()).find(Boolean) || "";
 }
 
 async function handleWorkbookImport(event) {
@@ -3952,7 +4151,6 @@ function normalizeWorkbenchTab(tab) {
     intake: "handoff",
     lifecycle: "business",
     matrix: "library",
-    evidence: "library",
     review: "business",
     controls: "business",
     pulse: "library",
@@ -3960,7 +4158,7 @@ function normalizeWorkbenchTab(tab) {
     connectors: "addons"
   };
   const normalized = aliasMap[tab] || tab || "handoff";
-  const available = ["library", "addons", "handoff", "inspector", "blueprint", "business"];
+  const available = ["library", "evidence", "addons", "handoff", "inspector", "blueprint", "business"];
   return available.includes(normalized) ? normalized : "handoff";
 }
 
@@ -20429,10 +20627,17 @@ function summarizeClientAddOnTestResults(results = []) {
 }
 
 function renderEvidenceWorkbench() {
-  if (!els.evidenceWorkbench) return;
+  ensureEvidenceWorkbenchState();
   const artifacts = state.evidenceArtifacts || [];
+  if (els.evidenceNoteInput && document.activeElement !== els.evidenceNoteInput) {
+    els.evidenceNoteInput.value = state.evidenceWorkbench.draftText || "";
+  }
+  if (els.evidenceWorkbenchMetrics) {
+    els.evidenceWorkbenchMetrics.innerHTML = evidenceWorkbenchMetricsHtml(artifacts);
+  }
+  if (!els.evidenceWorkbench && !els.evidenceWorkbenchFull) return;
   if (!artifacts.length) {
-    els.evidenceWorkbench.innerHTML = `
+    const empty = `
       <div class="evidence-empty compact-evidence-empty">
         <i data-lucide="paperclip"></i>
         <div>
@@ -20441,16 +20646,110 @@ function renderEvidenceWorkbench() {
         </div>
       </div>
     `;
+    if (els.evidenceWorkbench) els.evidenceWorkbench.innerHTML = empty;
+    if (els.evidenceWorkbenchFull) els.evidenceWorkbenchFull.innerHTML = empty;
     refreshIcons();
     return;
   }
-  els.evidenceWorkbench.innerHTML = `
+  if (els.evidenceWorkbench) {
+    els.evidenceWorkbench.innerHTML = `
     <div class="evidence-workbench-grid compact-evidence-grid">
       ${artifacts.map((artifact) => evidenceArtifactCard(artifact, "compact")).join("")}
     </div>
   `;
-  bindEvidenceActions(els.evidenceWorkbench);
+    bindEvidenceActions(els.evidenceWorkbench);
+  }
+  if (els.evidenceWorkbenchFull) {
+    els.evidenceWorkbenchFull.innerHTML = `
+      <div class="evidence-workbench-grid full-evidence-grid">
+        ${artifacts.map((artifact) => evidenceArtifactCard(artifact, "full")).join("")}
+      </div>
+    `;
+    bindEvidenceActions(els.evidenceWorkbenchFull);
+  }
   refreshIcons();
+}
+
+function evidenceWorkbenchMetricsHtml(artifacts = state.evidenceArtifacts || []) {
+  const stats = evidenceWorkbenchStats(artifacts);
+  return `
+    <div class="evidence-metric-strip">
+      ${evidenceMetricCard("Artifacts", stats.total, "paperclip", `${stats.reviewed} reviewed`)}
+      ${evidenceMetricCard("Apply queue", stats.readyToApply, "search-check", `${stats.suggestions} suggestions`)}
+      ${evidenceMetricCard("Applied", stats.applied, "check-circle-2", `${stats.appliedRecords} records fed`)}
+      ${evidenceMetricCard("Risks & approvals", stats.riskSignals, "shield-alert", `${stats.followUps} follow-ups`)}
+    </div>
+    <div class="evidence-output-feed">
+      ${evidenceOutputFeedCards().map((item) => `
+        <article class="${item.ready ? "ready" : item.pending ? "pending" : "open"}">
+          <span><i data-lucide="${escapeHtml(item.icon)}"></i></span>
+          <div>
+            <strong>${escapeHtml(item.label)}</strong>
+            <small>${escapeHtml(item.detail)}</small>
+          </div>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function evidenceMetricCard(label, value, icon, detail) {
+  return `
+    <article class="evidence-metric-card">
+      <span><i data-lucide="${escapeHtml(icon)}"></i></span>
+      <div>
+        <strong>${escapeHtml(value)}</strong>
+        <small>${escapeHtml(label)}</small>
+      </div>
+      <em>${escapeHtml(detail)}</em>
+    </article>
+  `;
+}
+
+function evidenceWorkbenchStats(artifacts = []) {
+  const reviewed = artifacts.filter((artifact) => evidenceArtifactStatus(artifact) === "reviewed").length;
+  const applied = artifacts.filter((artifact) => artifact.applied || evidenceArtifactStatus(artifact) === "applied").length;
+  const readyToApply = artifacts.filter((artifact) => !artifact.applied && evidenceArtifactStatus(artifact) === "reviewed").length;
+  const suggestions = artifacts.reduce((sum, artifact) => sum + evidenceSuggestionCount(artifact), 0);
+  const records = artifacts.reduce((sum, artifact) => {
+    const suggested = normalizeSuggestedRecords(artifact.suggestedRecords);
+    return sum + Object.values(suggested).reduce((recordSum, items) => recordSum + items.length, 0);
+  }, 0);
+  const appliedRecords = state.steps.length + state.data.length + state.systems.length + state.decisions.length + state.patterns.length;
+  const riskSignals = artifacts.reduce((sum, artifact) => {
+    const text = [
+      artifact.summary,
+      ...(artifact.warnings || []),
+      stringifyRecords(normalizeSuggestedRecords(artifact.suggestedRecords).steps),
+      stringifyRecords(normalizeSuggestedRecords(artifact.suggestedRecords).decisions)
+    ].join(" ").toLowerCase();
+    return sum + (/\brisk|approval|review gate|control|exception|sensitive|confidential|regulated|pii\b/.test(text) ? 1 : 0);
+  }, 0);
+  const followUps = artifacts.reduce((sum, artifact) => sum + (artifact.followUpQuestions || []).length, 0);
+  return { total: artifacts.length, reviewed, applied, readyToApply, suggestions, records, appliedRecords, riskSignals, followUps };
+}
+
+function evidenceOutputFeedCards() {
+  const reviewedArtifacts = (state.evidenceArtifacts || []).filter((artifact) => artifact.status === "reviewed" && !artifact.applied).length;
+  const pendingDetail = reviewedArtifacts ? `${reviewedArtifacts} evidence review${reviewedArtifacts === 1 ? "" : "s"} waiting` : "No pending evidence";
+  const hasEvidence = (state.evidenceArtifacts || []).some((artifact) => artifact.applied || artifact.status === "reviewed");
+  const cards = [
+    ["Solution Build Recipe", "sparkles", state.steps.length || state.systems.length || state.patterns.length, "steps, systems, and AI patterns"],
+    ["Workflow Map Studio", "map", state.steps.length, `${state.steps.length} step${state.steps.length === 1 ? "" : "s"}`],
+    ["Product PDR", "file-check-2", state.fields.workflowName || state.fields.submittedIdea || hasEvidence, "problem, users, outputs, and evidence"],
+    ["Engineering Brief", "file-code-2", state.steps.length || state.systems.length || state.data.length, "data, tools, access, and handoffs"],
+    ["Business Value", "chart-no-axes-column-increasing", state.fields.businessOutcome || state.fields.valueHypothesis || state.fields.biggestPain, "pain, value, effort, and KPI signals"],
+    ["Governance Inputs", "shield-check", inferOverallDataSensitivity() !== "Unknown" || state.decisions.length || hasEvidence, "data boundary, review, and controls"],
+    ["Enterprise Readiness Brief", "building-2", currentPilotControls().controlsConfirmed === "Yes" || hasEvidence, "testing evidence and approval gates"],
+    ["Combined Packet", "package-check", hasEvidence || state.steps.length, pendingDetail]
+  ];
+  return cards.map(([label, icon, ready, detail]) => ({
+    label,
+    icon,
+    ready: Boolean(ready),
+    pending: !ready && reviewedArtifacts > 0,
+    detail: ready ? detail : pendingDetail
+  }));
 }
 
 function renderTestLab() {
@@ -20770,6 +21069,7 @@ function bindEvidenceActions(root) {
 }
 
 function evidenceIcon(artifact = {}) {
+  if (artifact.sourceKind === "note") return "message-square-text";
   if (artifact.sourceKind === "screenshot") return "image";
   if (artifact.sourceKind === "spreadsheet") return "table-2";
   if (artifact.sourceKind === "document") return "file-text";
@@ -22736,6 +23036,10 @@ function normalizeLoadedState(parsed = {}) {
     fields: {
       ...structuredClone(defaultState.fields),
       ...(parsed.fields || {})
+    },
+    evidenceWorkbench: {
+      ...structuredClone(defaultState.evidenceWorkbench),
+      ...(parsed.evidenceWorkbench || {})
     },
     steps: (parsed.steps || []).map((step) => ({ ...newRecord("steps"), ...step })),
     data: (parsed.data || []).map((item) => ({ ...newRecord("data"), ...item })),

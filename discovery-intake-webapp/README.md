@@ -119,6 +119,8 @@ Analysis Studio > Outputs provides current downloadable briefs for Product PDR, 
 
 Analysis Studio > Live Session + Library includes `Import Workbook` for restoring a prior app-exported `.xlsx` workbook into the local session ledger, including core fields, process steps, data handling rows, systems, decisions, ideas, evidence-reference metadata, and evidence linkage rows.
 
+Analysis Studio > Evidence Analysis Workbench lets reviewers type, dictate, or upload workflow evidence such as notes, transcripts, screenshots, PDFs, Word docs, and Excel trackers. Extracted suggestions stay in the evidence review queue until applied, then feed the Solution Build Recipe, Workflow Map Studio, Product PDR, Engineering Brief, Business Value, Governance Inputs, Enterprise Readiness Brief, and Combined Packet through the existing session ledger.
+
 ## Roadmap
 
 Next major build phases:
