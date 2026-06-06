@@ -3457,28 +3457,58 @@ function renderDocumentUploadPanel() {
   }
 
   const doc = state.uploadedDocument;
-  const selectedBlock = doc ? `
-    <div class="document-upload-selected">
-      <span class="document-upload-file-icon"><i data-lucide="${uploadDocumentIcon(doc.type, doc.name)}"></i></span>
-      <div class="document-upload-file-meta">
-        <strong>${escapeHtml(doc.name)}</strong>
-        <small>${escapeHtml(formatFileSize(doc.size))}</small>
-        <span class="document-upload-status">Ready — extraction will run when the interview starts</span>
+  const status = doc?.status;
+  let bodyBlock;
+  let showSkip = true;
+
+  if (status === "extracting") {
+    // No upload button and no skip link while reading — prevents double-submit.
+    showSkip = false;
+    bodyBlock = `
+      <div class="document-upload-loading" role="status" aria-live="polite">
+        <span class="document-upload-spinner" aria-hidden="true"></span>
+        <span>Reading your document...</span>
       </div>
-      <button type="button" class="document-upload-remove" data-document-action="remove">Remove</button>
-    </div>
-    <div class="document-upload-actions">
-      <button type="button" class="primary-button" data-document-action="start">Start interview</button>
-    </div>
-  ` : `
-    <button type="button" class="document-upload-dropzone" data-document-action="open">
-      <span class="document-upload-dropzone-icon"><i data-lucide="upload-cloud"></i></span>
-      <span class="document-upload-dropzone-text">
-        <strong>Upload a document</strong>
-        <small>PDF, Word, or Excel · we'll never send it without asking first</small>
-      </span>
-    </button>
-  `;
+    `;
+  } else if (status === "error") {
+    bodyBlock = `
+      <div class="document-upload-error" role="alert">
+        <span class="document-upload-file-icon"><i data-lucide="alert-triangle"></i></span>
+        <div class="document-upload-file-meta">
+          <strong>Extraction failed</strong>
+          <span class="document-upload-status error">${escapeHtml(doc.error || "Something went wrong reading your document.")}</span>
+        </div>
+      </div>
+      <div class="document-upload-actions">
+        <button type="button" class="primary-button" data-document-action="retry">Try again</button>
+      </div>
+    `;
+  } else if (doc) {
+    bodyBlock = `
+      <div class="document-upload-selected">
+        <span class="document-upload-file-icon"><i data-lucide="${uploadDocumentIcon(doc.type, doc.name)}"></i></span>
+        <div class="document-upload-file-meta">
+          <strong>${escapeHtml(doc.name)}</strong>
+          <small>${escapeHtml(formatFileSize(doc.size))}</small>
+          <span class="document-upload-status">Ready — extraction will run when the interview starts</span>
+        </div>
+        <button type="button" class="document-upload-remove" data-document-action="remove">Remove</button>
+      </div>
+      <div class="document-upload-actions">
+        <button type="button" class="primary-button" data-document-action="start">Start interview</button>
+      </div>
+    `;
+  } else {
+    bodyBlock = `
+      <button type="button" class="document-upload-dropzone" data-document-action="open">
+        <span class="document-upload-dropzone-icon"><i data-lucide="upload-cloud"></i></span>
+        <span class="document-upload-dropzone-text">
+          <strong>Upload a document</strong>
+          <small>PDF, Word, or Excel · we'll never send it without asking first</small>
+        </span>
+      </button>
+    `;
+  }
 
   panel.innerHTML = `
     <section class="document-upload-card" aria-label="Start with a document">
@@ -3486,8 +3516,8 @@ function renderDocumentUploadPanel() {
         <h2>Start with a document (optional)</h2>
         <p>Upload a SOP, process doc, or spreadsheet and we'll pre-fill the workflow grid for you</p>
       </div>
-      ${selectedBlock}
-      <button type="button" class="document-upload-skip" data-document-action="skip">Skip — start with conversation</button>
+      ${bodyBlock}
+      ${showSkip ? `<button type="button" class="document-upload-skip" data-document-action="skip">Skip — start with conversation</button>` : ""}
     </section>
   `;
   refreshIcons();
@@ -3501,6 +3531,7 @@ function handleDocumentUploadPanelClick(event) {
   else if (action === "remove") removeUploadedDocument();
   else if (action === "skip") skipDocumentEntry();
   else if (action === "start") startInterviewWithDocument();
+  else if (action === "retry") retryDocumentExtraction();
 }
 
 function openDocumentDisclosure() {
@@ -3550,10 +3581,108 @@ function skipDocumentEntry() {
 }
 
 function startInterviewWithDocument() {
-  // Stage 1a holds the file only; extraction is a later sub-stage (1a part 2).
-  state.documentEntry.started = true;
+  if (!pendingUploadFile || !state.uploadedDocument) return;
+  runDocumentExtraction();
+}
+
+function retryDocumentExtraction() {
+  // The File is kept in module state across an error so retry can resend it.
+  if (!pendingUploadFile || !state.uploadedDocument) return;
+  runDocumentExtraction();
+}
+
+async function runDocumentExtraction() {
+  state.uploadedDocument.status = "extracting";
+  delete state.uploadedDocument.error;
   persistState();
   render();
+
+  let payload;
+  try {
+    const formData = new FormData();
+    formData.append("file", pendingUploadFile);
+    const response = await fetch("/api/extract-document", { method: "POST", body: formData });
+    payload = await response.json();
+  } catch {
+    payload = { success: false, error: "Could not reach the local server. Start with conversation or try again." };
+  }
+
+  // Guard against the panel being reset mid-flight (e.g. user removed the file).
+  if (!state.uploadedDocument) return;
+
+  if (!payload || payload.success !== true) {
+    state.uploadedDocument.status = "error";
+    state.uploadedDocument.error = (payload && payload.error) || "Extraction failed. Start with conversation or try again.";
+    persistState();
+    render();
+    return;
+  }
+
+  state.workflowGrid = buildWorkflowGridFromExtraction(payload.grid);
+  state.uploadedDocument.status = "extracted";
+  state.documentEntry.started = true;
+  pendingUploadFile = null;
+  persistState();
+  render();
+}
+
+// Maps the server document-extraction payload (POST /api/extract-document) into
+// a proper workflowGrid built from the Stage 0 factories. Document-derived
+// cells are marked state "inferred" with the raw 0-1 confidence; empty values
+// stay "empty" (capture-first — an empty cell should look empty).
+const EXTRACTION_CELL_KEY_MAP = {
+  workflowStep: "name",
+  description: "description",
+  personaActors: "personaActors",
+  systemsTools: "systemsTools",
+  dataProcessing: "dataProcessing",
+  rulesDecisionLogic: "rulesDecisionLogic",
+  output: "output",
+  trigger: "trigger",
+  handoff: "handoff",
+  humanCheckpoint: "humanCheckpoint",
+  timeTaken: "timeTaken",
+  frequencyVolume: "frequencyVolume",
+  painFriction: "painFriction",
+  dataSensitivity: "dataSensitivity",
+  exceptionBranching: "exceptionBranching",
+  regulatoryContext: "regulatoryContext"
+};
+
+function buildWorkflowGridFromExtraction(extracted = {}) {
+  const grid = newWorkflowGrid();
+  if (typeof extracted.workflowName === "string") {
+    grid.workflowName = extracted.workflowName.trim();
+  }
+  const baseline = String(extracted.dataSensitivityBaseline || "").trim();
+  if (baseline) {
+    grid.dataSensitivityBaseline = { value: baseline, state: "inferred", confidence: "" };
+  }
+
+  const steps = Array.isArray(extracted.steps) ? extracted.steps : [];
+  grid.steps = steps.map((rawStep) => {
+    const step = newGridStep();
+    const rawCells = rawStep?.cells || {};
+    Object.entries(EXTRACTION_CELL_KEY_MAP).forEach(([sourceKey, targetKey]) => {
+      const raw = rawCells[sourceKey];
+      if (!raw || typeof raw !== "object") return;
+      const value = typeof raw.value === "string" ? raw.value.trim() : "";
+      const confidence = typeof raw.confidence === "number" ? raw.confidence : "";
+      step.cells[targetKey] = {
+        value,
+        state: value ? "inferred" : "empty",
+        confidence: value ? confidence : ""
+      };
+    });
+    return step;
+  });
+
+  // Chain by array order using the factory-generated ids (ignore model ids).
+  grid.steps.forEach((step, index) => {
+    step.nextStepId = index < grid.steps.length - 1 ? grid.steps[index + 1].id : "";
+  });
+
+  return grid;
 }
 
 function renderAppMode() {
@@ -23368,13 +23497,15 @@ const GRID_CELL_KEYS = [
   "frequencyVolume",    // 12 Frequency/Volume
   "painFriction",       // 13 Pain/Friction
   "dataSensitivity",    // 14 Data Sensitivity (step-level)
-  "aiPattern"           // 15 AI Pattern (value = array of newAiPatternEntry())
+  "exceptionBranching", // 15 Exception Branching
+  "regulatoryContext",  // 16 Regulatory/Compliance Context
+  "aiPattern"           // 17 AI Pattern (generated later; value = array of newAiPatternEntry())
 ];
 
-// Uniform cell shape so later color-coding/escalation can treat all 15
+// Uniform cell shape so later color-coding/escalation can treat all 17
 // fields the same way.
 // state:      "empty" | "harvested" | "inferred" | "confirmed"
-// confidence: ""      | "Low" | "Medium" | "High"   (referenceLists.confidence)
+// confidence: "" | number (0-1, universal confidence framework)
 function newGridCell() {
   return { value: "", state: "empty", confidence: "" };
 }
@@ -23386,7 +23517,7 @@ function newAiPatternEntry() {
 }
 
 // An ordered grid step: a stable id, an explicit chain link (this step's
-// Output conceptually flows to the next step's Trigger), and the 15 cells.
+// Output conceptually flows to the next step's Trigger), and the 17 cells.
 function newGridStep() {
   const cells = {};
   GRID_CELL_KEYS.forEach((key) => {

@@ -3,9 +3,17 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import Busboy from "busboy";
+import mammoth from "mammoth";
+import * as XLSX from "xlsx";
 import { detectConnectors, formatForRecipe } from "./connectors/connector-detector.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// pdf-parse's package index runs a debug routine against a bundled test PDF
+// when required as the main module; importing the lib file directly avoids it.
+const require = createRequire(import.meta.url);
+const pdfParse = require("pdf-parse/lib/pdf-parse.js");
 
 function loadLocalEnv() {
   const envPath = path.join(__dirname, ".env.local");
@@ -39,6 +47,7 @@ const TRANSCRIPTION_MODEL = process.env.TRANSCRIPTION_MODEL || "gpt-4o-transcrib
 const TTS_MODEL = process.env.TTS_MODEL || "gpt-4o-mini-tts";
 const TTS_VOICE = process.env.TTS_VOICE || "alloy";
 const EXTRACTION_MODEL = process.env.EXTRACTION_MODEL || process.env.OPENAI_MODEL || "gpt-5.5";
+const DOCUMENT_EXTRACTION_MODEL = process.env.EXTRACT_DOC_MODEL || "gpt-4o";
 const EXTRACTION_REASONING_EFFORT = process.env.EXTRACTION_REASONING_EFFORT || "medium";
 const EXTRACTION_VERBOSITY = process.env.EXTRACTION_VERBOSITY || "low";
 const CHAT_REASONING_EFFORT = process.env.CHAT_REASONING_EFFORT || "low";
@@ -980,6 +989,10 @@ const server = http.createServer(async (req, res) => {
       return await handleExtract(req, res);
     }
 
+    if (req.method === "POST" && requestUrl.pathname === "/api/extract-document") {
+      return await handleExtractDocument(req, res);
+    }
+
     if (req.method === "POST" && requestUrl.pathname === "/api/evidence/analyze") {
       return await handleEvidenceAnalyze(req, res);
     }
@@ -1072,6 +1085,177 @@ async function handleExtract(req, res) {
   }
 
   return sendJson(res, 200, parsed);
+}
+
+const DOCUMENT_EXTRACTION_SYSTEM_PROMPT = `You are a workflow analysis expert. Extract a structured workflow grid from the provided document. Return ONLY valid JSON — no markdown fences, no explanation, just the raw JSON object.
+
+Return this exact schema:
+{
+  workflowName: string,
+  dataSensitivityBaseline: string,
+  steps: [
+    {
+      id: 'step-1',
+      nextStepId: 'step-2' (null for last step),
+      cells: {
+        workflowStep: { value: string, confidence: number },
+        description: { value: string, confidence: number },
+        personaActors: { value: string, confidence: number },
+        systemsTools: { value: string, confidence: number },
+        dataProcessing: { value: string, confidence: number },
+        rulesDecisionLogic: { value: string, confidence: number },
+        output: { value: string, confidence: number },
+        trigger: { value: string, confidence: number },
+        handoff: { value: string, confidence: number },
+        humanCheckpoint: { value: string, confidence: number },
+        timeTaken: { value: string, confidence: number },
+        frequencyVolume: { value: string, confidence: number },
+        painFriction: { value: '', confidence: 0 },
+        dataSensitivity: { value: string, confidence: number },
+        exceptionBranching: { value: string, confidence: number },
+        regulatoryContext: { value: string, confidence: number }
+      }
+    }
+  ]
+}
+
+Confidence rules: 0.9+ = explicitly stated in the document, 0.7 = clearly implied, 0.5 = reasonably inferred, below 0.5 = leave value as empty string.
+painFriction: always value '' and confidence 0 — documents describe how things should work, not where they hurt.
+aiPattern: do not include — it is generated later.
+Only extract steps actually present in the document.`;
+
+// Stage 1a Part 2: extract a draft workflow grid from an uploaded document.
+// The file is parsed entirely in memory (no disk writes) and the extracted
+// text is sent to OpenAI for structured extraction. Failures resolve as
+// { success: false, error } (HTTP 200) so the frontend can offer a
+// conversation fallback rather than treating it as a hard error.
+async function handleExtractDocument(req, res) {
+  if (!OPENAI_API_KEY) {
+    return sendJson(res, 200, {
+      success: false,
+      error: "OPENAI_API_KEY is not configured. Set it in your terminal and restart the server, or start with conversation instead."
+    });
+  }
+
+  let upload;
+  try {
+    upload = await readMultipartFile(req);
+  } catch (error) {
+    return sendJson(res, 200, { success: false, error: error.message || "Could not read the uploaded file." });
+  }
+  if (!upload || !upload.buffer?.length) {
+    return sendJson(res, 200, { success: false, error: "No file was received. Please choose a document and try again." });
+  }
+
+  let text;
+  try {
+    text = await extractDocumentText(upload);
+  } catch (error) {
+    console.error("Document text extraction failed", error);
+    return sendJson(res, 200, { success: false, error: "We couldn't read that document. Try a different file or start with conversation." });
+  }
+  if (!text || !text.trim()) {
+    return sendJson(res, 200, { success: false, error: "That document didn't contain readable text. Try a different file or start with conversation." });
+  }
+
+  // Keep the prompt within a sane bound; truncate very large documents.
+  const trimmedText = text.length > 120_000 ? text.slice(0, 120_000) : text;
+
+  let data;
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: DOCUMENT_EXTRACTION_MODEL,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: DOCUMENT_EXTRACTION_SYSTEM_PROMPT },
+          { role: "user", content: trimmedText }
+        ]
+      })
+    });
+    data = await response.json();
+    if (!response.ok) {
+      return sendJson(res, 200, { success: false, error: data.error?.message || "The extraction request failed." });
+    }
+  } catch (error) {
+    console.error("Document extraction request failed", error);
+    return sendJson(res, 200, { success: false, error: "Could not reach the extraction service. Start with conversation or try again." });
+  }
+
+  const outputText = data.choices?.[0]?.message?.content || "";
+  let grid;
+  try {
+    grid = JSON.parse(outputText);
+  } catch {
+    return sendJson(res, 200, { success: false, error: "The model returned an unreadable result. Try again or start with conversation." });
+  }
+
+  return sendJson(res, 200, { success: true, grid });
+}
+
+// Parse a single multipart/form-data file field ("file") fully into memory.
+function readMultipartFile(req, maxBytes = 25_000_000) {
+  return new Promise((resolve, reject) => {
+    const contentType = req.headers["content-type"] || "";
+    if (!contentType.includes("multipart/form-data")) {
+      reject(new Error("Expected a multipart/form-data upload."));
+      return;
+    }
+    let busboy;
+    try {
+      busboy = Busboy({ headers: req.headers, limits: { files: 1, fileSize: maxBytes } });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    let result = null;
+    let tooLarge = false;
+    busboy.on("file", (_name, stream, info) => {
+      const chunks = [];
+      stream.on("data", (chunk) => chunks.push(chunk));
+      stream.on("limit", () => {
+        tooLarge = true;
+        stream.resume();
+      });
+      stream.on("end", () => {
+        result = {
+          buffer: Buffer.concat(chunks),
+          filename: info.filename || "",
+          mimeType: info.mimeType || ""
+        };
+      });
+    });
+    busboy.on("error", reject);
+    busboy.on("close", () => {
+      if (tooLarge) reject(new Error("That file is too large to process."));
+      else resolve(result);
+    });
+    req.pipe(busboy);
+  });
+}
+
+// Extract raw text from a buffered PDF, Word, or Excel document.
+async function extractDocumentText({ buffer, filename = "", mimeType = "" }) {
+  const probe = `${filename} ${mimeType}`.toLowerCase();
+  if (probe.includes("pdf")) {
+    const parsed = await pdfParse(buffer);
+    return parsed.text || "";
+  }
+  if (probe.includes("word") || probe.includes("officedocument.wordprocessing") || /\.docx?(\s|$)/.test(probe)) {
+    const result = await mammoth.extractRawText({ buffer });
+    return result.value || "";
+  }
+  if (probe.includes("sheet") || probe.includes("excel") || /\.xlsx?(\s|$)/.test(probe)) {
+    const workbook = XLSX.read(buffer, { type: "buffer" });
+    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+    return firstSheet ? XLSX.utils.sheet_to_csv(firstSheet) : "";
+  }
+  throw new Error("Unsupported document type.");
 }
 
 async function handleEvidenceAnalyze(req, res) {

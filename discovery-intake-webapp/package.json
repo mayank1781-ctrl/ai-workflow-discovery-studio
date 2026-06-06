@@ -1,0 +1,13 @@
+{
+  "name": "discovery-intake-webapp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local server and frontend for the AI Workflow Discovery Studio intake app.",
+  "dependencies": {
+    "busboy": "^1.6.0",
+    "mammoth": "^1.8.0",
+    "pdf-parse": "^1.1.1",
+    "xlsx": "^0.18.5"
+  }
+}
