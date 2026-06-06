@@ -1088,6 +1088,7 @@ let recognition = null;
 let isListening = false;
 let aiAvailable = false;
 let realtimeAvailable = false;
+let addOnProviderStatus = null;
 let realtimeConnection = null;
 let realtimeDataChannel = null;
 let realtimeAudioElement = null;
@@ -1180,6 +1181,7 @@ const els = {
   pdrPreview: document.getElementById("pdrPreview"),
   stepMatrixPreview: document.getElementById("stepMatrixPreview"),
   solutionBlueprint: document.getElementById("solutionBlueprint"),
+  workflowMapStudio: document.getElementById("workflowMapStudio"),
   templateHandoffStudio: document.getElementById("templateHandoffStudio"),
   reviewGate: document.getElementById("reviewGate"),
   handoffSnapshot: document.getElementById("handoffSnapshot"),
@@ -1191,6 +1193,7 @@ const els = {
   workbookImportInput: document.getElementById("workbookImportInput"),
   evidenceReviewPanel: document.getElementById("evidenceReviewPanel"),
   evidenceWorkbench: document.getElementById("evidenceWorkbench"),
+  operatorAddOnsPanel: document.getElementById("operatorAddOnsPanel"),
   demoCaseSelect: document.getElementById("demoCaseSelect"),
   loadDemoCaseButton: document.getElementById("loadDemoCaseButton"),
   demoCaseSummaryMetrics: document.getElementById("demoCaseSummaryMetrics"),
@@ -1417,6 +1420,7 @@ async function checkAiStatus() {
     aiAvailable = Boolean(data.aiConfigured);
     realtimeAvailable = Boolean(data.realtimeConfigured);
     transcriptionAvailable = Boolean(data.transcriptionConfigured);
+    addOnProviderStatus = data.addOns || data.enterprise?.addOns || addOnProviderStatus || buildFallbackAddOnProviderStatus();
     const realtimeModel = data.realtimeModel || data.primaryModel || "gpt-realtime-2";
     transcriptionModel = data.transcriptionModel || transcriptionModel;
     const extractionModel = data.extractionModel || data.model || "structured extraction";
@@ -1424,6 +1428,7 @@ async function checkAiStatus() {
     els.aiStatus.title = realtimeAvailable ? `Primary voice model: ${realtimeModel}. Structured extraction model: ${extractionModel}.` : "";
     els.aiStatus.classList.toggle("active", aiAvailable || realtimeAvailable);
     renderLiveTestCommandCenter();
+    renderOperatorAddOnsPanel();
     renderPilotControlSummary();
     updateAiTurnStatus(state.captureStage || "idle");
     document.getElementById("aiExtractButton").disabled = !aiAvailable;
@@ -1444,10 +1449,12 @@ async function checkAiStatus() {
     aiAvailable = false;
     realtimeAvailable = false;
     transcriptionAvailable = false;
+    addOnProviderStatus = buildFallbackAddOnProviderStatus();
     els.aiStatus.textContent = "AI offline";
     els.aiStatus.title = "";
     els.aiStatus.classList.remove("active");
     renderLiveTestCommandCenter();
+    renderOperatorAddOnsPanel();
     renderPilotControlSummary();
     updateAiTurnStatus("offline");
     document.getElementById("aiExtractButton").disabled = true;
@@ -3133,6 +3140,7 @@ function render() {
   renderPdrPreview();
   renderStepMatrixPreview();
   renderSolutionBlueprint();
+  renderWorkflowMapStudio();
   renderTemplateHandoffStudio();
   renderLiveTestCommandCenter();
   renderGuidedPilotPanel();
@@ -3143,6 +3151,7 @@ function render() {
   renderRecapPanel();
   renderEvidenceReviewPanel();
   renderEvidenceWorkbench();
+  renderOperatorAddOnsPanel();
   renderDemoConsole();
   renderAnalysisMatrixMap();
   renderCaseComparison();
@@ -3938,10 +3947,12 @@ function normalizeWorkbenchTab(tab) {
     evidence: "library",
     review: "business",
     controls: "business",
-    pulse: "library"
+    pulse: "library",
+    providers: "addons",
+    connectors: "addons"
   };
   const normalized = aliasMap[tab] || tab || "handoff";
-  const available = ["library", "handoff", "inspector", "blueprint", "business"];
+  const available = ["library", "addons", "handoff", "inspector", "blueprint", "business"];
   return available.includes(normalized) ? normalized : "handoff";
 }
 
@@ -8774,6 +8785,328 @@ function buildMermaidGraph() {
   return lines.join("\n");
 }
 
+function deriveWorkflowMapStudio() {
+  const workflow = state.fields.workflowName || state.fields.submittedWorkflowTask || state.sessionMeta?.name || "Unnamed workflow";
+  const triggerLabel = state.fields.triggerSource || state.fields.triggerType || state.fields.startPoint || "Trigger / starting event TBD";
+  const outputLabel = state.fields.definitionOfDone || state.fields.endPoint || summarizedOutputs() || "Final output TBD";
+  const nodes = [
+    workflowMapNode("trigger", "Trigger", triggerLabel, {
+      lane: "Start",
+      detail: state.fields.entryConditions || state.fields.triggerFrequency || "Entry conditions not fully captured.",
+      status: isCapturedValue(triggerLabel) ? "captured" : "missing"
+    })
+  ];
+  const edges = [];
+  const steps = state.steps.length ? state.steps : [{
+    name: "Capture the rough A-to-Z process",
+    actor: state.fields.intervieweeRole || "Workflow owner",
+    tool: state.fields.availableTooling || "Current tools TBD",
+    input: state.fields.submittedWorkflowTask || state.fields.submittedIdea || "Workflow description",
+    output: "Numbered process map",
+    decision: "",
+    dataSensitivity: inferOverallDataSensitivity(),
+    handoff: "Discovery follow-up"
+  }];
+
+  steps.forEach((step, index) => {
+    const stepId = `step-${index + 1}`;
+    nodes.push(workflowMapNode(stepId, `Step ${index + 1}`, step.name || step.action || `Step ${index + 1}`, {
+      lane: "Activity",
+      actor: step.actor || "Actor TBD",
+      tool: step.tool || step.accessMode || "Tool TBD",
+      data: step.input || step.dataHandling || "Input data TBD",
+      output: step.output || "Output TBD",
+      detail: step.action || step.interviewNotes || "Step details need follow-up.",
+      status: stepMapStatus(step)
+    }));
+    edges.push(workflowMapEdge(index === 0 ? "trigger" : `step-${index}`, stepId, index === 0 ? "starts" : "next"));
+    if (isCapturedValue(step.decision)) {
+      const decisionId = `decision-${index + 1}`;
+      nodes.push(workflowMapNode(decisionId, "Decision", step.decision, {
+        lane: "Human review",
+        actor: step.actor || "Reviewer TBD",
+        detail: step.risk || step.openQuestions || "Decision criteria need validation.",
+        status: "review"
+      }));
+      edges.push(workflowMapEdge(stepId, decisionId, "review"));
+      if (index < steps.length - 1) edges.push(workflowMapEdge(decisionId, `step-${index + 2}`, "approved"));
+    }
+  });
+
+  nodes.push(workflowMapNode("output", "Output", outputLabel, {
+    lane: "Finish",
+    actor: state.fields.outputConsumer || "Output consumer TBD",
+    tool: state.fields.deliverableType || "Deliverable TBD",
+    detail: state.fields.acceptanceCriteria || state.fields.successMetrics || "Acceptance criteria need confirmation.",
+    status: isCapturedValue(outputLabel) ? "captured" : "missing"
+  }));
+  const finalStep = steps.length ? `step-${steps.length}` : "trigger";
+  const finalDecision = state.steps[steps.length - 1]?.decision ? `decision-${steps.length}` : "";
+  edges.push(workflowMapEdge(finalDecision || finalStep, "output", "produces"));
+
+  state.data.slice(0, 8).forEach((item, index) => {
+    const dataId = `data-${index + 1}`;
+    nodes.push(workflowMapNode(dataId, "Data", item.category || item.source || `Data ${index + 1}`, {
+      lane: "Data",
+      tool: item.source || item.format || "Source TBD",
+      data: item.sensitivity || "Sensitivity TBD",
+      detail: item.processing || item.usageMode || item.splitNotes || "Data usage needs validation.",
+      status: /unknown|tbd/i.test(item.sensitivity || "") ? "review" : "captured"
+    }));
+    edges.push(workflowMapEdge(dataId, bestWorkflowStepMatch(item, steps), "used by"));
+  });
+
+  state.systems.slice(0, 8).forEach((item, index) => {
+    const systemId = `system-${index + 1}`;
+    nodes.push(workflowMapNode(systemId, "System", item.name || `System ${index + 1}`, {
+      lane: "Systems",
+      actor: item.owner || "Owner TBD",
+      tool: item.access || "Access TBD",
+      detail: item.purpose || item.integration || "System purpose needs validation.",
+      status: isCapturedValue(item.access) ? "captured" : "review"
+    }));
+    edges.push(workflowMapEdge(systemId, bestWorkflowStepMatch(item, steps), "supports"));
+  });
+
+  const openQuestions = dedupeQuestions([
+    ...reviewFollowUps(),
+    state.fields.openQuestions,
+    state.fields.engineeringUnknowns
+  ]).slice(0, 6);
+  const map = {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    workflow,
+    summary: {
+      nodeCount: nodes.length,
+      edgeCount: edges.length,
+      stepCount: state.steps.length,
+      dataCount: state.data.length,
+      systemCount: state.systems.length,
+      decisionCount: state.decisions.length + state.steps.filter((step) => isCapturedValue(step.decision)).length,
+      dataSensitivity: inferOverallDataSensitivity(),
+      route: solutionBuildRoute().label
+    },
+    lanes: ["Start", "Activity", "Data", "Systems", "Human review", "Finish"],
+    nodes,
+    edges,
+    openQuestions,
+    reviewerNotes: [
+      "Confirm the A-to-Z activity order with the workflow owner.",
+      "Validate data sensitivity and source-system access before connector work.",
+      "Keep writeback/actions out of scope until human approval gates are named."
+    ]
+  };
+  map.mermaid = workflowMapMermaid(map);
+  return map;
+}
+
+function workflowMapNode(id, type, label, details = {}) {
+  return {
+    id,
+    type,
+    label: String(label || type || id),
+    lane: details.lane || "Activity",
+    actor: details.actor || "",
+    tool: details.tool || "",
+    data: details.data || "",
+    output: details.output || "",
+    detail: details.detail || "",
+    status: details.status || "review"
+  };
+}
+
+function workflowMapEdge(from, to, label = "") {
+  return { from, to, label };
+}
+
+function stepMapStatus(step = {}) {
+  const captured = ["name", "actor", "tool", "input", "output"].filter((key) => isCapturedValue(step[key])).length;
+  if (captured >= 4) return "captured";
+  if (captured >= 2) return "review";
+  return "missing";
+}
+
+function bestWorkflowStepMatch(item = {}, steps = state.steps) {
+  if (!steps.length) return "step-1";
+  const sourceText = Object.values(item).join(" ").toLowerCase();
+  let bestIndex = 0;
+  let bestScore = -1;
+  steps.forEach((step, index) => {
+    const tokens = [step.name, step.action, step.tool, step.input, step.output, step.dataHandling]
+      .join(" ")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((token) => token.length > 3);
+    const score = tokens.filter((token) => sourceText.includes(token)).length;
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = index;
+    }
+  });
+  return `step-${bestIndex + 1}`;
+}
+
+function workflowMapMermaid(map = deriveWorkflowMapStudio()) {
+  const lines = ["flowchart LR"];
+  const byLane = new Map();
+  map.nodes.forEach((node) => {
+    if (!byLane.has(node.lane)) byLane.set(node.lane, []);
+    byLane.get(node.lane).push(node);
+  });
+  map.lanes.forEach((lane, laneIndex) => {
+    const nodes = byLane.get(lane) || [];
+    if (!nodes.length) return;
+    lines.push(`  subgraph L${laneIndex + 1}["${safeMermaidLabel(lane)}"]`);
+    nodes.forEach((node) => {
+      const shape = node.type === "Decision" ? `{` : `[`;
+      const endShape = node.type === "Decision" ? `}` : `]`;
+      const label = `${node.type}: ${node.label}`;
+      lines.push(`    ${workflowMapMermaidId(node.id)}${shape}"${safeMermaidLabel(label)}"${endShape}`);
+    });
+    lines.push("  end");
+  });
+  map.edges.forEach((edge) => {
+    const label = edge.label ? `|${safeMermaidLabel(edge.label)}|` : "";
+    lines.push(`  ${workflowMapMermaidId(edge.from)} -->${label} ${workflowMapMermaidId(edge.to)}`);
+  });
+  return lines.join("\n");
+}
+
+function workflowMapMermaidId(id) {
+  return String(id || "node").replace(/[^a-zA-Z0-9_]/g, "_");
+}
+
+function workflowMapStudioRows(map = deriveWorkflowMapStudio()) {
+  return [
+    ["Record Type", "ID", "Type", "Lane", "Label", "From", "To", "Edge Label", "Actor", "Tool / Source", "Data / Sensitivity", "Output", "Status", "Detail"],
+    ...map.nodes.map((node) => [
+      "Node",
+      node.id,
+      node.type,
+      node.lane,
+      node.label,
+      "",
+      "",
+      "",
+      node.actor,
+      node.tool,
+      node.data,
+      node.output,
+      node.status,
+      node.detail
+    ]),
+    ...map.edges.map((edge) => [
+      "Edge",
+      `${edge.from}->${edge.to}`,
+      "",
+      "",
+      "",
+      edge.from,
+      edge.to,
+      edge.label,
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+    ])
+  ];
+}
+
+function workflowMapStudioMarkdown(map = deriveWorkflowMapStudio()) {
+  return [
+    `# ${map.workflow} Workflow Map Studio`,
+    "",
+    "## Summary",
+    `- Steps: ${map.summary.stepCount}`,
+    `- Data sources: ${map.summary.dataCount}`,
+    `- Systems: ${map.summary.systemCount}`,
+    `- Decisions: ${map.summary.decisionCount}`,
+    `- Data sensitivity: ${map.summary.dataSensitivity}`,
+    `- Recommended build route: ${map.summary.route}`,
+    "",
+    "## Visual Map",
+    "```mermaid",
+    map.mermaid,
+    "```",
+    "",
+    "## Nodes",
+    ...map.nodes.map((node) => `- ${node.type}: ${node.label} (${node.lane}) - ${node.detail || node.status}`),
+    "",
+    "## Open Questions",
+    ...(map.openQuestions.length ? map.openQuestions.map((question, index) => `${index + 1}. ${question}`) : ["No major map questions captured."]),
+    "",
+    "## Reviewer Notes",
+    ...map.reviewerNotes.map((note) => `- ${note}`)
+  ].join("\n");
+}
+
+function renderWorkflowMapStudio() {
+  if (!els.workflowMapStudio) return;
+  const map = deriveWorkflowMapStudio();
+  const visibleNodes = map.nodes.filter((node) => ["Trigger", "Step 1", "Step 2", "Step 3", "Decision", "Output"].includes(node.type) || node.type.startsWith("Step")).slice(0, 8);
+  els.workflowMapStudio.innerHTML = `
+    <section class="workflow-map-hero">
+      <div>
+        <p class="eyebrow">Workflow Map Studio</p>
+        <h3>${escapeHtml(map.workflow)}</h3>
+        <p>${map.summary.stepCount ? `${map.summary.stepCount} captured step${map.summary.stepCount === 1 ? "" : "s"}` : "Step capture still in progress"} with ${map.summary.dataCount} data source${map.summary.dataCount === 1 ? "" : "s"}, ${map.summary.systemCount} system${map.summary.systemCount === 1 ? "" : "s"}, and ${map.summary.decisionCount} decision/control point${map.summary.decisionCount === 1 ? "" : "s"}.</p>
+      </div>
+      <div class="workflow-map-stats">
+        ${workflowMapStat("Steps", map.summary.stepCount, "list-ordered")}
+        ${workflowMapStat("Data", map.summary.dataCount, "database")}
+        ${workflowMapStat("Systems", map.summary.systemCount, "monitor-cog")}
+        ${workflowMapStat("Controls", map.summary.decisionCount, "shield-check")}
+      </div>
+    </section>
+    <div class="workflow-map-body">
+      <div class="workflow-map-node-rail">
+        ${visibleNodes.map(workflowMapNodeCard).join("")}
+      </div>
+      <div class="workflow-map-source">
+        <div>
+          <p class="eyebrow">Mermaid source</p>
+          <h3>Export-ready visual map</h3>
+        </div>
+        <pre><code>${escapeHtml(map.mermaid)}</code></pre>
+      </div>
+    </div>
+    <div class="workflow-map-review-row">
+      <div>
+        <strong>Map reviewer checks</strong>
+        <p>${escapeHtml(map.reviewerNotes.join(" "))}</p>
+      </div>
+      <div>
+        <strong>Open route questions</strong>
+        <p>${escapeHtml(map.openQuestions.slice(0, 2).join(" ") || "No major map questions captured yet.")}</p>
+      </div>
+    </div>
+  `;
+  refreshIcons();
+}
+
+function workflowMapStat(label, value, icon) {
+  return `
+    <div>
+      <i data-lucide="${escapeHtml(icon)}"></i>
+      <strong>${escapeHtml(value)}</strong>
+      <span>${escapeHtml(label)}</span>
+    </div>
+  `;
+}
+
+function workflowMapNodeCard(node) {
+  return `
+    <article class="workflow-map-node-card ${escapeHtml(node.status)}">
+      <span>${escapeHtml(node.type)}</span>
+      <strong>${escapeHtml(node.label)}</strong>
+      <p>${escapeHtml([node.actor, node.tool, node.data].filter(isCapturedValue).join(" | ") || node.detail || "Details need review.")}</p>
+    </article>
+  `;
+}
+
 function renderIdeas() {
   els.ideasList.innerHTML = "";
   if (!state.ideas.length) {
@@ -8866,6 +9199,10 @@ function renderTemplateHandoffStudio() {
   const governanceBrief = deriveGovernanceBrief();
   const solutionBuildRecipe = deriveSolutionBuildRecipe(productBrief, engineeringBrief, businessBrief);
   const solutionBuildSpec = deriveSolutionBuildSpec(solutionBuildRecipe);
+  const workflowMapStudio = solutionBuildSpec.workflowMapStudio || deriveWorkflowMapStudio();
+  const addOnProviderPlan = solutionBuildSpec.addOnProviderPlan || deriveAddOnProviderPlan();
+  const agentBuildPack = solutionBuildSpec.agentBuildPack || deriveAgentBuildPack(solutionBuildSpec);
+  const reviewerOnePage = deriveReviewerOnePageSummary();
   const solutionCapabilityPlan = deriveSolutionCapabilityPlan(solutionBuildSpec);
   const solutionExecutionPlan = deriveSolutionExecutionPlan(solutionBuildSpec);
   const solutionExecutionBrief = deriveSolutionExecutionBrief(solutionExecutionPlan);
@@ -8898,6 +9235,7 @@ function renderTemplateHandoffStudio() {
     <div class="handoff-output-lane-grid">
       ${outputLanes.map((lane) => handoffOutputLaneCard(lane)).join("")}
     </div>
+    ${enterpriseBuildPackPanel(agentBuildPack, addOnProviderPlan, reviewerOnePage)}
     ${templateAlignmentPanel(alignmentContract)}
     ${questionRoutingPanel(questionRouting)}
     <section class="output-download-panel">
@@ -8946,6 +9284,45 @@ function renderTemplateHandoffStudio() {
     </section>
   `;
   refreshIcons();
+}
+
+function enterpriseBuildPackPanel(agentBuildPack = deriveAgentBuildPack(), addOnProviderPlan = deriveAddOnProviderPlan(), reviewerOnePage = deriveReviewerOnePageSummary()) {
+  const options = agentBuildPack.buildOptions || [];
+  const configured = addOnProviderPlan.groups.flatMap((group) => group.providers).filter((provider) => provider.configured || provider.status === "Included").length;
+  return `
+    <section class="enterprise-build-pack-panel">
+      <div class="enterprise-build-pack-head">
+        <div>
+          <p class="eyebrow">Enterprise Build Pack</p>
+          <h3>${escapeHtml(agentBuildPack.recommendedRoute)}</h3>
+          <p>${escapeHtml(agentBuildPack.routeRationale)}</p>
+        </div>
+        <div class="enterprise-build-pack-score">
+          <span>${escapeHtml(reviewerOnePage.readiness)}%</span>
+          <strong>${escapeHtml(reviewerOnePage.decision)}</strong>
+        </div>
+      </div>
+      <div class="enterprise-build-option-grid">
+        ${options.map((option) => `
+          <article>
+            <span>${escapeHtml(option.fit)}</span>
+            <strong>${escapeHtml(option.label)}</strong>
+            <p>${escapeHtml(option.buildSurface)}</p>
+          </article>
+        `).join("")}
+      </div>
+      <div class="enterprise-build-pack-foot">
+        <div>
+          <strong>${configured} providers included/configured</strong>
+          <p>${escapeHtml(addOnProviderPlan.rolloutPath.map((item) => `Phase ${item.phase}: ${item.action}`).join(" "))}</p>
+        </div>
+        <div>
+          <strong>Review package focus</strong>
+          <p>${escapeHtml(reviewerOnePage.packageFilesToReview.join(", "))}</p>
+        </div>
+      </div>
+    </section>
+  `;
 }
 
 function questionRoutingPanel(groups = questionRoutingGroups()) {
@@ -9240,6 +9617,9 @@ function outputDownloadPayload(type) {
   const governanceBrief = deriveGovernanceBrief();
   const solutionBuildRecipe = deriveSolutionBuildRecipe(productBrief, engineeringBrief, businessBrief);
   const solutionBuildSpec = deriveSolutionBuildSpec(solutionBuildRecipe);
+  const workflowMapStudio = solutionBuildSpec.workflowMapStudio || deriveWorkflowMapStudio();
+  const addOnProviderPlan = solutionBuildSpec.addOnProviderPlan || deriveAddOnProviderPlan();
+  const agentBuildPack = solutionBuildSpec.agentBuildPack || deriveAgentBuildPack(solutionBuildSpec);
   const solutionCapabilityPlan = deriveSolutionCapabilityPlan(solutionBuildSpec);
   const solutionExecutionPlan = deriveSolutionExecutionPlan(solutionBuildSpec);
   const solutionExecutionBrief = deriveSolutionExecutionBrief(solutionExecutionPlan);
@@ -9865,6 +10245,10 @@ function templateOutputContracts(productBrief = deriveProductBrief(), engineerin
 
 function deriveOutputManifest(productBrief = deriveProductBrief(), engineeringBrief = deriveEngineeringBrief(), businessBrief = deriveBusinessBrief(), governanceBrief = deriveGovernanceBrief(), combinedHandoff = deriveCombinedHandoff(productBrief, engineeringBrief, businessBrief), solutionBuildRecipe = deriveSolutionBuildRecipe(productBrief, engineeringBrief, businessBrief), solutionExecutionBrief = deriveSolutionExecutionBrief(), enterpriseReadinessTemplateBrief = deriveEnterpriseReadinessTemplateBrief()) {
   const solutionBuildSpec = deriveSolutionBuildSpec(solutionBuildRecipe);
+  const agentBuildPack = solutionBuildSpec.agentBuildPack || deriveAgentBuildPack(solutionBuildSpec);
+  const addOnProviderPlan = solutionBuildSpec.addOnProviderPlan || deriveAddOnProviderPlan();
+  const workflowMapStudio = solutionBuildSpec.workflowMapStudio || deriveWorkflowMapStudio();
+  const reviewerOnePage = deriveReviewerOnePageSummary();
   const solutionCapabilityPlan = deriveSolutionCapabilityPlan(solutionBuildSpec);
   const enterpriseConnectorContracts = deriveEnterpriseConnectorContracts(solutionBuildSpec);
   const connectorApprovalChecklist = deriveConnectorApprovalChecklist(enterpriseConnectorContracts);
@@ -9890,6 +10274,70 @@ function deriveOutputManifest(productBrief = deriveProductBrief(), engineeringBr
       sourceOfTruth: "Machine-readable ChatGPT/Copilot implementation route, platform responsibilities, connectors, controls, MVP steps, and test criteria",
       supplementLater: "No",
       nextAction: solutionBuildSpec.route.nextAction
+    },
+    {
+      output: "Agent Build Pack",
+      readiness: `${solutionBuildSpec.readiness}%`,
+      status: agentBuildPack.recommendedRoute,
+      contractId: "agent-build-pack",
+      route: "Solution Build",
+      owner: "Solution Builder / AI Engineering",
+      format: "DOCX / Markdown / JSON / Excel sheet",
+      packageFile: "agent-build-pack.json",
+      packageFiles: "agent-build-pack.json; agent-build-pack.md; agent-build-pack.docx; agent-build-pack-rows.json",
+      workbookSheet: "Agent Build Pack",
+      outputSurfaces: "Workbook sheet; Package JSON; Package Markdown; Package DOCX",
+      sourceOfTruth: "Advanced build-surface guidance for ChatGPT project, ChatGPT tools, OpenAI Agents SDK app, Microsoft 365 Copilot agent, and full custom app paths",
+      supplementLater: "No",
+      nextAction: "Choose the first build surface and preserve the rest as promotion paths."
+    },
+    {
+      output: "Workflow Map Studio",
+      readiness: workflowMapStudio.summary.stepCount ? "Ready" : "Needs workflow steps",
+      status: `${workflowMapStudio.summary.nodeCount} nodes / ${workflowMapStudio.summary.edgeCount} edges`,
+      contractId: "workflow-map-studio",
+      route: "Product / Engineering Handoff",
+      owner: "Product / Solution Builder",
+      format: "DOCX / Markdown / Mermaid / JSON / Excel sheet",
+      packageFile: "workflow-map-studio.json",
+      packageFiles: "workflow-map-studio.json; workflow-map-studio.md; workflow-map-studio.mmd; workflow-map-studio.docx; workflow-map-studio-rows.json",
+      workbookSheet: "Workflow Map Studio",
+      outputSurfaces: "Workbook sheet; Package JSON; Package Markdown; Package DOCX; Mermaid source",
+      sourceOfTruth: "Workflow nodes and edges derived from captured steps, data, systems, decisions, output, and reviewer notes",
+      supplementLater: "No",
+      nextAction: "Confirm map order, data sources, system access, and review gates before connector work."
+    },
+    {
+      output: "Add-On Provider Plan",
+      readiness: `${addOnProviderPlan.summary?.optionalProvidersConfigured || 0} optional configured`,
+      status: addOnProviderPlan.mode,
+      contractId: "add-on-provider-plan",
+      route: "Enterprise Add-ons",
+      owner: "AI Engineering / Platform owner",
+      format: "DOCX / Markdown / JSON / Excel sheet",
+      packageFile: "add-on-provider-plan.json",
+      packageFiles: "add-on-provider-plan.json; add-on-provider-plan.md; add-on-provider-plan.docx; add-on-provider-plan-rows.json",
+      workbookSheet: "Add-On Provider Plan",
+      outputSurfaces: "Workbook sheet; Package JSON; Package Markdown; Package DOCX",
+      sourceOfTruth: "Provider readiness registry for OpenAI-native features and optional voice, OCR, privacy, visualization, and observability services",
+      supplementLater: "No",
+      nextAction: "Turn on non-OpenAI providers only after enterprise approval and safe-sample validation."
+    },
+    {
+      output: "Reviewer One-Page Summary",
+      readiness: `${reviewerOnePage.readiness}%`,
+      status: reviewerOnePage.decision,
+      contractId: "reviewer-one-page-summary",
+      route: "Reviewer Handoff",
+      owner: "Product / Engineering / Coworker reviewer",
+      format: "DOCX / Markdown / JSON / Excel sheet",
+      packageFile: "reviewer-one-page-summary.json",
+      packageFiles: "reviewer-one-page-summary.json; reviewer-one-page-summary.md; reviewer-one-page-summary.docx; reviewer-one-page-summary-rows.json",
+      workbookSheet: "Reviewer One Page",
+      outputSurfaces: "Workbook sheet; Package JSON; Package Markdown; Package DOCX",
+      sourceOfTruth: "Brief overview of app purpose, current MVP status, recommended build route, next decisions, controls, and package files to review",
+      supplementLater: "No",
+      nextAction: "Use this as the short read-ahead for coworkers or a new Codex chat."
     },
     {
       output: "Solution Capability Plan",
@@ -11250,6 +11698,12 @@ function deriveSolutionBuildRecipe(productBrief = deriveProductBrief(), engineer
       templateField("Microsoft Copilot role in solution", route.copilotMode, "", { inferred: true, ownerRoute: "Solution Build" }),
       templateField("Enterprise build posture", route.enterprisePosture, "", { inferred: true, ownerRoute: "Engineering", treatment: "Validate before enterprise build" })
     ]),
+    templateSection("Advanced Agent Build Options", [
+      templateField("Recommended build surfaces", agentBuildOptionSummary(route), "", { inferred: true, ownerRoute: "Solution Build", treatment: "Choose first build surface" }),
+      templateField("First build recommendation", "Start with a Custom GPT / ChatGPT project using safe sample evidence, then promote to ChatGPT tools, Agents SDK, Microsoft 365 Copilot, or a custom app only when the pilot proves the need.", "", { inferred: true, ownerRoute: "Product / Engineering", treatment: "Use as build sequence" }),
+      templateField("Add-on provider posture", addOnProviderPlanMarkdown(deriveAddOnProviderPlan()).split("\n").slice(0, 10).join("\n"), "", { inferred: true, ownerRoute: "Engineering", treatment: "Provider approval gates" }),
+      templateField("Workflow map handoff", "Use Workflow Map Studio to validate activities, data, systems, decisions, handoffs, and approvals before building connectors or agents.", "", { inferred: true, ownerRoute: "Product / Engineering", treatment: "Review map before build" })
+    ]),
     templateSection("ChatGPT Build Path", [
       templateField("ChatGPT implementation surface", chatGptImplementationSurface(route), "", { inferred: true, ownerRoute: "Solution Build" }),
       templateField("Core ChatGPT instructions", chatGptCoreInstructions(), "", { inferred: true, ownerRoute: "Solution Build", treatment: "Use as starter instructions" }),
@@ -11406,6 +11860,372 @@ function solutionM365WorkflowSignalText() {
     ...state.steps.flatMap((step) => [step.tool, step.accessMode, step.input, step.output, step.handoff]),
     ...state.data.flatMap((item) => [item.source, item.format, item.usage])
   ].join(" ").toLowerCase();
+}
+
+function agentBuildOptionsForRoute(route = solutionBuildRoute()) {
+  const workflow = state.fields.workflowName || state.fields.submittedWorkflowTask || "this workflow";
+  const sourceInputs = dataSourcesSummary();
+  const outputContract = mvpOutputContractSummary();
+  const humanGate = humanReviewGateSummary();
+  const needsMicrosoft = /microsoft|hybrid/i.test(route.routeType);
+  const needsActions = /hybrid|agent/i.test(route.routeType);
+  return [
+    {
+      id: "chatgpt-custom-gpt",
+      label: "Custom GPT / ChatGPT project",
+      fit: needsActions ? "Best first prototype" : "Recommended MVP start",
+      buildSurface: "ChatGPT Enterprise project or GPT-style workspace",
+      whenToUse: "Use when users can upload approved files or paste context and need a guided assistant before enterprise connectors are approved.",
+      capabilities: ["Instructions", "Knowledge files", "File upload", "Vision over screenshots", "Data analysis/code interpreter where approved", "Human review prompts"],
+      dataInputs: [sourceInputs, "Approved SOPs, templates, decks, trackers, safe sample PDFs/screenshots"].filter(isCapturedValue),
+      humanCheckpoints: [humanGate, "Reviewer approves output before client-facing or system-of-record use"],
+      enterpriseControls: ["Use approved workspace", "Avoid raw sensitive data until approved", "Keep source list and reviewer decision in the package"],
+      buildSteps: [
+        `Create a ChatGPT workspace for ${workflow}.`,
+        "Paste the Role instruction, Run prompt, Reviewer prompt, and Escalation prompt from the Solution Build Recipe.",
+        "Upload only approved sample artifacts or attach sanitized examples.",
+        "Run 3-5 pilot examples and capture failures in the reviewer decision summary."
+      ],
+      outputContract
+    },
+    {
+      id: "chatgpt-agent-tools",
+      label: "ChatGPT agent with tools",
+      fit: needsActions ? "Strong candidate after pilot proof" : "Later hardening",
+      buildSurface: "OpenAI Responses API tool workflow or ChatGPT tool/action path",
+      whenToUse: "Use when the assistant must retrieve approved context, call narrow functions, or prepare structured outputs repeatedly.",
+      capabilities: ["Responses API", "Structured outputs", "Function/tool calls", "File search or approved retrieval", "Human-confirmed actions"],
+      dataInputs: [sourceInputs, "Approved API or MCP-accessible sources after security review"].filter(isCapturedValue),
+      humanCheckpoints: ["Tool calls stay read-only until write/action approvals exist", humanGate],
+      enterpriseControls: ["Tool schemas are strict", "Actions log source, prompt version, reviewer, and output", "Writeback requires explicit confirmation"],
+      buildSteps: [
+        "Turn the workflow steps into strict tool contracts.",
+        "Start with retrieval and analysis tools only.",
+        "Add structured output schemas for the agreed deliverable.",
+        "Add write/action tools only after approval gates are signed."
+      ],
+      outputContract
+    },
+    {
+      id: "openai-agents-sdk-app",
+      label: "OpenAI Agents SDK app",
+      fit: needsActions ? "Best custom app route" : "Use if workflow becomes multi-role or high-volume",
+      buildSurface: "Small web app or service using OpenAI Agents SDK",
+      whenToUse: "Use when the work needs routing across specialist agents, persistent state, evals, or a controlled enterprise UI.",
+      capabilities: ["Triage agent", "Specialist agents", "Tool handoffs", "Tracing/evals", "Voice pipeline option", "Approval checkpoints"],
+      dataInputs: [sourceInputs, "Approved connectors or local evidence store", "Test transcripts and reviewer examples"].filter(isCapturedValue),
+      humanCheckpoints: ["Domain owner signs prompt behavior", "Engineering signs auth/logging", "Governance signs data boundary"],
+      enterpriseControls: ["Role-based access", "Audit log", "Eval set before release", "Secrets managed outside the repo"],
+      buildSteps: [
+        "Create triage, evidence, workflow-map, solution-recipe, and reviewer agents.",
+        "Give each agent narrow tools and explicit handoff criteria.",
+        "Run evals against the sample cases and captured sessions.",
+        "Deploy only after package doctor and enterprise approval checks pass."
+      ],
+      outputContract
+    },
+    {
+      id: "microsoft-copilot-agent",
+      label: "Microsoft 365 Copilot / Copilot Studio agent",
+      fit: needsMicrosoft ? "Primary enterprise route" : "Optional Office collaboration route",
+      buildSurface: "Microsoft 365 Copilot, Copilot Studio, Graph/custom connector path",
+      whenToUse: "Use when the workflow lives in SharePoint, OneDrive, Teams, Outlook, Word, PowerPoint, or Excel and users need tenant-governed access.",
+      capabilities: ["Microsoft 365 grounding", "SharePoint/OneDrive content", "Copilot Studio topics/actions", "Graph or connector contracts after approval"],
+      dataInputs: [microsoft365SurfaceSummary(), microsoft365SourceLocationSummary(), "Approved Microsoft 365 folders and output destinations"].filter(isCapturedValue),
+      humanCheckpoints: ["Tenant admin confirms app registration and scopes", "Source owner confirms content locations", humanGate],
+      enterpriseControls: ["Inherited user permissions", "Least-privilege scopes", "Read-first pilot", "No broad tenant search without approval"],
+      buildSteps: [
+        "Confirm the exact Microsoft 365 source locations and output destinations.",
+        "Pilot read-only grounded prompts against safe samples.",
+        "Turn repeated paths into Copilot Studio topics/actions only after validation.",
+        "Use the enterprise connector contracts for any Graph/custom connector work."
+      ],
+      outputContract
+    },
+    {
+      id: "full-custom-app",
+      label: "Full custom app",
+      fit: needsActions && !needsMicrosoft ? "Later enterprise product route" : "Use after MVP proves demand",
+      buildSurface: "Custom web app, API backend, approved database/storage, OpenAI Responses/Agents integration",
+      whenToUse: "Use when the workflow needs custom roles, queueing, governed storage, dashboards, connectors, or repeatable production operations.",
+      capabilities: ["Custom UI", "Evidence store", "Workflow map editor", "Connector orchestration", "Audit trail", "Admin controls"],
+      dataInputs: [sourceInputs, "Approved storage and identity provider", "Connector contracts and eval sets"].filter(isCapturedValue),
+      humanCheckpoints: ["Product PDR approved", "Engineering brief approved", "Security/governance inputs approved", "Pilot metrics met"],
+      enterpriseControls: ["SSO/RBAC", "Secrets manager", "Logging/monitoring", "Data retention", "CI/CD and package doctor checks"],
+      buildSteps: [
+        "Promote the MVP requirements into a formal PDR and engineering brief.",
+        "Build the smallest app surface that captures evidence, runs analysis, and produces reviewed outputs.",
+        "Integrate connectors one by one with approval gates.",
+        "Add admin/release controls after pilot adoption is proven."
+      ],
+      outputContract
+    }
+  ];
+}
+
+function agentBuildOptionSummary(route = solutionBuildRoute()) {
+  return agentBuildOptionsForRoute(route)
+    .map((option) => `${option.label}: ${option.fit}; use when ${option.whenToUse}`)
+    .join("\n");
+}
+
+function deriveAddOnProviderPlan(status = getAddOnProviderStatus()) {
+  const groups = addOnProviderGroups(status).map(([category, items]) => ({
+    category,
+    providers: items.map((provider) => ({
+      id: provider.id,
+      label: provider.label,
+      provider: provider.provider,
+      status: addOnStatusLabel(provider),
+      configured: Boolean(provider.configured),
+      defaultUse: provider.defaultUse,
+      purpose: provider.purpose,
+      envVars: provider.envVars || [],
+      enterpriseGate: provider.enterpriseGate,
+      setup: provider.setup || [],
+      blockedUntil: provider.blockedUntil || [],
+      surfaces: provider.surfaces || []
+    }))
+  }));
+  return {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    mode: status.mode || "local",
+    summary: status.summary || {},
+    rolloutPath: recommendedAddOnRolloutPath(status),
+    groups,
+    providers: status.providers || [],
+    guardrails: [
+      "Keep OpenAI-native functionality as the default MVP path.",
+      "Treat non-OpenAI providers as optional add-ons until procurement, security, and data-handling reviews are complete.",
+      "Never commit provider keys or local .env files to GitHub.",
+      "Use safe sample or sanitized evidence before client or regulated data."
+    ]
+  };
+}
+
+function addOnProviderPlanRows(plan = deriveAddOnProviderPlan()) {
+  return [
+    ["Category", "Provider ID", "Label", "Provider", "Status", "Default Use", "Purpose", "Env Vars", "Enterprise Gate", "Setup", "Blocked Until", "Surfaces"],
+    ...plan.groups.flatMap((group) =>
+      group.providers.map((provider) => [
+        group.category,
+        provider.id,
+        provider.label,
+        provider.provider,
+        provider.status,
+        provider.defaultUse,
+        provider.purpose,
+        (provider.envVars || []).join("\n"),
+        provider.enterpriseGate,
+        (provider.setup || []).join("\n"),
+        (provider.blockedUntil || []).join("\n"),
+        (provider.surfaces || []).join("\n")
+      ])
+    )
+  ];
+}
+
+function addOnProviderPlanMarkdown(plan = deriveAddOnProviderPlan()) {
+  return [
+    "# Add-On Provider Plan",
+    "",
+    `Mode: ${plan.mode}`,
+    "",
+    "## Recommended Rollout",
+    ...plan.rolloutPath.map((item) => `- Phase ${item.phase}: ${item.action} ${item.reason}`),
+    "",
+    "## Provider Groups",
+    ...plan.groups.flatMap((group) => [
+      `### ${group.category}`,
+      ...group.providers.map((provider) => `- ${provider.label} (${provider.provider}): ${provider.status}. Gate: ${provider.enterpriseGate}`)
+    ]),
+    "",
+    "## Guardrails",
+    ...plan.guardrails.map((item) => `- ${item}`)
+  ].join("\n");
+}
+
+function deriveAgentBuildPack(solutionBuildSpec = null) {
+  const route = solutionBuildSpec?.route || solutionBuildRoute();
+  const workflow = solutionBuildSpec?.workflow || state.fields.workflowName || state.fields.submittedWorkflowTask || "Unnamed workflow";
+  const options = agentBuildOptionsForRoute(route);
+  return {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    workflow,
+    recommendedRoute: route.label,
+    routeType: route.routeType,
+    routeRationale: route.why,
+    recommendedPrimary: options[0],
+    buildOptions: options,
+    recommendedSequence: [
+      "Start with the Custom GPT / ChatGPT project route using safe sample inputs.",
+      "Use the Workflow Map Studio output to confirm steps, data, systems, decisions, handoffs, and reviewer gates.",
+      "Promote repeated retrieval/action needs into a ChatGPT tool or Agents SDK app only after the pilot works.",
+      "Use Microsoft 365 Copilot/Copilot Studio when the workflow should live inside the work tenant and Office artifacts.",
+      "Move to a full custom app when the workflow needs production storage, admin controls, dashboards, or multiple enterprise connectors."
+    ],
+    requiredInputs: [
+      "Approved source files or safe sample evidence",
+      "Current-state workflow steps",
+      "Data sensitivity and source-system access assumptions",
+      "Definition of done and output contract",
+      "Human reviewer and escalation rules"
+    ],
+    outputArtifacts: [
+      "Solution Build Recipe",
+      "Workflow Map Studio",
+      "Enterprise Connector Contracts",
+      "Reviewer One-Page Summary",
+      "Test Script and Acceptance Criteria"
+    ],
+    addOnProviderPlan: deriveAddOnProviderPlan()
+  };
+}
+
+function agentBuildPackRows(pack = deriveAgentBuildPack()) {
+  return [
+    ["Area", "ID", "Label", "Fit", "Build Surface", "When To Use", "Capabilities", "Data Inputs", "Human Checkpoints", "Enterprise Controls", "Build Steps", "Output Contract"],
+    ["Summary", "route", pack.recommendedRoute, pack.routeType, "", pack.routeRationale, "", "", "", "", pack.recommendedSequence.join("\n"), ""],
+    ...pack.buildOptions.map((option) => [
+      "Build Option",
+      option.id,
+      option.label,
+      option.fit,
+      option.buildSurface,
+      option.whenToUse,
+      (option.capabilities || []).join("\n"),
+      (option.dataInputs || []).join("\n"),
+      (option.humanCheckpoints || []).join("\n"),
+      (option.enterpriseControls || []).join("\n"),
+      (option.buildSteps || []).join("\n"),
+      option.outputContract
+    ])
+  ];
+}
+
+function agentBuildPackMarkdown(pack = deriveAgentBuildPack()) {
+  return [
+    `# ${pack.workflow} Agent Build Pack`,
+    "",
+    "## Recommended Route",
+    `${pack.recommendedRoute} (${pack.routeType})`,
+    "",
+    pack.routeRationale,
+    "",
+    "## Recommended Sequence",
+    ...pack.recommendedSequence.map((item, index) => `${index + 1}. ${item}`),
+    "",
+    "## Build Options",
+    ...pack.buildOptions.flatMap((option) => [
+      `### ${option.label}`,
+      `- Fit: ${option.fit}`,
+      `- Build surface: ${option.buildSurface}`,
+      `- When to use: ${option.whenToUse}`,
+      `- Capabilities: ${(option.capabilities || []).join(", ")}`,
+      `- Data inputs: ${(option.dataInputs || []).join("; ")}`,
+      `- Human checkpoints: ${(option.humanCheckpoints || []).join("; ")}`,
+      `- Enterprise controls: ${(option.enterpriseControls || []).join("; ")}`,
+      "",
+      "Build steps:",
+      ...(option.buildSteps || []).map((step, index) => `${index + 1}. ${step}`),
+      ""
+    ]),
+    "## Required Inputs",
+    ...pack.requiredInputs.map((item) => `- ${item}`),
+    "",
+    "## Output Artifacts",
+    ...pack.outputArtifacts.map((item) => `- ${item}`)
+  ].join("\n");
+}
+
+function deriveReviewerOnePageSummary() {
+  const review = buildReviewGate();
+  const route = solutionBuildRoute();
+  const map = deriveWorkflowMapStudio();
+  const addOnPlan = deriveAddOnProviderPlan();
+  const summary = {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    title: state.fields.workflowName || state.fields.submittedWorkflowTask || state.sessionMeta?.name || "AI Workflow Discovery Studio review",
+    decision: review.label,
+    readiness: review.overall,
+    whatThisAppDoes: [
+      "Captures a consulting workflow by typed notes, voice/dictation, and optional attachments.",
+      "Structures the workflow into steps, data, systems, decisions, risks, handoffs, and open questions.",
+      "Generates Product, Engineering, Business, Governance, Solution Build, Connector, Enterprise Readiness, and Reviewer package outputs.",
+      "Keeps add-on providers behind status/configuration gates so the MVP runs locally with the approved OpenAI key."
+    ],
+    currentMvpStatus: [
+      `${map.summary.stepCount} workflow steps captured`,
+      `${map.summary.dataCount} data sources captured`,
+      `${map.summary.systemCount} systems captured`,
+      `${review.completionQuestions.length} top completion questions`,
+      `${addOnPlan.summary?.optionalProvidersConfigured || 0} optional providers configured`
+    ],
+    recommendedBuildRoute: route.label,
+    nextDecisions: [
+      "Confirm the workflow map and definition of done.",
+      "Choose the first build surface: ChatGPT project, ChatGPT agent, Agents SDK app, Microsoft 365 Copilot, or custom app.",
+      "Approve safe evidence/data boundaries before using client-sensitive files.",
+      "Run the pilot test script and capture reviewer decisions before connector work."
+    ],
+    risksAndControls: [
+      solutionDataMinimizationControl(),
+      solutionAuditTrailControl(),
+      solutionWritebackBoundary(route),
+      humanReviewGateSummary()
+    ],
+    packageFilesToReview: [
+      "solution-build-recipe.md",
+      "agent-build-pack.md",
+      "workflow-map-studio.md",
+      "add-on-provider-plan.md",
+      "enterprise-connector-contracts.md",
+      "reviewer-one-page-summary.md"
+    ]
+  };
+  summary.markdown = reviewerOnePageMarkdown(summary);
+  return summary;
+}
+
+function reviewerOnePageRows(summary = deriveReviewerOnePageSummary()) {
+  return [
+    ["Section", "Item"],
+    ["Title", summary.title],
+    ["Readiness", `${summary.readiness}% - ${summary.decision}`],
+    ["Recommended Build Route", summary.recommendedBuildRoute],
+    ...summary.whatThisAppDoes.map((item) => ["What this app does", item]),
+    ...summary.currentMvpStatus.map((item) => ["Current MVP status", item]),
+    ...summary.nextDecisions.map((item) => ["Next decision", item]),
+    ...summary.risksAndControls.map((item) => ["Risk/control", item]),
+    ...summary.packageFilesToReview.map((item) => ["Package file", item])
+  ];
+}
+
+function reviewerOnePageMarkdown(summary = {}) {
+  return [
+    `# ${summary.title || "AI Workflow Discovery Studio review"}`,
+    "",
+    `Readiness: ${summary.readiness || 0}% - ${summary.decision || "Review needed"}`,
+    `Recommended build route: ${summary.recommendedBuildRoute || "TBD"}`,
+    "",
+    "## What This App Does",
+    ...(summary.whatThisAppDoes || []).map((item) => `- ${item}`),
+    "",
+    "## Current MVP Status",
+    ...(summary.currentMvpStatus || []).map((item) => `- ${item}`),
+    "",
+    "## Next Decisions",
+    ...(summary.nextDecisions || []).map((item) => `- ${item}`),
+    "",
+    "## Risks And Controls",
+    ...(summary.risksAndControls || []).map((item) => `- ${item}`),
+    "",
+    "## Package Files To Review",
+    ...(summary.packageFilesToReview || []).map((item) => `- ${item}`)
+  ].join("\n");
 }
 
 function solutionRouteConfidence(signals = []) {
@@ -12144,6 +12964,9 @@ function deriveSolutionBuildSpec(solutionBuildRecipe = deriveSolutionBuildRecipe
     capabilityPlan: deriveSolutionCapabilityPlan({ workflow, readiness: solutionBuildRecipe.readiness, route })
   };
   spec.executionPlan = deriveSolutionExecutionPlan(spec);
+  spec.workflowMapStudio = deriveWorkflowMapStudio();
+  spec.addOnProviderPlan = deriveAddOnProviderPlan();
+  spec.agentBuildPack = deriveAgentBuildPack(spec);
   return spec;
 }
 
@@ -14501,6 +15324,13 @@ function solutionBuildSpecRows(solutionBuildSpec = deriveSolutionBuildSpec()) {
     ["Route", "Recommended route", solutionBuildSpec.route.label, "Solution Builder / AI Engineering", solutionBuildSpec.route.routeType],
     ["Route", "Why this route", solutionBuildSpec.route.why, "Solution Builder / AI Engineering", solutionBuildSpec.route.confidence],
     ["Route", "Next action", solutionBuildSpec.route.nextAction, "Solution Builder / AI Engineering", "Next"],
+    ...((solutionBuildSpec.agentBuildPack?.buildOptions || []).map((option) => [
+      "Agent Build Option",
+      option.id,
+      `${option.label}\nSurface: ${option.buildSurface}\nWhen to use: ${option.whenToUse}`,
+      "Solution Builder / AI Engineering",
+      option.fit
+    ])),
     ...solutionBuildSpec.platforms.flatMap((platform) => [
       ["Platform", `${platform.label} surface`, platform.implementationSurface, platform.label, "Implementation surface"],
       ["Platform", `${platform.label} responsibilities`, platform.responsibilities.join("\n"), platform.label, "Responsibilities"],
@@ -18851,6 +19681,250 @@ function renderEvidenceReviewPanel() {
   refreshIcons();
 }
 
+function buildFallbackAddOnProviderStatus() {
+  return {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    mode: "local",
+    summary: {
+      openAiCoreConfigured: aiAvailable,
+      realtimeConfigured: realtimeAvailable,
+      transcriptionConfigured: transcriptionAvailable,
+      optionalProvidersConfigured: 0
+    },
+    providers: [
+      {
+        id: "openai-responses",
+        label: "OpenAI Responses API",
+        category: "Core reasoning",
+        provider: "OpenAI",
+        purpose: "Structured workflow analysis, native tool planning, multimodal reasoning, and agent-ready recipe generation.",
+        status: aiAvailable ? "configured" : "needs-setup",
+        configured: aiAvailable,
+        defaultUse: "native",
+        enterpriseGate: "Use existing enterprise OpenAI approval path.",
+        envVars: ["OPENAI_API_KEY", "EXTRACTION_MODEL"],
+        surfaces: ["Analyze Answer", "Analyze attachments", "Solution Build Recipe", "Agent Build Pack"],
+        setup: ["Reuse the local OpenAI key already configured for this app.", "Move to enterprise-managed key and retention settings at work."]
+      },
+      {
+        id: "openai-realtime",
+        label: "OpenAI Realtime voice",
+        category: "Voice capture",
+        provider: "OpenAI",
+        purpose: "Low-latency spoken workflow intake and spoken clarifying questions.",
+        status: realtimeAvailable ? "configured" : "needs-setup",
+        configured: realtimeAvailable,
+        defaultUse: "native",
+        enterpriseGate: "Pilot with safe sample workflows before client data.",
+        envVars: ["OPENAI_API_KEY", "REALTIME_MODEL", "REALTIME_VOICE"],
+        surfaces: ["AI Voice On", "Discovery interview"],
+        setup: ["Confirm browser microphone permissions.", "Use safe sample recordings for enterprise testing."]
+      },
+      {
+        id: "openai-transcription",
+        label: "OpenAI transcription",
+        category: "Voice capture",
+        provider: "OpenAI",
+        purpose: "Post-turn audio transcription for dictated workflow notes.",
+        status: transcriptionAvailable ? "configured" : "needs-setup",
+        configured: transcriptionAvailable,
+        defaultUse: "native",
+        enterpriseGate: "Pilot with approved transcript data.",
+        envVars: ["OPENAI_API_KEY", "TRANSCRIPTION_MODEL"],
+        surfaces: ["Dictate", "Stop", "Text Intake"],
+        setup: ["Keep microphone permissions enabled.", "Validate finance vocabulary transcription quality."]
+      },
+      ...fallbackOptionalProviders()
+    ]
+  };
+}
+
+function fallbackOptionalProviders() {
+  return [
+    ["elevenlabs-voice", "ElevenLabs voice output", "Voice narration", "ElevenLabs", "Optional narrated summaries and reviewer walkthroughs.", ["ELEVENLABS_API_KEY"]],
+    ["fish-audio-voice", "Fish Audio voice output", "Voice narration", "Fish Audio", "Optional voice generation alternative for training and playback.", ["FISH_AUDIO_API_KEY"]],
+    ["deepgram-stt", "Deepgram speech-to-text", "Voice capture", "Deepgram", "Optional long-form interview transcription, diarization, and vocabulary tuning.", ["DEEPGRAM_API_KEY"]],
+    ["assemblyai-stt", "AssemblyAI speech intelligence", "Voice capture", "AssemblyAI", "Optional transcript intelligence for long meetings and topic extraction.", ["ASSEMBLYAI_API_KEY"]],
+    ["azure-document-intelligence", "Azure Document Intelligence", "Document intelligence", "Microsoft Azure", "Enterprise OCR/layout extraction for PDFs, screenshots, scanned forms, and finance artifacts.", ["AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT", "AZURE_DOCUMENT_INTELLIGENCE_KEY"]],
+    ["llamaparse", "LlamaParse document extraction", "Document intelligence", "LlamaIndex", "Optional complex PDF/table extraction for messy consulting artifacts.", ["LLAMAPARSE_API_KEY"]],
+    ["mistral-ocr", "Mistral OCR", "Document intelligence", "Mistral AI", "Optional OCR/document parsing path for image-heavy PDFs and screenshots.", ["MISTRAL_API_KEY"]],
+    ["presidio-pii", "Microsoft Presidio PII review", "Privacy and controls", "Microsoft / Presidio", "Optional PII detection and redaction before evidence is analyzed or shared.", ["PRESIDIO_ENDPOINT"]],
+    ["azure-ai-language-pii", "Azure AI Language PII", "Privacy and controls", "Microsoft Azure", "Optional managed PII entity detection for enterprise Microsoft environments.", ["AZURE_AI_LANGUAGE_ENDPOINT", "AZURE_AI_LANGUAGE_KEY"]],
+    ["mermaid-workflow-map", "Mermaid workflow map", "Workflow visualization", "Local app", "Included visual process mapping for steps, data, systems, decisions, handoffs, and approvals.", []],
+    ["braintrust-evals", "Braintrust evals", "Evaluation and observability", "Braintrust", "Optional regression evaluation and quality dashboards for extraction and recipe quality.", ["BRAINTRUST_API_KEY"]],
+    ["langfuse-tracing", "Langfuse tracing", "Evaluation and observability", "Langfuse", "Optional tracing and prompt/version observability for enterprise pilots.", ["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"]]
+  ].map(([id, label, category, provider, purpose, envVars]) => ({
+    id,
+    label,
+    category,
+    provider,
+    purpose,
+    status: id === "mermaid-workflow-map" ? "included" : "needs-setup",
+    configured: id === "mermaid-workflow-map",
+    defaultUse: id === "mermaid-workflow-map" ? "native" : "optional",
+    enterpriseGate: id === "mermaid-workflow-map" ? "No external approval required." : "Approval required before production use.",
+    envVars,
+    surfaces: ["Operator Add-ons", "Solution Build Recipe", "Review Package"],
+    setup: id === "mermaid-workflow-map"
+      ? ["No external account required.", "Export Mermaid source with the review package."]
+      : ["Add keys only after procurement, security, and data-handling approval.", "Pilot with synthetic or sanitized sample evidence before client data."],
+    blockedUntil: id === "mermaid-workflow-map" ? [] : ["Vendor approval", "Data handling review", "Pilot evidence"]
+  }));
+}
+
+function getAddOnProviderStatus() {
+  return addOnProviderStatus || buildFallbackAddOnProviderStatus();
+}
+
+function addOnProviderGroups(status = getAddOnProviderStatus()) {
+  const groups = new Map();
+  (status.providers || []).forEach((provider) => {
+    const category = provider.category || "Other";
+    if (!groups.has(category)) groups.set(category, []);
+    groups.get(category).push(provider);
+  });
+  return [...groups.entries()];
+}
+
+function renderOperatorAddOnsPanel() {
+  if (!els.operatorAddOnsPanel) return;
+  const status = getAddOnProviderStatus();
+  const providers = status.providers || [];
+  const configured = providers.filter((provider) => provider.configured || provider.status === "included").length;
+  const optional = providers.filter((provider) => provider.defaultUse !== "native" && provider.status !== "included").length;
+  const pending = providers.filter((provider) => !provider.configured && provider.status !== "included").length;
+  const recommended = recommendedAddOnRolloutPath(status);
+  els.operatorAddOnsPanel.innerHTML = `
+    <section class="addons-hero">
+      <div>
+        <p class="eyebrow">Add-on architecture</p>
+        <h3>OpenAI-native first, provider add-ons behind approval gates</h3>
+        <p>The app can already capture typed, spoken, and uploaded workflow evidence. These provider contracts show what can be turned on next without making the MVP depend on unapproved vendors.</p>
+      </div>
+      <div class="addons-score-grid">
+        ${addOnMetric("Active", configured, "check-circle-2")}
+        ${addOnMetric("Optional", optional, "plug-zap")}
+        ${addOnMetric("Needs setup", pending, "circle-alert")}
+      </div>
+    </section>
+    <section class="addons-next-steps">
+      <div>
+        <p class="eyebrow">Recommended rollout</p>
+        <h3>Next enterprise sequence</h3>
+      </div>
+      <ol>
+        ${recommended.map((item) => `<li><span>${escapeHtml(item.phase)}</span><strong>${escapeHtml(item.action)}</strong><p>${escapeHtml(item.reason)}</p></li>`).join("")}
+      </ol>
+    </section>
+    <div class="addons-provider-groups">
+      ${addOnProviderGroups(status).map(([category, items]) => `
+        <section class="addons-provider-group">
+          <div class="addons-group-heading">
+            <div>
+              <p class="eyebrow">${escapeHtml(category)}</p>
+              <h3>${items.length} provider${items.length === 1 ? "" : "s"}</h3>
+            </div>
+          </div>
+          <div class="addons-provider-grid">
+            ${items.map(addOnProviderCard).join("")}
+          </div>
+        </section>
+      `).join("")}
+    </div>
+  `;
+  refreshIcons();
+}
+
+function addOnMetric(label, value, icon) {
+  return `
+    <div class="addon-metric">
+      <i data-lucide="${escapeHtml(icon)}"></i>
+      <strong>${escapeHtml(value)}</strong>
+      <span>${escapeHtml(label)}</span>
+    </div>
+  `;
+}
+
+function addOnProviderCard(provider) {
+  const tone = addOnStatusTone(provider);
+  const envVars = Array.isArray(provider.envVars) ? provider.envVars : [];
+  const surfaces = Array.isArray(provider.surfaces) ? provider.surfaces : [];
+  const setup = Array.isArray(provider.setup) ? provider.setup : [];
+  const blockedUntil = Array.isArray(provider.blockedUntil) ? provider.blockedUntil : [];
+  return `
+    <article class="addon-provider-card ${tone}">
+      <div class="addon-card-top">
+        <div>
+          <span>${escapeHtml(provider.provider || "Provider")}</span>
+          <strong>${escapeHtml(provider.label || provider.id || "Provider")}</strong>
+        </div>
+        <em>${escapeHtml(addOnStatusLabel(provider))}</em>
+      </div>
+      <p>${escapeHtml(provider.purpose || "Optional provider contract.")}</p>
+      <div class="addon-chip-row">
+        ${envVars.length ? envVars.map((envVar) => `<code>${escapeHtml(envVar)}</code>`).join("") : "<code>No key</code>"}
+      </div>
+      <div class="addon-detail-grid">
+        <div>
+          <span>Surfaces</span>
+          <p>${escapeHtml(surfaces.slice(0, 3).join(", ") || "Planning only")}</p>
+        </div>
+        <div>
+          <span>Gate</span>
+          <p>${escapeHtml(provider.enterpriseGate || "Approval required before production use")}</p>
+        </div>
+      </div>
+      <ul>
+        ${(setup.length ? setup : ["Define enterprise owner before enabling."]).slice(0, 2).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        ${blockedUntil.length ? `<li>Blocked until: ${escapeHtml(blockedUntil.slice(0, 3).join(", "))}</li>` : ""}
+      </ul>
+    </article>
+  `;
+}
+
+function addOnStatusTone(provider) {
+  if (provider.configured) return "configured";
+  if (provider.status === "included" || provider.defaultUse === "native") return "included";
+  return "needs-setup";
+}
+
+function addOnStatusLabel(provider) {
+  if (provider.configured) return "Configured";
+  if (provider.status === "included") return "Included";
+  if (provider.defaultUse === "native") return "Native";
+  return "Needs setup";
+}
+
+function recommendedAddOnRolloutPath(status = getAddOnProviderStatus()) {
+  const providers = status.providers || [];
+  const hasOpenAi = providers.some((provider) => provider.id === "openai-responses" && provider.configured);
+  const hasDocIntel = providers.some((provider) => ["azure-document-intelligence", "llamaparse", "mistral-ocr"].includes(provider.id) && provider.configured);
+  const hasPrivacy = providers.some((provider) => ["presidio-pii", "azure-ai-language-pii"].includes(provider.id) && provider.configured);
+  return [
+    {
+      phase: "1",
+      action: hasOpenAi ? "Use current OpenAI intake and extraction as the default path." : "Finish OpenAI API setup before enabling AI extraction.",
+      reason: "OpenAI-native capture, transcription, and workflow reasoning keep the MVP small and controllable."
+    },
+    {
+      phase: "2",
+      action: hasDocIntel ? "Benchmark document extraction against uploaded PDFs, DOCX, XLSX, and screenshots." : "Add enterprise document intelligence after the work tenant approves it.",
+      reason: "Consulting workflows often arrive as decks, trackers, SOPs, and screenshots; better extraction improves the recipe and workflow map."
+    },
+    {
+      phase: "3",
+      action: hasPrivacy ? "Run evidence through PII/privacy checks before package export." : "Choose a PII review path before using client-sensitive artifacts.",
+      reason: "The app should make evidence useful while keeping client, employee, and regulated data reviewable."
+    },
+    {
+      phase: "4",
+      action: "Add evals/tracing only after pilot criteria are stable.",
+      reason: "Observability is most useful once there are repeatable test transcripts and reviewer scoring rubrics."
+    }
+  ];
+}
+
 function renderEvidenceWorkbench() {
   if (!els.evidenceWorkbench) return;
   const artifacts = state.evidenceArtifacts || [];
@@ -20589,6 +21663,9 @@ function exportWorkbook() {
   const governanceBrief = deriveGovernanceBrief();
   const solutionBuildRecipe = deriveSolutionBuildRecipe(productBrief, engineeringBrief, businessBrief);
   const solutionBuildSpec = deriveSolutionBuildSpec(solutionBuildRecipe);
+  const workflowMapStudio = solutionBuildSpec.workflowMapStudio || deriveWorkflowMapStudio();
+  const addOnProviderPlan = solutionBuildSpec.addOnProviderPlan || deriveAddOnProviderPlan();
+  const agentBuildPack = solutionBuildSpec.agentBuildPack || deriveAgentBuildPack(solutionBuildSpec);
   const solutionCapabilityPlan = deriveSolutionCapabilityPlan(solutionBuildSpec);
   const solutionExecutionPlan = deriveSolutionExecutionPlan(solutionBuildSpec);
   const solutionExecutionBrief = deriveSolutionExecutionBrief(solutionExecutionPlan);
@@ -20632,6 +21709,10 @@ function exportWorkbook() {
   addSheetToWorkbook(wb, "Business Value Template", templateBriefRows(businessBrief));
   addSheetToWorkbook(wb, "Solution Build Recipe", solutionBuildRecipeRows(solutionBuildRecipe));
   addSheetToWorkbook(wb, "Solution Build Spec", solutionBuildSpecRows(solutionBuildSpec));
+  addSheetToWorkbook(wb, "Agent Build Pack", agentBuildPackRows(agentBuildPack));
+  addSheetToWorkbook(wb, "Add-On Provider Plan", addOnProviderPlanRows(addOnProviderPlan));
+  addSheetToWorkbook(wb, "Workflow Map Studio", workflowMapStudioRows(workflowMapStudio));
+  addSheetToWorkbook(wb, "Reviewer One Page", reviewerOnePageRows(reviewerOnePage));
   addSheetToWorkbook(wb, "Solution Capability Plan", solutionCapabilityPlanRows(solutionCapabilityPlan));
   addSheetToWorkbook(wb, "Solution Execution Plan", solutionExecutionPlanRows(solutionExecutionPlan));
   addSheetToWorkbook(wb, "Combined Handoff Packet", combinedHandoffRows(combinedHandoff));
@@ -21478,6 +22559,9 @@ async function createHandoffPackage() {
   const governanceBrief = deriveGovernanceBrief();
   const solutionBuildRecipe = deriveSolutionBuildRecipe(productBrief, engineeringBrief, businessBrief);
   const solutionBuildSpec = deriveSolutionBuildSpec(solutionBuildRecipe);
+  const workflowMapStudio = solutionBuildSpec.workflowMapStudio || deriveWorkflowMapStudio();
+  const addOnProviderPlan = solutionBuildSpec.addOnProviderPlan || deriveAddOnProviderPlan();
+  const agentBuildPack = solutionBuildSpec.agentBuildPack || deriveAgentBuildPack(solutionBuildSpec);
   const solutionCapabilityPlan = deriveSolutionCapabilityPlan(solutionBuildSpec);
   const solutionExecutionPlan = deriveSolutionExecutionPlan(solutionBuildSpec);
   const solutionExecutionBrief = deriveSolutionExecutionBrief(solutionExecutionPlan);
@@ -21493,6 +22577,7 @@ async function createHandoffPackage() {
   const combinedHandoff = deriveCombinedHandoff(productBrief, engineeringBrief, businessBrief, solutionBuildRecipe, solutionExecutionBrief, enterpriseReadinessTemplateBrief);
   const evidenceLinkage = deriveEvidenceLinkageContract();
   const reviewerDecisionSummary = deriveReviewerDecisionSummary();
+  const reviewerOnePage = deriveReviewerOnePageSummary();
   try {
     const payload = await requestJson("/api/packages", {
       method: "POST",
@@ -21508,6 +22593,16 @@ async function createHandoffPackage() {
         solutionBuildRecipeRows: solutionBuildRecipeRows(solutionBuildRecipe),
         solutionBuildSpec,
         solutionBuildSpecRows: solutionBuildSpecRows(solutionBuildSpec),
+        workflowMapStudio,
+        workflowMapStudioRows: workflowMapStudioRows(workflowMapStudio),
+        workflowMapStudioMarkdown: workflowMapStudioMarkdown(workflowMapStudio),
+        workflowMapMermaid: workflowMapStudio.mermaid,
+        addOnProviderPlan,
+        addOnProviderPlanRows: addOnProviderPlanRows(addOnProviderPlan),
+        addOnProviderPlanMarkdown: addOnProviderPlanMarkdown(addOnProviderPlan),
+        agentBuildPack,
+        agentBuildPackRows: agentBuildPackRows(agentBuildPack),
+        agentBuildPackMarkdown: agentBuildPackMarkdown(agentBuildPack),
         solutionCapabilityPlan,
         solutionCapabilityPlanRows: solutionCapabilityPlanRows(solutionCapabilityPlan),
         solutionExecutionPlan,
@@ -21583,6 +22678,9 @@ async function createHandoffPackage() {
         reviewerDecisionSummary,
         reviewerDecisionRows: reviewerDecisionRows(reviewerDecisionSummary),
         reviewerDecisionMarkdown: reviewerDecisionMarkdown(reviewerDecisionSummary),
+        reviewerOnePage,
+        reviewerOnePageRows: reviewerOnePageRows(reviewerOnePage),
+        reviewerOnePageMarkdown: reviewerOnePage.markdown,
         evidenceSummary: evidencePdrSummary(),
         evidenceLinkage,
         evidenceLinkageRows: evidenceLinkageRows(evidenceLinkage),

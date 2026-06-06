@@ -52,10 +52,30 @@ Never commit `.env.local`.
 | `GITHUB_DEFAULT_BRANCH` | Recommended | `main` | Default branch for review workflow references |
 | `GITHUB_ACTIONS_ENABLED` | Optional | `true` | Human-readable flag for enterprise setup status |
 
+## Optional Add-On Provider Values
+
+Leave these blank unless the work environment has approved the vendor, data boundary, retention settings, and secret-management path.
+
+| Variable | Required | Unlocks | Notes |
+| --- | --- | --- | --- |
+| `ELEVENLABS_API_KEY` | Optional | Voice narration | Reviewer walkthrough or training playback after approval |
+| `FISH_AUDIO_API_KEY` | Optional | Voice narration | Alternative generated voice provider after approval |
+| `DEEPGRAM_API_KEY` | Optional | Speech-to-text | Long-form interview transcription, diarization, vocabulary tuning |
+| `ASSEMBLYAI_API_KEY` | Optional | Speech intelligence | Long-form meeting transcript analysis and topic extraction |
+| `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT` | Optional | Document intelligence | Enterprise OCR/layout extraction for PDFs, screenshots, forms, and tables |
+| `AZURE_DOCUMENT_INTELLIGENCE_KEY` | Optional | Document intelligence | Pair with endpoint above; store only in `.env.local` or an approved secret manager |
+| `LLAMAPARSE_API_KEY` | Optional | Document parsing | Complex PDF/table extraction after vendor approval |
+| `MISTRAL_API_KEY` | Optional | OCR/document parsing | Optional OCR path for image-heavy files after vendor approval |
+| `PRESIDIO_ENDPOINT` | Optional | PII review | Approved Presidio endpoint for PII detection/redaction checks |
+| `AZURE_AI_LANGUAGE_ENDPOINT` | Optional | PII review | Managed Azure PII entity detection endpoint |
+| `AZURE_AI_LANGUAGE_KEY` | Optional | PII review | Pair with Azure AI Language endpoint above |
+| `BRAINTRUST_API_KEY` | Optional | Evals | Extraction/recipe regression evaluation after tool approval |
+| `LANGFUSE_PUBLIC_KEY` | Optional | Observability | Pilot tracing after telemetry policy approval |
+| `LANGFUSE_SECRET_KEY` | Optional | Observability | Pair with Langfuse public key; never commit |
+
 ## Local Safety Rules
 
 - Empty values in `.env.example` are intentional.
 - Real values belong only in `.env.local`, GitHub Actions secrets, or an approved enterprise secret manager.
-- The app health endpoint reports configuration booleans, not secret values.
+- The app health endpoint reports configuration booleans and provider names, not secret values.
 - Keep `CONNECTOR_MODE=mock` until the Microsoft 365 connector gate is approved.
-

@@ -240,26 +240,32 @@
                   <strong>Live Session + Library</strong>
                   <p>Current captured data, fields, steps, evidence, and session state.</p>
                 </button>
-                <button class="analysis-zone-card compact" data-workbench-tab="handoff" type="button">
+                <button class="analysis-zone-card compact" data-workbench-tab="addons" type="button">
                   <span>02</span>
+                  <i data-lucide="plug-zap"></i>
+                  <strong>Operator Add-ons</strong>
+                  <p>AI, voice, document, privacy, map, and observability provider gates.</p>
+                </button>
+                <button class="analysis-zone-card compact" data-workbench-tab="handoff" type="button">
+                  <span>03</span>
                   <i data-lucide="list-checks"></i>
                   <strong>Handoff Builder</strong>
                   <p>Convert captured facts into PDR-ready handoff fields.</p>
                 </button>
                 <button class="analysis-zone-card compact" data-workbench-tab="inspector" type="button">
-                  <span>03</span>
+                  <span>04</span>
                   <i data-lucide="panel-right"></i>
                   <strong>Readiness Inspector</strong>
                   <p>Document readiness, missing fields, routing, and next action.</p>
                 </button>
                 <button class="analysis-zone-card compact" data-workbench-tab="blueprint" type="button">
-                  <span>04</span>
+                  <span>05</span>
                   <i data-lucide="files"></i>
                   <strong>Outputs</strong>
                   <p>Product, Engineering, Business, governance inputs, and export package.</p>
                 </button>
                 <button class="analysis-zone-card compact" data-workbench-tab="business" type="button">
-                  <span>05</span>
+                  <span>06</span>
                   <i data-lucide="settings-2"></i>
                   <strong>Testing & Release</strong>
                   <p>Self testing, colleague sharing, and enterprise release readiness.</p>
@@ -388,6 +394,16 @@
               </details>
             </article>
 
+            <article class="panel workbench-panel operator-addons-panel" data-workbench-panel="addons" hidden>
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Operator Add-ons</p>
+                  <h3>Provider readiness and approval gates</h3>
+                </div>
+              </div>
+              <div id="operatorAddOnsPanel" class="operator-addons-workbench"></div>
+            </article>
+
             <article class="panel workbench-panel business-panel" data-workbench-panel="business" hidden>
               <div class="panel-heading">
                 <div>
@@ -481,6 +497,7 @@
                   </button>
                 </div>
               </div>
+              <div id="workflowMapStudio" class="workflow-map-studio"></div>
               <div id="templateHandoffStudio" class="template-handoff-studio"></div>
               <details class="legacy-output-logic">
                 <summary>

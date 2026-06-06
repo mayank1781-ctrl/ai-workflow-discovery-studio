@@ -56,6 +56,20 @@ const MICROSOFT_GRAPH_FOLDER_PATH = process.env.MICROSOFT_GRAPH_FOLDER_PATH || "
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY || "";
 const GITHUB_DEFAULT_BRANCH = process.env.GITHUB_DEFAULT_BRANCH || "main";
 const GITHUB_ACTIONS_ENABLED = process.env.GITHUB_ACTIONS_ENABLED || "false";
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || "";
+const FISH_AUDIO_API_KEY = process.env.FISH_AUDIO_API_KEY || "";
+const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY || "";
+const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY || "";
+const AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT = process.env.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT || "";
+const AZURE_DOCUMENT_INTELLIGENCE_KEY = process.env.AZURE_DOCUMENT_INTELLIGENCE_KEY || "";
+const LLAMAPARSE_API_KEY = process.env.LLAMAPARSE_API_KEY || "";
+const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY || "";
+const PRESIDIO_ENDPOINT = process.env.PRESIDIO_ENDPOINT || "";
+const AZURE_AI_LANGUAGE_ENDPOINT = process.env.AZURE_AI_LANGUAGE_ENDPOINT || "";
+const AZURE_AI_LANGUAGE_KEY = process.env.AZURE_AI_LANGUAGE_KEY || "";
+const BRAINTRUST_API_KEY = process.env.BRAINTRUST_API_KEY || "";
+const LANGFUSE_PUBLIC_KEY = process.env.LANGFUSE_PUBLIC_KEY || "";
+const LANGFUSE_SECRET_KEY = process.env.LANGFUSE_SECRET_KEY || "";
 const DATA_DIR = path.join(__dirname, "data");
 const SESSIONS_DIR = path.join(DATA_DIR, "sessions");
 const PACKAGES_DIR = path.join(DATA_DIR, "packages");
@@ -324,6 +338,238 @@ function splitConfigList(value) {
     .filter(Boolean);
 }
 
+function providerStatus({ id, label, category, provider, purpose, configured, mode = CONNECTOR_MODE, defaultUse = "optional", enterpriseGate = "Approval required before production use", envVars = [], surfaces = [], setup = [], blockedUntil = [] }) {
+  const active = Boolean(configured);
+  return {
+    id,
+    label,
+    category,
+    provider,
+    purpose,
+    status: active ? "configured" : defaultUse === "native" ? "included" : "needs-setup",
+    configured: active,
+    mode,
+    defaultUse,
+    enterpriseGate,
+    envVars,
+    surfaces,
+    setup,
+    blockedUntil,
+    secretsExposed: false
+  };
+}
+
+function buildAddOnProviderStatus() {
+  const azureDocumentConfigured = Boolean(AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT && AZURE_DOCUMENT_INTELLIGENCE_KEY);
+  const azureLanguageConfigured = Boolean(AZURE_AI_LANGUAGE_ENDPOINT && AZURE_AI_LANGUAGE_KEY);
+  const langfuseConfigured = Boolean(LANGFUSE_PUBLIC_KEY && LANGFUSE_SECRET_KEY);
+  return {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    mode: CONNECTOR_MODE,
+    summary: {
+      openAiCoreConfigured: Boolean(OPENAI_API_KEY),
+      realtimeConfigured: Boolean(OPENAI_API_KEY),
+      transcriptionConfigured: Boolean(OPENAI_API_KEY),
+      optionalProvidersConfigured: [
+        ELEVENLABS_API_KEY,
+        FISH_AUDIO_API_KEY,
+        DEEPGRAM_API_KEY,
+        ASSEMBLYAI_API_KEY,
+        azureDocumentConfigured,
+        LLAMAPARSE_API_KEY,
+        MISTRAL_API_KEY,
+        PRESIDIO_ENDPOINT,
+        azureLanguageConfigured,
+        BRAINTRUST_API_KEY,
+        langfuseConfigured
+      ].filter(Boolean).length
+    },
+    providers: [
+      providerStatus({
+        id: "openai-responses",
+        label: "OpenAI Responses API",
+        category: "Core reasoning",
+        provider: "OpenAI",
+        purpose: "Structured workflow analysis, native tool planning, multimodal reasoning, and agent-ready recipe generation.",
+        configured: Boolean(OPENAI_API_KEY),
+        defaultUse: "native",
+        envVars: ["OPENAI_API_KEY", "EXTRACTION_MODEL", "EXTRACTION_REASONING_EFFORT"],
+        surfaces: ["Analyze Answer", "Analyze attachments", "Solution Build Recipe", "Agent Build Pack"],
+        setup: ["Keep using the existing local OPENAI_API_KEY.", "Use store=false or enterprise retention settings when policy requires stateless processing."]
+      }),
+      providerStatus({
+        id: "openai-realtime",
+        label: "OpenAI Realtime voice",
+        category: "Voice capture",
+        provider: "OpenAI",
+        purpose: "Low-latency spoken workflow intake and spoken clarifying questions.",
+        configured: Boolean(OPENAI_API_KEY),
+        defaultUse: "native",
+        envVars: ["OPENAI_API_KEY", "REALTIME_MODEL", "REALTIME_VOICE"],
+        surfaces: ["AI Voice On", "AI speaks back", "Discovery interview"],
+        setup: ["Confirm microphone access in the browser.", "Pilot with safe sample workflows before client data."]
+      }),
+      providerStatus({
+        id: "openai-transcription",
+        label: "OpenAI transcription",
+        category: "Voice capture",
+        provider: "OpenAI",
+        purpose: "Post-turn audio transcription for dictated workflow notes.",
+        configured: Boolean(OPENAI_API_KEY),
+        defaultUse: "native",
+        envVars: ["OPENAI_API_KEY", "TRANSCRIPTION_MODEL"],
+        surfaces: ["Dictate", "Stop", "Text Intake"],
+        setup: ["Keep browser microphone permissions enabled.", "Validate transcription quality with consulting and finance vocabulary."]
+      }),
+      providerStatus({
+        id: "elevenlabs-voice",
+        label: "ElevenLabs voice output",
+        category: "Voice narration",
+        provider: "ElevenLabs",
+        purpose: "Optional high-quality narration for summaries, playback, and guided reviewer walkthroughs.",
+        configured: Boolean(ELEVENLABS_API_KEY),
+        envVars: ["ELEVENLABS_API_KEY"],
+        surfaces: ["Guided pilot", "Reviewer packet playback", "Training mode"],
+        setup: ["Add ELEVENLABS_API_KEY only after procurement/security approval.", "Keep generated voice disabled for confidential review until policy approves it."],
+        blockedUntil: ["Vendor approval", "Data handling review", "Voice retention settings"]
+      }),
+      providerStatus({
+        id: "fish-audio-voice",
+        label: "Fish Audio voice output",
+        category: "Voice narration",
+        provider: "Fish Audio",
+        purpose: "Optional voice generation alternative for narrated workflow summaries and role-based training prompts.",
+        configured: Boolean(FISH_AUDIO_API_KEY),
+        envVars: ["FISH_AUDIO_API_KEY"],
+        surfaces: ["Training mode", "Reviewer packet playback"],
+        setup: ["Add FISH_AUDIO_API_KEY only after vendor review.", "Use only approved voices and retention settings."],
+        blockedUntil: ["Vendor approval", "Voice policy approval"]
+      }),
+      providerStatus({
+        id: "deepgram-stt",
+        label: "Deepgram speech-to-text",
+        category: "Voice capture",
+        provider: "Deepgram",
+        purpose: "Optional speech-to-text add-on for long interviews, diarization, and domain vocabulary tuning.",
+        configured: Boolean(DEEPGRAM_API_KEY),
+        envVars: ["DEEPGRAM_API_KEY"],
+        surfaces: ["Long-form interview import", "Post-meeting transcript cleanup"],
+        setup: ["Add DEEPGRAM_API_KEY after enterprise approval.", "Benchmark against OpenAI transcription before enabling."],
+        blockedUntil: ["Vendor approval", "Retention policy", "Transcript storage approval"]
+      }),
+      providerStatus({
+        id: "assemblyai-stt",
+        label: "AssemblyAI speech intelligence",
+        category: "Voice capture",
+        provider: "AssemblyAI",
+        purpose: "Optional transcript intelligence for long meetings, speaker labels, and topic extraction.",
+        configured: Boolean(ASSEMBLYAI_API_KEY),
+        envVars: ["ASSEMBLYAI_API_KEY"],
+        surfaces: ["Long-form interview import", "Meeting transcript analysis"],
+        setup: ["Add ASSEMBLYAI_API_KEY after enterprise approval.", "Use safe-sample recordings for comparison testing."],
+        blockedUntil: ["Vendor approval", "Retention policy", "PII review"]
+      }),
+      providerStatus({
+        id: "azure-document-intelligence",
+        label: "Azure Document Intelligence",
+        category: "Document intelligence",
+        provider: "Microsoft Azure",
+        purpose: "Enterprise OCR/layout extraction for PDFs, screenshots, scanned forms, tables, and finance artifacts.",
+        configured: azureDocumentConfigured,
+        envVars: ["AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT", "AZURE_DOCUMENT_INTELLIGENCE_KEY"],
+        surfaces: ["Evidence upload", "Workbook import", "Evidence linkage"],
+        setup: ["Create an approved Azure resource in the work tenant.", "Route extracted fields through human approval before writing to the intake."],
+        blockedUntil: ["Azure subscription approval", "Tenant networking", "Data residency review"]
+      }),
+      providerStatus({
+        id: "llamaparse",
+        label: "LlamaParse document extraction",
+        category: "Document intelligence",
+        provider: "LlamaIndex",
+        purpose: "Optional complex PDF/table extraction for messy consulting artifacts and packaged reports.",
+        configured: Boolean(LLAMAPARSE_API_KEY),
+        envVars: ["LLAMAPARSE_API_KEY"],
+        surfaces: ["Evidence upload", "Bulk document import"],
+        setup: ["Add LLAMAPARSE_API_KEY after security review.", "Use only approved sample/client-safe documents."],
+        blockedUntil: ["Vendor approval", "Data retention review"]
+      }),
+      providerStatus({
+        id: "mistral-ocr",
+        label: "Mistral OCR",
+        category: "Document intelligence",
+        provider: "Mistral AI",
+        purpose: "Optional OCR/document parsing path for image-heavy PDFs and screenshots.",
+        configured: Boolean(MISTRAL_API_KEY),
+        envVars: ["MISTRAL_API_KEY"],
+        surfaces: ["Evidence upload", "Document triage"],
+        setup: ["Add MISTRAL_API_KEY after enterprise approval.", "Benchmark against Azure Document Intelligence before production use."],
+        blockedUntil: ["Vendor approval", "Data boundary review"]
+      }),
+      providerStatus({
+        id: "presidio-pii",
+        label: "Microsoft Presidio PII review",
+        category: "Privacy and controls",
+        provider: "Microsoft / Presidio",
+        purpose: "Optional PII detection and redaction before evidence is sent to AI analysis or shared in packages.",
+        configured: Boolean(PRESIDIO_ENDPOINT),
+        envVars: ["PRESIDIO_ENDPOINT"],
+        surfaces: ["Evidence upload", "Package doctor", "Governance Inputs"],
+        setup: ["Deploy or point to an approved Presidio service.", "Keep redaction warnings visible to the human reviewer."],
+        blockedUntil: ["Security architecture approval", "PII taxonomy signoff"]
+      }),
+      providerStatus({
+        id: "azure-ai-language-pii",
+        label: "Azure AI Language PII",
+        category: "Privacy and controls",
+        provider: "Microsoft Azure",
+        purpose: "Optional managed PII entity detection for enterprise Microsoft environments.",
+        configured: azureLanguageConfigured,
+        envVars: ["AZURE_AI_LANGUAGE_ENDPOINT", "AZURE_AI_LANGUAGE_KEY"],
+        surfaces: ["Evidence upload", "Governance Inputs", "Reviewer packet"],
+        setup: ["Create an approved Azure AI Language resource.", "Pilot with synthetic finance examples first."],
+        blockedUntil: ["Azure subscription approval", "PII policy approval"]
+      }),
+      providerStatus({
+        id: "mermaid-workflow-map",
+        label: "Mermaid workflow map",
+        category: "Workflow visualization",
+        provider: "Local app",
+        purpose: "Included visual process mapping for activities, data, systems, decisions, handoffs, and approvals.",
+        configured: true,
+        defaultUse: "native",
+        envVars: [],
+        surfaces: ["Workflow Map Studio", "Reviewer packet", "Package export"],
+        setup: ["No external account required.", "Export Mermaid source with the review package."]
+      }),
+      providerStatus({
+        id: "braintrust-evals",
+        label: "Braintrust evals",
+        category: "Evaluation and observability",
+        provider: "Braintrust",
+        purpose: "Optional regression evaluation and review dashboards for extraction quality and recipe quality.",
+        configured: Boolean(BRAINTRUST_API_KEY),
+        envVars: ["BRAINTRUST_API_KEY"],
+        surfaces: ["Live Test Lab", "Release controls", "Pilot evidence"],
+        setup: ["Add BRAINTRUST_API_KEY after tool approval.", "Run with sanitized pilot records first."],
+        blockedUntil: ["Vendor approval", "Evaluation data policy"]
+      }),
+      providerStatus({
+        id: "langfuse-tracing",
+        label: "Langfuse tracing",
+        category: "Evaluation and observability",
+        provider: "Langfuse",
+        purpose: "Optional tracing and prompt/version observability for enterprise pilots.",
+        configured: langfuseConfigured,
+        envVars: ["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"],
+        surfaces: ["Release controls", "Pilot evidence", "Builder diagnostics"],
+        setup: ["Add Langfuse keys after approval.", "Disable raw prompt logging unless governance approves it."],
+        blockedUntil: ["Vendor approval", "Telemetry policy"]
+      })
+    ]
+  };
+}
+
 function buildEnterpriseConfigStatus() {
   return {
     appEnv: APP_ENV,
@@ -344,6 +590,7 @@ function buildEnterpriseConfigStatus() {
     githubRepository: GITHUB_REPOSITORY,
     githubDefaultBranch: GITHUB_DEFAULT_BRANCH,
     githubActionsEnabled: /^(true|1|yes)$/i.test(GITHUB_ACTIONS_ENABLED),
+    addOns: buildAddOnProviderStatus(),
     secretsExposed: false
   };
 }
@@ -880,6 +1127,19 @@ async function handleCreatePackage(req, res) {
     "solution-build-recipe-rows.json": JSON.stringify(body.solutionBuildRecipeRows || [], null, 2),
     "solution-build-spec.json": JSON.stringify(body.solutionBuildSpec || {}, null, 2),
     "solution-build-spec-rows.json": JSON.stringify(body.solutionBuildSpecRows || [], null, 2),
+    "agent-build-pack.json": JSON.stringify(body.agentBuildPack || {}, null, 2),
+    "agent-build-pack.md": String(body.agentBuildPackMarkdown || ""),
+    "agent-build-pack.docx": createDocxBuffer("Agent Build Pack", body.agentBuildPackMarkdown || ""),
+    "agent-build-pack-rows.json": JSON.stringify(body.agentBuildPackRows || [], null, 2),
+    "add-on-provider-plan.json": JSON.stringify(body.addOnProviderPlan || {}, null, 2),
+    "add-on-provider-plan.md": String(body.addOnProviderPlanMarkdown || ""),
+    "add-on-provider-plan.docx": createDocxBuffer("Add-On Provider Plan", body.addOnProviderPlanMarkdown || ""),
+    "add-on-provider-plan-rows.json": JSON.stringify(body.addOnProviderPlanRows || [], null, 2),
+    "workflow-map-studio.json": JSON.stringify(body.workflowMapStudio || {}, null, 2),
+    "workflow-map-studio.md": String(body.workflowMapStudioMarkdown || ""),
+    "workflow-map-studio.mmd": String(body.workflowMapMermaid || ""),
+    "workflow-map-studio.docx": createDocxBuffer("Workflow Map Studio", body.workflowMapStudioMarkdown || ""),
+    "workflow-map-studio-rows.json": JSON.stringify(body.workflowMapStudioRows || [], null, 2),
     "solution-capability-plan.json": JSON.stringify(body.solutionCapabilityPlan || {}, null, 2),
     "solution-capability-plan-rows.json": JSON.stringify(body.solutionCapabilityPlanRows || [], null, 2),
     "solution-execution-plan.json": JSON.stringify(body.solutionExecutionPlan || {}, null, 2),
@@ -966,6 +1226,10 @@ async function handleCreatePackage(req, res) {
     "reviewer-decision-summary.json": JSON.stringify(body.reviewerDecisionSummary || {}, null, 2),
     "reviewer-decision-summary-rows.json": JSON.stringify(body.reviewerDecisionRows || [], null, 2),
     "reviewer-decision-summary.md": String(body.reviewerDecisionMarkdown || ""),
+    "reviewer-one-page-summary.json": JSON.stringify(body.reviewerOnePage || {}, null, 2),
+    "reviewer-one-page-summary-rows.json": JSON.stringify(body.reviewerOnePageRows || [], null, 2),
+    "reviewer-one-page-summary.md": String(body.reviewerOnePageMarkdown || ""),
+    "reviewer-one-page-summary.docx": createDocxBuffer("Reviewer One-Page Summary", body.reviewerOnePageMarkdown || ""),
     "evidence-summary.md": String(body.evidenceSummary || "No evidence summary captured."),
     "evidence-linkage.json": JSON.stringify(body.evidenceLinkage || {}, null, 2),
     "evidence-linkage-rows.json": JSON.stringify(body.evidenceLinkageRows || [], null, 2),
@@ -997,6 +1261,19 @@ async function handleCreatePackage(req, res) {
         "solution-build-recipe-rows.json",
         "solution-build-spec.json",
         "solution-build-spec-rows.json",
+        "agent-build-pack.json",
+        "agent-build-pack.md",
+        "agent-build-pack.docx",
+        "agent-build-pack-rows.json",
+        "add-on-provider-plan.json",
+        "add-on-provider-plan.md",
+        "add-on-provider-plan.docx",
+        "add-on-provider-plan-rows.json",
+        "workflow-map-studio.json",
+        "workflow-map-studio.md",
+        "workflow-map-studio.mmd",
+        "workflow-map-studio.docx",
+        "workflow-map-studio-rows.json",
         "solution-capability-plan.json",
         "solution-capability-plan-rows.json",
         "solution-execution-plan.json",
@@ -1083,6 +1360,10 @@ async function handleCreatePackage(req, res) {
         "reviewer-decision-summary.json",
         "reviewer-decision-summary-rows.json",
         "reviewer-decision-summary.md",
+        "reviewer-one-page-summary.json",
+        "reviewer-one-page-summary-rows.json",
+        "reviewer-one-page-summary.md",
+        "reviewer-one-page-summary.docx",
         "evidence-summary.md",
         "evidence-linkage.json",
         "evidence-linkage-rows.json",
@@ -1168,6 +1449,9 @@ function buildPackageReadme(summary) {
     "- `governance-inputs-template.docx` / `.json` / `.md`: basic data boundary, deployment, human review, and later governance review inputs.",
     "- `solution-build-recipe.docx` / `.json` / `.md` / `-rows.json`: practical ChatGPT and Microsoft Copilot implementation recipe, including platform route, prompt pack, connector plan, controls, MVP steps, and pilot test script.",
     "- `solution-build-spec.json` / `solution-build-spec-rows.json`: machine-readable ChatGPT/Copilot build contract for route logic, platform responsibilities, connector candidates, controls, MVP steps, and test criteria.",
+    "- `agent-build-pack.docx` / `.md` / `.json` / `-rows.json`: build-surface guide for Custom GPT/ChatGPT project, ChatGPT tools, OpenAI Agents SDK app, Microsoft 365 Copilot/Copilot Studio, and full custom app options.",
+    "- `add-on-provider-plan.docx` / `.md` / `.json` / `-rows.json`: optional provider registry for voice, speech-to-text, OCR/document intelligence, PII/privacy review, workflow visualization, and eval/observability add-ons with setup and enterprise approval gates.",
+    "- `workflow-map-studio.docx` / `.md` / `.json` / `.mmd` / `-rows.json`: visual workflow map contract covering steps, data, systems, decisions, handoffs, controls, open questions, and Mermaid source.",
     "- `solution-capability-plan.json` / `solution-capability-plan-rows.json`: feature-level plan mapping ChatGPT capabilities, Microsoft Copilot surfaces, human checkpoints, and enterprise hardening phases.",
     "- `solution-execution-plan.docx` / `.json` / `.md` / `-rows.json`: builder-facing runbook mapping each ChatGPT/Copilot capability to required data inputs, permissions, enterprise controls, human checkpoints, package evidence, and expected output.",
     "- `enterprise-connector-contracts.docx` / `.md` / `.json` / `-rows.json`: enterprise connector contract pack covering source systems, source locations, permission scope, allowed/blocked operations, approval gates, pilot data policy, fallback mode, setup steps, and test criteria.",
@@ -1210,6 +1494,7 @@ function buildPackageReadme(summary) {
     "- `pilot-insights.json`: feedback-derived themes and improvement backlog.",
     "- `pilot-insights.md`: readable pilot insights and recommended next fixes.",
     "- `reviewer-decision-summary.json` / `reviewer-decision-summary-rows.json` / `reviewer-decision-summary.md`: compact coworker review decision, reviewer snapshots, quality signals, and comment-derived backlog items.",
+    "- `reviewer-one-page-summary.docx` / `.md` / `.json` / `-rows.json`: brief business/product/engineering overview of what the app does, current MVP status, next decisions, package files to review, and key controls.",
     "- `evidence-summary.md`: optional evidence summary.",
     "- `evidence-linkage.json` / `evidence-linkage-rows.json` / `evidence-linkage.md`: optional evidence-to-field, step, system, risk, and open-question mapping.",
     "",

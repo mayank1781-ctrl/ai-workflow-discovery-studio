@@ -10551,6 +10551,553 @@ body[data-app-mode="interview"] #sendChatButton {
   min-height: 54px;
 }
 
+.operator-addons-workbench {
+  display: grid;
+  gap: 18px;
+}
+
+.addons-hero,
+.addons-next-steps,
+.addons-provider-group {
+  border: 1px solid rgba(132, 204, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(7, 15, 34, 0.54);
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.18);
+}
+
+.addons-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(300px, 0.7fr);
+  gap: 18px;
+  align-items: stretch;
+  padding: 18px;
+}
+
+.addons-hero h3,
+.addons-next-steps h3,
+.addons-provider-group h3 {
+  margin: 0;
+  color: rgba(249, 251, 255, 0.95);
+  font-size: 17px;
+  letter-spacing: 0;
+}
+
+.addons-hero p {
+  margin: 8px 0 0;
+  max-width: 880px;
+  color: rgba(225, 236, 255, 0.72);
+  line-height: 1.5;
+}
+
+.addons-score-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.addon-metric {
+  display: grid;
+  place-items: center;
+  min-height: 110px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.72);
+  text-align: center;
+}
+
+.addon-metric svg {
+  width: 18px;
+  height: 18px;
+  color: #67e8f9;
+}
+
+.addon-metric strong {
+  color: #f8fafc;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.addon-metric span {
+  color: rgba(226, 232, 240, 0.68);
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.addons-next-steps {
+  padding: 16px;
+}
+
+.addons-next-steps ol {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.addons-next-steps li {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.62);
+}
+
+.addons-next-steps li span {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin-bottom: 8px;
+  border-radius: 999px;
+  color: #061127;
+  background: #67e8f9;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.addons-next-steps li strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.addons-next-steps li p {
+  margin: 7px 0 0;
+  color: rgba(226, 232, 240, 0.66);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.addons-provider-groups {
+  display: grid;
+  gap: 16px;
+}
+
+.addons-provider-group {
+  padding: 16px;
+}
+
+.addons-group-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.addons-provider-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.addon-provider-card {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  min-width: 0;
+  min-height: 255px;
+  padding: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-left: 3px solid rgba(148, 163, 184, 0.48);
+  border-radius: 8px;
+  background: rgba(10, 17, 34, 0.76);
+}
+
+.addon-provider-card.configured {
+  border-left-color: #34d399;
+}
+
+.addon-provider-card.included {
+  border-left-color: #67e8f9;
+}
+
+.addon-provider-card.needs-setup {
+  border-left-color: #fbbf24;
+}
+
+.addon-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.addon-card-top span,
+.addon-detail-grid span {
+  display: block;
+  margin-bottom: 3px;
+  color: rgba(226, 232, 240, 0.55);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.addon-card-top strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.addon-card-top em {
+  flex: 0 0 auto;
+  align-self: start;
+  padding: 5px 7px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+  color: rgba(248, 250, 252, 0.8);
+  background: rgba(15, 23, 42, 0.82);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.addon-provider-card p,
+.addon-provider-card li {
+  margin: 0;
+  color: rgba(226, 232, 240, 0.68);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.addon-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.addon-chip-row code {
+  max-width: 100%;
+  padding: 4px 7px;
+  border: 1px solid rgba(100, 116, 139, 0.3);
+  border-radius: 999px;
+  color: #bfdbfe;
+  background: rgba(15, 23, 42, 0.86);
+  font-size: 10px;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.addon-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.addon-provider-card ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 16px;
+}
+
+.workflow-map-studio {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.workflow-map-hero,
+.workflow-map-body,
+.workflow-map-review-row {
+  border: 1px solid rgba(132, 204, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(7, 15, 34, 0.54);
+}
+
+.workflow-map-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(340px, 0.8fr);
+  gap: 18px;
+  align-items: center;
+  padding: 16px;
+}
+
+.workflow-map-hero h3,
+.workflow-map-source h3 {
+  margin: 0;
+  color: rgba(249, 251, 255, 0.95);
+  font-size: 17px;
+  letter-spacing: 0;
+}
+
+.workflow-map-hero p {
+  margin: 8px 0 0;
+  color: rgba(225, 236, 255, 0.72);
+  line-height: 1.5;
+}
+
+.workflow-map-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.workflow-map-stats div {
+  display: grid;
+  place-items: center;
+  min-height: 92px;
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.72);
+  text-align: center;
+}
+
+.workflow-map-stats svg {
+  width: 17px;
+  height: 17px;
+  color: #86efac;
+}
+
+.workflow-map-stats strong {
+  color: #f8fafc;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.workflow-map-stats span {
+  color: rgba(226, 232, 240, 0.65);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.workflow-map-body {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.2fr);
+  gap: 14px;
+  padding: 14px;
+}
+
+.workflow-map-node-rail {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.workflow-map-node-card {
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-left: 3px solid rgba(148, 163, 184, 0.5);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.68);
+}
+
+.workflow-map-node-card.captured {
+  border-left-color: #34d399;
+}
+
+.workflow-map-node-card.review {
+  border-left-color: #67e8f9;
+}
+
+.workflow-map-node-card.missing {
+  border-left-color: #fbbf24;
+}
+
+.workflow-map-node-card span {
+  display: block;
+  margin-bottom: 4px;
+  color: rgba(226, 232, 240, 0.55);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.workflow-map-node-card strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.workflow-map-node-card p {
+  margin: 5px 0 0;
+  color: rgba(226, 232, 240, 0.66);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.workflow-map-source {
+  min-width: 0;
+}
+
+.workflow-map-source pre {
+  max-height: 420px;
+  margin: 10px 0 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.86);
+}
+
+.workflow-map-source code {
+  color: rgba(219, 234, 254, 0.9);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.workflow-map-review-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px;
+}
+
+.workflow-map-review-row div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.56);
+}
+
+.workflow-map-review-row strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 13px;
+}
+
+.workflow-map-review-row p {
+  margin: 6px 0 0;
+  color: rgba(226, 232, 240, 0.67);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.enterprise-build-pack-panel {
+  display: grid;
+  gap: 14px;
+  margin: 18px 0;
+  padding: 16px;
+  border: 1px solid rgba(132, 204, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(7, 15, 34, 0.54);
+}
+
+.enterprise-build-pack-head,
+.enterprise-build-pack-foot {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.enterprise-build-pack-head h3 {
+  margin: 0;
+  color: rgba(249, 251, 255, 0.95);
+  font-size: 17px;
+  letter-spacing: 0;
+}
+
+.enterprise-build-pack-head p,
+.enterprise-build-pack-foot p {
+  margin: 7px 0 0;
+  color: rgba(226, 232, 240, 0.68);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.enterprise-build-pack-score {
+  display: grid;
+  place-items: center;
+  min-height: 96px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.68);
+  text-align: center;
+}
+
+.enterprise-build-pack-score span {
+  color: #f8fafc;
+  font-size: 26px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.enterprise-build-pack-score strong,
+.enterprise-build-pack-foot strong {
+  color: #f8fafc;
+  font-size: 13px;
+}
+
+.enterprise-build-option-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.enterprise-build-option-grid article,
+.enterprise-build-pack-foot > div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.62);
+}
+
+.enterprise-build-option-grid span {
+  display: block;
+  margin-bottom: 5px;
+  color: #67e8f9;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.enterprise-build-option-grid strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.enterprise-build-option-grid p {
+  margin: 6px 0 0;
+  color: rgba(226, 232, 240, 0.65);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+@media (max-width: 1180px) {
+  .addons-hero,
+  .addons-next-steps ol,
+  .addons-provider-grid,
+  .workflow-map-hero,
+  .workflow-map-body,
+  .workflow-map-review-row,
+  .enterprise-build-pack-head,
+  .enterprise-build-pack-foot,
+  .enterprise-build-option-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .addons-score-grid,
+  .workflow-map-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .addons-score-grid,
+  .workflow-map-stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .addon-provider-card {
+    min-height: 0;
+  }
+}
+
 @media (max-width: 1180px) {
   body[data-app-mode="interview"] .embedded-transcript-card {
     min-height: 0;
