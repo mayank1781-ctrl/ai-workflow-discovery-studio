@@ -5301,7 +5301,8 @@ body[data-app-mode="interview"] .step-flow-footer {
 .session-topbar,
 body[data-app-mode="interview"] .session-topbar,
 body[data-app-mode="analysis"] .session-topbar {
-  grid-template-columns: minmax(160px, 0.32fr) minmax(320px, 1fr) auto auto;
+  /* Equal 1fr side columns center the toggle (the auto middle column) on the page. */
+  grid-template-columns: 1fr auto 1fr;
   padding-inline: 22px;
 }
 
@@ -5310,6 +5311,7 @@ body[data-app-mode="analysis"] .session-topbar {
   min-width: 0;
   display: inline-flex;
   align-items: center;
+  justify-self: start;
 }
 
 .session-brand #aiStatus {
@@ -12083,4 +12085,63 @@ body[data-app-mode="interview"] .discovery-start-button {
   #evidenceNoteInput {
     min-height: 180px;
   }
+}
+
+/* Top-bar New / Save / Help trio (replaces the former Export Excel button). */
+.topbar-trio {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.topbar-trio-help {
+  position: relative;
+}
+
+.topbar-trio-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 104px;
+  min-height: 52px;
+  padding: 0 18px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 15px;
+  background:
+    linear-gradient(135deg, rgba(90, 167, 255, 0.1), transparent 42%),
+    rgba(255, 255, 255, 0.055);
+  color: rgba(248, 251, 255, 0.82);
+  font-size: 14px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+
+.topbar-trio-button:hover {
+  border-color: rgba(100, 244, 255, 0.42);
+  color: var(--future-white);
+  background:
+    radial-gradient(circle at 18% 10%, rgba(100, 244, 255, 0.2), transparent 38%),
+    rgba(255, 255, 255, 0.08);
+}
+
+.topbar-trio-button svg {
+  width: 17px;
+  height: 17px;
+}
+
+.topbar-trio-help summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Anchor the relocated Help popover to the right edge so it never overflows the viewport. */
+.topbar-trio-help .help-popover {
+  left: auto;
+  right: 0;
+  transform: none;
 }

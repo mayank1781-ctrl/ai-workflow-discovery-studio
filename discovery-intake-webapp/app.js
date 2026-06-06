@@ -1309,7 +1309,7 @@ function bindEvents() {
     toast("Session reset.");
   });
 
-  document.getElementById("exportButton").addEventListener("click", exportWorkbook);
+  document.getElementById("topbarNewButton")?.addEventListener("click", () => createNewSession({ appMode: "interview", activeWorkbenchTab: "handoff" }));
   document.querySelectorAll("[data-app-mode]").forEach((button) => {
     button.addEventListener("click", () => setAppMode(button.dataset.appMode || "interview"));
   });
@@ -23886,7 +23886,7 @@ function applyHoverHelp() {
     [".mode-tab[data-app-mode='analysis']", "Analysis Studio is the operator space for structuring the conversation into handoff outputs."],
     ["#saveButton", "Save the current discovery session locally and to the local app data folder."],
     ["#resetButton", "Start fresh while preserving saved sessions in the local session library."],
-    ["#exportButton", "Export the structured intake, process matrix, PDR notes, and handoff sheets to Excel."],
+    ["#topbarNewButton", "Start a clean Discovery session without leaving the top bar."],
     ["#voiceStatus", "Shows whether the browser is idle, listening, or processing the spoken answer."],
     [".voice-toggle", "Turn spoken AI replies on or off. The AI still updates the transcript either way."],
     ["#currentStepPanel", "Shows the workflow skeleton or the current step being explored."],
