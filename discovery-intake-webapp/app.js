@@ -1090,10 +1090,19 @@ const defaultState = {
       time: new Date().toISOString()
     }
   ],
-  voiceReplyEnabled: false
+  voiceReplyEnabled: false,
+  // Stage 1a document-first entry. Holds only serializable metadata; the
+  // actual File lives in the module-level `pendingUploadFile` (below) so
+  // session JSON serialization is never broken.
+  uploadedDocument: null, // null | { name, type, size, status: "pending" }
+  documentEntry: { dismissed: false, started: false }
 };
 
 let state = loadState();
+// Stage 1a: the selected File object is held here, NOT in `state`, because a
+// File cannot survive JSON.stringify (it would serialize to {}). It is
+// intentionally transient — lost on reload, which is fine for Stage 1a.
+let pendingUploadFile = null;
 let recognition = null;
 let isListening = false;
 let aiAvailable = false;
@@ -1322,6 +1331,13 @@ function bindEvents() {
   els.dictateEvidenceNoteButton?.addEventListener("click", toggleEvidenceDictation);
   els.useDiscoveryDraftEvidenceButton?.addEventListener("click", useDiscoveryDraftForEvidence);
   els.clearEvidenceNoteButton?.addEventListener("click", clearEvidenceWorkbenchDraft);
+  document.getElementById("documentUploadPanel")?.addEventListener("click", handleDocumentUploadPanelClick);
+  document.getElementById("documentUploadInput")?.addEventListener("change", handleDocumentUploadChange);
+  document.getElementById("documentDisclosureConfirm")?.addEventListener("click", confirmDocumentDisclosure);
+  document.getElementById("documentDisclosureCancel")?.addEventListener("click", closeDocumentDisclosure);
+  document.getElementById("documentDisclosureModal")?.addEventListener("click", (event) => {
+    if (event.target === event.currentTarget) closeDocumentDisclosure();
+  });
   els.workbookImportInput?.addEventListener("change", handleWorkbookImport);
   els.loadDemoCaseButton?.addEventListener("click", loadSelectedDemoCase);
   els.demoCaseSelect?.addEventListener("change", (event) => {
@@ -3339,6 +3355,7 @@ function render() {
   const section = getActiveSection();
   if (state.activeSection !== section.id) state.activeSection = section.id;
   renderHeaderContext();
+  renderDocumentUploadPanel();
   renderCurrentStepPanel();
   renderFrameAnchorStrip();
   renderCurrentQuestion(section);
@@ -3388,6 +3405,155 @@ function render() {
   updateAiTurnStatus(state.captureStage || "idle");
   updateProgressUi();
   refreshIcons();
+}
+
+// --- Stage 1a: document-first upload entry point (UI only) -------------------
+// Optional document upload shown above the interview hero on a fresh session.
+// No server calls and no extraction here — this only captures the file in
+// local module state and gates the interview until the user skips or starts.
+
+const DOCUMENT_UPLOAD_ACCEPT = ".pdf,.docx,.doc,.xlsx,.xls";
+
+function hasUserMessages() {
+  return [...(state.conversation || []), ...(state.aiChat || [])]
+    .some((message) => message.role === "user");
+}
+
+function shouldShowDocumentUploadPanel() {
+  return (
+    state.appMode === "interview"
+    && getActiveSection().id === "idea"
+    && !sessionHasContent()
+    && !hasUserMessages()
+    && !state.documentEntry?.dismissed
+    && !state.documentEntry?.started
+  );
+}
+
+function uploadDocumentIcon(type = "", name = "") {
+  const probe = `${type} ${name}`.toLowerCase();
+  if (probe.includes("sheet") || /\.(xlsx|xls)$/.test(probe)) return "table";
+  if (probe.includes("word") || /\.(docx|doc)$/.test(probe)) return "file-text";
+  if (probe.includes("pdf") || /\.pdf$/.test(probe)) return "file-type";
+  return "file";
+}
+
+function formatFileSize(bytes = 0) {
+  if (!bytes) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function renderDocumentUploadPanel() {
+  const panel = document.getElementById("documentUploadPanel");
+  if (!panel) return;
+  const show = shouldShowDocumentUploadPanel();
+  document.body.dataset.discoveryEntry = show ? "upload" : "";
+  panel.hidden = !show;
+  if (!show) {
+    panel.innerHTML = "";
+    return;
+  }
+
+  const doc = state.uploadedDocument;
+  const selectedBlock = doc ? `
+    <div class="document-upload-selected">
+      <span class="document-upload-file-icon"><i data-lucide="${uploadDocumentIcon(doc.type, doc.name)}"></i></span>
+      <div class="document-upload-file-meta">
+        <strong>${escapeHtml(doc.name)}</strong>
+        <small>${escapeHtml(formatFileSize(doc.size))}</small>
+        <span class="document-upload-status">Ready — extraction will run when the interview starts</span>
+      </div>
+      <button type="button" class="document-upload-remove" data-document-action="remove">Remove</button>
+    </div>
+    <div class="document-upload-actions">
+      <button type="button" class="primary-button" data-document-action="start">Start interview</button>
+    </div>
+  ` : `
+    <button type="button" class="document-upload-dropzone" data-document-action="open">
+      <span class="document-upload-dropzone-icon"><i data-lucide="upload-cloud"></i></span>
+      <span class="document-upload-dropzone-text">
+        <strong>Upload a document</strong>
+        <small>PDF, Word, or Excel · we'll never send it without asking first</small>
+      </span>
+    </button>
+  `;
+
+  panel.innerHTML = `
+    <section class="document-upload-card" aria-label="Start with a document">
+      <div class="document-upload-head">
+        <h2>Start with a document (optional)</h2>
+        <p>Upload a SOP, process doc, or spreadsheet and we'll pre-fill the workflow grid for you</p>
+      </div>
+      ${selectedBlock}
+      <button type="button" class="document-upload-skip" data-document-action="skip">Skip — start with conversation</button>
+    </section>
+  `;
+  refreshIcons();
+}
+
+function handleDocumentUploadPanelClick(event) {
+  const trigger = event.target.closest("[data-document-action]");
+  if (!trigger) return;
+  const action = trigger.dataset.documentAction;
+  if (action === "open") openDocumentDisclosure();
+  else if (action === "remove") removeUploadedDocument();
+  else if (action === "skip") skipDocumentEntry();
+  else if (action === "start") startInterviewWithDocument();
+}
+
+function openDocumentDisclosure() {
+  // The disclosure must appear on every upload attempt — no "seen once" flag.
+  const modal = document.getElementById("documentDisclosureModal");
+  if (modal) modal.hidden = false;
+}
+
+function closeDocumentDisclosure() {
+  const modal = document.getElementById("documentDisclosureModal");
+  if (modal) modal.hidden = true;
+}
+
+function confirmDocumentDisclosure() {
+  closeDocumentDisclosure();
+  const input = document.getElementById("documentUploadInput");
+  if (input) input.click();
+}
+
+function handleDocumentUploadChange(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  pendingUploadFile = file;
+  state.uploadedDocument = {
+    name: file.name,
+    type: file.type || "",
+    size: file.size || 0,
+    status: "pending"
+  };
+  // Allow re-selecting the same filename later.
+  event.target.value = "";
+  persistState();
+  render();
+}
+
+function removeUploadedDocument() {
+  pendingUploadFile = null;
+  state.uploadedDocument = null;
+  persistState();
+  render();
+}
+
+function skipDocumentEntry() {
+  state.documentEntry.dismissed = true;
+  persistState();
+  render();
+}
+
+function startInterviewWithDocument() {
+  // Stage 1a holds the file only; extraction is a later sub-stage (1a part 2).
+  state.documentEntry.started = true;
+  persistState();
+  render();
 }
 
 function renderAppMode() {
@@ -23421,6 +23587,13 @@ function normalizeLoadedState(parsed = {}) {
       ...structuredClone(defaultState.drilldown),
       ...(parsed.drilldown || {})
     },
+    documentEntry: {
+      ...structuredClone(defaultState.documentEntry),
+      ...(parsed.documentEntry || {})
+    },
+    // The File cannot be restored after a reload (pendingUploadFile is reset),
+    // so never trust a persisted selection — start with no held document.
+    uploadedDocument: null,
     evidenceArtifacts: (parsed.evidenceArtifacts || []).map((item) => ({
       ...item,
       suggestedRecords: normalizeSuggestedRecords(item.suggestedRecords),

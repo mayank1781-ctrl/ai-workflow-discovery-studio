@@ -73,9 +73,16 @@
           hidden
           accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
         />
+        <input
+          id="documentUploadInput"
+          type="file"
+          hidden
+          accept=".pdf,.docx,.doc,.xlsx,.xls"
+        />
 
         <section class="interview-room discovery-cockpit" data-app-panel="interview">
           <section class="interview-stage" aria-label="Voice interview">
+            <div id="documentUploadPanel" class="document-upload-panel" hidden></div>
             <div class="question-stage-card discovery-hero-card">
               <div class="discovery-hero-grid">
                 <div class="discovery-question-area">
@@ -198,6 +205,17 @@
             <div id="analysisMatrixMap" class="analysis-matrix-map discovery-matrix-section" aria-live="polite"></div>
           </section>
         </section>
+
+        <div id="documentDisclosureModal" class="doc-disclosure-overlay" hidden>
+          <div class="doc-disclosure-modal" role="dialog" aria-modal="true" aria-labelledby="documentDisclosureTitle">
+            <h2 id="documentDisclosureTitle">Before you upload</h2>
+            <p>This document will be sent to OpenAI's API for processing. It will not be stored beyond your session. Do not upload documents classified above your organisation's AI acceptable-use policy without approval.</p>
+            <div class="doc-disclosure-actions">
+              <button type="button" class="secondary-button" id="documentDisclosureCancel">Cancel</button>
+              <button type="button" class="primary-button" id="documentDisclosureConfirm">I understand — continue</button>
+            </div>
+          </div>
+        </div>
 
         <section class="analysis-studio" data-app-panel="analysis" hidden>
           <section class="analysis-console-hero" aria-label="Analysis console overview">
