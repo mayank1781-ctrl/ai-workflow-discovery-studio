@@ -1089,6 +1089,13 @@ let isListening = false;
 let aiAvailable = false;
 let realtimeAvailable = false;
 let addOnProviderStatus = null;
+let addOnTestRun = {
+  status: "idle",
+  allowLiveChecks: false,
+  summary: null,
+  results: [],
+  checkedAt: ""
+};
 let realtimeConnection = null;
 let realtimeDataChannel = null;
 let realtimeAudioElement = null;
@@ -1334,6 +1341,7 @@ function bindEvents() {
   els.pilotControlForm?.addEventListener("change", updatePilotControlFromEvent);
   els.guidedPilotPanel?.addEventListener("click", handleGuidedPilotClick);
   els.liveTestCommandCenter?.addEventListener("click", handleLiveTestAction);
+  els.operatorAddOnsPanel?.addEventListener("click", handleAddOnTestAction);
   els.templateHandoffStudio?.addEventListener("click", handleOutputDownloadClick);
   els.pilotFeedbackPanel?.addEventListener("input", updatePilotFeedbackFromEvent);
   els.pilotFeedbackPanel?.addEventListener("change", updatePilotFeedbackFromEvent);
@@ -9201,6 +9209,7 @@ function renderTemplateHandoffStudio() {
   const solutionBuildSpec = deriveSolutionBuildSpec(solutionBuildRecipe);
   const workflowMapStudio = solutionBuildSpec.workflowMapStudio || deriveWorkflowMapStudio();
   const addOnProviderPlan = solutionBuildSpec.addOnProviderPlan || deriveAddOnProviderPlan();
+  const addOnTestResults = deriveAddOnTestResults();
   const agentBuildPack = solutionBuildSpec.agentBuildPack || deriveAgentBuildPack(solutionBuildSpec);
   const reviewerOnePage = deriveReviewerOnePageSummary();
   const solutionCapabilityPlan = deriveSolutionCapabilityPlan(solutionBuildSpec);
@@ -10247,6 +10256,7 @@ function deriveOutputManifest(productBrief = deriveProductBrief(), engineeringBr
   const solutionBuildSpec = deriveSolutionBuildSpec(solutionBuildRecipe);
   const agentBuildPack = solutionBuildSpec.agentBuildPack || deriveAgentBuildPack(solutionBuildSpec);
   const addOnProviderPlan = solutionBuildSpec.addOnProviderPlan || deriveAddOnProviderPlan();
+  const addOnTestResults = deriveAddOnTestResults();
   const workflowMapStudio = solutionBuildSpec.workflowMapStudio || deriveWorkflowMapStudio();
   const reviewerOnePage = deriveReviewerOnePageSummary();
   const solutionCapabilityPlan = deriveSolutionCapabilityPlan(solutionBuildSpec);
@@ -10322,6 +10332,22 @@ function deriveOutputManifest(productBrief = deriveProductBrief(), engineeringBr
       sourceOfTruth: "Provider readiness registry for OpenAI-native features and optional voice, OCR, privacy, visualization, and observability services",
       supplementLater: "No",
       nextAction: "Turn on non-OpenAI providers only after enterprise approval and safe-sample validation."
+    },
+    {
+      output: "Add-On Test Results",
+      readiness: addOnTestResults.results.length ? `${addOnTestResults.summary.passed || 0} passed / ${addOnTestResults.summary.missingConfig || 0} missing` : "Not run",
+      status: addOnTestResults.allowLiveChecks ? "Safe live preflight" : "Config check",
+      contractId: "add-on-test-results",
+      route: "Enterprise Add-ons",
+      owner: "AI Engineering / Platform owner",
+      format: "DOCX / Markdown / JSON / Excel sheet",
+      packageFile: "add-on-test-results.json",
+      packageFiles: "add-on-test-results.json; add-on-test-results.md; add-on-test-results.docx; add-on-test-results-rows.json",
+      workbookSheet: "Add-On Test Results",
+      outputSurfaces: "Workbook sheet; Package JSON; Package Markdown; Package DOCX",
+      sourceOfTruth: "Latest Add-on Test Lab evidence for local configuration checks and optional safe provider preflight checks",
+      supplementLater: "No",
+      nextAction: addOnTestResults.results.length ? "Review failed or missing providers before enterprise pilot." : "Run config checks before packaging the next review build."
     },
     {
       output: "Reviewer One-Page Summary",
@@ -12043,6 +12069,79 @@ function addOnProviderPlanMarkdown(plan = deriveAddOnProviderPlan()) {
     "",
     "## Guardrails",
     ...plan.guardrails.map((item) => `- ${item}`)
+  ].join("\n");
+}
+
+function deriveAddOnTestResults() {
+  const results = addOnTestRun.results || [];
+  return {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    status: addOnTestRun.status || "idle",
+    checkedAt: addOnTestRun.checkedAt || "",
+    allowLiveChecks: Boolean(addOnTestRun.allowLiveChecks),
+    summary: addOnTestRun.summary || summarizeClientAddOnTestResults(results),
+    results,
+    guardrails: [
+      "Config checks inspect local readiness only.",
+      "Safe live checks ping provider preflight endpoints but do not send workflow content, uploaded files, screenshots, or secrets to the browser.",
+      "Provider keys remain server-side and must stay out of GitHub, review ZIPs, screenshots, and handoff documents.",
+      "Run live checks with synthetic or sanitized setup before client or regulated data."
+    ]
+  };
+}
+
+function addOnTestResultsRows(testRun = deriveAddOnTestResults()) {
+  const results = testRun.results || [];
+  if (!results.length) {
+    return [
+      ["Field", "Value"],
+      ["Status", "No add-on tests run yet"],
+      ["Mode", testRun.allowLiveChecks ? "Safe live preflight" : "Local config only"]
+    ];
+  }
+  return [
+    ["Provider ID", "Label", "Provider", "Category", "Configured", "Test Status", "Status Label", "Capability", "Detail", "Action", "HTTP Status", "Latency MS", "Docs URL", "Checked At", "Env Vars"],
+    ...results.map((result) => [
+      result.id,
+      result.label,
+      result.provider,
+      result.category,
+      result.configured ? "Yes" : "No",
+      result.testStatus,
+      result.statusLabel,
+      result.capability,
+      result.detail,
+      result.action,
+      result.httpStatus || "",
+      result.latencyMs || "",
+      result.docsUrl || "",
+      result.checkedAt || testRun.checkedAt || "",
+      (result.envVars || []).join("\n")
+    ])
+  ];
+}
+
+function addOnTestResultsMarkdown(testRun = deriveAddOnTestResults()) {
+  const summary = testRun.summary || {};
+  return [
+    "# Add-On Test Results",
+    "",
+    `Status: ${testRun.status || "idle"}`,
+    `Mode: ${testRun.allowLiveChecks ? "Safe live preflight" : "Local config only"}`,
+    `Checked at: ${testRun.checkedAt || "Not run yet"}`,
+    "",
+    "## Summary",
+    `- Passed: ${summary.passed || 0}`,
+    `- Config present: ${summary.configured || 0}`,
+    `- Missing config: ${summary.missingConfig || 0}`,
+    `- Failed: ${summary.failed || 0}`,
+    "",
+    "## Provider Results",
+    ...(testRun.results?.length ? testRun.results.map((result) => `- ${result.label} (${result.provider}): ${result.statusLabel}. ${result.detail} Next: ${result.action}`) : ["- No add-on tests run yet."]),
+    "",
+    "## Guardrails",
+    ...(testRun.guardrails || []).map((item) => `- ${item}`)
   ].join("\n");
 }
 
@@ -19817,6 +19916,28 @@ function renderOperatorAddOnsPanel() {
         ${recommended.map((item) => `<li><span>${escapeHtml(item.phase)}</span><strong>${escapeHtml(item.action)}</strong><p>${escapeHtml(item.reason)}</p></li>`).join("")}
       </ol>
     </section>
+    <section class="addons-test-lab ${escapeHtml(addOnTestRun.status || "idle")}">
+      <div class="addons-test-head">
+        <div>
+          <p class="eyebrow">Add-on Test Lab</p>
+          <h3>Configuration checks first, safe live checks when approved</h3>
+          <p>Config checks only inspect local readiness. Safe live checks call provider preflight endpoints and never send workflow content, files, screenshots, or secrets back to the browser.</p>
+        </div>
+        <div class="addons-test-actions">
+          <button class="secondary-button compact" type="button" data-addon-test-run="config">
+            <i data-lucide="list-checks"></i>
+            Run config checks
+          </button>
+          <button class="primary-button compact" type="button" data-addon-test-run="live">
+            <i data-lucide="activity"></i>
+            Run safe live checks
+          </button>
+        </div>
+      </div>
+      <div id="addOnTestResults" class="addons-test-results">
+        ${renderAddOnTestResults()}
+      </div>
+    </section>
     <div class="addons-provider-groups">
       ${addOnProviderGroups(status).map(([category, items]) => `
         <section class="addons-provider-group">
@@ -19852,6 +19973,7 @@ function addOnProviderCard(provider) {
   const surfaces = Array.isArray(provider.surfaces) ? provider.surfaces : [];
   const setup = Array.isArray(provider.setup) ? provider.setup : [];
   const blockedUntil = Array.isArray(provider.blockedUntil) ? provider.blockedUntil : [];
+  const testResult = latestAddOnTestResult(provider.id);
   return `
     <article class="addon-provider-card ${tone}">
       <div class="addon-card-top">
@@ -19879,8 +20001,85 @@ function addOnProviderCard(provider) {
         ${(setup.length ? setup : ["Define enterprise owner before enabling."]).slice(0, 2).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
         ${blockedUntil.length ? `<li>Blocked until: ${escapeHtml(blockedUntil.slice(0, 3).join(", "))}</li>` : ""}
       </ul>
+      <div class="addon-test-status ${escapeHtml(testResult?.testStatus || "idle")}">
+        <span>${escapeHtml(testResult?.statusLabel || "Not tested")}</span>
+        <p>${escapeHtml(testResult?.detail || "Run a config check to verify local readiness, or run a safe live check after approval.")}</p>
+      </div>
+      <div class="addon-test-actions">
+        <button class="secondary-button compact" type="button" data-addon-test-provider="${escapeHtml(provider.id)}" data-addon-test-mode="config">
+          <i data-lucide="list-checks"></i>
+          Check
+        </button>
+        <button class="secondary-button compact" type="button" data-addon-test-provider="${escapeHtml(provider.id)}" data-addon-test-mode="live">
+          <i data-lucide="activity"></i>
+          Live
+        </button>
+      </div>
     </article>
   `;
+}
+
+function renderAddOnTestResults() {
+  if (addOnTestRun.status === "running") {
+    return `
+      <div class="addon-test-empty running">
+        <i data-lucide="loader-circle"></i>
+        <strong>Running add-on checks</strong>
+        <p>Provider checks are in progress. Secrets stay server-side and no workflow content is sent.</p>
+      </div>
+    `;
+  }
+  const results = addOnTestRun.results || [];
+  if (!results.length) {
+    return `
+      <div class="addon-test-empty">
+        <i data-lucide="flask-conical"></i>
+        <strong>No add-on checks run yet</strong>
+        <p>Run config checks to verify local setup. Run safe live checks only when you are ready to ping external provider APIs.</p>
+      </div>
+    `;
+  }
+  const summary = addOnTestRun.summary || {};
+  return `
+    <div class="addon-test-summary-grid">
+      ${addOnTestMetric("Passed", summary.passed || 0, "check-circle-2")}
+      ${addOnTestMetric("Config present", summary.configured || 0, "key-round")}
+      ${addOnTestMetric("Missing config", summary.missingConfig || 0, "circle-alert")}
+      ${addOnTestMetric("Failed", summary.failed || 0, "x-circle")}
+    </div>
+    <div class="addon-test-result-list">
+      ${results.map(addOnTestResultRow).join("")}
+    </div>
+    <p class="addon-test-footnote">Last run: ${escapeHtml(formatDateTime(addOnTestRun.checkedAt))}. Mode: ${addOnTestRun.allowLiveChecks ? "safe live preflight" : "local config only"}.</p>
+  `;
+}
+
+function addOnTestMetric(label, value, icon) {
+  return `
+    <div class="addon-test-metric">
+      <i data-lucide="${escapeHtml(icon)}"></i>
+      <strong>${escapeHtml(value)}</strong>
+      <span>${escapeHtml(label)}</span>
+    </div>
+  `;
+}
+
+function addOnTestResultRow(result) {
+  return `
+    <article class="addon-test-result ${escapeHtml(result.testStatus || "idle")}">
+      <div>
+        <span>${escapeHtml(result.provider || "Provider")}</span>
+        <strong>${escapeHtml(result.label || result.id)}</strong>
+        <p>${escapeHtml(result.detail || "")}</p>
+        <small>${escapeHtml(result.action || "")}</small>
+      </div>
+      <em>${escapeHtml(result.statusLabel || result.testStatus || "Checked")}${result.httpStatus ? ` · HTTP ${escapeHtml(result.httpStatus)}` : ""}${result.latencyMs ? ` · ${escapeHtml(result.latencyMs)}ms` : ""}</em>
+    </article>
+  `;
+}
+
+function latestAddOnTestResult(providerId) {
+  return (addOnTestRun.results || []).find((result) => result.id === providerId);
 }
 
 function addOnStatusTone(provider) {
@@ -19923,6 +20122,75 @@ function recommendedAddOnRolloutPath(status = getAddOnProviderStatus()) {
       reason: "Observability is most useful once there are repeatable test transcripts and reviewer scoring rubrics."
     }
   ];
+}
+
+async function handleAddOnTestAction(event) {
+  const runButton = event.target.closest("[data-addon-test-run]");
+  const providerButton = event.target.closest("[data-addon-test-provider]");
+  if (!runButton && !providerButton) return;
+
+  const providerId = providerButton?.dataset.addonTestProvider || "";
+  const mode = runButton?.dataset.addonTestRun || providerButton?.dataset.addonTestMode || "config";
+  const allowLiveChecks = mode === "live";
+  if (allowLiveChecks) {
+    const proceed = confirm("Run safe live provider checks? This will ping configured external provider APIs, but it will not send workflow content, files, screenshots, or secrets to the browser.");
+    if (!proceed) return;
+  }
+  await runAddOnProviderTests({ providerId, allowLiveChecks });
+}
+
+async function runAddOnProviderTests({ providerId = "", allowLiveChecks = false } = {}) {
+  const existingResults = addOnTestRun.results || [];
+  addOnTestRun = {
+    status: "running",
+    allowLiveChecks,
+    summary: null,
+    results: existingResults,
+    checkedAt: new Date().toISOString()
+  };
+  renderOperatorAddOnsPanel();
+  try {
+    const payload = await requestJson("/api/add-ons/test", {
+      method: "POST",
+      body: {
+        providerId,
+        allowLiveChecks
+      }
+    });
+    const incomingResults = Array.isArray(payload.results) ? payload.results : [];
+    const previous = providerId
+      ? existingResults.filter((result) => result.id !== providerId)
+      : [];
+    addOnTestRun = {
+      status: "complete",
+      allowLiveChecks: Boolean(payload.allowLiveChecks),
+      summary: providerId ? summarizeClientAddOnTestResults([...previous, ...incomingResults]) : payload.summary,
+      results: providerId ? [...previous, ...incomingResults] : incomingResults,
+      checkedAt: payload.checkedAt || new Date().toISOString()
+    };
+    toast(allowLiveChecks ? "Safe live add-on checks complete." : "Add-on configuration checks complete.");
+  } catch (error) {
+    addOnTestRun = {
+      status: "error",
+      allowLiveChecks,
+      summary: null,
+      results: [],
+      checkedAt: new Date().toISOString()
+    };
+    toast(`Add-on check failed: ${error.message}`);
+  }
+  renderOperatorAddOnsPanel();
+}
+
+function summarizeClientAddOnTestResults(results = []) {
+  return {
+    total: results.length,
+    passed: results.filter((result) => result.testStatus === "passed").length,
+    configured: results.filter((result) => result.testStatus === "configured").length,
+    missingConfig: results.filter((result) => result.testStatus === "missing-config").length,
+    failed: results.filter((result) => result.testStatus === "failed").length,
+    skipped: results.filter((result) => result.testStatus === "skipped").length
+  };
 }
 
 function renderEvidenceWorkbench() {
@@ -21711,6 +21979,7 @@ function exportWorkbook() {
   addSheetToWorkbook(wb, "Solution Build Spec", solutionBuildSpecRows(solutionBuildSpec));
   addSheetToWorkbook(wb, "Agent Build Pack", agentBuildPackRows(agentBuildPack));
   addSheetToWorkbook(wb, "Add-On Provider Plan", addOnProviderPlanRows(addOnProviderPlan));
+  addSheetToWorkbook(wb, "Add-On Test Results", addOnTestResultsRows());
   addSheetToWorkbook(wb, "Workflow Map Studio", workflowMapStudioRows(workflowMapStudio));
   addSheetToWorkbook(wb, "Reviewer One Page", reviewerOnePageRows(reviewerOnePage));
   addSheetToWorkbook(wb, "Solution Capability Plan", solutionCapabilityPlanRows(solutionCapabilityPlan));
@@ -22600,6 +22869,9 @@ async function createHandoffPackage() {
         addOnProviderPlan,
         addOnProviderPlanRows: addOnProviderPlanRows(addOnProviderPlan),
         addOnProviderPlanMarkdown: addOnProviderPlanMarkdown(addOnProviderPlan),
+        addOnTestResults,
+        addOnTestResultsRows: addOnTestResultsRows(addOnTestResults),
+        addOnTestResultsMarkdown: addOnTestResultsMarkdown(addOnTestResults),
         agentBuildPack,
         agentBuildPackRows: agentBuildPackRows(agentBuildPack),
         agentBuildPackMarkdown: agentBuildPackMarkdown(agentBuildPack),

@@ -70,6 +70,7 @@ const AZURE_AI_LANGUAGE_KEY = process.env.AZURE_AI_LANGUAGE_KEY || "";
 const BRAINTRUST_API_KEY = process.env.BRAINTRUST_API_KEY || "";
 const LANGFUSE_PUBLIC_KEY = process.env.LANGFUSE_PUBLIC_KEY || "";
 const LANGFUSE_SECRET_KEY = process.env.LANGFUSE_SECRET_KEY || "";
+const ADDON_LIVE_TEST_TIMEOUT_MS = Number(process.env.ADDON_LIVE_TEST_TIMEOUT_MS || 8000);
 const DATA_DIR = path.join(__dirname, "data");
 const SESSIONS_DIR = path.join(DATA_DIR, "sessions");
 const PACKAGES_DIR = path.join(DATA_DIR, "packages");
@@ -359,6 +360,306 @@ function providerStatus({ id, label, category, provider, purpose, configured, mo
   };
 }
 
+function addOnProviderTestPlans() {
+  return {
+    "openai-responses": {
+      capability: "OpenAI API key and model-list preflight",
+      docsUrl: "https://platform.openai.com/docs/api-reference/models/list",
+      safeLiveCheck: true,
+      run: () => addonHttpCheck({
+        url: "https://api.openai.com/v1/models",
+        headers: { Authorization: `Bearer ${OPENAI_API_KEY}` }
+      })
+    },
+    "openai-realtime": {
+      capability: "Realtime model access uses the same OpenAI project key",
+      docsUrl: "https://developers.openai.com/api/docs/models/all",
+      safeLiveCheck: true,
+      run: () => addonHttpCheck({
+        url: "https://api.openai.com/v1/models",
+        headers: { Authorization: `Bearer ${OPENAI_API_KEY}` }
+      })
+    },
+    "openai-transcription": {
+      capability: "Transcription model access uses the same OpenAI project key",
+      docsUrl: "https://developers.openai.com/api/docs/models/all",
+      safeLiveCheck: true,
+      run: () => addonHttpCheck({
+        url: "https://api.openai.com/v1/models",
+        headers: { Authorization: `Bearer ${OPENAI_API_KEY}` }
+      })
+    },
+    "elevenlabs-voice": {
+      capability: "ElevenLabs subscription/auth preflight",
+      docsUrl: "https://elevenlabs.io/docs/api-reference/user/subscription/get",
+      safeLiveCheck: true,
+      run: () => addonHttpCheck({
+        url: "https://api.elevenlabs.io/v1/user/subscription",
+        headers: { "xi-api-key": ELEVENLABS_API_KEY }
+      })
+    },
+    "fish-audio-voice": {
+      capability: "Fish Audio model-list preflight",
+      docsUrl: "https://docs.fish.audio/api-reference/endpoint/model/list-models",
+      safeLiveCheck: true,
+      run: () => addonHttpCheck({
+        url: "https://api.fish.audio/model",
+        headers: { Authorization: `Bearer ${FISH_AUDIO_API_KEY}` }
+      })
+    },
+    "deepgram-stt": {
+      capability: "Deepgram projects/auth preflight",
+      docsUrl: "https://developers.deepgram.com/reference/authentication",
+      safeLiveCheck: true,
+      run: () => addonHttpCheck({
+        url: "https://api.deepgram.com/v1/projects",
+        headers: { Authorization: `Token ${DEEPGRAM_API_KEY}` }
+      })
+    },
+    "assemblyai-stt": {
+      capability: "AssemblyAI transcript-list auth preflight",
+      docsUrl: "https://www.assemblyai.com/docs/api-reference/transcripts/list",
+      safeLiveCheck: true,
+      run: () => addonHttpCheck({
+        url: "https://api.assemblyai.com/v2/transcript?limit=1",
+        headers: { Authorization: ASSEMBLYAI_API_KEY }
+      })
+    },
+    "azure-document-intelligence": {
+      capability: "Azure Document Intelligence resource-info preflight",
+      docsUrl: "https://learn.microsoft.com/en-us/rest/api/aiservices/miscellaneous-operations/get-resource-details",
+      safeLiveCheck: true,
+      run: () => addonHttpCheck({
+        url: `${normalizeBaseUrl(AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT)}/documentintelligence/info?api-version=2024-11-30`,
+        headers: { "Ocp-Apim-Subscription-Key": AZURE_DOCUMENT_INTELLIGENCE_KEY }
+      })
+    },
+    "llamaparse": {
+      capability: "LlamaParse cloud API auth preflight",
+      docsUrl: "https://docs.llamaindex.ai/en/stable/llama_cloud/llama_parse/",
+      safeLiveCheck: true,
+      run: () => addonHttpCheck({
+        url: "https://api.cloud.llamaindex.ai/api/v1/parsing/jobs?limit=1",
+        headers: { Authorization: `Bearer ${LLAMAPARSE_API_KEY}` }
+      })
+    },
+    "mistral-ocr": {
+      capability: "Mistral model-list preflight for OCR/model access",
+      docsUrl: "https://docs.mistral.ai/api/endpoint/models",
+      safeLiveCheck: true,
+      run: () => addonHttpCheck({
+        url: "https://api.mistral.ai/v1/models",
+        headers: { Authorization: `Bearer ${MISTRAL_API_KEY}` }
+      })
+    },
+    "presidio-pii": {
+      capability: "Presidio service health preflight",
+      docsUrl: "https://microsoft.github.io/presidio/api-docs/api-docs.html",
+      safeLiveCheck: true,
+      run: () => addonHttpCheck({
+        url: `${presidioBaseUrl(PRESIDIO_ENDPOINT)}/health`
+      })
+    },
+    "azure-ai-language-pii": {
+      capability: "Azure AI Language PII synthetic-text preflight",
+      docsUrl: "https://learn.microsoft.com/en-us/rest/api/language/analyze-text/analyze-text/analyze-text",
+      safeLiveCheck: true,
+      run: () => addonHttpCheck({
+        url: `${normalizeBaseUrl(AZURE_AI_LANGUAGE_ENDPOINT)}/language/:analyze-text?api-version=2025-11-01`,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Ocp-Apim-Subscription-Key": AZURE_AI_LANGUAGE_KEY
+        },
+        body: {
+          kind: "PiiEntityRecognition",
+          analysisInput: {
+            documents: [
+              {
+                id: "safe-synthetic-check",
+                text: "Jane Doe at Contoso requested a sample workflow review.",
+                language: "en"
+              }
+            ]
+          },
+          parameters: {
+            loggingOptOut: true
+          }
+        }
+      })
+    },
+    "mermaid-workflow-map": {
+      capability: "Local Mermaid workflow-map renderer",
+      docsUrl: "https://mermaid.js.org/",
+      safeLiveCheck: false,
+      run: null
+    },
+    "braintrust-evals": {
+      capability: "Braintrust project-list auth preflight",
+      docsUrl: "https://www.braintrust.dev/docs/api-reference/introduction",
+      safeLiveCheck: true,
+      run: () => addonHttpCheck({
+        url: "https://api.braintrust.dev/v1/project?limit=1",
+        headers: { Authorization: `Bearer ${BRAINTRUST_API_KEY}` }
+      })
+    },
+    "langfuse-tracing": {
+      capability: "Langfuse public API project preflight",
+      docsUrl: "https://langfuse.com/docs/api-and-data-platform/features/public-api",
+      safeLiveCheck: true,
+      run: () => addonHttpCheck({
+        url: "https://cloud.langfuse.com/api/public/projects",
+        headers: { Authorization: `Basic ${Buffer.from(`${LANGFUSE_PUBLIC_KEY}:${LANGFUSE_SECRET_KEY}`).toString("base64")}` }
+      })
+    }
+  };
+}
+
+async function handleAddOnProviderTest(req, res) {
+  const body = await readJson(req);
+  const allowLiveChecks = Boolean(body.allowLiveChecks);
+  const requestedProviderId = String(body.providerId || "").trim();
+  const status = buildAddOnProviderStatus();
+  const providers = requestedProviderId
+    ? status.providers.filter((provider) => provider.id === requestedProviderId)
+    : status.providers;
+  if (requestedProviderId && !providers.length) {
+    return sendJson(res, 404, { error: "Unknown add-on provider" });
+  }
+
+  const results = [];
+  for (const provider of providers) {
+    results.push(await runAddOnProviderTest(provider, { allowLiveChecks }));
+  }
+
+  return sendJson(res, 200, {
+    ok: true,
+    checkedAt: new Date().toISOString(),
+    allowLiveChecks,
+    summary: summarizeAddOnTestResults(results),
+    results,
+    secretsExposed: false
+  });
+}
+
+async function runAddOnProviderTest(provider, { allowLiveChecks = false } = {}) {
+  const plan = addOnProviderTestPlans()[provider.id] || {};
+  const base = {
+    id: provider.id,
+    label: provider.label,
+    provider: provider.provider,
+    category: provider.category,
+    configured: Boolean(provider.configured),
+    envVars: provider.envVars || [],
+    capability: plan.capability || "Provider readiness contract",
+    docsUrl: plan.docsUrl || "",
+    checkedAt: new Date().toISOString(),
+    secretsExposed: false
+  };
+
+  if (provider.id === "mermaid-workflow-map") {
+    return {
+      ...base,
+      testStatus: "passed",
+      statusLabel: "Local check passed",
+      detail: "Workflow Map Studio is included locally and does not require an external provider key.",
+      action: "Use Outputs > Workflow Map Studio to review generated Mermaid source."
+    };
+  }
+
+  if (!provider.configured) {
+    return {
+      ...base,
+      testStatus: "missing-config",
+      statusLabel: "Missing configuration",
+      detail: `Required local environment values are not configured: ${(provider.envVars || []).join(", ") || "none"}.`,
+      action: "Add approved values to discovery-intake-webapp/.env.local, restart the app, then rerun this test."
+    };
+  }
+
+  if (!allowLiveChecks) {
+    return {
+      ...base,
+      testStatus: "configured",
+      statusLabel: "Config present",
+      detail: "Required local environment values are present. No external provider call was made.",
+      action: "Use Run safe live checks when you are ready to call provider preflight endpoints."
+    };
+  }
+
+  if (!plan.run) {
+    return {
+      ...base,
+      testStatus: "skipped",
+      statusLabel: "No live adapter",
+      detail: "This provider has a readiness contract but no live probe adapter yet.",
+      action: "Keep it in planning mode until a vendor-specific adapter is approved."
+    };
+  }
+
+  try {
+    const probe = await plan.run();
+    return {
+      ...base,
+      testStatus: probe.ok ? "passed" : "failed",
+      statusLabel: probe.ok ? "Live check passed" : "Live check failed",
+      detail: probe.ok ? "Provider endpoint responded successfully to the safe preflight request." : `Provider endpoint returned HTTP ${probe.status}.`,
+      action: probe.ok ? "Provider can move to a synthetic pilot test after enterprise approval." : "Check the key, endpoint, region, account permissions, and vendor dashboard status.",
+      httpStatus: probe.status,
+      latencyMs: probe.latencyMs
+    };
+  } catch (error) {
+    return {
+      ...base,
+      testStatus: "failed",
+      statusLabel: "Live check failed",
+      detail: String(error.message || error),
+      action: "Check local network access, endpoint URL, key validity, provider status, and enterprise proxy requirements."
+    };
+  }
+}
+
+function summarizeAddOnTestResults(results = []) {
+  return {
+    total: results.length,
+    passed: results.filter((result) => result.testStatus === "passed").length,
+    configured: results.filter((result) => result.testStatus === "configured").length,
+    missingConfig: results.filter((result) => result.testStatus === "missing-config").length,
+    failed: results.filter((result) => result.testStatus === "failed").length,
+    skipped: results.filter((result) => result.testStatus === "skipped").length
+  };
+}
+
+async function addonHttpCheck({ url, method = "GET", headers = {}, body = undefined }) {
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ADDON_LIVE_TEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal
+    });
+    await response.arrayBuffer();
+    return {
+      ok: response.status >= 200 && response.status < 300,
+      status: response.status,
+      latencyMs: Date.now() - startedAt
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function normalizeBaseUrl(value) {
+  return String(value || "").replace(/\/+$/g, "");
+}
+
+function presidioBaseUrl(value) {
+  return normalizeBaseUrl(String(value || "").replace(/\/(analyze|anonymize|deanonymize).*$/i, ""));
+}
+
 function buildAddOnProviderStatus() {
   const azureDocumentConfigured = Boolean(AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT && AZURE_DOCUMENT_INTELLIGENCE_KEY);
   const azureLanguageConfigured = Boolean(AZURE_AI_LANGUAGE_ENDPOINT && AZURE_AI_LANGUAGE_KEY);
@@ -621,6 +922,10 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         enterprise: buildEnterpriseConfigStatus()
       });
+    }
+
+    if (req.method === "POST" && requestUrl.pathname === "/api/add-ons/test") {
+      return await handleAddOnProviderTest(req, res);
     }
 
     if (requestUrl.pathname === "/api/sessions") {
@@ -1135,6 +1440,10 @@ async function handleCreatePackage(req, res) {
     "add-on-provider-plan.md": String(body.addOnProviderPlanMarkdown || ""),
     "add-on-provider-plan.docx": createDocxBuffer("Add-On Provider Plan", body.addOnProviderPlanMarkdown || ""),
     "add-on-provider-plan-rows.json": JSON.stringify(body.addOnProviderPlanRows || [], null, 2),
+    "add-on-test-results.json": JSON.stringify(body.addOnTestResults || {}, null, 2),
+    "add-on-test-results.md": String(body.addOnTestResultsMarkdown || ""),
+    "add-on-test-results.docx": createDocxBuffer("Add-On Test Results", body.addOnTestResultsMarkdown || ""),
+    "add-on-test-results-rows.json": JSON.stringify(body.addOnTestResultsRows || [], null, 2),
     "workflow-map-studio.json": JSON.stringify(body.workflowMapStudio || {}, null, 2),
     "workflow-map-studio.md": String(body.workflowMapStudioMarkdown || ""),
     "workflow-map-studio.mmd": String(body.workflowMapMermaid || ""),
@@ -1269,6 +1578,10 @@ async function handleCreatePackage(req, res) {
         "add-on-provider-plan.md",
         "add-on-provider-plan.docx",
         "add-on-provider-plan-rows.json",
+        "add-on-test-results.json",
+        "add-on-test-results.md",
+        "add-on-test-results.docx",
+        "add-on-test-results-rows.json",
         "workflow-map-studio.json",
         "workflow-map-studio.md",
         "workflow-map-studio.mmd",
@@ -1451,6 +1764,7 @@ function buildPackageReadme(summary) {
     "- `solution-build-spec.json` / `solution-build-spec-rows.json`: machine-readable ChatGPT/Copilot build contract for route logic, platform responsibilities, connector candidates, controls, MVP steps, and test criteria.",
     "- `agent-build-pack.docx` / `.md` / `.json` / `-rows.json`: build-surface guide for Custom GPT/ChatGPT project, ChatGPT tools, OpenAI Agents SDK app, Microsoft 365 Copilot/Copilot Studio, and full custom app options.",
     "- `add-on-provider-plan.docx` / `.md` / `.json` / `-rows.json`: optional provider registry for voice, speech-to-text, OCR/document intelligence, PII/privacy review, workflow visualization, and eval/observability add-ons with setup and enterprise approval gates.",
+    "- `add-on-test-results.docx` / `.md` / `.json` / `-rows.json`: latest Operator Add-ons Test Lab evidence showing local configuration checks, optional safe live preflight checks, missing provider values, and next actions.",
     "- `workflow-map-studio.docx` / `.md` / `.json` / `.mmd` / `-rows.json`: visual workflow map contract covering steps, data, systems, decisions, handoffs, controls, open questions, and Mermaid source.",
     "- `solution-capability-plan.json` / `solution-capability-plan-rows.json`: feature-level plan mapping ChatGPT capabilities, Microsoft Copilot surfaces, human checkpoints, and enterprise hardening phases.",
     "- `solution-execution-plan.docx` / `.json` / `.md` / `-rows.json`: builder-facing runbook mapping each ChatGPT/Copilot capability to required data inputs, permissions, enterprise controls, human checkpoints, package evidence, and expected output.",

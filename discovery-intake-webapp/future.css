@@ -10629,6 +10629,222 @@ body[data-app-mode="interview"] #sendChatButton {
   padding: 16px;
 }
 
+.addons-test-lab {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(132, 204, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(7, 15, 34, 0.54);
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.18);
+}
+
+.addons-test-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+}
+
+.addons-test-head h3 {
+  margin: 0;
+  color: rgba(249, 251, 255, 0.95);
+  font-size: 17px;
+}
+
+.addons-test-head p {
+  margin: 8px 0 0;
+  max-width: 860px;
+  color: rgba(225, 236, 255, 0.72);
+  line-height: 1.5;
+}
+
+.addons-test-actions,
+.addon-test-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.addons-test-actions .compact,
+.addon-test-actions .compact {
+  min-height: 38px;
+}
+
+.addons-test-results {
+  display: grid;
+  gap: 12px;
+}
+
+.addon-test-empty {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  min-height: 94px;
+  padding: 14px;
+  border: 1px dashed rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.58);
+}
+
+.addon-test-empty svg {
+  width: 22px;
+  height: 22px;
+  color: #67e8f9;
+}
+
+.addon-test-empty.running svg {
+  animation: spin 1.1s linear infinite;
+}
+
+.addon-test-empty strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 14px;
+}
+
+.addon-test-empty p,
+.addon-test-footnote {
+  margin: 4px 0 0;
+  color: rgba(226, 232, 240, 0.68);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.addon-test-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.addon-test-metric {
+  display: grid;
+  gap: 5px;
+  min-height: 86px;
+  padding: 11px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.7);
+}
+
+.addon-test-metric svg {
+  width: 17px;
+  height: 17px;
+  color: #67e8f9;
+}
+
+.addon-test-metric strong {
+  color: #f8fafc;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.addon-test-metric span {
+  color: rgba(226, 232, 240, 0.68);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.addon-test-result-list {
+  display: grid;
+  gap: 8px;
+}
+
+.addon-test-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-left: 3px solid rgba(148, 163, 184, 0.48);
+  border-radius: 8px;
+  background: rgba(10, 17, 34, 0.74);
+}
+
+.addon-test-result.passed {
+  border-left-color: #34d399;
+}
+
+.addon-test-result.configured,
+.addon-test-result.skipped {
+  border-left-color: #67e8f9;
+}
+
+.addon-test-result.missing-config {
+  border-left-color: #fbbf24;
+}
+
+.addon-test-result.failed {
+  border-left-color: #fb7185;
+}
+
+.addon-test-result span,
+.addon-test-status span {
+  display: block;
+  margin-bottom: 3px;
+  color: rgba(226, 232, 240, 0.55);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.addon-test-result strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 13px;
+}
+
+.addon-test-result p,
+.addon-test-result small,
+.addon-test-status p {
+  margin: 5px 0 0;
+  color: rgba(226, 232, 240, 0.68);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.addon-test-result em {
+  justify-self: end;
+  max-width: 220px;
+  padding: 5px 7px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+  color: rgba(248, 250, 252, 0.82);
+  background: rgba(15, 23, 42, 0.82);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+  text-align: right;
+}
+
+.addon-test-status {
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.58);
+}
+
+.addon-test-status.passed {
+  border-color: rgba(52, 211, 153, 0.34);
+}
+
+.addon-test-status.configured,
+.addon-test-status.skipped {
+  border-color: rgba(103, 232, 249, 0.28);
+}
+
+.addon-test-status.missing-config {
+  border-color: rgba(251, 191, 36, 0.32);
+}
+
+.addon-test-status.failed {
+  border-color: rgba(251, 113, 133, 0.32);
+}
+
 .addons-next-steps ol {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -11068,10 +11284,18 @@ body[data-app-mode="interview"] #sendChatButton {
   line-height: 1.4;
 }
 
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (max-width: 1180px) {
   .addons-hero,
+  .addons-test-head,
   .addons-next-steps ol,
   .addons-provider-grid,
+  .addon-test-result,
   .workflow-map-hero,
   .workflow-map-body,
   .workflow-map-review-row,
@@ -11082,13 +11306,23 @@ body[data-app-mode="interview"] #sendChatButton {
   }
 
   .addons-score-grid,
+  .addon-test-summary-grid,
   .workflow-map-stats {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .addons-test-actions,
+  .addon-test-actions,
+  .addon-test-result em {
+    justify-content: flex-start;
+    justify-self: start;
+    text-align: left;
   }
 }
 
 @media (max-width: 760px) {
   .addons-score-grid,
+  .addon-test-summary-grid,
   .workflow-map-stats {
     grid-template-columns: minmax(0, 1fr);
   }

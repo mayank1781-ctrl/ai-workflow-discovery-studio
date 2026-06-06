@@ -72,6 +72,7 @@ Leave these blank unless the work environment has approved the vendor, data boun
 | `BRAINTRUST_API_KEY` | Optional | Evals | Extraction/recipe regression evaluation after tool approval |
 | `LANGFUSE_PUBLIC_KEY` | Optional | Observability | Pilot tracing after telemetry policy approval |
 | `LANGFUSE_SECRET_KEY` | Optional | Observability | Pair with Langfuse public key; never commit |
+| `ADDON_LIVE_TEST_TIMEOUT_MS` | Optional | Add-on Test Lab | Timeout for safe live provider preflight checks; defaults to `8000` |
 
 ## Local Safety Rules
 

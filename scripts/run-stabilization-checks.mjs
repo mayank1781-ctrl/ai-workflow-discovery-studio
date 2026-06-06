@@ -22,6 +22,10 @@ const checks = [
     args: ["scripts/check-local-setup.mjs", "--health"]
   },
   {
+    label: "Add-on Test Lab config smoke",
+    args: ["scripts/check-add-on-test-lab.mjs"]
+  },
+  {
     label: "Enterprise transfer kit",
     args: ["scripts/check-enterprise-transfer-kit.mjs"]
   },
