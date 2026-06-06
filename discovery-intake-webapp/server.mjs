@@ -1156,19 +1156,29 @@ async function handleExtractDocument(req, res) {
     return sendJson(res, 200, { success: false, error: "No file was received. Please choose a document and try again." });
   }
 
-  let text;
-  try {
-    text = await extractDocumentText(upload);
-  } catch (error) {
-    console.error("Document text extraction failed", error);
-    return sendJson(res, 200, { success: false, error: "We couldn't read that document. Try a different file or start with conversation." });
+  // Images go straight to the vision model; everything else (PDF/Word/Excel)
+  // is parsed to text first — that path is unchanged.
+  let userMessageContent;
+  if (isImageUpload(upload)) {
+    const dataUrl = `data:${upload.mimeType || "image/png"};base64,${upload.buffer.toString("base64")}`;
+    userMessageContent = [
+      { type: "text", text: "Extract the workflow grid from this image or screenshot." },
+      { type: "image_url", image_url: { url: dataUrl, detail: "high" } }
+    ];
+  } else {
+    let text;
+    try {
+      text = await extractDocumentText(upload);
+    } catch (error) {
+      console.error("Document text extraction failed", error);
+      return sendJson(res, 200, { success: false, error: "We couldn't read that document. Try a different file or start with conversation." });
+    }
+    if (!text || !text.trim()) {
+      return sendJson(res, 200, { success: false, error: "That document didn't contain readable text. Try a different file or start with conversation." });
+    }
+    // Keep the prompt within a sane bound; truncate very large documents.
+    userMessageContent = text.length > 120_000 ? text.slice(0, 120_000) : text;
   }
-  if (!text || !text.trim()) {
-    return sendJson(res, 200, { success: false, error: "That document didn't contain readable text. Try a different file or start with conversation." });
-  }
-
-  // Keep the prompt within a sane bound; truncate very large documents.
-  const trimmedText = text.length > 120_000 ? text.slice(0, 120_000) : text;
 
   let data;
   try {
@@ -1183,7 +1193,7 @@ async function handleExtractDocument(req, res) {
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: DOCUMENT_EXTRACTION_SYSTEM_PROMPT },
-          { role: "user", content: trimmedText }
+          { role: "user", content: userMessageContent }
         ]
       })
     });
@@ -1265,6 +1275,12 @@ async function extractDocumentText({ buffer, filename = "", mimeType = "" }) {
     return firstSheet ? XLSX.utils.sheet_to_csv(firstSheet) : "";
   }
   throw new Error("Unsupported document type.");
+}
+
+// Images are sent to the vision model rather than parsed to text.
+function isImageUpload({ filename = "", mimeType = "" }) {
+  const probe = `${filename} ${mimeType}`.toLowerCase();
+  return mimeType.toLowerCase().startsWith("image/") || /\.(png|jpe?g|webp)(\s|$)/.test(probe);
 }
 
 const HARVEST_GRID_SYSTEM_PROMPT = `You are a workflow data extraction specialist. Extract structured workflow field values from a conversation transcript and return updates to a workflow grid.
