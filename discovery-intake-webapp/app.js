@@ -1120,6 +1120,9 @@ let postTurnRecorderStream = null;
 let postTurnAudioChunks = [];
 let transcriptionAvailable = false;
 let transcriptionModel = "gpt-4o-transcribe";
+let ttsAvailable = false;
+let ttsAudioElement = null;
+let ttsAbortController = null;
 let evidenceRecognition = null;
 let evidenceDictationActive = false;
 let evidenceDictationFinal = "";
@@ -1379,6 +1382,8 @@ function bindEvents() {
   els.voiceReplyToggle.addEventListener("change", (event) => {
     state.voiceReplyEnabled = event.target.checked;
     persistState();
+    // Turning the toggle off should also silence anything mid-sentence.
+    if (!state.voiceReplyEnabled) stopSpeaking();
     const reply = state.voiceReplyEnabled ? "AI spoken responses are on. After you tap Done Talking, I will summarize what I heard and ask the next follow-up out loud." : "AI spoken responses are off. I will keep responses on screen.";
     addConversationMessage("assistant", reply);
     maybeSpeak(reply);
@@ -1454,6 +1459,7 @@ async function checkAiStatus() {
     aiAvailable = Boolean(data.aiConfigured);
     realtimeAvailable = Boolean(data.realtimeConfigured);
     transcriptionAvailable = Boolean(data.transcriptionConfigured);
+    ttsAvailable = Boolean(data.ttsConfigured);
     addOnProviderStatus = data.addOns || data.enterprise?.addOns || addOnProviderStatus || buildFallbackAddOnProviderStatus();
     const realtimeModel = data.realtimeModel || data.primaryModel || "gpt-realtime-2";
     transcriptionModel = data.transcriptionModel || transcriptionModel;
@@ -1475,7 +1481,7 @@ async function checkAiStatus() {
     document.getElementById("showProgressButton").title = "Review which intake sections are complete, partial, or still open.";
     document.getElementById("showMapButton").title = "Refresh the A-Z process map using the latest captured steps.";
     els.voiceHint.textContent = canUsePostTurnTranscription()
-      ? `Dictation uses ${transcriptionModel} after you tap Stop, then sends the cleaned transcript into the same intake flow.`
+      ? `Dictate records your answer and transcribes it with OpenAI ${transcriptionModel} when you tap Stop, then drops the cleaned text into the answer box.${ttsAvailable && state.voiceReplyEnabled ? " AI replies are spoken with OpenAI text-to-speech." : ""}`
       : realtimeAvailable
         ? `Primary mode is GPT-Realtime 2 live voice. Use Start Talking and Stop Talking for a guided turn-by-turn intake; the AI will structure the visible transcript as you go.`
         : "Voice uses your browser's speech recognition if available. Use Chrome or Edge for best results.";
@@ -1483,6 +1489,7 @@ async function checkAiStatus() {
     aiAvailable = false;
     realtimeAvailable = false;
     transcriptionAvailable = false;
+    ttsAvailable = false;
     addOnProviderStatus = buildFallbackAddOnProviderStatus();
     els.aiStatus.textContent = "AI offline";
     els.aiStatus.title = "";
@@ -1643,6 +1650,8 @@ function setupBrowserVoices() {
 }
 
 function startRecording() {
+  // A new turn always silences any AI reply that is still playing.
+  stopSpeaking();
   if (canUsePostTurnTranscription()) {
     startPostTurnRecording();
     return;
@@ -1662,11 +1671,21 @@ function startRecording() {
 }
 
 function endRecording() {
+  // Stop is the counterpart to Dictate: always halt any in-progress AI speech,
+  // then stop whichever capture mode is active.
+  stopSpeaking();
   if (postTurnRecorder) {
     stopPostTurnRecording();
     return;
   }
-  if (!recognition || !isListening) return;
+  if (!recognition || !isListening) {
+    // Nothing was recording (e.g. Stop pressed only to silence the AI reply).
+    // Make sure the buttons land back in a clean idle state.
+    document.getElementById("startRecordingButton").disabled = false;
+    document.getElementById("endRecordingButton").disabled = true;
+    if (state.captureStage === "listening") setCaptureStage("idle", "Voice idle");
+    return;
+  }
   recognition.stop();
   const text = mergePendingSpeechTranscript();
   if (!text) {
@@ -7867,16 +7886,92 @@ function latestDeltaSummary() {
   return `I updated ${changes.join(", ")} in the intake.`;
 }
 
-function maybeSpeak(text) {
-  if (!state.voiceReplyEnabled || realtimeConnection || !("speechSynthesis" in window)) return;
+async function maybeSpeak(text) {
+  // Skip when the toggle is off, or when a live realtime call owns the audio.
+  if (!state.voiceReplyEnabled || realtimeConnection) return;
+  const clean = normalizeLiveAssistantReply("assistant", text);
+  if (!clean) return;
+  // Interrupt anything already playing so replies never overlap.
+  stopSpeaking();
+  if (ttsAvailable) {
+    try {
+      ttsAbortController = new AbortController();
+      const response = await fetch("/api/tts/speak", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: clean }),
+        signal: ttsAbortController.signal
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || `TTS request failed with status ${response.status}`);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      ttsAudioElement = audio;
+      setSpeakingUi(true);
+      const release = () => {
+        URL.revokeObjectURL(url);
+        if (ttsAudioElement === audio) {
+          ttsAudioElement = null;
+          setSpeakingUi(false);
+        }
+      };
+      audio.addEventListener("ended", release, { once: true });
+      audio.addEventListener("error", release, { once: true });
+      await audio.play();
+      return;
+    } catch (error) {
+      // AbortError means the user/UI intentionally stopped playback; stay silent.
+      if (error?.name === "AbortError") return;
+      // Any other failure (offline, quota, etc.) falls back to the browser voice.
+      ttsAbortController = null;
+    }
+  }
+  speakWithBrowser(clean);
+}
+
+function speakWithBrowser(text) {
+  if (!("speechSynthesis" in window)) return;
   window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(normalizeLiveAssistantReply("assistant", text));
+  const utterance = new SpeechSynthesisUtterance(text);
   const voice = selectNaturalBrowserVoice();
   if (voice) utterance.voice = voice;
   utterance.rate = 0.94;
   utterance.pitch = 1.04;
   utterance.volume = 0.95;
+  utterance.addEventListener("end", () => setSpeakingUi(false), { once: true });
+  setSpeakingUi(true);
   window.speechSynthesis.speak(utterance);
+}
+
+function stopSpeaking() {
+  if (ttsAbortController) {
+    ttsAbortController.abort();
+    ttsAbortController = null;
+  }
+  if (ttsAudioElement) {
+    ttsAudioElement.pause();
+    ttsAudioElement.src = "";
+    ttsAudioElement = null;
+  }
+  if ("speechSynthesis" in window) {
+    window.speechSynthesis.cancel();
+  }
+  setSpeakingUi(false);
+}
+
+// Keep the Stop button live while the AI is speaking so it can interrupt
+// playback, without clobbering the recording state that owns it otherwise.
+function setSpeakingUi(speaking) {
+  const stopButton = document.getElementById("endRecordingButton");
+  if (!stopButton) return;
+  if (speaking) {
+    stopButton.disabled = false;
+  } else if (!postTurnRecorder && !isListening) {
+    stopButton.disabled = true;
+  }
 }
 
 function selectNaturalBrowserVoice() {
