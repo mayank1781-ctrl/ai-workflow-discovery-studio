@@ -48,6 +48,7 @@ const TTS_MODEL = process.env.TTS_MODEL || "gpt-4o-mini-tts";
 const TTS_VOICE = process.env.TTS_VOICE || "alloy";
 const EXTRACTION_MODEL = process.env.EXTRACTION_MODEL || process.env.OPENAI_MODEL || "gpt-5.5";
 const DOCUMENT_EXTRACTION_MODEL = process.env.EXTRACT_DOC_MODEL || "gpt-4o";
+const HARVEST_MODEL = process.env.HARVEST_MODEL || "gpt-4o";
 const EXTRACTION_REASONING_EFFORT = process.env.EXTRACTION_REASONING_EFFORT || "medium";
 const EXTRACTION_VERBOSITY = process.env.EXTRACTION_VERBOSITY || "low";
 const CHAT_REASONING_EFFORT = process.env.CHAT_REASONING_EFFORT || "low";
@@ -993,6 +994,10 @@ const server = http.createServer(async (req, res) => {
       return await handleExtractDocument(req, res);
     }
 
+    if (req.method === "POST" && requestUrl.pathname === "/api/harvest-grid") {
+      return await handleHarvestGrid(req, res);
+    }
+
     if (req.method === "POST" && requestUrl.pathname === "/api/evidence/analyze") {
       return await handleEvidenceAnalyze(req, res);
     }
@@ -1037,6 +1042,10 @@ async function handleExtract(req, res) {
     currentSection: body.currentSection,
     transcript: body.transcript,
     answer: body.answer,
+    // Stage 1b: optional grid-awareness. When present, the model treats it as
+    // a summary of what is already known and focuses on gaps. When null/absent,
+    // behavior is unchanged (normal open-ended discovery).
+    gridContext: body.gridContext || null,
     state: pruneState(body.state)
   };
 
@@ -1256,6 +1265,101 @@ async function extractDocumentText({ buffer, filename = "", mimeType = "" }) {
     return firstSheet ? XLSX.utils.sheet_to_csv(firstSheet) : "";
   }
   throw new Error("Unsupported document type.");
+}
+
+const HARVEST_GRID_SYSTEM_PROMPT = `You are a workflow data extraction specialist. Extract structured workflow field values from a conversation transcript and return updates to a workflow grid.
+
+Read the ENTIRE transcript holistically — information mentioned anywhere applies to any step's fields.
+
+Confidence rules (apply universally to all input types):
+0.9+ = explicitly stated by the person
+0.7  = clearly implied
+0.5  = reasonably inferred
+<0.5 = do not include
+
+Special rules:
+- painFriction: only include if the person explicitly expressed frustration, difficulty, or pain. Never infer this field.
+- aiPattern: never include — it is generated separately.
+- Only update a cell if the new confidence exceeds the existing confidence, or the existing state is 'empty'.
+- Match updates to existing steps by name or position. If a genuinely new step is mentioned, add it to newSteps.
+
+Return ONLY valid JSON — no markdown, no explanation:
+{
+  stepUpdates: [
+    {
+      stepId: 'existing-step-id or new',
+      stepName: string,
+      fieldUpdates: {
+        fieldKey: {
+          value: string,
+          confidence: number,
+          state: 'confirmed' or 'inferred'
+        }
+      }
+    }
+  ],
+  newSteps: []
+}`;
+
+// Stage 1b: harvest structured grid updates from the live conversation. Called
+// after each user answer. Failures are intentionally benign — they resolve to
+// an empty update set (HTTP 200) so the frontend can ignore them silently and
+// never interrupt the interview.
+async function handleHarvestGrid(req, res) {
+  const empty = { stepUpdates: [], newSteps: [] };
+  if (!OPENAI_API_KEY) {
+    return sendJson(res, 200, empty);
+  }
+
+  let body;
+  try {
+    body = await readJson(req);
+  } catch {
+    return sendJson(res, 200, empty);
+  }
+
+  const payload = {
+    transcript: body.transcript || [],
+    currentGrid: body.currentGrid || null,
+    latestAnswer: body.latestAnswer || ""
+  };
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: HARVEST_MODEL,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: HARVEST_GRID_SYSTEM_PROMPT },
+          { role: "user", content: JSON.stringify(payload) }
+        ]
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      console.warn("Grid harvest request failed", data.error?.message || response.status);
+      return sendJson(res, 200, empty);
+    }
+    const outputText = data.choices?.[0]?.message?.content || "";
+    let parsed;
+    try {
+      parsed = JSON.parse(outputText);
+    } catch {
+      return sendJson(res, 200, empty);
+    }
+    return sendJson(res, 200, {
+      stepUpdates: Array.isArray(parsed.stepUpdates) ? parsed.stepUpdates : [],
+      newSteps: Array.isArray(parsed.newSteps) ? parsed.newSteps : []
+    });
+  } catch (error) {
+    console.warn("Grid harvest unavailable", error.message);
+    return sendJson(res, 200, empty);
+  }
 }
 
 async function handleEvidenceAnalyze(req, res) {
@@ -2399,6 +2503,11 @@ function extractionInstructions() {
     "When the user mentions files, reports, emails, trackers, systems, data types, or repositories, capture data/system records as appropriate.",
     "For each step, capture exceptions or variations and data sensitivity directly on the step record when mentioned. Uploaded screenshots or files are optional supporting evidence, never a requirement for the intake to work. Mark evidenceConfidence as High only when the user confirms; otherwise use Medium or Low.",
     "AI patterns are post-intake enrichment. Fill pattern only when it is obvious from the step; otherwise leave it blank until the intake is complete. Use retrieve, search, extract, transform/normalize, summarize, classify, compare, generate, review/QA, recommend, orchestrate/automate, human approval, or no AI pattern.",
+    // Stage 1b grid-awareness. Only active when payload.gridContext is present.
+    "GRID-AWARENESS: The request payload may include a gridContext object summarizing a structured workflow grid already populated from earlier discovery or an uploaded document. When gridContext is null or absent, run normal open-ended discovery as usual. When gridContext is present, treat it as a summary of what is ALREADY KNOWN and do not re-ask about it.",
+    "When gridContext is present, each step lists populatedFields (already captured with sufficient confidence) and emptyOrWeakFields (missing or low-confidence). Do not ask about any field already listed in populatedFields. Focus nextQuestion on the emptyOrWeakFields, choosing the single biggest, most handoff-critical gap and asking ONE focused question at a time.",
+    "When gridContext is present, always prioritise Pain/Friction: only a human can provide it and documents never can, so if any step is missing genuine Pain/Friction, prefer surfacing that gap. Do not infer Pain/Friction yourself; ask the person about it.",
+    "When gridContext is present and all high-priority fields across all steps are already populated (no meaningful emptyOrWeakFields remain), shift to wrap-up mode: set nextQuestion to 'I think I have a good picture — let me confirm a few things before we wrap up' and then confirm rather than interrogate.",
     "Return only JSON matching the schema."
   ].join(" ");
 }
