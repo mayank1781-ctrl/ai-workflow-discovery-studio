@@ -3368,6 +3368,7 @@ function render() {
   renderLiveSpeechDraft();
   renderDiscoveryInferenceLens();
   renderWorkflowGridPanel();
+  updateConfidenceCards();
   els.sectionTitle.textContent = section.label;
   renderConversation();
   renderAiChat();
@@ -4114,6 +4115,100 @@ function renderWorkflowGridPanel() {
     </div>
   `;
   refreshIcons();
+}
+
+// --- Live step confidence cards (read-only left-panel display) --------------
+// Glowing cards below the Dictate/Stop/Add Attachment row. One card per step in
+// state.workflowGrid.steps, coloured by how many of the step's 17 cells are
+// captured (confirmed/inferred). Rewrites only its own container — never calls
+// render(), so it is safe to invoke from inside render() on every update.
+function updateConfidenceCards() {
+  const container = document.getElementById("step-confidence-cards");
+  if (!container) return;
+
+  const steps = Array.isArray(state.workflowGrid?.steps) ? state.workflowGrid.steps : [];
+  if (!steps.length) {
+    // Empty grid -> render nothing. Blank space is fine, no placeholder.
+    container.innerHTML = "";
+    return;
+  }
+
+  // The grid has no current-step marker of its own; the live interview tracks
+  // the active step via state.activeStepIndex (over legacy state.steps). Only
+  // surface a "NOW" badge when the interview is actually in step mode.
+  const hasActiveStep = Array.isArray(state.steps) && state.steps.length > 0;
+  const currentIndex = hasActiveStep
+    ? Math.max(0, Math.min(Number(state.activeStepIndex) || 0, steps.length - 1))
+    : -1;
+
+  const cardsHtml = steps.map((step, index) => {
+    const cells = Object.values(step.cells || {});
+    const filled = cells.filter((c) => c && (c.state === "confirmed" || c.state === "inferred")).length;
+    const coverage = cells.length ? filled / cells.length : 0;
+    const isCurrentStep = index === currentIndex;
+
+    // Glow state -> background, border, animation, and the accent colour reused
+    // by the coverage bar fill and the percentage label.
+    let background;
+    let border;
+    let accent;
+    let animation = "";
+    if (isCurrentStep) {
+      background = "#1a0020";
+      border = "#ff4fc8";
+      accent = "#ff4fc8";
+      animation = "pulsePink 1.5s infinite";
+    } else if (coverage === 0) {
+      background = "#0d1a26";
+      border = "#1a2a3a";
+      accent = "#1a2a3a";
+    } else if (coverage < 0.25) {
+      background = "#1a1500";
+      border = "#f59e0b55";
+      accent = "#f59e0b";
+      animation = "pulseAmber 2s infinite";
+    } else if (coverage < 0.5) {
+      background = "#001a18";
+      border = "#00d4b4aa";
+      accent = "#00d4b4";
+    } else {
+      background = "#002520";
+      border = "#00d4b4";
+      accent = "#00d4b4";
+    }
+
+    const stepNumber = String(index + 1).padStart(2, "0");
+    const rawName = step.cells?.name?.value?.trim() || `Step ${index + 1}`;
+    const label = truncateUi(rawName, 20);
+    const percent = Math.round(coverage * 100);
+    const nowBadge = isCurrentStep
+      ? `<span style="font-size:8px;font-weight:700;letter-spacing:0.08em;color:#ff4fc8;margin-left:auto;">NOW</span>`
+      : "";
+
+    const cardStyle = [
+      `background:${background}`,
+      `border:1px solid ${border}`,
+      animation ? `animation:${animation}` : ""
+    ].filter(Boolean).join(";");
+
+    return `
+      <div class="step-conf-card" style="${cardStyle};display:flex;flex-direction:column;" title="${escapeHtml(rawName)}">
+        <div style="display:flex;align-items:center;font-size:9px;color:#5b7186;letter-spacing:0.06em;">
+          <span>${stepNumber}</span>${nowBadge}
+        </div>
+        <div style="font-size:12px;font-weight:700;color:#fff;line-height:1.2;margin:4px 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${escapeHtml(label)}</div>
+        <div style="margin-top:auto;display:flex;align-items:center;gap:6px;">
+          <div style="flex:1;height:3px;background:#1a2a3a;border-radius:99px;overflow:hidden;">
+            <div style="width:${percent}%;height:100%;background:${accent};border-radius:99px;transition:width 0.4s ease;"></div>
+          </div>
+          <span style="font-size:10px;color:${accent};">${percent}%</span>
+        </div>
+      </div>`;
+  }).join("");
+
+  container.innerHTML = `
+    <div class="step-conf-label">Steps</div>
+    <div class="step-conf-row">${cardsHtml}</div>`;
 }
 
 function renderAppMode() {
