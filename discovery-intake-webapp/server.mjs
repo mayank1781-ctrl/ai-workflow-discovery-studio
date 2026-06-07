@@ -3466,27 +3466,77 @@ function parseModelJson(text) {
   }
 }
 
-// Convert an HTML string to a PDF and stream it back. html-pdf-node renders via
-// a bundled headless Chromium (puppeteer), loaded lazily on first request so it
-// never affects server startup or other endpoints.
+// Build a PDF programmatically from the same { workflowName, steps } payload the
+// DOCX handlers use — no browser/Chromium. pdfkit is pure JS and uses built-in
+// Helvetica fonts (no font files). Loaded lazily on first request.
+//   kind "recipe":      title + per step: name, AI Pattern, prompt body.
+//   kind "engineering": title + per step: name + the six engineering fields.
 async function handlePdfExport(req, res) {
   try {
     const body = await readJson(req);
-    const html = typeof body.html === "string" ? body.html : "";
-    if (!html.trim()) return sendJson(res, 400, { error: "html is required" });
-    const rawName = typeof body.filename === "string" && body.filename.trim() ? body.filename.trim() : "export.pdf";
-    let safeName = rawName.replace(/[^a-z0-9._-]/gi, "-").replace(/-{2,}/g, "-").replace(/^-|-$/g, "") || "export";
-    if (!safeName.toLowerCase().endsWith(".pdf")) safeName += ".pdf";
+    const kind = body.kind === "engineering" ? "engineering" : "recipe";
+    const workflowName = typeof body.workflowName === "string" && body.workflowName.trim() ? body.workflowName.trim() : "Workflow";
+    const steps = Array.isArray(body.steps) ? body.steps : [];
+    const safeName = String(workflowName).replace(/[^a-z0-9]/gi, "-").replace(/-{2,}/g, "-").replace(/^-|-$/g, "") || "workflow";
+    const docTitle = `${workflowName} — ${kind === "engineering" ? "Engineering Doc" : "Recipe Book"}`;
 
-    const htmlPdf = require("html-pdf-node");
-    const buffer = await htmlPdf.generatePdf(
-      { content: html },
-      { format: "A4", printBackground: true, margin: { top: "18mm", right: "16mm", bottom: "18mm", left: "16mm" } }
-    );
+    const PDFDocument = require("pdfkit");
+    const doc = new PDFDocument({
+      size: "LETTER",
+      margins: { top: 72, bottom: 72, left: 72, right: 72 },
+      info: { Title: docTitle }
+    });
+    const chunks = [];
+    doc.on("data", (chunk) => chunks.push(chunk));
+    const finished = new Promise((resolve, reject) => {
+      doc.on("end", resolve);
+      doc.on("error", reject);
+    });
 
+    doc.font("Helvetica-Bold").fontSize(22).fillColor("#0d1b2e").text(docTitle, { align: "center" });
+    doc.moveDown(1.2);
+
+    const labelLine = (label, value) => {
+      doc.font("Helvetica-Bold").fontSize(11).fillColor("#000000").text(`${label}:  `, { continued: true })
+        .font("Helvetica").fillColor("#1a2330").text(String(value || "—"));
+    };
+
+    if (kind === "recipe") {
+      for (const step of steps) {
+        doc.font("Helvetica-Bold").fontSize(15).fillColor("#0d1b2e").text(String(step.name || "Unnamed Step"));
+        doc.moveDown(0.3);
+        labelLine("AI Pattern", step.aiPattern);
+        doc.moveDown(0.3);
+        doc.font("Helvetica").fontSize(11).fillColor("#1a2330").text(String(step.prompt || "No prompt generated yet."));
+        doc.moveDown(1);
+      }
+    } else {
+      const fields = [
+        ["Systems / Tools", "systemsTools"],
+        ["Data Processing", "dataProcessing"],
+        ["Rules / Decision Logic", "rulesDecisionLogic"],
+        ["Exception Branching", "exceptionBranching"],
+        ["Regulatory / Compliance Context", "regulatoryContext"],
+        ["Human Checkpoint", "humanCheckpoint"]
+      ];
+      for (const step of steps) {
+        doc.font("Helvetica-Bold").fontSize(15).fillColor("#0d1b2e").text(String(step.name || "Unnamed Step"));
+        doc.moveDown(0.3);
+        for (const [label, key] of fields) {
+          labelLine(label, step[key]);
+          doc.moveDown(0.15);
+        }
+        doc.moveDown(0.8);
+      }
+    }
+
+    doc.end();
+    await finished;
+    const buffer = Buffer.concat(chunks);
+    const filename = `${safeName}-${kind === "engineering" ? "engineering-doc" : "recipe-book"}.pdf`;
     res.writeHead(200, {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${safeName}"`,
+      "Content-Disposition": `attachment; filename="${filename}"`,
       "Content-Length": buffer.length
     });
     res.end(buffer);

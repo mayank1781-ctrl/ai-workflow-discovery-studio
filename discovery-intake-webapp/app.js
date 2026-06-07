@@ -5117,63 +5117,15 @@ function handleHandoffConfirm() {
 }
 
 // --- PDF export (Recipe Book + Engineering Doc) -------------------------------
-// Builds a clean, printable HTML document from the same grid data the DOCX
-// exports use, then posts it to /api/pdf-export (html-pdf-node) for conversion.
-
-function buildHtmlPdfDocument(title, bodyHtml) {
-  return `<!doctype html><html><head><meta charset="utf-8"><style>
-    body{font-family:Arial,Helvetica,sans-serif;color:#1a2330;margin:0;padding:0;font-size:12px;line-height:1.45;}
-    h1{font-size:22px;margin:0 0 18px;}
-    h2{font-size:15px;margin:18px 0 6px;color:#0d1b2e;border-bottom:1px solid #e2e8f0;padding-bottom:4px;}
-    p{margin:4px 0;}
-    .label{font-weight:700;}
-    .prompt{background:#f4f6f9;border:1px solid #e2e8f0;border-radius:6px;padding:10px;white-space:pre-wrap;word-wrap:break-word;margin:6px 0;}
-    section{page-break-inside:avoid;margin-bottom:10px;}
-  </style></head><body><h1>${escapeHtml(title)}</h1>${bodyHtml}</body></html>`;
-}
+// Mirrors the DOCX export handlers: post the same { workflowName, steps } data
+// to /api/pdf-export, which builds the PDF programmatically with pdfkit (no
+// browser/Chromium). The server picks the layout from `kind`.
 
 function pdfSafeName(workflowName) {
   return (workflowName || "workflow").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "workflow";
 }
 
-function buildRecipeBookHtml() {
-  const workflowName = analysisWorkflowName() || "Workflow";
-  const steps = analysisGridSteps();
-  const cache = state.recipeCache || {};
-  const body = steps.map((step, index) => {
-    const name = stepDisplayName(step, index);
-    const pattern = stepPrimaryPattern(step) || "—";
-    const prompt = cache[step.id] || "";
-    return `<section>
-      <h2>${escapeHtml(name)}</h2>
-      <p><span class="label">AI Pattern:</span> ${escapeHtml(pattern)}</p>
-      <div class="prompt">${escapeHtml(prompt || "No prompt generated yet.")}</div>
-    </section>`;
-  }).join("");
-  const hasContent = steps.some((step) => (cache[step.id] || "").trim() || stepPrimaryPattern(step).trim());
-  return { html: buildHtmlPdfDocument(`${workflowName} — Recipe Book`, body), filename: `${pdfSafeName(workflowName)}-recipe-book.pdf`, hasContent };
-}
-
-function buildEngineeringDocHtml() {
-  const workflowName = analysisWorkflowName() || "Workflow";
-  const steps = analysisGridSteps();
-  const fields = [
-    ["Systems / Tools", "systemsTools"],
-    ["Data Processing", "dataProcessing"],
-    ["Rules / Decision Logic", "rulesDecisionLogic"],
-    ["Exception Branching", "exceptionBranching"],
-    ["Regulatory / Compliance Context", "regulatoryContext"],
-    ["Human Checkpoint", "humanCheckpoint"]
-  ];
-  const body = steps.map((step, index) => {
-    const rows = fields.map(([label, key]) => `<p><span class="label">${escapeHtml(label)}:</span> ${escapeHtml(gridCellValue(step, key) || "—")}</p>`).join("");
-    return `<section><h2>${escapeHtml(stepDisplayName(step, index))}</h2>${rows}</section>`;
-  }).join("");
-  const hasContent = steps.some((step) => fields.some(([, key]) => gridCellValue(step, key).trim()));
-  return { html: buildHtmlPdfDocument(`${workflowName} — Engineering Doc`, body), filename: `${pdfSafeName(workflowName)}-engineering-doc.pdf`, hasContent };
-}
-
-async function downloadPdfFromHtml(html, filename, btn) {
+async function downloadPdf(payload, filename, btn) {
   const notify = (message) => (typeof toast === "function" ? toast(message) : alert(message));
   if (btn) {
     btn.textContent = "Preparing…";
@@ -5185,7 +5137,7 @@ async function downloadPdfFromHtml(html, filename, btn) {
     const response = await fetch("/api/pdf-export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ html, filename })
+      body: JSON.stringify(payload)
     });
     if (!response.ok) {
       let message = `PDF export failed (${response.status}).`;
@@ -5218,21 +5170,49 @@ async function downloadPdfFromHtml(html, filename, btn) {
 }
 
 async function handleRecipePdfExport() {
-  const { html, filename, hasContent } = buildRecipeBookHtml();
-  if (!hasContent) {
-    (typeof toast === "function" ? toast : alert)("Generate at least one recipe prompt before exporting.");
+  const notify = (message) => (typeof toast === "function" ? toast(message) : alert(message));
+  const workflowName = analysisWorkflowName() || "Workflow";
+  const steps = analysisGridSteps().map((step, index) => ({
+    name: stepDisplayName(step, index),
+    aiPattern: stepPrimaryPattern(step),
+    prompt: state.recipeCache?.[step.id] || ""
+  }));
+  if (!steps.some((step) => step.prompt.trim() || step.aiPattern.trim())) {
+    notify("Generate at least one recipe prompt before exporting.");
     return;
   }
-  await downloadPdfFromHtml(html, filename, document.getElementById("recipe-pdf-btn"));
+  await downloadPdf(
+    { kind: "recipe", workflowName, steps },
+    `${pdfSafeName(workflowName)}-recipe-book.pdf`,
+    document.getElementById("recipe-pdf-btn")
+  );
 }
 
 async function handleEngineeringPdfExport() {
-  const { html, filename, hasContent } = buildEngineeringDocHtml();
+  const notify = (message) => (typeof toast === "function" ? toast(message) : alert(message));
+  const workflowName = analysisWorkflowName() || "Workflow";
+  const steps = analysisGridSteps().map((step, index) => ({
+    name: stepDisplayName(step, index),
+    systemsTools: gridCellValue(step, "systemsTools"),
+    dataProcessing: gridCellValue(step, "dataProcessing"),
+    rulesDecisionLogic: gridCellValue(step, "rulesDecisionLogic"),
+    exceptionBranching: gridCellValue(step, "exceptionBranching"),
+    regulatoryContext: gridCellValue(step, "regulatoryContext"),
+    humanCheckpoint: gridCellValue(step, "humanCheckpoint")
+  }));
+  const hasContent = steps.some((step) =>
+    step.systemsTools.trim() || step.dataProcessing.trim() || step.rulesDecisionLogic.trim() ||
+    step.exceptionBranching.trim() || step.regulatoryContext.trim() || step.humanCheckpoint.trim()
+  );
   if (!hasContent) {
-    (typeof toast === "function" ? toast : alert)("Capture engineering details (systems, data processing, rules, etc.) before exporting.");
+    notify("Capture engineering details (systems, data processing, rules, etc.) before exporting.");
     return;
   }
-  await downloadPdfFromHtml(html, filename, document.getElementById("engineering-pdf-btn"));
+  await downloadPdf(
+    { kind: "engineering", workflowName, steps },
+    `${pdfSafeName(workflowName)}-engineering-doc.pdf`,
+    document.getElementById("engineering-pdf-btn")
+  );
 }
 
 function renderAppMode() {
