@@ -1353,7 +1353,7 @@ async function handleExtractDocument(req, res) {
         // A 14-step SOP with full cell values produces a large JSON object.
         // Without enough headroom the response is cut off mid-array and the
         // tail steps silently disappear, so reserve room for a long step list.
-        max_tokens: 4000,
+        max_tokens: 16000,
         messages: [
           { role: "system", content: DOCUMENT_EXTRACTION_SYSTEM_PROMPT },
           { role: "user", content: userMessageContent }
