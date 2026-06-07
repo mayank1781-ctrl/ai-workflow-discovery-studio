@@ -2492,17 +2492,20 @@ function fileSafe(value) {
 // and then drill only the empty/unknown cells listed in the summary.
 function documentExtractionPivotBlock(gridSummary) {
   return [
-    "---",
-    "DOCUMENT EXTRACTION COMPLETE. The workflow grid has been pre-populated.",
+    "CRITICAL OVERRIDE — DOCUMENT EXTRACTION COMPLETE.",
+    "",
+    "You have just received a SYSTEM_TRIGGER message, not a user answer.",
+    "Do NOT echo or repeat the trigger text under any circumstances.",
+    "Do NOT ask \"what do you call this workflow\" or any generic intake question.",
     "",
     gridSummary,
     "",
-    "Your immediate job:",
-    "1. Acknowledge what was extracted in ONE short sentence (e.g. \"I've pulled [N] steps from your document.\")",
-    "2. Ask the user to confirm the step list looks right, or if anything is missing or named incorrectly.",
-    "3. After confirmation, focus ONLY on empty and unknown cells listed above — do NOT re-ask about cells already confirmed or inferred.",
-    "4. Treat confirmed/inferred cells as settled — never re-ask them.",
-    "---"
+    "Your ONLY permitted response right now is:",
+    "1. One sentence acknowledging the number of steps extracted (e.g. \"I've pulled [N] steps from your document.\")",
+    "2. List the step names briefly so the user can scan them.",
+    "3. Ask: \"Do these steps look right, or is anything missing or named incorrectly?\"",
+    "",
+    "After the user confirms, drill ONLY on empty/unknown cells listed above. Never re-ask confirmed or inferred cells."
   ].join("\n");
 }
 
