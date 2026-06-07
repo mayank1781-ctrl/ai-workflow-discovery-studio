@@ -1372,7 +1372,8 @@ async function handleExtractDocument(req, res) {
   const outputText = data.choices?.[0]?.message?.content || "";
   let grid;
   try {
-    grid = JSON.parse(outputText);
+    const cleaned = outputText.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
+    grid = JSON.parse(cleaned);
   } catch {
     return sendJson(res, 200, { success: false, error: "The model returned an unreadable result. Try again or start with conversation." });
   }
