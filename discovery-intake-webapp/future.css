@@ -12413,6 +12413,12 @@ body[data-discovery-entry="upload"] .main-turn-actions {
 
 /* --- Stage 2: live workflow grid panel ---------------------------------- */
 .live-grid-panel {
+  /* Grid item of the single-column .interview-stage grid. Without this, the
+     panel's default min-width:auto lets the nested max-content grid table
+     force the 1fr track wider than the viewport, stretching the hero card and
+     transcript and clipping the main content. min-width:0 keeps the panel
+     within its track so .live-grid-scroll scrolls the table internally. */
+  min-width: 0;
   margin-top: var(--future-space-5);
   padding: var(--future-space-5);
   border: 1px solid var(--future-line);
