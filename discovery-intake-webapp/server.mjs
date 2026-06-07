@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import dotenv from "dotenv";
 import Busboy from "busboy";
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
@@ -36,7 +37,11 @@ function loadLocalEnv() {
   }
 }
 
+// Load `.env.local` first (it keeps precedence for existing setups), then fall
+// back to `.env` via dotenv. Both are directory-relative and neither overrides
+// a variable already present in the real environment (e.g. PORT from a script).
 loadLocalEnv();
+dotenv.config({ path: path.join(__dirname, ".env") });
 
 const PORT = Number(process.env.PORT || 5173);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
