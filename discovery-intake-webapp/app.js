@@ -4932,9 +4932,9 @@ const WORKFLOW_FRAME_QUESTION_MODEL = {
     { field: "deliverableType", text: `${matrixPromptFor("output").replace(/^./, (c) => c.toUpperCase())}?` }
   ]
 };
-const WORKFLOW_COMPONENT_OVERVIEW_QUESTION = "Before we go step by step, can you describe the workflow at the top level: the big phases, main inputs, main data types, tools or systems used, and final outputs?";
-const WORKFLOW_DATA_TOOLS_OVERVIEW_QUESTION = "Before we drill into Step 1, what are the main inputs, data types, tools or systems, and outputs involved across the workflow overall?";
-const PROCESS_MAP_QUESTION = "Can you give me the rough numbered A-to-Z process from trigger to final output?";
+const WORKFLOW_COMPONENT_OVERVIEW_QUESTION = "Before we get into the detail — what are the main moving parts of this workflow at a high level?";
+const WORKFLOW_DATA_TOOLS_OVERVIEW_QUESTION = "Before we get into each step — which tools or systems tend to show up across this workflow overall?";
+const PROCESS_MAP_QUESTION = "Walk me through this from beginning to end — what kicks it off, what happens at each stage, and what comes out the other side?";
 
 function cleanQuestionLabel(text) {
   return String(text || "")
@@ -6386,7 +6386,7 @@ function syncGuidedDrilldownAfterExtraction({ beforeStepCount = 0, touchedStepIn
 }
 
 function skeletonConfirmationQuestion() {
-  if (!state.steps.length) return "Can you give me the rough numbered A-to-Z workflow before we fill in details?";
+  if (!state.steps.length) return "Walk me through this from start to finish — what's the first thing that happens, and where does it end up?";
   const preview = state.steps
     .slice(0, 6)
     .map((step, index) => `${index + 1}. ${step.name || step.action || `Step ${index + 1}`}`)
@@ -7433,6 +7433,23 @@ async function aiExtractAnswer(options = {}) {
   }
 }
 
+// Q2 is the mandatory pain/friction question. The process-map override must not
+// jump ahead of it, so this returns true only once a genuine pain signal exists:
+// a populated grid painFriction cell, a legacy step pain value, or the user
+// actually mentioning pain/friction in the conversation. Field names are mapped
+// to the real state shape (state.aiChat turns use `text`; there is no
+// state.conversationHistory). dataSensitivityBaseline is intentionally excluded
+// because it reflects data sensitivity — which a document can set — not pain.
+function q2HasBeenAnswered() {
+  const painPattern = /annoying|slow|painful|frustrat|pain|friction/i;
+  const gridSteps = state.workflowGrid?.steps || [];
+  if (gridSteps.some((step) => String(step?.cells?.painFriction?.value || "").trim())) return true;
+  if ((state.steps || []).some((step) => String(step?.pain || "").trim())) return true;
+  if ((state.aiChat || []).some((turn) => turn?.role === "user" && painPattern.test(String(turn?.text || "")))) return true;
+  if (painPattern.test(String(state.transcript || ""))) return true;
+  return false;
+}
+
 function sanitizeExtractionResult(result = {}, options = {}) {
   const answer = String(options.answer || "");
   const sanitized = {
@@ -7478,10 +7495,16 @@ function sanitizeExtractionResult(result = {}, options = {}) {
       sanitized.fields.workflowCategory = "Pre-delivery / workshop prep";
     }
     sanitized.summary = genericTopic ? "Need a named starting topic." : `Starting topic: ${topic || "early use-case idea"}.`;
-    sanitized.nextQuestion = genericTopic ? OPENING_DISCOVERY_QUESTION : PROCESS_MAP_QUESTION;
+    // Only force the process map once Q2 (pain) is done; before that, let the
+    // LLM's returned nextQuestion through so Q2 is not skipped.
+    if (genericTopic) {
+      sanitized.nextQuestion = OPENING_DISCOVERY_QUESTION;
+    } else if (q2HasBeenAnswered()) {
+      sanitized.nextQuestion = PROCESS_MAP_QUESTION;
+    }
   }
 
-  if (questionAsksDataBoundary(options.askedQuestion) && answerLooksLikeDataBoundary(answer)) {
+  if (questionAsksDataBoundary(options.askedQuestion) && answerLooksLikeDataBoundary(answer) && q2HasBeenAnswered()) {
     sanitized.nextQuestion = PROCESS_MAP_QUESTION;
   }
 
@@ -7567,7 +7590,7 @@ function routeNextQuestionAfterExtraction(result = {}) {
 
 function nextQuestionRouteAfterExtraction(result = {}) {
   const askedQuestion = result._askedQuestion || "";
-  if (processSkeletonStillNeededAfterAnswer(result._answer, askedQuestion, result)) {
+  if (q2HasBeenAnswered() && processSkeletonStillNeededAfterAnswer(result._answer, askedQuestion, result)) {
     return { text: PROCESS_MAP_QUESTION, source: "A-Z process" };
   }
   if (state.drilldown?.status === "confirmSkeleton") {
@@ -7605,7 +7628,7 @@ function nextCoreDiscoveryQuestion(avoidQuestions = []) {
   if (!isSubmittedTopicCaptured()) return route(OPENING_DISCOVERY_QUESTION, "Intake guide");
   const overviewQuestion = workflowOverviewQuestion(avoidQuestions);
   if (overviewQuestion) return overviewQuestion;
-  if (!state.steps.length) return route(PROCESS_MAP_QUESTION, "A-Z process");
+  if (!state.steps.length && q2HasBeenAnswered()) return route(PROCESS_MAP_QUESTION, "A-Z process");
   const primary = topCompletionQuestionItems(4, { includeSupplemental: false })
     .find((item) => !avoidQuestions.some((question) => isSameQuestion(item.question, question)));
   if (primary?.question) return { text: primary.question, source: primary.source || primary.lane || "Discovery queue" };
@@ -7680,7 +7703,7 @@ function componentOverviewQuestionText(signals = workflowOverviewSignals()) {
   if (!signals.dataCaptured) missing.push("main inputs and data types");
   if (!signals.outputCaptured) missing.push("final outputs");
   if (!missing.length) return WORKFLOW_COMPONENT_OVERVIEW_QUESTION;
-  return `Before the A-to-Z list, what ${joinNaturalList(missing)} should we capture across the workflow overall?`;
+  return `Before we map out the steps, what ${joinNaturalList(missing)} should we capture across the workflow overall?`;
 }
 
 // Pure (no side effects) — safe to call during render. Decides which workflow
@@ -24321,7 +24344,7 @@ function normalizeLoadedState(parsed = {}) {
     merged.currentQuestionSource = "Updated intake flow";
   }
   if (isPrematureSupplementalQuestion(merged.currentQuestionOverride, merged)) {
-    merged.currentQuestionOverride = "Can you give me the rough numbered A-to-Z process from trigger to final output?";
+    merged.currentQuestionOverride = PROCESS_MAP_QUESTION;
     merged.currentQuestionSource = "A-Z process";
     merged.activeSection = "workflow";
   }
