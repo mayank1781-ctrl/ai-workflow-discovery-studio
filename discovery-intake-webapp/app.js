@@ -1064,6 +1064,8 @@ const defaultState = {
   },
   lastRecap: null,
   activeWorkbenchTab: "handoff",
+  analysisActiveTab: "grid",
+  recipeCache: {},
   questionFocus: "auto",
   currentQuestionOverride: "",
   currentQuestionSource: "Intake guide",
@@ -1416,10 +1418,15 @@ function bindEvents() {
   });
   document.getElementById("addMapFeedbackButton")?.addEventListener("click", addMapFeedback);
   document.getElementById("addMapStepButton")?.addEventListener("click", addMapStepFromFeedback);
-  document.getElementById("addIdeaButton").addEventListener("click", addIdea);
+  document.getElementById("addIdeaButton")?.addEventListener("click", addIdea);
   document.querySelectorAll("[data-workbench-tab]").forEach((button) => {
     button.addEventListener("click", () => {
       activateWorkbenchTab(button.dataset.workbenchTab);
+    });
+  });
+  document.querySelectorAll("[data-analysis-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      activateAnalysisTab(button.dataset.analysisTab);
     });
   });
   document.querySelectorAll("[data-output-action]").forEach((button) => {
@@ -3366,7 +3373,7 @@ function render() {
   renderWorkflowGridPanel();
   updateConfidenceCards();
   updateProcessFlowMapCompact();
-  els.sectionTitle.textContent = section.label;
+  if (els.sectionTitle) els.sectionTitle.textContent = section.label;
   renderConversation();
   renderAiChat();
   renderValidationFlow();
@@ -3403,6 +3410,7 @@ function render() {
   renderMapStepEditor();
   renderWorkbenchTabs();
   renderAppMode();
+  if (state.appMode === "analysis") renderAnalysisStudio();
   updateAiTurnStatus(state.captureStage || "idle");
   updateProgressUi();
   refreshIcons();
@@ -4105,6 +4113,547 @@ function updateProcessFlowMapFull() {
   const currentIndex = Math.max(0, Math.min(Number(state.activeStepIndex) || 0, steps.length - 1));
   container.innerHTML =
     `<div class="pf-map-row-full">${pfMapBuildNodes(steps, "full", currentIndex)}</div>`;
+}
+
+// ============================================================================
+// Analysis Studio — 4-tab interface: Workflow Grid | AI Opportunities |
+// Recipe Book | Engineering Doc. Every tab render function reads
+// state.workflowGrid directly and never calls render(). Tab switching mirrors
+// activateWorkbenchTab(): set state, persist, re-render the active tab.
+// ============================================================================
+
+// Canonical AI pattern -> hex colour. Pills, dots, gantt bars all key off this.
+const AI_PATTERNS = {
+  Retrieve: "#06b6d4",
+  Extract: "#00d4b4",
+  Generate: "#f97316",
+  Summarise: "#ec4899",
+  Search: "#10b981",
+  Match: "#3b82f6",
+  Route: "#8b5cf6",
+  Optimise: "#f59e0b",
+  Classify: "#6366f1"
+};
+
+const ANALYSIS_TABS = ["grid", "opportunities", "recipe", "engineering"];
+
+// Implementation-complexity bucket per pattern. Low ends Phase 2, Medium ends
+// Phase 3, High ends Phase 4. Unknown patterns default to Medium.
+const GANTT_COMPLEXITY = {
+  Retrieve: "low", Search: "low", Classify: "low",
+  Extract: "medium", Match: "medium", Summarise: "medium", Route: "medium",
+  Generate: "high", Optimise: "high"
+};
+
+// Plain-English labels for the 17 grid cells (used by the Open Gaps table).
+const CELL_PLAIN_NAMES = {
+  name: "Workflow Step",
+  description: "Description",
+  personaActors: "Persona / Actors",
+  systemsTools: "Systems / Tools",
+  dataProcessing: "Data Processing",
+  rulesDecisionLogic: "Rules / Decision Logic",
+  output: "Output",
+  trigger: "Trigger",
+  handoff: "Handoff",
+  humanCheckpoint: "Human Checkpoint",
+  timeTaken: "Time Taken",
+  frequencyVolume: "Frequency / Volume",
+  painFriction: "Pain / Friction",
+  dataSensitivity: "Data Sensitivity",
+  exceptionBranching: "Exception Branching",
+  regulatoryContext: "Regulatory / Compliance Context",
+  aiPattern: "AI Pattern"
+};
+
+function normalizeAnalysisTab(tab) {
+  return ANALYSIS_TABS.includes(tab) ? tab : "grid";
+}
+
+// --- shared grid-cell readers -------------------------------------------------
+
+function analysisGridSteps() {
+  return Array.isArray(state.workflowGrid?.steps) ? state.workflowGrid.steps : [];
+}
+
+function analysisWorkflowName() {
+  return (state.workflowGrid?.workflowName || state.fields?.workflowName || "").trim();
+}
+
+function gridCellValue(step, key) {
+  const cell = step?.cells?.[key];
+  if (!cell) return "";
+  if (key === "aiPattern") return stepPatternList(step).join(", ");
+  return typeof cell.value === "string" ? cell.value.trim() : "";
+}
+
+function gridCellState(step, key) {
+  return step?.cells?.[key]?.state || "empty";
+}
+
+// All non-empty pattern names from the aiPattern cell's value array.
+function stepPatternList(step) {
+  const value = step?.cells?.aiPattern?.value;
+  if (!Array.isArray(value)) return [];
+  return value.map((entry) => (entry?.pattern || "").trim()).filter(Boolean);
+}
+
+// Pill / colouring uses the first entry's pattern. Empty array -> "".
+function stepPrimaryPattern(step) {
+  return stepPatternList(step)[0] || "";
+}
+
+function patternFilled(step) {
+  return stepPatternList(step).length > 0;
+}
+
+function patternColor(pattern) {
+  return AI_PATTERNS[pattern] || "#5b7186";
+}
+
+function stepDisplayName(step, index) {
+  return gridCellValue(step, "name") || `Step ${index + 1}`;
+}
+
+function stepCoverage(step) {
+  const cells = Object.values(step?.cells || {});
+  if (!cells.length) return 0;
+  const filled = cells.filter((c) => c && (c.state === "confirmed" || c.state === "inferred")).length;
+  return filled / GRID_CELL_KEYS.length;
+}
+
+// Empty OR unknown cells across the 17-cell schema.
+function stepGapCells(step) {
+  return GRID_CELL_KEYS.filter((key) => {
+    const st = gridCellState(step, key);
+    return st === "empty" || st === "unknown";
+  });
+}
+
+function cellFilled(step, key) {
+  if (key === "aiPattern") return patternFilled(step);
+  return Boolean(gridCellValue(step, key));
+}
+
+// low | medium | high from the step's dataSensitivity cell value.
+function sensitivityLevel(step) {
+  const text = gridCellValue(step, "dataSensitivity").toLowerCase();
+  if (!text) return "low";
+  if (/high|confidential|pii|sensitive/.test(text)) return "high";
+  if (/medium/.test(text)) return "medium";
+  return "low";
+}
+
+// AI Opportunity Score, 0-4.
+function opportunityScore(step) {
+  let score = 0;
+  if (cellFilled(step, "painFriction")) score += 1;
+  if (patternFilled(step)) score += 1;
+  if (stepCoverage(step) >= 0.5) score += 1;
+  if (cellFilled(step, "frequencyVolume")) score += 1;
+  return score;
+}
+
+// Border glow used by confidence cards / flow map, reused on opportunity cards.
+function coverageGlowColor(coverage) {
+  if (coverage === 0) return "#1a2a3a";
+  if (coverage < 0.25) return "#f59e0b";
+  if (coverage < 0.5) return "#00d4b4aa";
+  return "#00d4b4";
+}
+
+function sensitivityColor(level) {
+  if (level === "high") return "#ef4444";
+  if (level === "medium") return "#f59e0b";
+  return "#10b981";
+}
+
+// AI pattern pill markup. Empty array or no pattern -> "" (no pill).
+function patternPill(step) {
+  const pattern = stepPrimaryPattern(step);
+  if (!pattern) return "";
+  const color = patternColor(pattern);
+  return `<span style="display:inline-flex;align-items:center;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:700;color:#0d1b2a;background:${color};">${escapeHtml(pattern)}</span>`;
+}
+
+// --- tab switching ------------------------------------------------------------
+
+function activateAnalysisTab(tab) {
+  state.analysisActiveTab = normalizeAnalysisTab(tab);
+  persistState();
+  renderAnalysisStudio();
+  refreshIcons();
+}
+
+// Routes to the active tab's render function. Called from render() only when
+// the Analysis Studio is the visible panel (state.appMode === "analysis").
+function renderAnalysisStudio() {
+  const active = normalizeAnalysisTab(state.analysisActiveTab);
+  if (state.analysisActiveTab !== active) state.analysisActiveTab = active;
+
+  document.querySelectorAll("[data-analysis-tab]").forEach((button) => {
+    const selected = button.dataset.analysisTab === active;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-selected", selected ? "true" : "false");
+  });
+  document.querySelectorAll(".analysis-tab-panel").forEach((panel) => {
+    panel.classList.toggle("active", panel.id === `analysis-tab-${active}`);
+  });
+
+  if (active === "grid") renderAnalysisTabGrid();
+  else if (active === "opportunities") renderAnalysisTabOpportunities();
+  else if (active === "recipe") renderAnalysisTabRecipe();
+  else if (active === "engineering") renderAnalysisTabEngineering();
+}
+
+// --- TAB 1: Workflow Grid -----------------------------------------------------
+
+function renderAnalysisTabGrid() {
+  updateProcessFlowMapFull();
+  renderStepMatrixPreview();
+}
+
+// --- TAB 2: AI Opportunities --------------------------------------------------
+
+function renderAnalysisTabOpportunities() {
+  const container = document.getElementById("analysis-tab-opportunities");
+  if (!container) return;
+  const steps = analysisGridSteps();
+  if (!steps.length) {
+    container.innerHTML = `<div class="summary-item">No workflow steps yet. Capture a process in the interview to populate AI opportunities.</div>`;
+    return;
+  }
+
+  // One dot per step, positioned by sensitivity (x) and opportunity score (y).
+  const dots = steps.map((step, index) => {
+    const score = opportunityScore(step);
+    const level = sensitivityLevel(step);
+    const xPct = level === "high" ? 80 : level === "medium" ? 50 : 20;
+    const yPct = 90 - (score / 4) * 80; // score 4 -> 10% (top), 0 -> 90% (bottom)
+    const color = patternColor(stepPrimaryPattern(step));
+    const name = stepDisplayName(step, index);
+    return `<div class="opp-dot" style="left:calc(${xPct}% - 16px);top:calc(${yPct}% - 16px);background:${color};" title="${escapeHtml(name)}">${index + 1}</div>`;
+  }).join("");
+
+  const quadrant = `
+    <div class="opp-quadrant">
+      <div class="opp-quadrant-cell" style="background:rgba(0,212,180,0.10);"><span class="opp-quadrant-label">High Opportunity / Low Risk</span></div>
+      <div class="opp-quadrant-cell" style="background:rgba(245,158,11,0.10);"><span class="opp-quadrant-label">High Opportunity / Needs Review</span></div>
+      <div class="opp-quadrant-cell"><span class="opp-quadrant-label">Lower Priority</span></div>
+      <div class="opp-quadrant-cell" style="background:rgba(236,72,153,0.10);"><span class="opp-quadrant-label">Proceed with Caution</span></div>
+      ${dots}
+    </div>`;
+
+  // Ranked cards, sorted by opportunity score descending (stable on index).
+  const ranked = steps
+    .map((step, index) => ({ step, index, score: opportunityScore(step) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+
+  const cards = ranked.map(({ step, index }) => {
+    const name = stepDisplayName(step, index);
+    const coverage = stepCoverage(step);
+    const percent = Math.round(coverage * 100);
+    const glow = coverageGlowColor(coverage);
+    const level = sensitivityLevel(step);
+    const badgeColor = sensitivityColor(level);
+    const gaps = stepGapCells(step).length;
+    const painRaw = gridCellValue(step, "painFriction");
+    const painSnippet = painRaw ? truncateUi(painRaw, 80) : "No pain/friction captured yet.";
+    const pill = patternPill(step) || `<span style="font-size:11px;color:#5b7186;">No pattern</span>`;
+    return `
+      <div style="background:#0d1b2a;border:1px solid ${glow};border-radius:8px;padding:14px;margin-bottom:8px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <span style="font-size:10px;color:#5b7186;letter-spacing:0.06em;">${String(index + 1).padStart(2, "0")}</span>
+          <strong style="font-size:14px;color:#dde8f5;flex:1;">${escapeHtml(name)}</strong>
+          ${pill}
+        </div>
+        <p style="font-size:12px;color:#9fb3c8;margin:0 0 10px;">${escapeHtml(painSnippet)}</p>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="flex:1;height:4px;background:#1a2a3a;border-radius:99px;overflow:hidden;">
+            <div style="width:${percent}%;height:100%;background:${glow};border-radius:99px;"></div>
+          </div>
+          <span style="font-size:10px;color:#7a93b4;">${percent}%</span>
+          <span class="sensitivity-badge" style="background:${badgeColor}22;color:${badgeColor};">${level.toUpperCase()}</span>
+          <span style="font-size:11px;color:#7a93b4;flex-shrink:0;">${gaps} gap${gaps === 1 ? "" : "s"}</span>
+        </div>
+      </div>`;
+  }).join("");
+
+  container.innerHTML = quadrant + `<div>${cards}</div>`;
+}
+
+// --- TAB 3: Recipe Book -------------------------------------------------------
+
+function recipePromptBlockHtml(prompt) {
+  return `<div class="recipe-prompt-block"><button class="recipe-copy-btn" type="button" data-recipe-copy>Copy</button>${escapeHtml(prompt)}</div>`;
+}
+
+// Fills an accordion body with the prompt block and wires its copy button.
+function renderRecipeBody(body, prompt) {
+  body.innerHTML = recipePromptBlockHtml(prompt);
+  const copyBtn = body.querySelector("[data-recipe-copy]");
+  copyBtn?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    navigator.clipboard?.writeText(prompt)
+      .then(() => {
+        copyBtn.textContent = "Copied!";
+        window.setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
+      })
+      .catch(() => {});
+  });
+}
+
+function renderAnalysisTabRecipe() {
+  const container = document.getElementById("analysis-tab-recipe");
+  if (!container) return;
+  const steps = analysisGridSteps();
+  if (!steps.length) {
+    container.innerHTML = `<div class="summary-item">No workflow steps yet. Capture a process to build the recipe book.</div>`;
+    return;
+  }
+  state.recipeCache = state.recipeCache || {};
+
+  const accordions = steps.map((step, index) => {
+    const name = stepDisplayName(step, index);
+    const pill = patternPill(step);
+    const cached = state.recipeCache[step.id];
+    const num = String(index + 1).padStart(2, "0");
+    return `
+      <div class="recipe-accordion" data-step-id="${escapeHtml(step.id)}">
+        <div class="recipe-accordion-header" data-recipe-toggle="${escapeHtml(step.id)}">
+          <span style="font-size:10px;color:#5b7186;letter-spacing:0.06em;">${num}</span>
+          <strong style="font-size:14px;color:#dde8f5;flex:1;">${escapeHtml(name)}</strong>
+          ${pill}
+          <button class="primary-button compact" type="button" data-recipe-generate="${escapeHtml(step.id)}" style="margin-left:auto;">${cached ? "Regenerate" : "Generate prompt"}</button>
+        </div>
+        <div class="recipe-accordion-body" data-recipe-body="${escapeHtml(step.id)}"></div>
+      </div>`;
+  }).join("");
+
+  container.innerHTML =
+    accordions +
+    `<div style="margin-top:16px;"><button class="secondary-button compact" type="button" id="downloadRecipeBookBtn">Download Recipe Book</button></div>`;
+
+  // Pre-fill cached prompts (bodies stay collapsed by default).
+  steps.forEach((step) => {
+    const cached = state.recipeCache[step.id];
+    if (!cached) return;
+    const body = container.querySelector(`[data-recipe-body="${step.id}"]`);
+    if (body) renderRecipeBody(body, cached);
+  });
+
+  container.querySelectorAll("[data-recipe-toggle]").forEach((header) => {
+    header.addEventListener("click", (event) => {
+      if (event.target.closest("[data-recipe-generate]")) return;
+      const body = container.querySelector(`[data-recipe-body="${header.dataset.recipeToggle}"]`);
+      if (body) body.classList.toggle("open");
+    });
+  });
+  container.querySelectorAll("[data-recipe-generate]").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      generateRecipePrompt(btn.dataset.recipeGenerate);
+    });
+  });
+  container.querySelector("#downloadRecipeBookBtn")?.addEventListener("click", downloadRecipeBook);
+}
+
+async function generateRecipePrompt(stepId) {
+  const step = analysisGridSteps().find((s) => s.id === stepId);
+  if (!step) return;
+  const body = document.querySelector(`[data-recipe-body="${stepId}"]`);
+  if (!body) return;
+  body.classList.add("open");
+  body.innerHTML = `<div style="display:flex;align-items:center;gap:10px;color:#7a93b4;font-size:13px;"><span style="width:16px;height:16px;border:2px solid #1a2a3a;border-top-color:#00d4b4;border-radius:50%;display:inline-block;animation:spin 1.1s linear infinite;"></span>Generating prompt...</div>`;
+  try {
+    const response = await fetch("/api/recipe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ step, workflowName: analysisWorkflowName() })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.prompt) {
+      throw new Error(data.error || "No prompt returned");
+    }
+    state.recipeCache = state.recipeCache || {};
+    state.recipeCache[stepId] = data.prompt;
+    persistState();
+    renderRecipeBody(body, data.prompt);
+    const btn = document.querySelector(`[data-recipe-generate="${stepId}"]`);
+    if (btn) btn.textContent = "Regenerate";
+  } catch (error) {
+    body.innerHTML = `<div style="color:#ef9a9a;font-size:13px;display:flex;align-items:center;gap:10px;">Failed to generate — <button class="primary-button compact" type="button" data-recipe-retry style="position:static;">retry</button></div>`;
+    body.querySelector("[data-recipe-retry]")?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      generateRecipePrompt(stepId);
+    });
+  }
+}
+
+function downloadRecipeBook() {
+  const steps = analysisGridSteps();
+  const workflowName = analysisWorkflowName() || "workflow";
+  const cache = state.recipeCache || {};
+  const parts = [`=== WORKFLOW: ${workflowName} ===`, ""];
+  let any = false;
+  steps.forEach((step, index) => {
+    const prompt = cache[step.id];
+    if (!prompt) return;
+    any = true;
+    parts.push(`=== STEP ${index + 1}: ${stepDisplayName(step, index)} ===`);
+    parts.push(`AI Pattern: ${stepPrimaryPattern(step) || "n/a"}`);
+    parts.push("---");
+    parts.push(prompt);
+    parts.push("");
+  });
+  if (!any) {
+    toast("Generate at least one prompt before downloading.");
+    return;
+  }
+  const safeName = workflowName.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "workflow";
+  downloadTextFile(`${safeName}-recipe-book.txt`, parts.join("\n"));
+}
+
+// --- TAB 4: Engineering Doc ---------------------------------------------------
+
+function patternComplexity(pattern) {
+  return GANTT_COMPLEXITY[pattern] || "medium";
+}
+
+// End week for a complexity bucket over the 8-week, 4-phase plan.
+function ganttEndWeek(complexity) {
+  if (complexity === "low") return 5;   // ends Phase 2
+  if (complexity === "high") return 8;  // ends Phase 4
+  return 7;                             // medium ends Phase 3
+}
+
+function renderAnalysisTabEngineering() {
+  const container = document.getElementById("analysis-tab-engineering");
+  if (!container) return;
+  const steps = analysisGridSteps();
+  if (!steps.length) {
+    container.innerHTML = `<div class="summary-item">No workflow steps yet. Capture a process to build the engineering doc.</div>`;
+    return;
+  }
+
+  // Section 1: Implementation Gantt.
+  const phaseHeader = `
+    <div class="gantt-row" style="color:#7a93b4;font-weight:700;">
+      <div class="gantt-label">Phase</div>
+      <div class="gantt-track" style="background:transparent;display:flex;gap:2px;">
+        <div style="flex:2;font-size:9px;background:#1a2a3a;border-radius:4px;padding:2px 4px;overflow:hidden;">P1 Discovery</div>
+        <div style="flex:3;font-size:9px;background:#1a2a3a;border-radius:4px;padding:2px 4px;overflow:hidden;">P2 Build</div>
+        <div style="flex:2;font-size:9px;background:#1a2a3a;border-radius:4px;padding:2px 4px;overflow:hidden;">P3 Test</div>
+        <div style="flex:1;font-size:9px;background:#1a2a3a;border-radius:4px;padding:2px 4px;overflow:hidden;">P4</div>
+      </div>
+    </div>`;
+  const ganttRows = steps.map((step, index) => {
+    const name = stepDisplayName(step, index);
+    const pattern = stepPrimaryPattern(step);
+    const widthPct = (ganttEndWeek(patternComplexity(pattern)) / 8) * 100;
+    const color = patternColor(pattern);
+    return `
+      <div class="gantt-row">
+        <div class="gantt-label" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+        <div class="gantt-track"><div class="gantt-bar" style="width:${widthPct}%;background:${color};"></div></div>
+      </div>`;
+  }).join("");
+
+  // Section 2: Data Sensitivity Profile.
+  const sensRows = steps.map((step, index) => {
+    const name = stepDisplayName(step, index);
+    const level = sensitivityLevel(step);
+    const color = sensitivityColor(level);
+    const pct = level === "high" ? 100 : level === "medium" ? 66 : 33;
+    const raw = gridCellValue(step, "dataSensitivity") || "Not captured";
+    return `
+      <div class="sensitivity-row">
+        <div class="gantt-label" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+        <span class="sensitivity-badge" style="background:${color}22;color:${color};">${level.toUpperCase()}</span>
+        <div class="gantt-track"><div class="gantt-bar" style="width:${pct}%;background:${color};"></div></div>
+        <span style="font-size:10px;color:#5b7186;flex-shrink:0;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(raw)}</span>
+      </div>`;
+  }).join("");
+
+  // Section 3: Open Gaps.
+  const gapRows = [];
+  steps.forEach((step, index) => {
+    stepGapCells(step).forEach((key) => {
+      gapRows.push({
+        index,
+        name: stepDisplayName(step, index),
+        key,
+        label: CELL_PLAIN_NAMES[key] || key,
+        state: gridCellState(step, key)
+      });
+    });
+  });
+  gapRows.sort((a, b) => a.index - b.index || GRID_CELL_KEYS.indexOf(a.key) - GRID_CELL_KEYS.indexOf(b.key));
+  const gapsHtml = gapRows.length
+    ? `<table class="gaps-table"><thead><tr><th>Step</th><th>Cell Name</th><th>State</th></tr></thead><tbody>` +
+      gapRows.map((g) => `<tr><td>${escapeHtml(g.name)}</td><td>${escapeHtml(g.label)}</td><td>${escapeHtml(g.state)}</td></tr>`).join("") +
+      `</tbody></table>`
+    : `<div class="summary-item">All cells addressed — ready to generate outputs.</div>`;
+
+  const sectionTitleStyle = "font-size:13px;font-weight:700;color:#dde8f5;margin:0 0 10px;text-transform:uppercase;letter-spacing:0.04em;";
+  container.innerHTML = `
+    <section style="margin-bottom:24px;">
+      <h3 style="${sectionTitleStyle}">Implementation Gantt</h3>
+      ${phaseHeader}
+      ${ganttRows}
+    </section>
+    <section style="margin-bottom:24px;">
+      <h3 style="${sectionTitleStyle}">Data Sensitivity Profile</h3>
+      ${sensRows}
+    </section>
+    <section style="margin-bottom:16px;">
+      <h3 style="${sectionTitleStyle}">Open Gaps</h3>
+      ${gapsHtml}
+    </section>
+    <div><button class="secondary-button compact" type="button" id="exportEngineeringDocBtn">Export Engineering Doc</button></div>`;
+
+  container.querySelector("#exportEngineeringDocBtn")?.addEventListener("click", exportEngineeringDoc);
+}
+
+function exportEngineeringDoc() {
+  const steps = analysisGridSteps();
+  const workflowName = analysisWorkflowName() || "workflow";
+  const lines = [`=== ENGINEERING DOC: ${workflowName} ===`, ""];
+
+  lines.push("## Implementation Gantt");
+  steps.forEach((step, index) => {
+    const pattern = stepPrimaryPattern(step) || "n/a";
+    const complexity = patternComplexity(stepPrimaryPattern(step));
+    const endWeek = ganttEndWeek(complexity);
+    lines.push(`- Step ${index + 1}: ${stepDisplayName(step, index)} | Pattern: ${pattern} | Complexity: ${complexity} | Phase 1 -> end week ${endWeek}`);
+  });
+  lines.push("");
+
+  lines.push("## Data Sensitivity Profile");
+  steps.forEach((step, index) => {
+    const level = sensitivityLevel(step).toUpperCase();
+    const raw = gridCellValue(step, "dataSensitivity") || "Not captured";
+    lines.push(`- Step ${index + 1}: ${stepDisplayName(step, index)} | ${level} | ${raw}`);
+  });
+  lines.push("");
+
+  lines.push("## Open Gaps");
+  const gapRows = [];
+  steps.forEach((step, index) => {
+    stepGapCells(step).forEach((key) => {
+      gapRows.push({ index, name: stepDisplayName(step, index), key, label: CELL_PLAIN_NAMES[key] || key, state: gridCellState(step, key) });
+    });
+  });
+  gapRows.sort((a, b) => a.index - b.index || GRID_CELL_KEYS.indexOf(a.key) - GRID_CELL_KEYS.indexOf(b.key));
+  if (!gapRows.length) {
+    lines.push("All cells addressed — ready to generate outputs.");
+  } else {
+    gapRows.forEach((g) => lines.push(`- ${g.name} | ${g.label} | ${g.state}`));
+  }
+  lines.push("");
+
+  const safeName = workflowName.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "workflow";
+  downloadTextFile(`${safeName}-engineering-doc.txt`, lines.join("\n"));
 }
 
 function renderAppMode() {
@@ -7095,6 +7644,7 @@ function sanitizeAiQuestion(text) {
 }
 
 function renderSectionForm(section) {
+  if (!els.sectionForm) return;
   const wrap = document.createElement("div");
   wrap.className = "section-capture-stack";
   const form = document.createElement("div");
@@ -8883,6 +9433,7 @@ function addMapStepFromFeedback() {
 }
 
 function renderSummary() {
+  if (!els.captureSummary) return;
   const progress = calculateProgress();
   const readiness = calculateReadiness(progress.percent);
   const dataDepth = Math.min(100, Math.round((state.data.length / 4) * 100));
@@ -10412,6 +10963,7 @@ function workflowMapNodeCard(node) {
 }
 
 function renderIdeas() {
+  if (!els.ideasList) return;
   els.ideasList.innerHTML = "";
   if (!state.ideas.length) {
     els.ideasList.innerHTML = `<div class="summary-item">No future-state ideas parked yet.</div>`;
@@ -10432,6 +10984,7 @@ function renderIdeas() {
 }
 
 function renderPdrPreview() {
+  if (!els.pdrPreview) return;
   els.pdrPreview.textContent = deriveProductBrief().markdown;
 }
 
@@ -23036,10 +23589,7 @@ function backlogSeed(patternLabel, agentRoles = recommendedAgentRoles()) {
 }
 
 function renderStepMatrixPreview() {
-  // Drive the full process flow map off state.workflowGrid independently — it
-  // must render even when the legacy state.steps array is still empty, so this
-  // runs before the early-return below.
-  updateProcessFlowMapFull();
+  if (!els.stepMatrixPreview) return;
   if (!state.steps.length) {
     els.stepMatrixPreview.innerHTML = `<div class="summary-item">Once you provide a rough numbered process list, this becomes the final step-by-step discovery template.</div>`;
     return;
@@ -24075,11 +24625,11 @@ function unknownGridCells() {
 
 function updateProgressUi() {
   const progress = calculateProgress();
-  els.progressPercent.textContent = `${progress.percent}%`;
+  if (els.progressPercent) els.progressPercent.textContent = `${progress.percent}%`;
   if (els.progressPercentMirror) {
     els.progressPercentMirror.textContent = `${progress.percent}%`;
   }
-  els.progressFill.style.width = `${progress.percent}%`;
+  if (els.progressFill) els.progressFill.style.width = `${progress.percent}%`;
   if (els.discoveryCompletionPill && els.discoveryCompletionLabel && els.discoveryCompletionFill) {
     const sessionCompletion = calculateDiscoverySessionProgress(progress.percent);
     els.discoveryCompletionPill.style.setProperty("--completion", `${sessionCompletion}%`);

@@ -49,6 +49,7 @@ const TTS_VOICE = process.env.TTS_VOICE || "alloy";
 const EXTRACTION_MODEL = process.env.EXTRACTION_MODEL || process.env.OPENAI_MODEL || "gpt-5.5";
 const DOCUMENT_EXTRACTION_MODEL = process.env.EXTRACT_DOC_MODEL || "gpt-4o";
 const HARVEST_MODEL = process.env.HARVEST_MODEL || "gpt-4o";
+const RECIPE_MODEL = process.env.RECIPE_MODEL || "gpt-4o-mini";
 const EXTRACTION_REASONING_EFFORT = process.env.EXTRACTION_REASONING_EFFORT || "medium";
 const EXTRACTION_VERBOSITY = process.env.EXTRACTION_VERBOSITY || "low";
 const CHAT_REASONING_EFFORT = process.env.CHAT_REASONING_EFFORT || "low";
@@ -1006,6 +1007,10 @@ const server = http.createServer(async (req, res) => {
       return await handleChat(req, res);
     }
 
+    if (req.method === "POST" && requestUrl.pathname === "/api/recipe") {
+      return await handleRecipe(req, res);
+    }
+
     if (req.method === "POST" && requestUrl.pathname === "/api/realtime/session") {
       return await handleRealtimeSession(req, res);
     }
@@ -1515,6 +1520,113 @@ async function handleChat(req, res) {
   return sendJson(res, 200, {
     reply: extractOutputText(data)
   });
+}
+
+// Recipe Book: generate a ready-to-paste ChatGPT Enterprise prompt for a single
+// workflow step. The step arrives as a full workflowGrid step object whose cells
+// have the { value, state, confidence } shape; the aiPattern cell's value is an
+// array of { pattern, confidence } entries. Uses chat/completions with a
+// cost-efficient model.
+function recipeCellValue(step, key) {
+  const cell = step?.cells?.[key];
+  if (!cell) return "";
+  if (key === "aiPattern") {
+    const entries = Array.isArray(cell.value) ? cell.value : [];
+    return entries.map((entry) => entry?.pattern).filter(Boolean).join(", ");
+  }
+  return typeof cell.value === "string" ? cell.value.trim() : "";
+}
+
+function recipeSystemPrompt() {
+  return [
+    "You are a senior AI enablement lead who writes production-ready prompts for ChatGPT Enterprise.",
+    "Your audience is an operations or finance professional (not an engineer) who will paste your prompt into ChatGPT Enterprise to perform one step of a business workflow.",
+    "Write ONE complete, copy-paste-ready prompt for the single workflow step described in the user message.",
+    "The prompt you write MUST contain these clearly labelled sections:",
+    "1. Role/persona context — who ChatGPT should act as for this step.",
+    "2. Task instruction — a clear instruction grounded in the step's AI pattern (e.g. Retrieve, Extract, Generate, Summarise, Classify, Match, Route, Optimise, Search).",
+    "3. Input — what data the user will provide (based on the step's inputs, systems, and data processing).",
+    "4. Output format — exactly what ChatGPT should return.",
+    "5. Rules & constraints — any rules, decision logic, compliance, or data-sensitivity guardrails from the step.",
+    "6. Example invocation — a single example line showing how the user would kick it off.",
+    "Be specific and practical. Do not include commentary, preamble, or markdown code fences around the whole thing — return only the prompt text itself.",
+    "Keep it concise enough to fit comfortably in one screen."
+  ].join("\n");
+}
+
+function recipeUserPayload(step, workflowName) {
+  const lines = [
+    `Workflow: ${workflowName || "Unnamed workflow"}`,
+    `Step name: ${recipeCellValue(step, "name") || "Untitled step"}`,
+    `Description: ${recipeCellValue(step, "description") || "(none provided)"}`,
+    `Persona / actors: ${recipeCellValue(step, "personaActors") || "(none provided)"}`,
+    `Systems / tools: ${recipeCellValue(step, "systemsTools") || "(none provided)"}`,
+    `Data processing: ${recipeCellValue(step, "dataProcessing") || "(none provided)"}`,
+    `Rules / decision logic: ${recipeCellValue(step, "rulesDecisionLogic") || "(none provided)"}`,
+    `Output: ${recipeCellValue(step, "output") || "(none provided)"}`,
+    `Trigger: ${recipeCellValue(step, "trigger") || "(none provided)"}`,
+    `Handoff: ${recipeCellValue(step, "handoff") || "(none provided)"}`,
+    `Human checkpoint: ${recipeCellValue(step, "humanCheckpoint") || "(none provided)"}`,
+    `Pain / friction: ${recipeCellValue(step, "painFriction") || "(none provided)"}`,
+    `Data sensitivity: ${recipeCellValue(step, "dataSensitivity") || "(none provided)"}`,
+    `Exception branching: ${recipeCellValue(step, "exceptionBranching") || "(none provided)"}`,
+    `Regulatory / compliance context: ${recipeCellValue(step, "regulatoryContext") || "(none provided)"}`,
+    `AI pattern: ${recipeCellValue(step, "aiPattern") || "(infer the most fitting pattern)"}`
+  ];
+  return lines.join("\n");
+}
+
+async function handleRecipe(req, res) {
+  if (!OPENAI_API_KEY) {
+    return sendJson(res, 400, {
+      error: "OPENAI_API_KEY is not configured. Set it in your terminal and restart the server."
+    });
+  }
+
+  let body;
+  try {
+    body = await readJson(req);
+  } catch (error) {
+    return sendJson(res, 400, { error: error.message || "Invalid request body" });
+  }
+
+  const step = body.step;
+  if (!step || typeof step !== "object") {
+    return sendJson(res, 400, { error: "A workflow step object is required." });
+  }
+  const workflowName = typeof body.workflowName === "string" ? body.workflowName.trim() : "";
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: RECIPE_MODEL,
+        max_tokens: 800,
+        messages: [
+          { role: "system", content: recipeSystemPrompt() },
+          { role: "user", content: recipeUserPayload(step, workflowName) }
+        ]
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      return sendJson(res, response.status, {
+        error: data.error?.message || "OpenAI API request failed",
+        detail: data
+      });
+    }
+    const prompt = data.choices?.[0]?.message?.content?.trim() || "";
+    if (!prompt) {
+      return sendJson(res, 502, { error: "The model returned an empty prompt." });
+    }
+    return sendJson(res, 200, { prompt });
+  } catch (error) {
+    return sendJson(res, 500, { error: error.message || "Recipe generation failed" });
+  }
 }
 
 async function handleRealtimeSession(req, res) {
