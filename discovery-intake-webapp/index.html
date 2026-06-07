@@ -79,6 +79,12 @@
           hidden
           accept=".pdf,.docx,.doc,.xlsx,.xls,.png,.jpg,.jpeg,.webp"
         />
+        <input
+          id="attachmentUploadInput"
+          type="file"
+          hidden
+          accept=".pdf,.docx,.doc,.xlsx,.xls,.png,.jpg,.jpeg,.webp"
+        />
 
         <section class="interview-room discovery-cockpit" data-app-panel="interview">
           <section class="interview-stage" aria-label="Voice interview">
@@ -118,10 +124,10 @@
                       <i data-lucide="square"></i>
                       Stop
                     </button>
-                    <label class="secondary-button main-attachment-button" for="evidenceFileInput" title="Upload optional docs, screenshots, PDFs, decks, or trackers as context">
+                    <button class="secondary-button main-attachment-button" id="addAttachmentButton" type="button" title="Upload optional docs, screenshots, PDFs, decks, or trackers as context">
                       <i data-lucide="paperclip"></i>
                       Add Attachment
-                    </label>
+                    </button>
                     <button class="secondary-button" id="startRealtimeButton" type="button">
                       <i data-lucide="radio"></i>
                       AI Voice On
