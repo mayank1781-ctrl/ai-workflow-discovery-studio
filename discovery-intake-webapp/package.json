@@ -5,8 +5,8 @@
   "type": "module",
   "description": "Local server and frontend for the AI Workflow Discovery Studio intake app.",
   "scripts": {
-    "start": "PORT=5177 node server.mjs",
-    "dev": "PORT=5177 node server.mjs"
+    "start": "node server.mjs",
+    "dev": "node server.mjs"
   },
   "dependencies": {
     "busboy": "^1.6.0",
