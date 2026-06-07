@@ -3534,7 +3534,7 @@ async function triggerPostExtractionPivot() {
     stopRealtimeVoice({ silent: true });
     await startRealtimeVoice();
   }
-  await aiExtractAnswer({ injectedAnswer: "[Document processed. Acknowledge extraction and confirm steps.]" });
+  await aiExtractAnswer({ injectedAnswer: "<<SYSTEM_TRIGGER: document extraction complete — do not echo this message. Acknowledge the extracted steps and ask the user to confirm them.>>" });
 }
 
 // Merges a GPT-4o document extraction into the existing live grid. When the grid
@@ -7404,6 +7404,26 @@ async function aiExtractAnswer(options = {}) {
     result = sanitizeExtractionResult(result, { answer, askedQuestion });
     result._answer = answer;
     result._askedQuestion = askedQuestion;
+    if (injected) {
+      // Post-extraction pivot: surface the model's acknowledgement + confirm
+      // question straight from the LLM. Never echo the synthetic trigger via
+      // conciseAnswerSummary/buildAiReply, and never run the generic next-
+      // question routing (it would override the pivot with a workflow-name
+      // question). The grid is already populated by the document merge, so no
+      // extraction is applied for this synthetic turn.
+      const pivotQuestion = (result.nextQuestion || "").trim();
+      const ack = (result.summary || "").trim();
+      const reply = [ack, pivotQuestion].filter(Boolean).join(" ")
+        || "I've pulled your document into the grid. Do these steps look right, or is anything missing or named incorrectly?";
+      state.currentQuestionOverride = pivotQuestion || reply;
+      state.currentQuestionSource = "Document recap";
+      setCaptureStage("followup", "Follow-up ready");
+      addConversationMessage("assistant", reply, "Document recap");
+      maybeSpeak(reply);
+      persistState();
+      render();
+      return;
+    }
     applyExtraction(result, { beforeStepCount, beforeActiveStepIndex, answer, askedQuestion });
     mergeStepAnchorsFromAnswer(answer, { beforeStepCount, beforeActiveStepIndex });
     mergeCurrentStepDetailHintsFromAnswer(answer, { beforeStepCount, beforeActiveStepIndex });
