@@ -1375,6 +1375,7 @@ async function handleExtractDocument(req, res) {
     const cleaned = outputText.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
     grid = JSON.parse(cleaned);
   } catch {
+    console.error('Raw model response:', outputText);
     return sendJson(res, 200, { success: false, error: "The model returned an unreadable result. Try again or start with conversation." });
   }
 
