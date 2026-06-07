@@ -3404,6 +3404,7 @@ function render() {
   renderCaseComparison();
   renderLifecyclePanel();
   renderSessionLibrary();
+  renderSavedSessionsPanel();
   renderPilotControls();
   renderTestLab();
   renderMap();
@@ -10045,6 +10046,53 @@ function caseScore(label, score, color) {
       <div class="case-score-track"><i></i></div>
     </div>
   `;
+}
+
+// Compact "Saved Sessions" panel for the Discovery view. Lists disk-persisted
+// sessions (and any local-only ones) from getCombinedSessionLibrary(); clicking
+// a row loads it into state via the existing loadSessionFromLibrary(), which
+// fetches GET /api/sessions/:id for server-only sessions.
+function renderSavedSessionsPanel() {
+  const container = document.getElementById("savedSessionsPanel");
+  if (!container) return;
+  const sessions = getCombinedSessionLibrary();
+  const currentId = state.sessionMeta?.id;
+  const head = `
+    <div class="saved-sessions-head" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+      <i data-lucide="folder-clock" style="width:14px;height:14px;color:#7a93b4;"></i>
+      <strong style="font-size:12px;letter-spacing:0.04em;text-transform:uppercase;color:#7a93b4;">Saved Sessions</strong>
+      <span style="font-size:11px;color:#5b7186;margin-left:auto;">${sessions.length} saved</span>
+    </div>`;
+  if (!sessions.length) {
+    container.innerHTML = head + `<p style="font-size:12px;color:#5b7186;margin:0;">No saved sessions yet. Click <strong>Save</strong> to keep this workflow on disk.</p>`;
+    refreshIcons();
+    return;
+  }
+  const rows = sessions.map((entry) => {
+    const id = entry.sessionId || entry.id;
+    const name = entry.workflowName || entry.name || "Untitled workflow";
+    const steps = Number.isFinite(entry.stepCount) ? entry.stepCount : 0;
+    const when = formatSavedSessionDate(entry.savedAt || entry.updatedAt);
+    const active = id === currentId;
+    const meta = `${steps} step${steps === 1 ? "" : "s"}${when ? ` · ${escapeHtml(when)}` : ""}${entry.remoteOnly ? " · on disk" : ""}`;
+    return `
+      <button type="button" data-load-session="${escapeHtml(id)}" ${active ? 'aria-current="true"' : ""} style="display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;background:${active ? "#102338" : "#0d1b2a"};border:1px solid ${active ? "#00d4b4" : "#1a2a3a"};border-radius:8px;padding:8px 10px;color:#dde8f5;cursor:pointer;">
+        <strong style="font-size:13px;">${escapeHtml(name)}</strong>
+        <span style="font-size:11px;color:#7a93b4;">${meta}</span>
+      </button>`;
+  }).join("");
+  container.innerHTML = head + `<div style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow:auto;">${rows}</div>`;
+  container.querySelectorAll("[data-load-session]").forEach((button) => {
+    button.addEventListener("click", () => loadSessionFromLibrary(button.dataset.loadSession));
+  });
+  refreshIcons();
+}
+
+function formatSavedSessionDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 function renderSessionLibrary() {
@@ -25229,6 +25277,7 @@ async function syncSessionsFromServer() {
     const payload = await requestJson("/api/sessions");
     serverSessions = Array.isArray(payload.sessions) ? payload.sessions : [];
     renderSessionLibrary();
+    renderSavedSessionsPanel();
   } catch (error) {
     console.warn("Server session sync unavailable", error.message);
   }
@@ -25253,6 +25302,7 @@ async function saveSessionToServer(sessionState = state, options = {}) {
     if (response.summary) {
       serverSessions = [response.summary, ...serverSessions.filter((entry) => entry.id !== response.summary.id)];
       renderSessionLibrary();
+      renderSavedSessionsPanel();
     }
     if (options.immediate) toast("Session saved to server files.");
   } catch (error) {
