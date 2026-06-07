@@ -4207,6 +4207,15 @@ function patternFilled(step) {
   return stepPatternList(step).length > 0;
 }
 
+// True when the step has at least one AI pattern entry scored with positive
+// confidence. The opportunity quadrant only reads as meaningful once a step
+// clears this bar — until then every dot collapses into the bottom-left.
+function stepHasScoredPattern(step) {
+  const value = step?.cells?.aiPattern?.value;
+  if (!Array.isArray(value)) return false;
+  return value.some((entry) => Number(entry?.confidence) > 0);
+}
+
 function patternColor(pattern) {
   return AI_PATTERNS[pattern] || "#5b7186";
 }
@@ -4324,6 +4333,12 @@ function renderAnalysisTabOpportunities() {
     return;
   }
 
+  // The quadrant is only meaningful once at least one step carries a scored AI
+  // pattern (confidence > 0). With no scored patterns every dot collapses into
+  // the bottom-left corner and reads as broken, so swap in an explanatory
+  // empty state and suppress the quadrant entirely.
+  const hasScoredPattern = steps.some(stepHasScoredPattern);
+
   // One dot per step, positioned by sensitivity (x) and opportunity score (y).
   const dots = steps.map((step, index) => {
     const score = opportunityScore(step);
@@ -4335,13 +4350,18 @@ function renderAnalysisTabOpportunities() {
     return `<div class="opp-dot" style="left:calc(${xPct}% - 16px);top:calc(${yPct}% - 16px);background:${color};" title="${escapeHtml(name)}">${index + 1}</div>`;
   }).join("");
 
-  const quadrant = `
+  const quadrant = hasScoredPattern
+    ? `
     <div class="opp-quadrant">
       <div class="opp-quadrant-cell" style="background:rgba(0,212,180,0.10);"><span class="opp-quadrant-label">High Opportunity / Low Risk</span></div>
       <div class="opp-quadrant-cell" style="background:rgba(245,158,11,0.10);"><span class="opp-quadrant-label">High Opportunity / Needs Review</span></div>
       <div class="opp-quadrant-cell"><span class="opp-quadrant-label">Lower Priority</span></div>
       <div class="opp-quadrant-cell" style="background:rgba(236,72,153,0.10);"><span class="opp-quadrant-label">Proceed with Caution</span></div>
       ${dots}
+    </div>`
+    : `
+    <div class="empty-state-msg" style="text-align:center; color:#8899aa; padding:2rem; font-size:0.95rem;">
+      Complete the interview and assign AI patterns to see opportunities plotted here.
     </div>`;
 
   // Ranked cards, sorted by opportunity score descending (stable on index).
