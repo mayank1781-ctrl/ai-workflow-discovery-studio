@@ -1060,7 +1060,7 @@ async function handleExtract(req, res) {
       reasoning: {
         effort: EXTRACTION_REASONING_EFFORT
       },
-      instructions: extractionInstructions(),
+      instructions: extractionInstructions(body.gridSummary || ""),
       input: JSON.stringify(payload),
       text: {
         verbosity: EXTRACTION_VERBOSITY,
@@ -1496,7 +1496,7 @@ async function handleChat(req, res) {
       reasoning: {
         effort: CHAT_REASONING_EFFORT
       },
-      instructions: chatInstructions(),
+      instructions: chatInstructions(body.gridSummary || ""),
       input: JSON.stringify(payload),
       text: {
         verbosity: CHAT_VERBOSITY
@@ -1525,6 +1525,17 @@ async function handleRealtimeSession(req, res) {
   }
 
   const sdp = await readText(req);
+  // The realtime body is raw SDP, so the grid summary (when present) rides in on
+  // a URI-encoded header set by the client at session creation.
+  const rawGridSummary = req.headers["x-grid-summary"];
+  let gridSummary = "";
+  if (typeof rawGridSummary === "string" && rawGridSummary) {
+    try {
+      gridSummary = decodeURIComponent(rawGridSummary);
+    } catch {
+      gridSummary = "";
+    }
+  }
   const formData = new FormData();
   formData.set("sdp", sdp);
   formData.set(
@@ -1532,7 +1543,7 @@ async function handleRealtimeSession(req, res) {
     JSON.stringify({
       type: "realtime",
       model: REALTIME_MODEL,
-      instructions: realtimeInstructions(),
+      instructions: realtimeInstructions(gridSummary),
       reasoning: {
         effort: REALTIME_REASONING_EFFORT
       },
@@ -2475,8 +2486,28 @@ function fileSafe(value) {
     .slice(0, 80) || "discovery-intake";
 }
 
-function extractionInstructions() {
+// Post-extraction pivot block injected into every prompt builder when a
+// non-empty grid summary is supplied (i.e. a document has pre-populated the
+// grid). Tells the model to acknowledge the extraction, confirm the step list,
+// and then drill only the empty/unknown cells listed in the summary.
+function documentExtractionPivotBlock(gridSummary) {
   return [
+    "---",
+    "DOCUMENT EXTRACTION COMPLETE. The workflow grid has been pre-populated.",
+    "",
+    gridSummary,
+    "",
+    "Your immediate job:",
+    "1. Acknowledge what was extracted in ONE short sentence (e.g. \"I've pulled [N] steps from your document.\")",
+    "2. Ask the user to confirm the step list looks right, or if anything is missing or named incorrectly.",
+    "3. After confirmation, focus ONLY on empty and unknown cells listed above — do NOT re-ask about cells already confirmed or inferred.",
+    "4. Treat confirmed/inferred cells as settled — never re-ask them.",
+    "---"
+  ].join("\n");
+}
+
+function extractionInstructions(gridSummary = "") {
+  const lines = [
     "You extract structured current-state repetitive workflow intake details from interview text.",
     "The user works in a finance-industry-focused management consulting environment. North star: understand real current-state work across client delivery, pre-delivery, pursuit, internal delivery enablement, and post-delivery synthesis, then turn it into Product/Engineering-ready AI opportunities. Business-case metrics such as capacity, margin, volume, cost rate, and project economics can often be supplemented later by Finance, Operations, PMO, Account Reporting, or practice leadership.",
     "Do not assume every idea is client delivery execution. Always classify workflowCategory as Client delivery execution, Pre-delivery / workshop prep, Pursuit / revenue enablement, Internal delivery enablement, Post-delivery synthesis, Other, or unknown.",
@@ -2539,7 +2570,9 @@ function extractionInstructions() {
     "When gridContext is present, always prioritise Pain/Friction: only a human can provide it and documents never can, so if any step is missing genuine Pain/Friction, prefer surfacing that gap. Do not infer Pain/Friction yourself; ask the person about it.",
     "When gridContext is present and all high-priority fields across all steps are already populated (no meaningful emptyOrWeakFields remain), shift to wrap-up mode: set nextQuestion to 'I think I have a good picture — let me confirm a few things before we wrap up' and then confirm rather than interrogate.",
     "Return only JSON matching the schema."
-  ].join(" ");
+  ];
+  if (gridSummary && gridSummary.trim()) lines.push(documentExtractionPivotBlock(gridSummary));
+  return lines.join(" ");
 }
 
 function evidenceInstructions() {
@@ -2561,8 +2594,8 @@ function evidenceInstructions() {
   ].join(" ");
 }
 
-function chatInstructions() {
-  return [
+function chatInstructions(gridSummary = "") {
+  const lines = [
     "You are an embedded ChatGPT-style intake copilot inside a workflow discovery website.",
     "Help the user clarify current-state time-heavy engagement workflow details for AI automation discovery in a finance-industry consulting firm. The workflow may be client delivery, pre-delivery/workshop prep, pursuit/revenue enablement, internal delivery enablement, post-delivery synthesis, or other.",
     "If there is a submitted domain idea, treat it as a hypothesis. Help validate whether it matches the actual current-state workflow, needs clarification, should be split, or is not a good AI candidate.",
@@ -2590,11 +2623,13 @@ function chatInstructions() {
     "If the user asks what a button or field means, explain it in plain language.",
     "Do not ask for raw client data. Ask for categories, examples, sensitivity, and handling rules instead. Treat uploaded files and screenshots as optional add-ons, not prerequisites.",
     "Do not claim you updated the structured intake unless the user clicks the website's AI Analyze Answer action."
-  ].join(" ");
+  ];
+  if (gridSummary && gridSummary.trim()) lines.push(documentExtractionPivotBlock(gridSummary));
+  return lines.join(" ");
 }
 
-function realtimeInstructions() {
-  return [
+function realtimeInstructions(gridSummary = "") {
+  const lines = [
     "# Role and Objective",
     "You are a voice-first discovery intake interviewer for repetitive-work AI automation opportunities.",
     "Your job is to collect current-state time-heavy engagement workflow information that can later become a product-style PDR, engineering handoff, Excel intake table, and process map.",
@@ -2632,7 +2667,9 @@ function realtimeInstructions() {
     "",
     "# Output Awareness",
     "The website has separate buttons for structured extraction and Excel export. Your voice role is to help the user produce clear answers that those tools can capture for Product and Engineering."
-  ].join("\n");
+  ];
+  if (gridSummary && gridSummary.trim()) lines.push(documentExtractionPivotBlock(gridSummary));
+  return lines.join("\n");
 }
 
 function pruneState(state = {}) {

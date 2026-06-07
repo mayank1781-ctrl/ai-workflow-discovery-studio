@@ -1896,7 +1896,8 @@ async function sendChatMessage() {
       body: {
         message: text,
         state,
-        chatHistory: state.aiChat.slice(-12)
+        chatHistory: state.aiChat.slice(-12),
+        gridSummary: gridSummaryForPrompt(state.workflowGrid)
       }
     });
     const reply = result.reply || "I am ready for the next intake detail.";
@@ -3173,7 +3174,10 @@ async function startRealtimeVoice() {
 
     const response = await fetch("/api/realtime/session", {
       method: "POST",
-      headers: { "Content-Type": "application/sdp" },
+      headers: {
+        "Content-Type": "application/sdp",
+        "X-Grid-Summary": encodeURIComponent(gridSummaryForPrompt(state.workflowGrid))
+      },
       body: offer.sdp
     });
 
@@ -3514,6 +3518,23 @@ async function extractAttachmentIntoGrid(file) {
   persistState();
   render();
   toast(changed ? `Added details from ${file.name} to the grid.` : `No new workflow details found in ${file.name}.`);
+  // Pivot the interview to acknowledge the extraction and confirm the steps,
+  // then drill only the gaps. The grid summary now rides into every prompt.
+  await triggerPostExtractionPivot();
+}
+
+// After a document pre-fills the grid, drive the interview's main Current
+// Question to the acknowledge-and-confirm pivot. The trigger message is
+// system-injected (never shown to the user) and prompts the LLM to fire the
+// pivot behaviour. If a realtime voice session is live, it is torn down and
+// re-initiated so the fresh SDP carries the updated grid summary — a live
+// session's instructions cannot be patched in place.
+async function triggerPostExtractionPivot() {
+  if (realtimeConnection) {
+    stopRealtimeVoice({ silent: true });
+    await startRealtimeVoice();
+  }
+  await aiExtractAnswer({ injectedAnswer: "[Document processed. Acknowledge extraction and confirm steps.]" });
 }
 
 // Merges a GPT-4o document extraction into the existing live grid. When the grid
@@ -3613,6 +3634,53 @@ function buildGridContext() {
       };
     })
   };
+}
+
+// Plain-English labels for the 17 grid cell keys, used only in prompt-facing
+// summaries so the model reads "AI pattern" rather than "aiPattern".
+const GRID_CELL_PLAIN_NAMES = {
+  name: "workflow step name",
+  description: "description",
+  personaActors: "persona/actors",
+  systemsTools: "systems/tools",
+  dataProcessing: "data processing",
+  rulesDecisionLogic: "rules/decision logic",
+  output: "output",
+  trigger: "trigger",
+  handoff: "handoff",
+  humanCheckpoint: "human checkpoint",
+  timeTaken: "time taken",
+  frequencyVolume: "frequency/volume",
+  painFriction: "pain/friction",
+  dataSensitivity: "data sensitivity",
+  exceptionBranching: "exception branching",
+  regulatoryContext: "regulatory/compliance context",
+  aiPattern: "AI pattern"
+};
+
+// Pure: compact text summary of the live grid for prompt injection. Lists each
+// step's filled count out of the 17-cell schema, plus the plain-English names
+// of its empty/unknown cells. Returns "" when there are no steps (nothing to
+// inject). No side effects — reads only the passed grid.
+function gridSummaryForPrompt(workflowGrid) {
+  const steps = Array.isArray(workflowGrid?.steps) ? workflowGrid.steps : [];
+  if (!steps.length) return "";
+  const total = GRID_CELL_KEYS.length;
+  const lines = ["Current grid state (extracted from document):"];
+  steps.forEach((step, index) => {
+    const cells = step.cells || {};
+    const empties = GRID_CELL_KEYS.filter((key) => {
+      const cell = cells[key];
+      return !cell || cell.state === "empty" || cell.state === "unknown";
+    });
+    const filled = total - empties.length;
+    const name = (cells.name?.value || "").trim() || `Step ${index + 1}`;
+    lines.push(`Step ${index + 1} — "${name}": ${filled}/${total} cells filled`);
+    if (empties.length) {
+      lines.push(`  Empty: ${empties.map((key) => GRID_CELL_PLAIN_NAMES[key] || key).join(", ")}`);
+    }
+  });
+  return lines.join("\n");
 }
 
 // Maps a harvest fieldKey to a canonical grid cell key. Treats the document-
@@ -7251,7 +7319,10 @@ function saveAnswerToSection() {
 }
 
 async function aiExtractAnswer(options = {}) {
-  const answer = els.answerInput.value.trim() || latestTranscriptBlock();
+  // A system-injected trigger (e.g. the post-extraction pivot) supplies its own
+  // answer text and must never be read from, or written back to, the input box.
+  const injected = typeof options.injectedAnswer === "string" && options.injectedAnswer.trim();
+  const answer = injected ? options.injectedAnswer : (els.answerInput.value.trim() || latestTranscriptBlock());
   if (!answer) {
     toast("Add transcript, chat, or typed text first.");
     return;
@@ -7317,7 +7388,7 @@ async function aiExtractAnswer(options = {}) {
     const beforeStepCount = state.steps.length;
     const beforeActiveStepIndex = getCurrentStepIndex();
     const askedQuestion = getDisplayQuestion(getActiveSection()).text;
-    state.transcript = [state.transcript, answer].filter(Boolean).join("\n\n");
+    if (!injected) state.transcript = [state.transcript, answer].filter(Boolean).join("\n\n");
     let result = await requestJson("/api/extract", {
       method: "POST",
       body: {
@@ -7326,6 +7397,7 @@ async function aiExtractAnswer(options = {}) {
         transcript: state.transcript,
         currentQuestion: askedQuestion,
         gridContext: buildGridContext(),
+        gridSummary: gridSummaryForPrompt(state.workflowGrid),
         state
       }
     });
@@ -7348,17 +7420,20 @@ async function aiExtractAnswer(options = {}) {
     state.currentQuestionOverride = routedNextQuestion || stepInterviewQuestion();
     state.currentQuestionSource = nextRoute?.source || (state.steps.length ? "Step-by-step interview" : "Discovery queue");
     maybeSpeak(reply);
-    state.voiceCheckpoints.push({
-      checkpoint: getActiveSection().label,
-      summary: result.summary || answer,
-      confirmed: ""
-    });
-    els.answerInput.value = "";
+    if (!injected) {
+      state.voiceCheckpoints.push({
+        checkpoint: getActiveSection().label,
+        summary: result.summary || answer,
+        confirmed: ""
+      });
+      els.answerInput.value = "";
+    }
     persistState();
     render();
     // Stage 1b: harvest grid updates from the conversation in the background.
-    // Fire-and-forget — never awaited, never blocks the interview.
-    harvestGridFromConversation(answer);
+    // Fire-and-forget — never awaited, never blocks the interview. Skipped for a
+    // system-injected trigger, which carries no workflow content to harvest.
+    if (!injected) harvestGridFromConversation(answer);
     toast(state.currentQuestionOverride ? `Captured. Next: ${state.currentQuestionOverride}` : "AI extraction applied.");
   } catch (error) {
     setCaptureStage("idle", "Voice idle");
