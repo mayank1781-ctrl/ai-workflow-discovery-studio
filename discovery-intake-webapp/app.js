@@ -1190,7 +1190,6 @@ const els = {
   answerInput: document.getElementById("answerInput"),
   interviewGuide: document.getElementById("interviewGuide"),
   captureCoach: document.getElementById("captureCoach"),
-  discoveryInferenceLens: document.getElementById("discoveryInferenceLens"),
   voiceStatus: document.getElementById("voiceStatus"),
   voiceReplyToggle: document.getElementById("voiceReplyToggle"),
   startRealtimeButton: document.getElementById("startRealtimeButton"),
@@ -3368,7 +3367,6 @@ function render() {
   renderCaptureCoach();
   renderTextIntakeAssist();
   renderLiveSpeechDraft();
-  renderDiscoveryInferenceLens();
   renderWorkflowGridPanel();
   updateConfidenceCards();
   updateProcessFlowMapCompact();
@@ -6169,11 +6167,6 @@ function deltaBadgeList(delta = {}) {
     .filter(Boolean);
 }
 
-function renderDiscoveryInferenceLens() {
-  if (!els.discoveryInferenceLens) return;
-  els.discoveryInferenceLens.innerHTML = discoveryHandoffSignalPanel();
-}
-
 function inferenceLensPanel(variant = "") {
   const lens = inferenceLensData();
   return `
@@ -6191,87 +6184,6 @@ function inferenceLensPanel(variant = "") {
         ${lensColumn("Complete next", "message-circle-question", lens.questions)}
       </div>
     </section>
-  `;
-}
-
-function discoveryHandoffSignalPanel() {
-  const product = deriveProductBrief();
-  const engineering = deriveEngineeringBrief();
-  const business = deriveBusinessBrief();
-  const governance = governanceRoute();
-  const gate = gateAssessment();
-  // Grid-cell coverage: confirmed + inferred count toward coverage; unknown
-  // (asked, no answer) does not — it only counts toward "Addressed".
-  const coverage = gridCoverageStats();
-  const signals = [
-    discoveryHandoffSignal("Product", "package", product.readiness, product.readinessLabel, nextMissingTemplateField(product) || "Ready to review MVP slice, users, scope, and acceptance criteria."),
-    discoveryHandoffSignal("Engineering", "wrench", engineering.readiness, engineering.readinessLabel, nextMissingTemplateField(engineering) || "Ready to review systems, data access, integration, logging, and outputs."),
-    discoveryHandoffSignal("Business", "badge-dollar-sign", business.readiness, business.readinessLabel, nextMissingTemplateField(business) || "Ready to review value path, frequency, baseline, KPIs, and sponsor decision.")
-  ];
-  return `
-    <section class="inference-lens-panel discovery handoff-signal-panel">
-      <div class="lens-heading handoff-signal-heading">
-        <div>
-          <p class="eyebrow">Handoff Signals</p>
-          <h3>${handoffReadinessScore()}% intake-to-handoff readiness</h3>
-          <p>How the current conversation converts into Product, Engineering, and Business outputs.</p>
-        </div>
-        <span title="Governance is captured as later review input, not the main preparedness score.">Gov inputs: ${escapeHtml(governance.path)}</span>
-      </div>
-      ${coverage.total ? `
-        <div class="handoff-grid-coverage" title="Coverage counts confirmed + inferred grid cells. Unknown (asked, no answer available) counts only toward Addressed.">
-          <div class="grid-coverage-stat">
-            <strong>${coverage.coveragePct}%</strong>
-            <span>Coverage</span>
-          </div>
-          <div class="grid-coverage-stat secondary">
-            <strong>${coverage.addressedPct}%</strong>
-            <span>Addressed</span>
-          </div>
-        </div>
-      ` : ""}
-      <div class="handoff-signal-bars">
-        ${signals.map(handoffSignalCard).join("")}
-      </div>
-      <div class="handoff-signal-next">
-        <span><i data-lucide="corner-down-right"></i></span>
-        <p>${escapeHtml(topCompletionQuestions(1)[0] || gate.rationale || "Answer the highlighted question to improve the handoff package.")}</p>
-      </div>
-    </section>
-  `;
-}
-
-function discoveryHandoffSignal(label, icon, score, status, next) {
-  return {
-    label,
-    icon,
-    score: Math.max(0, Math.min(100, Number(score) || 0)),
-    status: status || templateReadinessLabel(score),
-    next
-  };
-}
-
-function nextMissingTemplateField(brief) {
-  const field = brief.sections
-    .flatMap((section) => section.fields.map((item) => ({ section: section.title.replace(/^\d+\.\s*/, ""), ...item })))
-    .find((item) => item.status !== "Captured");
-  return field ? `${field.section}: ${field.label}` : "";
-}
-
-function handoffSignalCard(item) {
-  return `
-    <article class="handoff-signal-card">
-      <div class="handoff-signal-row">
-        <span><i data-lucide="${escapeHtml(item.icon)}"></i></span>
-        <div>
-          <strong>${escapeHtml(item.label)}</strong>
-          <em>${escapeHtml(item.status)}</em>
-        </div>
-        <b>${item.score}%</b>
-      </div>
-      <div class="handoff-signal-meter" style="--handoff-signal:${item.score};"><i></i></div>
-      <p>${escapeHtml(item.next)}</p>
-    </article>
   `;
 }
 
