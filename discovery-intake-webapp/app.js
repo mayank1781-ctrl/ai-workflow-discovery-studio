@@ -1333,6 +1333,8 @@ function bindEvents() {
   els.clearEvidenceNoteButton?.addEventListener("click", clearEvidenceWorkbenchDraft);
   document.getElementById("documentUploadPanel")?.addEventListener("click", handleDocumentUploadPanelClick);
   document.getElementById("documentUploadInput")?.addEventListener("change", handleDocumentUploadChange);
+  document.getElementById("addAttachmentButton")?.addEventListener("click", triggerAttachmentPicker);
+  document.getElementById("attachmentUploadInput")?.addEventListener("change", handleAttachmentUploadChange);
   document.getElementById("documentDisclosureConfirm")?.addEventListener("click", confirmDocumentDisclosure);
   document.getElementById("documentDisclosureCancel")?.addEventListener("click", closeDocumentDisclosure);
   document.getElementById("documentDisclosureModal")?.addEventListener("click", (event) => {
@@ -3747,6 +3749,120 @@ function buildWorkflowGridFromExtraction(extracted = {}) {
   });
 
   return grid;
+}
+
+// --- "Add Attachment" (mid-interview) --------------------------------------
+// The interview-view "Add Attachment" button opens a hidden file picker (PDF,
+// image, or document) and runs the selection through the same GPT-4o document
+// extraction endpoint as the pre-interview upload. The difference: an
+// attachment arrives while the interview is already in progress, so its
+// results are MERGED into the live grid rather than replacing it.
+
+function triggerAttachmentPicker() {
+  const input = document.getElementById("attachmentUploadInput");
+  if (input) input.click();
+}
+
+async function handleAttachmentUploadChange(event) {
+  const file = event.target.files?.[0];
+  // Allow re-selecting the same filename later.
+  event.target.value = "";
+  if (!file) return;
+  await extractAttachmentIntoGrid(file);
+}
+
+async function extractAttachmentIntoGrid(file) {
+  toast(`Reading ${file.name}...`);
+  let payload;
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await fetch("/api/extract-document", { method: "POST", body: formData });
+    payload = await response.json();
+  } catch {
+    payload = { success: false, error: "Could not reach the local server. Try again." };
+  }
+
+  if (!payload || payload.success !== true) {
+    toast((payload && payload.error) || "Attachment extraction failed. Try again.");
+    return;
+  }
+
+  const changed = mergeExtractionIntoGrid(payload.grid);
+  persistState();
+  render();
+  toast(changed ? `Added details from ${file.name} to the grid.` : `No new workflow details found in ${file.name}.`);
+}
+
+// Merges a GPT-4o document extraction into the existing live grid. When the grid
+// is still empty (e.g. a conversation-only start) the freshly built grid is
+// adopted wholesale, matching the upload path. Otherwise new steps are appended
+// and cells on matching steps only improve, reusing the same confidence gating
+// as the conversation harvest. Returns true if anything changed.
+function mergeExtractionIntoGrid(extracted = {}) {
+  const incoming = buildWorkflowGridFromExtraction(extracted);
+  const grid = state.workflowGrid || newWorkflowGrid();
+  state.workflowGrid = grid;
+
+  const existingSteps = Array.isArray(grid.steps) ? grid.steps : [];
+  const incomingSteps = Array.isArray(incoming.steps) ? incoming.steps : [];
+  if (existingSteps.length === 0 && incomingSteps.length > 0) {
+    state.workflowGrid = incoming;
+    return true;
+  }
+
+  let changed = false;
+  if (!grid.workflowName && incoming.workflowName) {
+    grid.workflowName = incoming.workflowName;
+    changed = true;
+  }
+  if (!grid.dataSensitivityBaseline?.value && incoming.dataSensitivityBaseline?.value) {
+    grid.dataSensitivityBaseline = incoming.dataSensitivityBaseline;
+    changed = true;
+  }
+
+  incomingSteps.forEach((incomingStep) => {
+    const update = {
+      stepName: incomingStep.cells?.name?.value || "",
+      fieldUpdates: extractionCellsToFieldUpdates(incomingStep.cells)
+    };
+    const match = findGridStepForUpdate(grid, update);
+    if (match) {
+      if (applyFieldUpdatesToStep(match, update.fieldUpdates)) changed = true;
+    } else {
+      const created = createGridStepFromHarvest(update);
+      if (created) {
+        grid.steps.push(created);
+        changed = true;
+      }
+    }
+  });
+
+  if (changed) {
+    // Re-chain Output -> next Trigger by array order using factory ids.
+    grid.steps.forEach((step, index) => {
+      step.nextStepId = index < grid.steps.length - 1 ? grid.steps[index + 1].id : "";
+    });
+  }
+  return changed;
+}
+
+// Translates extraction cells (from buildWorkflowGridFromExtraction) into the
+// fieldUpdates shape that applyFieldUpdatesToStep / createGridStepFromHarvest
+// expect, so the attachment merge reuses the harvest gating verbatim.
+function extractionCellsToFieldUpdates(cells = {}) {
+  const updates = {};
+  Object.entries(cells).forEach(([key, cell]) => {
+    if (!cell || typeof cell !== "object") return;
+    if (cell.state === "unknown") {
+      updates[key] = { value: "", state: "unknown", confidence: 0 };
+      return;
+    }
+    if (typeof cell.value === "string" && cell.value.trim()) {
+      updates[key] = { value: cell.value, state: cell.state, confidence: cell.confidence };
+    }
+  });
+  return updates;
 }
 
 // --- Stage 1b: grid-aware conversation harvesting --------------------------
