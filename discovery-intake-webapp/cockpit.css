@@ -713,3 +713,123 @@ input::placeholder {
   letter-spacing: 0.08em; color: #00d4b4;
   margin-bottom: 4px; text-transform: uppercase;
 }
+
+/* Analysis Studio 4-tab layout */
+.analysis-tab-bar {
+  display: flex; gap: 4px; padding: 12px 16px 0;
+  border-bottom: 1px solid #1a2a3a;
+}
+.analysis-tab-btn {
+  padding: 8px 16px; border-radius: 6px 6px 0 0;
+  background: transparent; border: none;
+  color: #7a93b4; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: all 0.2s ease;
+}
+.analysis-tab-btn:hover { color: #00d4b4; }
+.analysis-tab-btn.active {
+  background: #0d1b2a; color: #00d4b4;
+  border-bottom: 2px solid #00d4b4;
+}
+.analysis-tab-panel { display: none; padding: 16px; }
+.analysis-tab-panel.active { display: block; }
+
+/* AI Opportunities quadrant */
+.opp-quadrant {
+  width: 100%; aspect-ratio: 1.6;
+  display: grid; grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr; gap: 2px;
+  background: #1a2a3a; border-radius: 8px;
+  overflow: hidden; margin-bottom: 16px;
+  position: relative;
+}
+.opp-quadrant-cell {
+  position: relative; padding: 8px;
+  display: flex; align-items: flex-start;
+}
+.opp-quadrant-label {
+  font-size: 10px; font-weight: 700;
+  opacity: 0.5; text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.opp-dot {
+  width: 32px; height: 32px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; color: #0d1b2a;
+  position: absolute; cursor: pointer;
+  transition: transform 0.2s ease;
+}
+.opp-dot:hover { transform: scale(1.2); z-index: 10; }
+
+/* Recipe Book */
+.recipe-accordion {
+  border: 1px solid #1a2a3a; border-radius: 8px;
+  margin-bottom: 8px; overflow: hidden;
+}
+.recipe-accordion-header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px; cursor: pointer;
+  background: #0d1b2a;
+}
+.recipe-accordion-header:hover { background: #111f30; }
+.recipe-accordion-body {
+  display: none; padding: 16px;
+  background: #080f18; border-top: 1px solid #1a2a3a;
+}
+.recipe-accordion-body.open { display: block; }
+.recipe-prompt-block {
+  background: #040a10; border-radius: 6px;
+  padding: 16px; font-family: monospace;
+  font-size: 12px; line-height: 1.6;
+  color: #b0c4d8; white-space: pre-wrap;
+  position: relative;
+}
+.recipe-copy-btn {
+  position: absolute; top: 8px; right: 8px;
+  padding: 4px 10px; font-size: 11px;
+  background: #1a2a3a; border: none;
+  border-radius: 4px; color: #00d4b4;
+  cursor: pointer;
+}
+
+/* Engineering Doc */
+.gantt-row {
+  display: flex; align-items: center;
+  gap: 8px; margin-bottom: 6px;
+}
+.gantt-label {
+  width: 140px; font-size: 11px;
+  color: #7a93b4; flex-shrink: 0;
+  overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gantt-track {
+  flex: 1; height: 20px; background: #1a2a3a;
+  border-radius: 4px; overflow: hidden;
+}
+.gantt-bar {
+  height: 100%; border-radius: 4px;
+  transition: width 0.4s ease;
+}
+.sensitivity-row {
+  display: flex; align-items: center;
+  gap: 8px; margin-bottom: 6px;
+}
+.sensitivity-badge {
+  width: 64px; text-align: center;
+  padding: 2px 0; border-radius: 4px;
+  font-size: 10px; font-weight: 700;
+  flex-shrink: 0;
+}
+.gaps-table {
+  width: 100%; border-collapse: collapse;
+  font-size: 12px;
+}
+.gaps-table th {
+  text-align: left; padding: 6px 12px;
+  color: #7a93b4; border-bottom: 1px solid #1a2a3a;
+  font-weight: 600;
+}
+.gaps-table td {
+  padding: 6px 12px; border-bottom: 1px solid #0d1b2a;
+  color: #b0c4d8;
+}
