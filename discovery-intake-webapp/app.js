@@ -4507,7 +4507,7 @@ function renderAnalysisTabRecipe() {
 
   container.innerHTML =
     accordions +
-    `<div style="margin-top:16px;"><button class="secondary-button compact" type="button" id="downloadRecipeBookBtn">Download Recipe Book</button><button type="button" id="recipe-export-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download DOCX</button></div>`;
+    `<div style="margin-top:16px;"><button class="secondary-button compact" type="button" id="downloadRecipeBookBtn">Download Recipe Book</button><button type="button" id="recipe-export-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download DOCX</button><button type="button" id="recipe-pdf-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download PDF</button></div>`;
 
   // Pre-fill cached prompts (bodies stay collapsed by default).
   steps.forEach((step) => {
@@ -4534,6 +4534,7 @@ function renderAnalysisTabRecipe() {
 
   const recipeExportBtn = container.querySelector("#recipe-export-btn");
   recipeExportBtn?.addEventListener("click", handleRecipeExport);
+  container.querySelector("#recipe-pdf-btn")?.addEventListener("click", handleRecipePdfExport);
   syncRecipeExportButton(recipeExportBtn);
 }
 
@@ -4758,12 +4759,13 @@ function renderAnalysisTabEngineering() {
       <h3 style="${sectionTitleStyle}">Open Gaps</h3>
       ${gapsHtml}
     </section>
-    <div><button class="secondary-button compact" type="button" id="exportEngineeringDocBtn">Export Engineering Doc</button><button type="button" id="engineering-export-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download DOCX</button></div>`;
+    <div><button class="secondary-button compact" type="button" id="exportEngineeringDocBtn">Export Engineering Doc</button><button type="button" id="engineering-export-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download DOCX</button><button type="button" id="engineering-pdf-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download PDF</button></div>`;
 
   container.querySelector("#exportEngineeringDocBtn")?.addEventListener("click", exportEngineeringDoc);
 
   const engineeringExportBtn = container.querySelector("#engineering-export-btn");
   engineeringExportBtn?.addEventListener("click", handleEngineeringExport);
+  container.querySelector("#engineering-pdf-btn")?.addEventListener("click", handleEngineeringPdfExport);
   syncEngineeringExportButton(engineeringExportBtn);
 }
 
@@ -5112,6 +5114,105 @@ function handleHandoffConfirm() {
   // Re-render the tab so Zone 1's confidence dots flip to teal immediately.
   renderAnalysisTabHandoff();
   toast("Patterns confirmed and saved to grid");
+}
+
+// --- PDF export (Recipe Book + Engineering Doc) -------------------------------
+// Mirrors the DOCX export handlers: post the same { workflowName, steps } data
+// to /api/pdf-export, which builds the PDF programmatically with pdfkit (no
+// browser/Chromium). The server picks the layout from `kind`.
+
+function pdfSafeName(workflowName) {
+  return (workflowName || "workflow").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "workflow";
+}
+
+async function downloadPdf(payload, filename, btn) {
+  const notify = (message) => (typeof toast === "function" ? toast(message) : alert(message));
+  if (btn) {
+    btn.textContent = "Preparing…";
+    btn.disabled = true;
+    btn.style.opacity = "0.4";
+    btn.style.cursor = "not-allowed";
+  }
+  try {
+    const response = await fetch("/api/pdf-export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+      let message = `PDF export failed (${response.status}).`;
+      try {
+        const data = await response.json();
+        if (data?.error) message = data.error;
+      } catch (_) { /* non-JSON error body */ }
+      throw new Error(message);
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    notify(error?.message || "PDF export failed.");
+  } finally {
+    if (btn) {
+      btn.textContent = "⬇ Download PDF";
+      btn.disabled = false;
+      btn.style.opacity = "1";
+      btn.style.cursor = "pointer";
+    }
+  }
+}
+
+async function handleRecipePdfExport() {
+  const notify = (message) => (typeof toast === "function" ? toast(message) : alert(message));
+  const workflowName = analysisWorkflowName() || "Workflow";
+  const steps = analysisGridSteps().map((step, index) => ({
+    name: stepDisplayName(step, index),
+    aiPattern: stepPrimaryPattern(step),
+    prompt: state.recipeCache?.[step.id] || ""
+  }));
+  if (!steps.some((step) => step.prompt.trim() || step.aiPattern.trim())) {
+    notify("Generate at least one recipe prompt before exporting.");
+    return;
+  }
+  await downloadPdf(
+    { kind: "recipe", workflowName, steps },
+    `${pdfSafeName(workflowName)}-recipe-book.pdf`,
+    document.getElementById("recipe-pdf-btn")
+  );
+}
+
+async function handleEngineeringPdfExport() {
+  const notify = (message) => (typeof toast === "function" ? toast(message) : alert(message));
+  const workflowName = analysisWorkflowName() || "Workflow";
+  const steps = analysisGridSteps().map((step, index) => ({
+    name: stepDisplayName(step, index),
+    systemsTools: gridCellValue(step, "systemsTools"),
+    dataProcessing: gridCellValue(step, "dataProcessing"),
+    rulesDecisionLogic: gridCellValue(step, "rulesDecisionLogic"),
+    exceptionBranching: gridCellValue(step, "exceptionBranching"),
+    regulatoryContext: gridCellValue(step, "regulatoryContext"),
+    humanCheckpoint: gridCellValue(step, "humanCheckpoint")
+  }));
+  const hasContent = steps.some((step) =>
+    step.systemsTools.trim() || step.dataProcessing.trim() || step.rulesDecisionLogic.trim() ||
+    step.exceptionBranching.trim() || step.regulatoryContext.trim() || step.humanCheckpoint.trim()
+  );
+  if (!hasContent) {
+    notify("Capture engineering details (systems, data processing, rules, etc.) before exporting.");
+    return;
+  }
+  await downloadPdf(
+    { kind: "engineering", workflowName, steps },
+    `${pdfSafeName(workflowName)}-engineering-doc.pdf`,
+    document.getElementById("engineering-pdf-btn")
+  );
 }
 
 function renderAppMode() {

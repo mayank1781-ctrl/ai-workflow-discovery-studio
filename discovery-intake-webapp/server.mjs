@@ -1042,6 +1042,10 @@ const server = http.createServer(async (req, res) => {
       return await handlePatternHandoff(req, res);
     }
 
+    if (req.method === "POST" && requestUrl.pathname === "/api/pdf-export") {
+      return await handlePdfExport(req, res);
+    }
+
     if (req.method !== "GET") {
       return sendJson(res, 405, { error: "Method not allowed" });
     }
@@ -3459,6 +3463,86 @@ function parseModelJson(text) {
     } catch (_) {
       return null;
     }
+  }
+}
+
+// Build a PDF programmatically from the same { workflowName, steps } payload the
+// DOCX handlers use — no browser/Chromium. pdfkit is pure JS and uses built-in
+// Helvetica fonts (no font files). Loaded lazily on first request.
+//   kind "recipe":      title + per step: name, AI Pattern, prompt body.
+//   kind "engineering": title + per step: name + the six engineering fields.
+async function handlePdfExport(req, res) {
+  try {
+    const body = await readJson(req);
+    const kind = body.kind === "engineering" ? "engineering" : "recipe";
+    const workflowName = typeof body.workflowName === "string" && body.workflowName.trim() ? body.workflowName.trim() : "Workflow";
+    const steps = Array.isArray(body.steps) ? body.steps : [];
+    const safeName = String(workflowName).replace(/[^a-z0-9]/gi, "-").replace(/-{2,}/g, "-").replace(/^-|-$/g, "") || "workflow";
+    const docTitle = `${workflowName} — ${kind === "engineering" ? "Engineering Doc" : "Recipe Book"}`;
+
+    const PDFDocument = require("pdfkit");
+    const doc = new PDFDocument({
+      size: "LETTER",
+      margins: { top: 72, bottom: 72, left: 72, right: 72 },
+      info: { Title: docTitle }
+    });
+    const chunks = [];
+    doc.on("data", (chunk) => chunks.push(chunk));
+    const finished = new Promise((resolve, reject) => {
+      doc.on("end", resolve);
+      doc.on("error", reject);
+    });
+
+    doc.font("Helvetica-Bold").fontSize(22).fillColor("#0d1b2e").text(docTitle, { align: "center" });
+    doc.moveDown(1.2);
+
+    const labelLine = (label, value) => {
+      doc.font("Helvetica-Bold").fontSize(11).fillColor("#000000").text(`${label}:  `, { continued: true })
+        .font("Helvetica").fillColor("#1a2330").text(String(value || "—"));
+    };
+
+    if (kind === "recipe") {
+      for (const step of steps) {
+        doc.font("Helvetica-Bold").fontSize(15).fillColor("#0d1b2e").text(String(step.name || "Unnamed Step"));
+        doc.moveDown(0.3);
+        labelLine("AI Pattern", step.aiPattern);
+        doc.moveDown(0.3);
+        doc.font("Helvetica").fontSize(11).fillColor("#1a2330").text(String(step.prompt || "No prompt generated yet."));
+        doc.moveDown(1);
+      }
+    } else {
+      const fields = [
+        ["Systems / Tools", "systemsTools"],
+        ["Data Processing", "dataProcessing"],
+        ["Rules / Decision Logic", "rulesDecisionLogic"],
+        ["Exception Branching", "exceptionBranching"],
+        ["Regulatory / Compliance Context", "regulatoryContext"],
+        ["Human Checkpoint", "humanCheckpoint"]
+      ];
+      for (const step of steps) {
+        doc.font("Helvetica-Bold").fontSize(15).fillColor("#0d1b2e").text(String(step.name || "Unnamed Step"));
+        doc.moveDown(0.3);
+        for (const [label, key] of fields) {
+          labelLine(label, step[key]);
+          doc.moveDown(0.15);
+        }
+        doc.moveDown(0.8);
+      }
+    }
+
+    doc.end();
+    await finished;
+    const buffer = Buffer.concat(chunks);
+    const filename = `${safeName}-${kind === "engineering" ? "engineering-doc" : "recipe-book"}.pdf`;
+    res.writeHead(200, {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Length": buffer.length
+    });
+    res.end(buffer);
+  } catch (err) {
+    console.error("[pdf-export] error:", err);
+    return sendJson(res, 500, { error: err.message });
   }
 }
 
