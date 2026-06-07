@@ -6,11 +6,17 @@ The current product direction is text-first with optional voice. Typed answers a
 
 ## Run The App
 
-From the repository root:
+From the `discovery-intake-webapp/` directory, set up your environment once and start the server:
 
 ```bash
-node scripts/start-local.mjs
+cp .env.example .env   # then open .env and fill in your API keys
+npm install            # first time only (installs dotenv and other deps)
+npm run dev            # starts the server on http://localhost:5177/
 ```
+
+`npm run dev` and `npm run start` both run the server on port 5177. Keys are
+loaded automatically from `.env` (via dotenv), so you no longer need to export
+them in the terminal.
 
 Then open:
 
@@ -26,22 +32,20 @@ If normal `node` is unavailable, use the Node runtime bundled with Codex:
 
 ## Local Environment
 
-The local server reads secrets from:
+The local server loads variables from `discovery-intake-webapp/.env` (via
+dotenv); `.env.local` is also still supported and takes precedence if present.
 
-```text
-discovery-intake-webapp/.env.local
-```
-
-Start from the template if needed:
+Start from the template:
 
 ```bash
-cp discovery-intake-webapp/.env.example discovery-intake-webapp/.env.local
+cp discovery-intake-webapp/.env.example discovery-intake-webapp/.env
 ```
 
-Required for live AI extraction:
+Then fill in keys. Required for live AI features:
 
 ```text
 OPENAI_API_KEY=...
+ANTHROPIC_API_KEY=...
 ```
 
 Current model defaults:
@@ -53,7 +57,8 @@ REALTIME_VOICE=marin
 TRANSCRIPTION_MODEL=gpt-4o-transcribe
 ```
 
-The API key is used only by the local server. Do not commit `.env.local`.
+The API keys are used only by the local server. Never commit `.env` or
+`.env.local` — only the `.env.example` template is tracked.
 
 ## Stabilization Check
 
