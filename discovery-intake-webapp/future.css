@@ -12526,6 +12526,12 @@ body[data-discovery-entry="upload"] .main-turn-actions {
   box-shadow: inset 3px 0 0 var(--future-cyan);
 }
 
+/* unknown = asked in interview, no specific answer available (slate blue). */
+.live-grid-cell[data-cell-state="unknown"] {
+  background: rgba(74, 111, 165, 0.2);
+  box-shadow: inset 3px 0 0 #4a6fa5;
+}
+
 /* Subtle fade-in for populated cells when the grid updates. */
 .live-grid-cell:not(.is-empty) {
   animation: liveGridCellIn 280ms ease;
@@ -12552,4 +12558,70 @@ body[data-discovery-entry="upload"] .main-turn-actions {
   .live-grid-panel {
     padding: var(--future-space-4);
   }
+}
+
+/* Session Pulse: "Asked — no answer available" (unknown grid cells). */
+.discovery-asked-panel {
+  margin-top: var(--future-space-4);
+  padding: var(--future-space-3) var(--future-space-4);
+  border: 1px solid rgba(74, 111, 165, 0.4);
+  border-radius: 12px;
+  background: rgba(74, 111, 165, 0.08);
+}
+
+.asked-panel-head strong {
+  font-size: 0.86rem;
+}
+
+.asked-panel-head p {
+  margin: 2px 0 0;
+  font-size: 0.76rem;
+  color: var(--future-muted);
+}
+
+.asked-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: var(--future-space-3);
+}
+
+.asked-pill[data-cell-state="unknown"] {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border: 1px solid #4a6fa5;
+  border-radius: 999px;
+  background: rgba(74, 111, 165, 0.2);
+  color: var(--future-white);
+  font-size: 0.74rem;
+}
+
+/* Handoff Signals: grid coverage vs addressed stats. */
+.handoff-grid-coverage {
+  display: flex;
+  gap: var(--future-space-5);
+  margin-bottom: var(--future-space-3);
+}
+
+.grid-coverage-stat {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.grid-coverage-stat strong {
+  font-size: 1.15rem;
+}
+
+.grid-coverage-stat span {
+  font-size: 0.72rem;
+  color: var(--future-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.grid-coverage-stat.secondary strong {
+  font-size: 0.95rem;
+  color: var(--future-muted);
 }

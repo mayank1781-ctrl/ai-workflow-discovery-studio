@@ -1129,6 +1129,7 @@ Return this exact schema:
 }
 
 Confidence rules: 0.9+ = explicitly stated in the document, 0.7 = clearly implied, 0.5 = reasonably inferred, below 0.5 = leave value as empty string.
+State rule: if the document explicitly states a field is unclear, not specified, unknown, TBD, or unavailable, include that cell as { "value": "", "confidence": 0, "state": "unknown" }. If a topic is simply not mentioned at all, leave it empty (do not include a state). Only use state:"unknown" for explicitly-flagged-as-unknown information.
 painFriction: always value '' and confidence 0 — documents describe how things should work, not where they hurt.
 aiPattern: do not include — it is generated later.
 Only extract steps actually present in the document.`;
@@ -1296,6 +1297,7 @@ Confidence rules (apply universally to all input types):
 Special rules:
 - painFriction: only include if the person explicitly expressed frustration, difficulty, or pain. Never infer this field.
 - aiPattern: never include — it is generated separately.
+- state "unknown": if the person was asked about a field and said they don't know, can't answer, or it is genuinely unclear/TBD/unavailable, set that field to { "value": "", "confidence": 0, "state": "unknown" }. If a topic was simply never raised in the conversation, do not include it (leave it empty). Never use "unknown" to overwrite a field that already has a real answer.
 - Only update a cell if the new confidence exceeds the existing confidence, or the existing state is 'empty'.
 - Match updates to existing steps by name or position. If a genuinely new step is mentioned, add it to newSteps.
 
@@ -1309,7 +1311,7 @@ Return ONLY valid JSON — no markdown, no explanation:
         fieldKey: {
           value: string,
           confidence: number,
-          state: 'confirmed' or 'inferred'
+          state: 'confirmed', 'inferred', or 'unknown'
         }
       }
     }

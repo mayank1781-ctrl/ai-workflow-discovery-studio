@@ -3725,6 +3725,11 @@ function buildWorkflowGridFromExtraction(extracted = {}) {
     Object.entries(EXTRACTION_CELL_KEY_MAP).forEach(([sourceKey, targetKey]) => {
       const raw = rawCells[sourceKey];
       if (!raw || typeof raw !== "object") return;
+      // unknown = the document explicitly said this is unclear/TBD/unspecified.
+      if (raw.state === "unknown") {
+        step.cells[targetKey] = { value: "", state: "unknown", confidence: 0 };
+        return;
+      }
       const value = typeof raw.value === "string" ? raw.value.trim() : "";
       const confidence = typeof raw.confidence === "number" ? raw.confidence : "";
       step.cells[targetKey] = {
@@ -3866,6 +3871,16 @@ function applyFieldUpdatesToStep(step, fieldUpdates) {
     const key = normalizeGridFieldKey(rawKey);
     if (!key || key === "aiPattern") return; // aiPattern is never harvested
     if (!update || typeof update !== "object") return;
+    // unknown = asked but the interviewee genuinely could not answer. Record it
+    // only when the cell has no real answer yet — never overwrite captured data.
+    if (update.state === "unknown") {
+      const existing = step.cells[key];
+      if (!existing || existing.state === "empty") {
+        step.cells[key] = { value: "", state: "unknown", confidence: 0 };
+        changed = true;
+      }
+      return;
+    }
     const value = typeof update.value === "string" ? update.value.trim() : "";
     if (!value) return;
     const confidence = typeof update.confidence === "number" ? update.confidence : 0;
@@ -3961,7 +3976,8 @@ function renderWorkflowGridPanel() {
   const rowsHtml = LIVE_GRID_ROWS.map((row) => {
     const cells = steps.map((step) => {
       const { text, state: cellState } = gridCellDisplay(step.cells?.[row.key]);
-      const emptyClass = text ? "" : " is-empty";
+      // unknown cells carry no text but must still show slate styling, not muted.
+      const emptyClass = (text || cellState === "unknown") ? "" : " is-empty";
       return `<td class="live-grid-cell${emptyClass}" data-cell-state="${escapeHtml(cellState)}" title="${escapeHtml(text)}">${escapeHtml(truncateUi(text, 80))}</td>`;
     }).join("");
     return `<tr><th scope="row" class="live-grid-row-label">${escapeHtml(row.label)}</th>${cells}</tr>`;
@@ -5284,6 +5300,10 @@ function renderTurnSignalPanel() {
   const lastAnswer = latestUserMessage();
   const nextQuestion = cleanQuestionLabel(state.lastRecap?.nextQuestion || getDisplayQuestion(getActiveSection()).text || stepInterviewQuestion());
   const blockerItems = topCompletionQuestionItems(4, { includeSupplemental: true });
+  // Grid cells the interview raised but the interviewee could not answer. These
+  // are intentionally NOT surfaced as "Ask now" cards (which come from the
+  // legacy completion checklist, not grid cells) — they are listed separately.
+  const askedUnknown = unknownGridCells();
   els.turnSignalPanel.className = `turn-signal-panel ${escapeHtml(stage.key)}`;
   els.turnSignalPanel.innerHTML = `
     <div class="discovery-pulse-heading">
@@ -5357,6 +5377,17 @@ function renderTurnSignalPanel() {
           .join("")}
       </div>
     </div>
+    ${askedUnknown.length ? `
+      <div class="discovery-asked-panel" title="Raised in the interview but no specific answer was available — these are not open gaps to re-ask.">
+        <div class="asked-panel-head">
+          <strong>Asked — no answer available</strong>
+          <p>Raised in the interview; the interviewee could not give a specific answer. Not counted as open gaps.</p>
+        </div>
+        <div class="asked-pill-row">
+          ${askedUnknown.map((item) => `<span class="asked-pill" data-cell-state="unknown">? ${escapeHtml(item.stepName)} · ${escapeHtml(item.label)}</span>`).join("")}
+        </div>
+      </div>
+    ` : ""}
   `;
   els.turnSignalPanel.querySelectorAll("[data-question-focus]").forEach((button) => {
     button.addEventListener("click", () => setQuestionFocus(button.dataset.questionFocus));
@@ -5466,6 +5497,9 @@ function discoveryHandoffSignalPanel() {
   const business = deriveBusinessBrief();
   const governance = governanceRoute();
   const gate = gateAssessment();
+  // Grid-cell coverage: confirmed + inferred count toward coverage; unknown
+  // (asked, no answer) does not — it only counts toward "Addressed".
+  const coverage = gridCoverageStats();
   const signals = [
     discoveryHandoffSignal("Product", "package", product.readiness, product.readinessLabel, nextMissingTemplateField(product) || "Ready to review MVP slice, users, scope, and acceptance criteria."),
     discoveryHandoffSignal("Engineering", "wrench", engineering.readiness, engineering.readinessLabel, nextMissingTemplateField(engineering) || "Ready to review systems, data access, integration, logging, and outputs."),
@@ -5481,6 +5515,18 @@ function discoveryHandoffSignalPanel() {
         </div>
         <span title="Governance is captured as later review input, not the main preparedness score.">Gov inputs: ${escapeHtml(governance.path)}</span>
       </div>
+      ${coverage.total ? `
+        <div class="handoff-grid-coverage" title="Coverage counts confirmed + inferred grid cells. Unknown (asked, no answer available) counts only toward Addressed.">
+          <div class="grid-coverage-stat">
+            <strong>${coverage.coveragePct}%</strong>
+            <span>Coverage</span>
+          </div>
+          <div class="grid-coverage-stat secondary">
+            <strong>${coverage.addressedPct}%</strong>
+            <span>Addressed</span>
+          </div>
+        </div>
+      ` : ""}
       <div class="handoff-signal-bars">
         ${signals.map(handoffSignalCard).join("")}
       </div>
@@ -23763,6 +23809,76 @@ function gridSessionScore() {
   return Math.max(0, Math.min(100, 20 + Math.round((filled / total) * 40)));
 }
 
+// Human labels for grid field keys (used by the unknown-cell list).
+const GRID_FIELD_LABELS = {
+  name: "Workflow Step",
+  description: "Description",
+  personaActors: "Persona/Actors",
+  systemsTools: "Systems/Tools",
+  dataProcessing: "Data Processing",
+  rulesDecisionLogic: "Rules/Decision logic",
+  output: "Output",
+  trigger: "Trigger",
+  handoff: "Handoff",
+  humanCheckpoint: "Human checkpoint",
+  timeTaken: "Time Taken",
+  frequencyVolume: "Frequency/Volume",
+  painFriction: "Pain/Friction",
+  dataSensitivity: "Data Sensitivity",
+  exceptionBranching: "Exception Branching",
+  regulatoryContext: "Regulatory/Compliance",
+  aiPattern: "AI Pattern"
+};
+
+// All grid step cells that count toward coverage (excludes the step name label
+// and aiPattern, which is generated later, never captured).
+function gridCellsForCoverage() {
+  const steps = state.workflowGrid?.steps;
+  if (!Array.isArray(steps)) return [];
+  const out = [];
+  steps.forEach((step, index) => {
+    Object.entries(step.cells || {}).forEach(([key, cell]) => {
+      if (key === "name" || key === "aiPattern") return;
+      out.push({
+        key,
+        cell,
+        stepName: step.cells?.name?.value?.trim() || `Step ${index + 1}`
+      });
+    });
+  });
+  return out;
+}
+
+// Coverage = confirmed + inferred (unknown does NOT count). Addressed also
+// includes unknown (asked, even if no answer was available).
+function gridCoverageStats() {
+  const cells = gridCellsForCoverage();
+  const total = cells.length;
+  let covered = 0;
+  let unknown = 0;
+  cells.forEach(({ cell }) => {
+    const cellState = cell?.state;
+    if (cellState === "confirmed" || cellState === "inferred") covered += 1;
+    else if (cellState === "unknown") unknown += 1;
+  });
+  const addressed = covered + unknown;
+  return {
+    total,
+    covered,
+    unknown,
+    addressed,
+    coveragePct: total ? Math.round((covered / total) * 100) : 0,
+    addressedPct: total ? Math.round((addressed / total) * 100) : 0
+  };
+}
+
+// Cells the interview raised but the interviewee could not answer.
+function unknownGridCells() {
+  return gridCellsForCoverage()
+    .filter(({ cell }) => cell?.state === "unknown")
+    .map(({ stepName, key }) => ({ stepName, label: GRID_FIELD_LABELS[key] || key }));
+}
+
 function updateProgressUi() {
   const progress = calculateProgress();
   els.progressPercent.textContent = `${progress.percent}%`;
@@ -23825,7 +23941,8 @@ const GRID_CELL_KEYS = [
 
 // Uniform cell shape so later color-coding/escalation can treat all 17
 // fields the same way.
-// state:      "empty" | "harvested" | "inferred" | "confirmed"
+// state:      "empty" | "inferred" | "confirmed" | "unknown"
+// unknown = raised in interview; interviewee could not provide a specific answer
 // confidence: "" | number (0-1, universal confidence framework)
 function newGridCell() {
   return { value: "", state: "empty", confidence: "" };
