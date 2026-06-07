@@ -4716,9 +4716,86 @@ function renderAnalysisTabEngineering() {
       <h3 style="${sectionTitleStyle}">Open Gaps</h3>
       ${gapsHtml}
     </section>
-    <div><button class="secondary-button compact" type="button" id="exportEngineeringDocBtn">Export Engineering Doc</button></div>`;
+    <div><button class="secondary-button compact" type="button" id="exportEngineeringDocBtn">Export Engineering Doc</button><button type="button" id="engineering-export-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download DOCX</button></div>`;
 
   container.querySelector("#exportEngineeringDocBtn")?.addEventListener("click", exportEngineeringDoc);
+
+  const engineeringExportBtn = container.querySelector("#engineering-export-btn");
+  engineeringExportBtn?.addEventListener("click", handleEngineeringExport);
+  syncEngineeringExportButton(engineeringExportBtn);
+}
+
+// Mirrors syncRecipeExportButton: keep the button clickable whenever the
+// Engineering Doc tab is shown (it only renders once steps exist), so the click
+// always reaches handleEngineeringExport, which guards the empty case.
+function syncEngineeringExportButton(btn) {
+  if (!btn) return;
+  btn.disabled = false;
+  btn.style.opacity = "1";
+  btn.style.cursor = "pointer";
+}
+
+async function handleEngineeringExport() {
+  const btn = document.getElementById("engineering-export-btn");
+  if (!btn) return;
+
+  const notify = (message) => (typeof toast === "function" ? toast(message) : alert(message));
+  const workflowName = analysisWorkflowName() || "Workflow";
+  const steps = analysisGridSteps().map((step, index) => ({
+    name: stepDisplayName(step, index),
+    systemsTools: gridCellValue(step, "systemsTools"),
+    dataProcessing: gridCellValue(step, "dataProcessing"),
+    rulesDecisionLogic: gridCellValue(step, "rulesDecisionLogic"),
+    exceptionBranching: gridCellValue(step, "exceptionBranching"),
+    regulatoryContext: gridCellValue(step, "regulatoryContext"),
+    humanCheckpoint: gridCellValue(step, "humanCheckpoint")
+  }));
+
+  const hasContent = steps.some((step) =>
+    step.systemsTools.trim() || step.dataProcessing.trim() || step.rulesDecisionLogic.trim() ||
+    step.exceptionBranching.trim() || step.regulatoryContext.trim() || step.humanCheckpoint.trim()
+  );
+  if (!hasContent) {
+    notify("Capture engineering details (systems, data processing, rules, etc.) before exporting.");
+    return;
+  }
+
+  btn.textContent = "Preparing…";
+  btn.disabled = true;
+  btn.style.opacity = "0.4";
+  btn.style.cursor = "not-allowed";
+  try {
+    const response = await fetch("/api/engineering-doc-export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workflowName, steps })
+    });
+    if (!response.ok) {
+      let message = `Engineering doc export failed (${response.status}).`;
+      try {
+        const data = await response.json();
+        if (data?.error) message = data.error;
+      } catch (_) { /* non-JSON error body */ }
+      throw new Error(message);
+    }
+
+    const blob = await response.blob();
+    const safeName = workflowName.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "workflow";
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${safeName}-engineering-doc.docx`;
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    notify(error?.message || "Engineering doc export failed.");
+  } finally {
+    btn.textContent = "⬇ Download DOCX";
+    syncEngineeringExportButton(btn);
+  }
 }
 
 function exportEngineeringDoc() {

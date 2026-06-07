@@ -1027,6 +1027,10 @@ const server = http.createServer(async (req, res) => {
       return await handleRecipeBookExport(req, res);
     }
 
+    if (req.method === "POST" && requestUrl.pathname === "/api/engineering-doc-export") {
+      return await handleEngineeringDocExport(req, res);
+    }
+
     if (req.method !== "GET") {
       return sendJson(res, 405, { error: "Method not allowed" });
     }
@@ -3208,6 +3212,91 @@ async function handleRecipeBookExport(req, res) {
     res.end(buffer);
   } catch (err) {
     console.error("[recipe-book-export] error:", err);
+    return sendJson(res, 500, { error: err.message });
+  }
+}
+
+async function handleEngineeringDocExport(req, res) {
+  try {
+    // Loaded lazily so a missing/broken `docx` install can never crash server
+    // startup or take down unrelated endpoints (e.g. /api/extract). Only this
+    // endpoint depends on it, and it fails gracefully below if it is absent.
+    const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = await import("docx");
+
+    const body = await readJson(req);
+    const { workflowName = "Workflow", steps = [] } = body;
+    const safeName = String(workflowName).replace(/[^a-z0-9]/gi, "-").replace(/-{2,}/g, "-").replace(/^-|-$/, "");
+    const children = [];
+
+    children.push(
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { before: 720, after: 360 },
+        children: [new TextRun({ text: `${workflowName} — Engineering Doc`, bold: true, size: 48, font: "Arial" })]
+      }),
+      new Paragraph({ children: [new TextRun("")] })
+    );
+
+    // Engineering-relevant cell values, in the order they appear per step.
+    const fields = [
+      ["Systems / Tools", "systemsTools"],
+      ["Data Processing", "dataProcessing"],
+      ["Rules / Decision Logic", "rulesDecisionLogic"],
+      ["Exception Branching", "exceptionBranching"],
+      ["Regulatory / Compliance Context", "regulatoryContext"],
+      ["Human Checkpoint", "humanCheckpoint"]
+    ];
+
+    for (const step of steps) {
+      const name = String(step.name || "Unnamed Step");
+
+      children.push(new Paragraph({
+        heading: HeadingLevel.HEADING_1,
+        spacing: { before: 480, after: 120 },
+        children: [new TextRun({ text: name, font: "Arial", bold: true, size: 32 })]
+      }));
+      for (const [label, key] of fields) {
+        const value = String(step[key] || "—");
+        children.push(new Paragraph({
+          spacing: { before: 80, after: 80 },
+          children: [
+            new TextRun({ text: `${label}:  `, bold: true, size: 22, font: "Arial" }),
+            new TextRun({ text: value, size: 22, font: "Arial" })
+          ]
+        }));
+      }
+      children.push(new Paragraph({ children: [new TextRun("")] }));
+    }
+
+    const doc = new Document({
+      styles: {
+        default: { document: { run: { font: "Arial", size: 24 } } },
+        paragraphStyles: [{
+          id: "Heading1", name: "Heading 1", basedOn: "Normal", next: "Normal", quickFormat: true,
+          run: { size: 32, bold: true, font: "Arial" },
+          paragraph: { spacing: { before: 480, after: 120 }, outlineLevel: 0 }
+        }]
+      },
+      sections: [{
+        properties: {
+          page: {
+            size: { width: 12240, height: 15840 },
+            margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 }
+          }
+        },
+        children
+      }]
+    });
+
+    const buffer = await Packer.toBuffer(doc);
+    res.writeHead(200, {
+      "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "Content-Disposition": `attachment; filename="${safeName}-engineering-doc.docx"`,
+      "Content-Length": buffer.length
+    });
+    res.end(buffer);
+  } catch (err) {
+    console.error("[engineering-doc-export] error:", err);
     return sendJson(res, 500, { error: err.message });
   }
 }
