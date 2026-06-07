@@ -4465,7 +4465,7 @@ function renderAnalysisTabRecipe() {
 
   container.innerHTML =
     accordions +
-    `<div style="margin-top:16px;"><button class="secondary-button compact" type="button" id="downloadRecipeBookBtn">Download Recipe Book</button></div>`;
+    `<div style="margin-top:16px;"><button class="secondary-button compact" type="button" id="downloadRecipeBookBtn">Download Recipe Book</button><button type="button" id="recipe-export-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download DOCX</button></div>`;
 
   // Pre-fill cached prompts (bodies stay collapsed by default).
   steps.forEach((step) => {
@@ -4489,6 +4489,20 @@ function renderAnalysisTabRecipe() {
     });
   });
   container.querySelector("#downloadRecipeBookBtn")?.addEventListener("click", downloadRecipeBook);
+
+  const recipeExportBtn = container.querySelector("#recipe-export-btn");
+  recipeExportBtn?.addEventListener("click", handleRecipeExport);
+  syncRecipeExportButton(recipeExportBtn);
+}
+
+// Enables the DOCX export only once at least one step carries an AI pattern —
+// the recipe prompts (and therefore the document body) hang off the patterns.
+function syncRecipeExportButton(btn) {
+  if (!btn) return;
+  const hasPattern = analysisGridSteps().some((step) => stepPrimaryPattern(step));
+  btn.disabled = !hasPattern;
+  btn.style.opacity = hasPattern ? "1" : "0.4";
+  btn.style.cursor = hasPattern ? "pointer" : "not-allowed";
 }
 
 async function generateRecipePrompt(stepId) {
@@ -4545,6 +4559,61 @@ function downloadRecipeBook() {
   }
   const safeName = workflowName.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "workflow";
   downloadTextFile(`${safeName}-recipe-book.txt`, parts.join("\n"));
+}
+
+async function handleRecipeExport() {
+  const btn = document.getElementById("recipe-export-btn");
+  if (!btn) return;
+  btn.textContent = "Preparing…";
+  btn.disabled = true;
+  btn.style.opacity = "0.4";
+  btn.style.cursor = "not-allowed";
+  try {
+    const workflowName = analysisWorkflowName() || "Workflow";
+    const steps = analysisGridSteps().map((step, index) => ({
+      name: stepDisplayName(step, index),
+      aiPattern: stepPrimaryPattern(step),
+      prompt: state.recipeCache?.[step.id] || "",
+      personaActors: gridCellValue(step, "personaActors"),
+      systemsTools: gridCellValue(step, "systemsTools")
+    }));
+
+    const response = await fetch("/api/recipe-book-export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workflowName, steps })
+    });
+    if (!response.ok) {
+      let message = `Recipe book export failed (${response.status}).`;
+      try {
+        const data = await response.json();
+        if (data?.error) message = data.error;
+      } catch (_) { /* non-JSON error body */ }
+      throw new Error(message);
+    }
+
+    const blob = await response.blob();
+    const safeName = workflowName.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "workflow";
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${safeName}-recipe-book.docx`;
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    const message = error?.message || "Recipe book export failed.";
+    if (typeof toast === "function") {
+      toast(message);
+    } else {
+      alert(message);
+    }
+  } finally {
+    btn.textContent = "⬇ Download DOCX";
+    syncRecipeExportButton(btn);
+  }
 }
 
 // --- TAB 4: Engineering Doc ---------------------------------------------------
