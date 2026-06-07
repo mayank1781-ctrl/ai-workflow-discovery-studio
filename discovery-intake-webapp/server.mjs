@@ -1118,6 +1118,129 @@ function countNumberedSections(text) {
   return numbers.size;
 }
 
+// ── Data-sensitivity normalisation ────────────────────────────────────────
+// The reviewer UI grades each step's sensitivity purely from a substring of
+// the step's `dataSensitivity` cell value (high|confidential|pii|sensitive →
+// HIGH, medium → MEDIUM, else LOW). Free-text classification labels such as
+// "Internal Restricted" therefore silently fall through to LOW even though
+// they are HIGH. To keep that downstream grader correct, every value we emit
+// here begins with a canonical "High" / "Medium" / "Low" token, and any
+// appended reason is a controlled string with no stray high-regex tokens.
+
+// Numeric rank so we can take the higher of two levels without lowering.
+const SENSITIVITY_RANK = { High: 3, Medium: 2, Low: 1 };
+
+// FIX 1 — map a document classification label to a sensitivity level.
+// Order matters: the more specific "Internal Restricted" / "Restricted" HIGH
+// rules are tested before the generic "Internal" MEDIUM rule. Returns null
+// when the label is absent or unrecognised.
+function mapLabelToSensitivity(label) {
+  const text = String(label || "").toLowerCase();
+  if (!text.trim()) return null;
+  // HIGH labels (restricted / confidential family). "Internal Restricted"
+  // is caught here by the "restricted" test before the "internal" MEDIUM rule.
+  if (/\b(highly|strictly)\s+confidential\b/.test(text)) return "High";
+  if (/\bconfidential\b/.test(text)) return "High";
+  if (/\brestricted\b/.test(text)) return "High";
+  // MEDIUM labels (internal use). Reached only when no restricted/confidential
+  // token is present above.
+  if (/\binternal\b/.test(text)) return "Medium";
+  // LOW labels (openly shareable).
+  if (/\b(public|unrestricted|external)\b/.test(text)) return "Low";
+  return null;
+}
+
+// FIX 2 — infer a sensitivity level from a step's combined cell text when no
+// document classification label is available. Returns null when no signal is
+// found (so genuinely empty/unknown cells are left untouched downstream).
+function inferSensitivityFromContent(text) {
+  const t = String(text || "").toLowerCase();
+  if (!t.trim()) return null;
+
+  // HIGH: financial instrument identifiers, named parties, money movement,
+  // personal data, named regulatory regimes, or explicit sensitivity words.
+  const high = [
+    /\bisin\b/, /\bcusip\b/, /\bsedol\b/, /\btrade\s*ref(erence)?\b/,
+    /\bcounterpart(y|ies)\b/, /\bclient\s+name/, /\bclient\b/, /\bmandate\b/,
+    /\bsettlement\s+(amount|value|instruction)/, /\bcash\s+(amount|figure|movement|flow)/,
+    /\bdate\s+of\s+birth\b/, /\bd\.?o\.?b\.?\b/, /\bpassport\b/, /\bpersonal\s+data\b/,
+    /\bhome\s+address\b/, /\b(full\s+)?name\s+and\s+address\b/,
+    /\bgdpr\b/, /\bmifid\b/, /\bfca\b/, /\baml\b/, /\bkyc\b/, /\bfatca\b/, /\bpoca\b/,
+    /\bsar\b/, /\bsuspicious\s+activity\b/,
+    /\bconfidential\b/, /\brestricted\b/
+  ];
+  if (high.some((re) => re.test(t))) return "High";
+
+  // MEDIUM: internal fund/portfolio data and aggregate metrics not tied to a
+  // specific client, or named internal systems carrying operational data.
+  const medium = [
+    /\bnav\b/, /\bnet\s+asset\s+value\b/, /\bfund\s+name/, /\bportfolio\s+position/,
+    /\bportfolio\b/, /\baggregate\b/, /\binternal\s+system/, /\bcost\s+basis\b/,
+    /\bperformance\s+metric/, /\bbenchmark\b/
+  ];
+  if (medium.some((re) => re.test(t))) return "Medium";
+
+  // LOW: purely operational / process content with no financial or personal
+  // data (status checks, confirmations, routine process steps).
+  const low = [
+    /\bstatus\s+check/, /\bsystem\s+status\b/, /\bconfirmation\b/, /\bconfirm\b/,
+    /\bprocess\s+step\b/, /\boperational\b/, /\bhealth\s*check\b/, /\bheartbeat\b/
+  ];
+  if (low.some((re) => re.test(t))) return "Low";
+
+  return null;
+}
+
+// Concatenate the descriptive cell values that may carry sensitivity signals.
+const SENSITIVITY_SIGNAL_CELLS = [
+  "workflowStep", "description", "personaActors", "systemsTools",
+  "dataProcessing", "rulesDecisionLogic", "output", "trigger", "handoff",
+  "regulatoryContext", "exceptionBranching", "dataSensitivity"
+];
+function stepSensitivityText(step) {
+  return SENSITIVITY_SIGNAL_CELLS.map((key) => recipeCellValue(step, key)).filter(Boolean).join(" \n ");
+}
+
+// Short controlled reason shown after the level token. Deliberately avoids the
+// words high/confidential/pii/sensitive so it never collides with the
+// downstream HIGH regex on Medium/Low rows.
+const SENSITIVITY_REASON = {
+  High: "client / regulatory / financial-identifier data",
+  Medium: "internal fund / portfolio / aggregate data",
+  Low: "operational / process step"
+};
+
+// Rewrite each step's dataSensitivity cell so the reviewer UI grades it
+// correctly. A recognised document label sets a baseline for every step;
+// per-step content signals may raise a step above that baseline but never
+// lower it. With no label, fall back to pure content inference. Steps with
+// neither a label nor any signal are left untouched.
+function normalizeStepSensitivity(grid) {
+  if (!grid || !Array.isArray(grid.steps)) return grid;
+  const baseline = mapLabelToSensitivity(grid.dataSensitivityBaseline);
+  for (const step of grid.steps) {
+    if (!step || typeof step !== "object") continue;
+    const content = inferSensitivityFromContent(stepSensitivityText(step));
+    // Higher of baseline vs content; null when neither produced a signal.
+    let level = baseline;
+    if (content && (!level || SENSITIVITY_RANK[content] > SENSITIVITY_RANK[level])) {
+      level = content;
+    }
+    if (!level) continue;
+    const reason = baseline && level === baseline && String(grid.dataSensitivityBaseline || "").trim()
+      ? String(grid.dataSensitivityBaseline).trim()
+      : SENSITIVITY_REASON[level];
+    const cells = step.cells || (step.cells = {});
+    const existing = cells.dataSensitivity || {};
+    cells.dataSensitivity = {
+      ...existing,
+      value: `${level} — ${reason}`,
+      confidence: typeof existing.confidence === "number" ? existing.confidence : 0.7
+    };
+  }
+  return grid;
+}
+
 const DOCUMENT_EXTRACTION_SYSTEM_PROMPT = `You are a workflow analysis expert. Extract a structured workflow grid from the provided document. Return ONLY valid JSON — no markdown fences, no explanation, just the raw JSON object.
 
 Return this exact schema:
@@ -1153,6 +1276,9 @@ Return this exact schema:
 Confidence rules: 0.9+ = explicitly stated in the document, 0.7 = clearly implied, 0.5 = reasonably inferred, below 0.5 = leave value as empty string.
 State rule: if the document explicitly states a field is unclear, not specified, unknown, TBD, or unavailable, include that cell as { "value": "", "confidence": 0, "state": "unknown" }. If a topic is simply not mentioned at all, leave it empty (do not include a state). Only use state:"unknown" for explicitly-flagged-as-unknown information.
 painFriction: always value '' and confidence 0 — documents describe how things should work, not where they hurt.
+Data sensitivity:
+- dataSensitivityBaseline: if the document carries a classification or sensitivity label (e.g. in a header, footer, cover page, or watermark — "Internal Restricted", "Restricted", "Confidential", "Strictly Confidential", "Internal Use Only", "Public", etc.), copy that label verbatim into dataSensitivityBaseline. Leave it as "" if the document has no such label.
+- Per-step dataSensitivity.value: begin the value with one word — "High", "Medium", or "Low" — then a short reason. HIGH for restricted/confidential labels or steps touching ISIN/CUSIP/SEDOL/trade references, counterparty or client names, settlement amounts or cash figures, personal data (name, address, date of birth, passport), or regulatory terms (GDPR, MiFID, FCA, AML, KYC, FATCA, POCA, SAR). MEDIUM for internal-use labels or internal fund names, NAV, portfolio positions, or aggregate financial metrics not tied to a specific client. LOW for public labels or purely operational/process steps with no financial or personal data.
 aiPattern: do not include — it is generated later.
 Only extract steps actually present in the document — never invent steps that aren't there.
 Extract ALL steps from the document. Do not stop early. A document may have up to 20 steps. Return every step you find, even if the list is long.`;
@@ -1250,6 +1376,11 @@ async function handleExtractDocument(req, res) {
   } catch {
     return sendJson(res, 200, { success: false, error: "The model returned an unreadable result. Try again or start with conversation." });
   }
+
+  // Normalise each step's dataSensitivity cell so the reviewer UI grades it
+  // correctly: map the document classification label (FIX 1) and infer from
+  // step content when no label is present (FIX 2).
+  normalizeStepSensitivity(grid);
 
   // Completeness check: if the document clearly contains more numbered sections
   // than the model returned steps, the extraction may have been truncated. Flag
