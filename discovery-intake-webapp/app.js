@@ -4343,6 +4343,33 @@ function renderAnalysisTabGrid() {
 
 // --- TAB 2: AI Opportunities --------------------------------------------------
 
+// Business-sponsor priority score (1-5) computed client-side from grid cells:
+// base 3, +1 for confirmed pain, +1 for daily/high volume, -1 for high/sensitive
+// data, clamped to 1-5.
+function opportunityPriorityScore(step) {
+  let score = 3;
+  if (gridCellState(step, "painFriction") === "confirmed" && gridCellValue(step, "painFriction").trim()) {
+    score += 1;
+  }
+  const frequency = gridCellValue(step, "frequencyVolume").toLowerCase();
+  if (/(daily|hourly|high|continuous|constant|real.?time|every\s*day|per\s*day|multiple|many\s*times|several\s*times)/.test(frequency)) {
+    score += 1;
+  }
+  const sensitivity = gridCellValue(step, "dataSensitivity").toLowerCase();
+  if (sensitivity.includes("high") || sensitivity.includes("sensitive")) {
+    score -= 1;
+  }
+  return Math.max(1, Math.min(5, score));
+}
+
+// Colour + label for a priority score: 5 High (teal), 3-4 Medium (amber),
+// 1-2 Low (grey).
+function opportunityPriorityBadge(score) {
+  if (score >= 5) return { color: "#00d4b4", label: "High" };
+  if (score >= 3) return { color: "#f59e0b", label: "Medium" };
+  return { color: "#4b5563", label: "Low" };
+}
+
 function renderAnalysisTabOpportunities() {
   const container = document.getElementById("analysis-tab-opportunities");
   if (!container) return;
@@ -4383,12 +4410,13 @@ function renderAnalysisTabOpportunities() {
       Complete the interview and assign AI patterns to see opportunities plotted here.
     </div>`;
 
-  // Ranked cards, sorted by opportunity score descending (stable on index).
+  // Ranked cards, sorted by business priority score descending (stable on index).
   const ranked = steps
-    .map((step, index) => ({ step, index, score: opportunityScore(step) }))
+    .map((step, index) => ({ step, index, score: opportunityPriorityScore(step) }))
     .sort((a, b) => b.score - a.score || a.index - b.index);
 
-  const cards = ranked.map(({ step, index }) => {
+  const cards = ranked.map(({ step, index, score }) => {
+    const badge = opportunityPriorityBadge(score);
     const name = stepDisplayName(step, index);
     const coverage = stepCoverage(step);
     const percent = Math.round(coverage * 100);
@@ -4405,6 +4433,7 @@ function renderAnalysisTabOpportunities() {
           <span style="font-size:10px;color:#5b7186;letter-spacing:0.06em;">${String(index + 1).padStart(2, "0")}</span>
           <strong style="font-size:14px;color:#dde8f5;flex:1;">${escapeHtml(name)}</strong>
           ${pill}
+          <span title="Priority score (1-5)" style="background:${badge.color}22;color:${badge.color};font-size:11px;font-weight:700;padding:2px 9px;border-radius:99px;white-space:nowrap;">${score} · ${badge.label}</span>
         </div>
         <p style="font-size:12px;color:#9fb3c8;margin:0 0 10px;">${escapeHtml(painSnippet)}</p>
         <div style="display:flex;align-items:center;gap:10px;">
@@ -4418,7 +4447,14 @@ function renderAnalysisTabOpportunities() {
       </div>`;
   }).join("");
 
-  container.innerHTML = quadrant + `<div>${cards}</div>`;
+  const legend = `
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;font-size:11px;color:#7a93b4;">
+      <span style="text-transform:uppercase;letter-spacing:0.06em;">Priority</span>
+      <span style="display:inline-flex;align-items:center;gap:6px;"><i style="width:10px;height:10px;border-radius:99px;background:#00d4b4;display:inline-block;"></i>High (5)</span>
+      <span style="display:inline-flex;align-items:center;gap:6px;"><i style="width:10px;height:10px;border-radius:99px;background:#f59e0b;display:inline-block;"></i>Medium (3-4)</span>
+      <span style="display:inline-flex;align-items:center;gap:6px;"><i style="width:10px;height:10px;border-radius:99px;background:#4b5563;display:inline-block;"></i>Low (1-2)</span>
+    </div>`;
+  container.innerHTML = legend + quadrant + `<div>${cards}</div>`;
 }
 
 // --- TAB 3: Recipe Book -------------------------------------------------------
