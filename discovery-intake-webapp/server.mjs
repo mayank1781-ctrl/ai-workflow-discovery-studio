@@ -1042,6 +1042,10 @@ const server = http.createServer(async (req, res) => {
       return await handlePatternHandoff(req, res);
     }
 
+    if (req.method === "POST" && requestUrl.pathname === "/api/pdf-export") {
+      return await handlePdfExport(req, res);
+    }
+
     if (req.method !== "GET") {
       return sendJson(res, 405, { error: "Method not allowed" });
     }
@@ -3459,6 +3463,36 @@ function parseModelJson(text) {
     } catch (_) {
       return null;
     }
+  }
+}
+
+// Convert an HTML string to a PDF and stream it back. html-pdf-node renders via
+// a bundled headless Chromium (puppeteer), loaded lazily on first request so it
+// never affects server startup or other endpoints.
+async function handlePdfExport(req, res) {
+  try {
+    const body = await readJson(req);
+    const html = typeof body.html === "string" ? body.html : "";
+    if (!html.trim()) return sendJson(res, 400, { error: "html is required" });
+    const rawName = typeof body.filename === "string" && body.filename.trim() ? body.filename.trim() : "export.pdf";
+    let safeName = rawName.replace(/[^a-z0-9._-]/gi, "-").replace(/-{2,}/g, "-").replace(/^-|-$/g, "") || "export";
+    if (!safeName.toLowerCase().endsWith(".pdf")) safeName += ".pdf";
+
+    const htmlPdf = require("html-pdf-node");
+    const buffer = await htmlPdf.generatePdf(
+      { content: html },
+      { format: "A4", printBackground: true, margin: { top: "18mm", right: "16mm", bottom: "18mm", left: "16mm" } }
+    );
+
+    res.writeHead(200, {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="${safeName}"`,
+      "Content-Length": buffer.length
+    });
+    res.end(buffer);
+  } catch (err) {
+    console.error("[pdf-export] error:", err);
+    return sendJson(res, 500, { error: err.message });
   }
 }
 

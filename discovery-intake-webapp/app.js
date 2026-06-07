@@ -4507,7 +4507,7 @@ function renderAnalysisTabRecipe() {
 
   container.innerHTML =
     accordions +
-    `<div style="margin-top:16px;"><button class="secondary-button compact" type="button" id="downloadRecipeBookBtn">Download Recipe Book</button><button type="button" id="recipe-export-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download DOCX</button></div>`;
+    `<div style="margin-top:16px;"><button class="secondary-button compact" type="button" id="downloadRecipeBookBtn">Download Recipe Book</button><button type="button" id="recipe-export-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download DOCX</button><button type="button" id="recipe-pdf-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download PDF</button></div>`;
 
   // Pre-fill cached prompts (bodies stay collapsed by default).
   steps.forEach((step) => {
@@ -4534,6 +4534,7 @@ function renderAnalysisTabRecipe() {
 
   const recipeExportBtn = container.querySelector("#recipe-export-btn");
   recipeExportBtn?.addEventListener("click", handleRecipeExport);
+  container.querySelector("#recipe-pdf-btn")?.addEventListener("click", handleRecipePdfExport);
   syncRecipeExportButton(recipeExportBtn);
 }
 
@@ -4758,12 +4759,13 @@ function renderAnalysisTabEngineering() {
       <h3 style="${sectionTitleStyle}">Open Gaps</h3>
       ${gapsHtml}
     </section>
-    <div><button class="secondary-button compact" type="button" id="exportEngineeringDocBtn">Export Engineering Doc</button><button type="button" id="engineering-export-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download DOCX</button></div>`;
+    <div><button class="secondary-button compact" type="button" id="exportEngineeringDocBtn">Export Engineering Doc</button><button type="button" id="engineering-export-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download DOCX</button><button type="button" id="engineering-pdf-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download PDF</button></div>`;
 
   container.querySelector("#exportEngineeringDocBtn")?.addEventListener("click", exportEngineeringDoc);
 
   const engineeringExportBtn = container.querySelector("#engineering-export-btn");
   engineeringExportBtn?.addEventListener("click", handleEngineeringExport);
+  container.querySelector("#engineering-pdf-btn")?.addEventListener("click", handleEngineeringPdfExport);
   syncEngineeringExportButton(engineeringExportBtn);
 }
 
@@ -5112,6 +5114,125 @@ function handleHandoffConfirm() {
   // Re-render the tab so Zone 1's confidence dots flip to teal immediately.
   renderAnalysisTabHandoff();
   toast("Patterns confirmed and saved to grid");
+}
+
+// --- PDF export (Recipe Book + Engineering Doc) -------------------------------
+// Builds a clean, printable HTML document from the same grid data the DOCX
+// exports use, then posts it to /api/pdf-export (html-pdf-node) for conversion.
+
+function buildHtmlPdfDocument(title, bodyHtml) {
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+    body{font-family:Arial,Helvetica,sans-serif;color:#1a2330;margin:0;padding:0;font-size:12px;line-height:1.45;}
+    h1{font-size:22px;margin:0 0 18px;}
+    h2{font-size:15px;margin:18px 0 6px;color:#0d1b2e;border-bottom:1px solid #e2e8f0;padding-bottom:4px;}
+    p{margin:4px 0;}
+    .label{font-weight:700;}
+    .prompt{background:#f4f6f9;border:1px solid #e2e8f0;border-radius:6px;padding:10px;white-space:pre-wrap;word-wrap:break-word;margin:6px 0;}
+    section{page-break-inside:avoid;margin-bottom:10px;}
+  </style></head><body><h1>${escapeHtml(title)}</h1>${bodyHtml}</body></html>`;
+}
+
+function pdfSafeName(workflowName) {
+  return (workflowName || "workflow").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "workflow";
+}
+
+function buildRecipeBookHtml() {
+  const workflowName = analysisWorkflowName() || "Workflow";
+  const steps = analysisGridSteps();
+  const cache = state.recipeCache || {};
+  const body = steps.map((step, index) => {
+    const name = stepDisplayName(step, index);
+    const pattern = stepPrimaryPattern(step) || "—";
+    const prompt = cache[step.id] || "";
+    return `<section>
+      <h2>${escapeHtml(name)}</h2>
+      <p><span class="label">AI Pattern:</span> ${escapeHtml(pattern)}</p>
+      <div class="prompt">${escapeHtml(prompt || "No prompt generated yet.")}</div>
+    </section>`;
+  }).join("");
+  const hasContent = steps.some((step) => (cache[step.id] || "").trim() || stepPrimaryPattern(step).trim());
+  return { html: buildHtmlPdfDocument(`${workflowName} — Recipe Book`, body), filename: `${pdfSafeName(workflowName)}-recipe-book.pdf`, hasContent };
+}
+
+function buildEngineeringDocHtml() {
+  const workflowName = analysisWorkflowName() || "Workflow";
+  const steps = analysisGridSteps();
+  const fields = [
+    ["Systems / Tools", "systemsTools"],
+    ["Data Processing", "dataProcessing"],
+    ["Rules / Decision Logic", "rulesDecisionLogic"],
+    ["Exception Branching", "exceptionBranching"],
+    ["Regulatory / Compliance Context", "regulatoryContext"],
+    ["Human Checkpoint", "humanCheckpoint"]
+  ];
+  const body = steps.map((step, index) => {
+    const rows = fields.map(([label, key]) => `<p><span class="label">${escapeHtml(label)}:</span> ${escapeHtml(gridCellValue(step, key) || "—")}</p>`).join("");
+    return `<section><h2>${escapeHtml(stepDisplayName(step, index))}</h2>${rows}</section>`;
+  }).join("");
+  const hasContent = steps.some((step) => fields.some(([, key]) => gridCellValue(step, key).trim()));
+  return { html: buildHtmlPdfDocument(`${workflowName} — Engineering Doc`, body), filename: `${pdfSafeName(workflowName)}-engineering-doc.pdf`, hasContent };
+}
+
+async function downloadPdfFromHtml(html, filename, btn) {
+  const notify = (message) => (typeof toast === "function" ? toast(message) : alert(message));
+  if (btn) {
+    btn.textContent = "Preparing…";
+    btn.disabled = true;
+    btn.style.opacity = "0.4";
+    btn.style.cursor = "not-allowed";
+  }
+  try {
+    const response = await fetch("/api/pdf-export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ html, filename })
+    });
+    if (!response.ok) {
+      let message = `PDF export failed (${response.status}).`;
+      try {
+        const data = await response.json();
+        if (data?.error) message = data.error;
+      } catch (_) { /* non-JSON error body */ }
+      throw new Error(message);
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    notify(error?.message || "PDF export failed.");
+  } finally {
+    if (btn) {
+      btn.textContent = "⬇ Download PDF";
+      btn.disabled = false;
+      btn.style.opacity = "1";
+      btn.style.cursor = "pointer";
+    }
+  }
+}
+
+async function handleRecipePdfExport() {
+  const { html, filename, hasContent } = buildRecipeBookHtml();
+  if (!hasContent) {
+    (typeof toast === "function" ? toast : alert)("Generate at least one recipe prompt before exporting.");
+    return;
+  }
+  await downloadPdfFromHtml(html, filename, document.getElementById("recipe-pdf-btn"));
+}
+
+async function handleEngineeringPdfExport() {
+  const { html, filename, hasContent } = buildEngineeringDocHtml();
+  if (!hasContent) {
+    (typeof toast === "function" ? toast : alert)("Capture engineering details (systems, data processing, rules, etc.) before exporting.");
+    return;
+  }
+  await downloadPdfFromHtml(html, filename, document.getElementById("engineering-pdf-btn"));
 }
 
 function renderAppMode() {
