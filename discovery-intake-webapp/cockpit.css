@@ -628,3 +628,39 @@ input::placeholder {
     border-bottom: 1px solid var(--line);
   }
 }
+
+/* --- Live step confidence cards (Discovery left panel) ------------------- */
+@keyframes pulseAmber {
+  0%, 100% { box-shadow: 0 0 0px #f59e0b44; }
+  50% { box-shadow: 0 0 8px #f59e0b88; }
+}
+@keyframes pulsePink {
+  0%, 100% { box-shadow: 0 0 4px #ff4fc888; }
+  50% { box-shadow: 0 0 14px #ff4fc8cc; }
+}
+.step-conf-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 2px;
+  scrollbar-width: none;
+}
+.step-conf-card {
+  border-radius: 10px;
+  padding: 10px 12px;
+  width: 140px;
+  min-width: 140px;
+  height: 80px;
+  box-sizing: border-box;
+  transition: all 0.35s ease;
+  cursor: default;
+  flex-shrink: 0;
+}
+.step-conf-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #00d4b4;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
