@@ -5992,11 +5992,7 @@ function renderTurnSignalPanel() {
   const active = currentValidationStage(stages);
   const progress = validationFlowProgress(stages);
   const matrixScore = matrixCompletionScore();
-  const readiness = handoffReadinessScore();
-  const checklistGap = nextHandoffChecklistGap();
   const focus = validQuestionFocus(state.questionFocus);
-  const latestDelta = state.intakeDeltas?.[0] || null;
-  const changed = latestDelta ? deltaBadgeList(latestDelta) : [];
   const currentStep = getCurrentStep();
   const lastAnswer = latestUserMessage();
   const nextQuestion = cleanQuestionLabel(state.lastRecap?.nextQuestion || getDisplayQuestion(getActiveSection()).text || stepInterviewQuestion());
@@ -6051,11 +6047,6 @@ function renderTurnSignalPanel() {
         <span>Process matrix</span>
         <strong>${matrixScore}% filled</strong>
         <p>${escapeHtml(currentStep ? `Current step: ${currentStep.name || currentStep.action || `Step ${getCurrentStepIndex() + 1}`}` : "Waiting for the rough A-to-Z step list.")}</p>
-      </div>
-      <div class="pulse-mini-card" title="How ready this intake looks for Product and Engineering handoff">
-        <span>Handoff readiness</span>
-        <strong>${readiness}% ready</strong>
-        <p>${escapeHtml(checklistGap ? `${checklistGap.section}: ${checklistGap.item.label}` : changed.length ? changed.join(" · ") : "No structured fields updated yet.")}</p>
       </div>
       <div class="pulse-mini-card" title="The latest spoken or typed answer being interpreted">
         <span>Latest answer</span>
@@ -6147,54 +6138,6 @@ function setQuestionFocus(value) {
   persistState();
   render();
   toast(`Question focus: ${questionFocusLabel(focus)}.`);
-}
-
-function deltaBadgeList(delta = {}) {
-  return [
-    ["fields", "fields"],
-    ["steps", "steps"],
-    ["data", "data"],
-    ["systems", "tools"],
-    ["decisions", "decisions"],
-    ["ideas", "ideas"],
-    ["evidenceArtifacts", "evidence"],
-    ["mapReviews", "map notes"]
-  ]
-    .map(([key, label]) => {
-      const count = delta[key] || 0;
-      return count > 0 ? `+${count} ${label}` : "";
-    })
-    .filter(Boolean);
-}
-
-function inferenceLensPanel(variant = "") {
-  const lens = inferenceLensData();
-  return `
-    <section class="inference-lens-panel ${variant}">
-      <div class="lens-heading">
-        <div>
-          <p class="eyebrow">Inference Lens</p>
-          <h3>${lens.confidence}% confidence in handoff readiness</h3>
-        </div>
-        <span>${escapeHtml(lens.gateDecision)}</span>
-      </div>
-      <div class="lens-grid">
-        ${lensColumn("Known facts", "check-circle-2", lens.known)}
-        ${lensColumn("AI approximations", "wand-sparkles", lens.inferred)}
-        ${lensColumn("Complete next", "message-circle-question", lens.questions)}
-      </div>
-    </section>
-  `;
-}
-
-function lensColumn(title, icon, items) {
-  const safeItems = items.length ? items : ["Nothing captured yet."];
-  return `
-    <article>
-      <h4><i data-lucide="${icon}"></i>${escapeHtml(title)}</h4>
-      <ul>${safeItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-    </article>
-  `;
 }
 
 function inferenceLensData() {
