@@ -8,6 +8,7 @@ import Busboy from "busboy";
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
 import { detectConnectors, formatForRecipe } from "./connectors/connector-detector.mjs";
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from "docx";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // pdf-parse's package index runs a debug routine against a bundled test PDF
@@ -1021,6 +1022,10 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && requestUrl.pathname === "/api/tts/speak") {
       return await handleTextToSpeech(req, res);
+    }
+
+    if (req.method === "POST" && requestUrl.pathname === "/api/recipe-book-export") {
+      return await handleRecipeBookExport(req, res);
     }
 
     if (req.method !== "GET") {
@@ -3110,6 +3115,97 @@ function sendJson(res, status, payload) {
     "Cache-Control": "no-store"
   });
   res.end(JSON.stringify(payload));
+}
+
+async function handleRecipeBookExport(req, res) {
+  try {
+    const body = await readJson(req);
+    const { workflowName = "Workflow", steps = [] } = body;
+    const safeName = String(workflowName).replace(/[^a-z0-9]/gi, "-").replace(/-{2,}/g, "-").replace(/^-|-$/, "");
+    const children = [];
+
+    children.push(
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { before: 720, after: 360 },
+        children: [new TextRun({ text: `${workflowName} — Recipe Book`, bold: true, size: 48, font: "Arial" })]
+      }),
+      new Paragraph({ children: [new TextRun("")] })
+    );
+
+    for (const step of steps) {
+      const name = String(step.name || "Unnamed Step");
+      const aiPattern = String(step.aiPattern || "—");
+      const prompt = String(step.prompt || "");
+      const personaActors = String(step.personaActors || "—");
+      const systemsTools = String(step.systemsTools || "—");
+
+      children.push(new Paragraph({
+        heading: HeadingLevel.HEADING_1,
+        spacing: { before: 480, after: 120 },
+        children: [new TextRun({ text: name, font: "Arial", bold: true, size: 32 })]
+      }));
+      children.push(new Paragraph({
+        spacing: { before: 120, after: 120 },
+        children: [
+          new TextRun({ text: "AI Pattern:  ", bold: true, size: 24, font: "Arial" }),
+          new TextRun({ text: aiPattern, size: 24, font: "Arial" })
+        ]
+      }));
+      for (const line of prompt.split("\n")) {
+        children.push(new Paragraph({
+          spacing: { before: 60, after: 60 },
+          children: [new TextRun({ text: line, size: 22, font: "Arial" })]
+        }));
+      }
+      children.push(new Paragraph({
+        spacing: { before: 120, after: 60 },
+        children: [
+          new TextRun({ text: "Persona / Actors:  ", bold: true, size: 20, font: "Arial" }),
+          new TextRun({ text: personaActors, size: 20, font: "Arial" })
+        ]
+      }));
+      children.push(new Paragraph({
+        spacing: { before: 60, after: 60 },
+        children: [
+          new TextRun({ text: "Systems / Tools:  ", bold: true, size: 20, font: "Arial" }),
+          new TextRun({ text: systemsTools, size: 20, font: "Arial" })
+        ]
+      }));
+      children.push(new Paragraph({ children: [new TextRun("")] }));
+    }
+
+    const doc = new Document({
+      styles: {
+        default: { document: { run: { font: "Arial", size: 24 } } },
+        paragraphStyles: [{
+          id: "Heading1", name: "Heading 1", basedOn: "Normal", next: "Normal", quickFormat: true,
+          run: { size: 32, bold: true, font: "Arial" },
+          paragraph: { spacing: { before: 480, after: 120 }, outlineLevel: 0 }
+        }]
+      },
+      sections: [{
+        properties: {
+          page: {
+            size: { width: 12240, height: 15840 },
+            margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 }
+          }
+        },
+        children
+      }]
+    });
+
+    const buffer = await Packer.toBuffer(doc);
+    res.writeHead(200, {
+      "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "Content-Disposition": `attachment; filename="${safeName}-recipe-book.docx"`,
+      "Content-Length": buffer.length
+    });
+    res.end(buffer);
+  } catch (err) {
+    console.error("[recipe-book-export] error:", err);
+    return sendJson(res, 500, { error: err.message });
+  }
 }
 
 server.listen(PORT, () => {
