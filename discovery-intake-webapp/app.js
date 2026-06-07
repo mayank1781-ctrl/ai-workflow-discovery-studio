@@ -4953,10 +4953,12 @@ function renderAnalysisTabHandoff() {
       <h3 style="${sectionTitleStyle}">AI Analysis</h3>
       <button type="button" id="handoffAnalyseBtn" style="${HANDOFF_TEAL_BUTTON}margin-bottom:12px;">Generate AI Analysis</button>
       <div>${patternCards}</div>
+      <button type="button" id="handoffConfirmBtn" style="${HANDOFF_TEAL_BUTTON}margin-top:12px;">Confirm Patterns</button>
     </section>`;
 
   container.querySelector("#handoffQuestionsBtn")?.addEventListener("click", handleHandoffQuestions);
   container.querySelector("#handoffAnalyseBtn")?.addEventListener("click", handleHandoffAnalyse);
+  container.querySelector("#handoffConfirmBtn")?.addEventListener("click", handleHandoffConfirm);
   container.querySelectorAll("[data-handoff-answer]").forEach((textarea) => {
     textarea.addEventListener("input", () => {
       state.handoffAnswers[textarea.dataset.handoffAnswer] = textarea.value;
@@ -5043,6 +5045,37 @@ async function handleHandoffAnalyse() {
       btn.style.cursor = "pointer";
     }
   }
+}
+
+// Write confirmed patterns back into the workflow grid. For each analysed
+// pattern, the user's override (state.handoffOverrides[stepId]) wins over the
+// AI suggestion. The aiPattern cell stores an ARRAY of { pattern, confidence }
+// entries (see newAiPatternEntry / GRID_CELL_KEYS) — writing a bare string
+// would break stepPatternList/handoffStepConfidence and leave Zone 1 grey — so
+// we set value to a single confirmed entry at confidence 1.
+function handleHandoffConfirm() {
+  const patterns = Array.isArray(state.handoffPatterns) ? state.handoffPatterns : [];
+  if (!patterns.length) {
+    toast("Generate AI analysis before confirming patterns.");
+    return;
+  }
+  state.handoffOverrides = state.handoffOverrides || {};
+  const steps = Array.isArray(state.workflowGrid?.steps) ? state.workflowGrid.steps : [];
+  patterns.forEach((entry) => {
+    const stepId = entry.stepId;
+    const step = steps.find((item) => item.id === stepId);
+    if (!step?.cells?.aiPattern) return;
+    const override = (state.handoffOverrides[stepId] || "").trim();
+    const patternValue = override || (entry.pattern || "").trim();
+    if (!patternValue) return;
+    step.cells.aiPattern.value = [{ pattern: patternValue, confidence: 1 }];
+    step.cells.aiPattern.state = "confirmed";
+    step.cells.aiPattern.confidence = 1;
+  });
+  persistState();
+  // Re-render the tab so Zone 1's confidence dots flip to teal immediately.
+  renderAnalysisTabHandoff();
+  toast("Patterns confirmed and saved to grid");
 }
 
 function renderAppMode() {
