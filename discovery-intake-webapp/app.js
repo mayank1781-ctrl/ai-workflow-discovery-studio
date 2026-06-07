@@ -3835,7 +3835,8 @@ function mergeExtractionIntoGrid(extracted = {}) {
     const match = findGridStepForUpdate(grid, update);
     if (match) {
       if (applyFieldUpdatesToStep(match, update.fieldUpdates)) changed = true;
-    } else {
+    } else if (!grid.stepListLocked) {
+      // Step list frozen after Q3 — only update existing steps, never add new.
       const created = createGridStepFromHarvest(update);
       if (created) {
         grid.steps.push(created);
@@ -3947,7 +3948,9 @@ function applyHarvestUpdates(payload = {}) {
       if (applyFieldUpdatesToStep(step, update.fieldUpdates)) changed = true;
       return;
     }
-    // No match (e.g. stepId "new") — treat as a newly mentioned step.
+    // No match (e.g. stepId "new") — treat as a newly mentioned step, unless the
+    // step list is frozen after Q3, in which case no new steps may be created.
+    if (grid.stepListLocked) return;
     const created = createGridStepFromHarvest(update);
     if (created) {
       grid.steps.push(created);
@@ -3955,7 +3958,11 @@ function applyHarvestUpdates(payload = {}) {
     }
   });
 
-  const newSteps = Array.isArray(payload.newSteps) ? payload.newSteps : [];
+  // Once the step list is frozen after Q3, drilling can only enrich existing
+  // steps — silently drop any harvested new steps to keep the count stable.
+  const newSteps = grid.stepListLocked
+    ? []
+    : (Array.isArray(payload.newSteps) ? payload.newSteps : []);
   newSteps.forEach((raw) => {
     const created = createGridStepFromHarvest(raw);
     if (created) {
@@ -5994,11 +6001,21 @@ function setCurrentStepIndex(index) {
   render();
 }
 
+// Freezes the workflowGrid step list once Q3 confirmation is resolved and
+// step-by-step drilling begins. After this, harvest/merge may only update
+// existing steps — never create new ones (prevents step-count inflation and
+// corrupted coverage stats). Idempotent; reset to false on a new session and
+// by reviseWorkflowSkeleton() when the user re-opens the list to edit it.
+function lockWorkflowStepList() {
+  if (state.workflowGrid) state.workflowGrid.stepListLocked = true;
+}
+
 function confirmWorkflowSkeleton() {
   ensureDrilldownState();
   if (!state.steps.length) return;
   state.drilldown.skeletonConfirmed = true;
   state.drilldown.status = "active";
+  lockWorkflowStepList();
   state.drilldown.manualStepFocus = false;
   state.activeStepIndex = Math.max(0, firstIncompleteStepIndex(0));
   state.activeSection = "workflow";
@@ -6025,6 +6042,8 @@ function reviseWorkflowSkeleton() {
   state.drilldown.status = "confirmSkeleton";
   state.drilldown.skeletonConfirmed = false;
   state.drilldown.manualStepFocus = false;
+  // Re-opening the step list for edits allows new steps again until re-confirmed.
+  if (state.workflowGrid) state.workflowGrid.stepListLocked = false;
   state.activeSection = "workflow";
   state.currentQuestionOverride = "What should I add, remove, rename, merge, split, or reorder in these major workflow steps?";
   state.currentQuestionSource = "Skeleton revision";
@@ -6473,6 +6492,7 @@ function syncGuidedDrilldownAfterExtraction({ beforeStepCount = 0, touchedStepIn
   state.activeSection = "workflow";
   const cluster = currentDrilldownCluster(state.steps[targetIndex]);
   state.drilldown.status = "active";
+  lockWorkflowStepList();
   state.drilldown.currentClusterId = cluster?.id || "";
   state.currentQuestionOverride = stepInterviewQuestion();
   state.currentQuestionSource = "Guided step drill-down";
@@ -7370,6 +7390,7 @@ function saveAnswerToSection() {
     ensureDrilldownState();
     state.drilldown.skeletonConfirmed = true;
     state.drilldown.status = "active";
+    lockWorkflowStepList();
   } else if (section.recordType === "data") {
     state.data.push({ ...newRecord("data"), category: text });
   } else if (section.recordType === "systems") {
@@ -7902,6 +7923,7 @@ function mergeStepAnchorsFromAnswer(answer, options = {}) {
     state.drilldown.skeletonConfirmed = true;
     state.drilldown.status = "active";
     state.drilldown.manualStepFocus = false;
+    lockWorkflowStepList();
     const explicitIndex = explicitStepIndexFromAnswer(answer);
     const beforeActiveStepIndex = Number.isFinite(options.beforeActiveStepIndex) ? options.beforeActiveStepIndex : getCurrentStepIndex();
     if (anchors.length > 1 || (options.beforeStepCount || 0) === 0) {
@@ -7956,6 +7978,7 @@ function mergeCurrentStepDetailHintsFromAnswer(answer, options = {}) {
   state.drilldown.skeletonConfirmed = true;
   state.drilldown.status = "active";
   state.drilldown.manualStepFocus = false;
+  lockWorkflowStepList();
   if (!isCapturedValue(step.evidenceConfidence)) step.evidenceConfidence = "Medium";
   const cluster = currentDrilldownCluster(step);
   state.drilldown.currentClusterId = cluster?.id || "";
@@ -24214,6 +24237,9 @@ function newWorkflowGrid() {
   return {
     schemaVersion: 1,
     dataSensitivityBaseline: newGridCell(),
+    // Frozen once Q3 step confirmation completes and drilling begins: no NEW
+    // steps may be added after this, though existing steps keep updating.
+    stepListLocked: false,
     steps: []
   };
 }
@@ -24250,6 +24276,7 @@ function normalizeWorkflowGrid(grid) {
     ...grid,
     schemaVersion: grid.schemaVersion || base.schemaVersion,
     dataSensitivityBaseline: normalizeGridCell(grid.dataSensitivityBaseline),
+    stepListLocked: Boolean(grid.stepListLocked),
     steps: Array.isArray(grid.steps) ? grid.steps.map(normalizeGridStep) : []
   };
 }
@@ -24300,6 +24327,7 @@ function ensureDrilldownState() {
   if (state.steps?.length && state.drilldown.status === "waitingForSteps") {
     state.drilldown.skeletonConfirmed = true;
     state.drilldown.status = "active";
+    lockWorkflowStepList();
   }
   return state.drilldown;
 }
@@ -24450,6 +24478,7 @@ function normalizeLoadedState(parsed = {}) {
   if (merged.steps.length && isProceedPermissionQuestion(merged.currentQuestionOverride)) {
     merged.drilldown.status = "active";
     merged.drilldown.skeletonConfirmed = true;
+    if (merged.workflowGrid) merged.workflowGrid.stepListLocked = true;
     merged.activeSection = "workflow";
     merged.currentQuestionOverride = "";
     merged.currentQuestionSource = "Step-by-step interview";
