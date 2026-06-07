@@ -1214,7 +1214,6 @@ const els = {
   ideasList: document.getElementById("ideasList"),
   ideaInput: document.getElementById("ideaInput"),
   pdrPreview: document.getElementById("pdrPreview"),
-  stepMatrixPreview: document.getElementById("stepMatrixPreview"),
   solutionBlueprint: document.getElementById("solutionBlueprint"),
   workflowMapStudio: document.getElementById("workflowMapStudio"),
   templateHandoffStudio: document.getElementById("templateHandoffStudio"),
@@ -3385,7 +3384,6 @@ function render() {
   renderSummary();
   renderIdeas();
   renderPdrPreview();
-  renderStepMatrixPreview();
   renderSolutionBlueprint();
   renderWorkflowMapStudio();
   renderTemplateHandoffStudio();
@@ -4319,7 +4317,6 @@ function renderAnalysisStudio() {
 
 function renderAnalysisTabGrid() {
   updateProcessFlowMapFull();
-  renderStepMatrixPreview();
 }
 
 // --- TAB 2: AI Opportunities --------------------------------------------------
@@ -7756,7 +7753,6 @@ function recordCard(type, record, index) {
       persistState();
       renderSummary();
       renderMap();
-      renderStepMatrixPreview();
       renderPdrPreview();
       updateProgressUi();
     });
@@ -23608,43 +23604,6 @@ function backlogSeed(patternLabel, agentRoles = recommendedAgentRoles()) {
   ];
 }
 
-function renderStepMatrixPreview() {
-  if (!els.stepMatrixPreview) return;
-  if (!state.steps.length) {
-    els.stepMatrixPreview.innerHTML = `<div class="summary-item">Once you provide a rough numbered process list, this becomes the final step-by-step discovery template.</div>`;
-    return;
-  }
-  const rows = stepMatrixRows();
-  els.stepMatrixPreview.innerHTML = `
-    <div class="matrix-legend" aria-label="Matrix confidence legend">
-      <span><i class="legend-dot captured"></i>Captured</span>
-      <span><i class="legend-dot inferred"></i>Inferred</span>
-      <span><i class="legend-dot review"></i>Needs review</span>
-      <span><i class="legend-dot missing"></i>Missing</span>
-    </div>
-    <table class="matrix-table">
-      <tbody>
-        ${rows
-          .map(
-            (row, rowIndex) => `
-              <tr>
-                ${row
-                  .map((cell, cellIndex) => {
-                    const tag = rowIndex === 0 || cellIndex === 0 ? "th" : "td";
-                    const meta = tag === "td" ? matrixCellMeta(rows[rowIndex][0], cell, state.steps[cellIndex - 1]) : null;
-                    const attrs = meta ? ` class="${meta.className}" title="${escapeHtml(meta.title)}"` : "";
-                    return `<${tag}${attrs}>${escapeHtml(cell || "")}</${tag}>`;
-                  })
-                  .join("")}
-              </tr>
-            `
-          )
-          .join("")}
-      </tbody>
-    </table>
-  `;
-}
-
 function matrixCellMeta(rowLabel, value, step = {}) {
   const trimmed = String(value || "").trim();
   if (rowLabel === "AI Pattern" || rowLabel === "Likely Tool Fit") {
@@ -25501,7 +25460,6 @@ function applyHoverHelp() {
     [".analysis-zone-card", "Open the selected analysis workspace for reviewing and packaging the discovery."],
     [".step-field-chip", "Green means captured; highlighted items are the details the AI is currently trying to fill."],
     [".workbench-tab", "Switch between saved sessions, session pulse, handoff builder, blueprint, Product/Engineering, and business review."],
-    [".step-matrix-preview", "Shows which process-matrix cells are captured, inferred, or still missing."],
     [".blueprint-inspector", "Tracks known facts, unknowns, product questions, engineering questions, data flags, and next best question."],
     [".product-handoff-grid", "Preview of the Product and Engineering handoff package created from the discovery conversation."]
   ];
