@@ -3369,6 +3369,7 @@ function render() {
   renderDiscoveryInferenceLens();
   renderWorkflowGridPanel();
   updateConfidenceCards();
+  updateProcessFlowMapCompact();
   els.sectionTitle.textContent = section.label;
   renderConversation();
   renderAiChat();
@@ -4216,6 +4217,111 @@ function updateConfidenceCards() {
   container.innerHTML = `
     <div class="step-conf-label">Steps</div>
     <div class="step-conf-row">${cardsHtml}</div>`;
+}
+
+// --- Process Flow Map (compact + full) -------------------------------------
+// A horizontal pipeline of the workflowGrid steps: one node per step, arrows
+// between them, each node bordered/barred by its 17-cell coverage. Two density
+// modes share the same node builder. Like updateConfidenceCards(), these read
+// state.workflowGrid.steps and rewrite only their own container — never call
+// render(), so they are safe to invoke from inside render().
+
+// Coverage -> accent colour. Mirrors the confidence-card glow scale. The
+// current-step pink override is applied by the caller, not here.
+function pfMapGlowColor(coverage) {
+  if (coverage === 0) return "#1a2a3a";
+  if (coverage < 0.25) return "#f59e0b";
+  if (coverage < 0.5) return "rgba(0,212,180,0.67)";
+  return "#00d4b4";
+}
+
+// Builds the node + connector markup for a flow map. `mode` is "compact" or
+// "full"; `currentIndex` is the active step (or -1 for none).
+function pfMapBuildNodes(steps, mode, currentIndex) {
+  const full = mode === "full";
+  const nodeClass = full ? "pf-node pf-node-full" : "pf-node pf-node-compact";
+  const connClass = full ? "pf-connector pf-connector-full" : "pf-connector";
+  const ids = new Set(steps.map((s) => s.id));
+
+  return steps
+    .map((step, index) => {
+      const cells = Object.values(step.cells || {});
+      const filled = cells.filter((c) => c && (c.state === "confirmed" || c.state === "inferred")).length;
+      // Coverage is always over the fixed 17-cell schema.
+      const coverage = filled / 17;
+      const isCurrentStep = index === currentIndex;
+      // Current step pink overrides the coverage glow for both border and bar.
+      const accent = isCurrentStep ? "#ff4fc8" : pfMapGlowColor(coverage);
+
+      const stepNumber = String(index + 1).padStart(2, "0");
+      const rawName = step.cells?.name?.value?.trim() || `Step ${index + 1}`;
+      const label = truncateUi(rawName, full ? 48 : 18);
+      const percent = Math.round(coverage * 100);
+
+      const numStyle = full
+        ? "font-size:9px;color:#3d5470;letter-spacing:0.06em;"
+        : "font-size:8px;color:#3d5470;letter-spacing:0.06em;";
+      const nameStyle = full
+        ? "font-size:12px;font-weight:700;color:#dde8f5;line-height:1.25;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;"
+        : "font-size:10px;font-weight:700;color:#dde8f5;line-height:1.25;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+
+      // Coverage % only in full mode, right-aligned, coloured by glow state.
+      const pctHtml = full
+        ? `<div style="font-size:10px;text-align:right;color:${accent};margin-top:2px;">${percent}%</div>`
+        : "";
+
+      const barHeight = full ? 3 : 2;
+      const node =
+        `<div class="${nodeClass}" style="border-color:${accent};" title="${escapeHtml(rawName)}">` +
+        `<div style="${numStyle}">${stepNumber}</div>` +
+        `<div style="${nameStyle}">${escapeHtml(label)}</div>` +
+        pctHtml +
+        `<div class="pf-coverage-bar" style="width:${percent}%;height:${barHeight}px;background:${accent};"></div>` +
+        `</div>`;
+
+      // Connector to the next step: follow nextStepId when it points at a real
+      // step, otherwise fall back to sequential array order. No arrow after the
+      // last node.
+      const hasNext = step.nextStepId ? ids.has(step.nextStepId) : index < steps.length - 1;
+      const connector = hasNext ? `<div class="${connClass}"></div>` : "";
+      return node + connector;
+    })
+    .join("");
+}
+
+// COMPACT: Discovery page, below the step confidence cards. Hidden (empty
+// innerHTML, no placeholder) when there are no steps.
+function updateProcessFlowMapCompact() {
+  const container = document.getElementById("process-flow-map-compact");
+  if (!container) return;
+
+  const steps = Array.isArray(state.workflowGrid?.steps) ? state.workflowGrid.steps : [];
+  if (!steps.length) {
+    container.innerHTML = "";
+    return;
+  }
+
+  const currentIndex = Math.max(0, Math.min(Number(state.activeStepIndex) || 0, steps.length - 1));
+  container.innerHTML =
+    `<div class="pf-label">Flow</div>` +
+    `<div class="pf-map-row">${pfMapBuildNodes(steps, "compact", currentIndex)}</div>`;
+}
+
+// FULL: Analysis Studio Process Matrix section. Renders the same step pipeline
+// at a larger size with coverage percentages.
+function updateProcessFlowMapFull() {
+  const container = document.getElementById("process-flow-map-full");
+  if (!container) return;
+
+  const steps = Array.isArray(state.workflowGrid?.steps) ? state.workflowGrid.steps : [];
+  if (!steps.length) {
+    container.innerHTML = "";
+    return;
+  }
+
+  const currentIndex = Math.max(0, Math.min(Number(state.activeStepIndex) || 0, steps.length - 1));
+  container.innerHTML =
+    `<div class="pf-map-row-full">${pfMapBuildNodes(steps, "full", currentIndex)}</div>`;
 }
 
 function renderAppMode() {
@@ -23108,6 +23214,10 @@ function backlogSeed(patternLabel, agentRoles = recommendedAgentRoles()) {
 }
 
 function renderStepMatrixPreview() {
+  // Drive the full process flow map off state.workflowGrid independently — it
+  // must render even when the legacy state.steps array is still empty, so this
+  // runs before the early-return below.
+  updateProcessFlowMapFull();
   if (!state.steps.length) {
     els.stepMatrixPreview.innerHTML = `<div class="summary-item">Once you provide a rough numbered process list, this becomes the final step-by-step discovery template.</div>`;
     return;
