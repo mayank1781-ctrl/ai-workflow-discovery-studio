@@ -3711,6 +3711,11 @@ const EXTRACTION_CELL_KEY_MAP = {
 };
 
 function buildWorkflowGridFromExtraction(extracted = {}) {
+  // The `= {}` default only guards `undefined`; the model can still send `null`
+  // or a non-object (e.g. JSON.parse("null") server-side), so normalize here
+  // before dereferencing — otherwise the attachment/document extraction throws
+  // "Cannot read properties of null" right after the file is read.
+  if (!extracted || typeof extracted !== "object") extracted = {};
   const grid = newWorkflowGrid();
   if (typeof extracted.workflowName === "string") {
     grid.workflowName = extracted.workflowName.trim();
