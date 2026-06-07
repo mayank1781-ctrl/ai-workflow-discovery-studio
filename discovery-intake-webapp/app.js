@@ -3521,6 +3521,11 @@ async function extractAttachmentIntoGrid(file) {
   }
 
   const changed = mergeExtractionIntoGrid(payload.grid);
+  // Completeness warning from the server (set when the document appears to have
+  // more numbered sections than steps were extracted). Stored on state so the
+  // Discovery view can surface an amber banner below the step cards; cleared on
+  // every extraction so a later, complete upload removes a stale warning.
+  state.extractionWarning = typeof payload.extractionWarning === "string" ? payload.extractionWarning : "";
   persistState();
   render();
   toast(changed ? `Added details from ${file.name} to the grid.` : `No new workflow details found in ${file.name}.`);
@@ -4003,9 +4008,22 @@ function updateConfidenceCards() {
       </div>`;
   }).join("");
 
+  // Amber completeness banner, shown directly below the step cards only when
+  // the server flagged a potentially truncated extraction (more numbered
+  // sections in the document than steps that came back).
+  const warning = (state.extractionWarning || "").trim();
+  const warningHtml = warning
+    ? `<div class="extraction-warning-banner" role="status" style="margin-top:10px;padding:10px 12px;border:1px solid #f59e0b;background:#1a1500;border-radius:8px;color:#f5c451;font-size:12px;line-height:1.45;display:flex;gap:8px;align-items:flex-start;">
+        <i data-lucide="triangle-alert" style="width:14px;height:14px;flex-shrink:0;margin-top:1px;"></i>
+        <span>${escapeHtml(warning)}</span>
+      </div>`
+    : "";
+
   container.innerHTML = `
     <div class="step-conf-label">Steps</div>
-    <div class="step-conf-row">${cardsHtml}</div>`;
+    <div class="step-conf-row">${cardsHtml}</div>
+    ${warningHtml}`;
+  if (warning) refreshIcons();
 }
 
 // --- Process Flow Map (compact + full) -------------------------------------
