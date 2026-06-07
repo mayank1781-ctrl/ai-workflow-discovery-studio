@@ -4940,13 +4940,20 @@ function renderQuestionLensBar(question = {}) {
   const source = question.source || state.currentQuestionSource || "Intake guide";
   const status = archetypeConfidenceLabel(archetype);
   const nextGap = topCompletionQuestions(1)[0] || archetypeFollowUpQuestion(archetype);
+  // Stale source labels from earlier interview architectures should not surface
+  // as a lens-bar tag. Suppress the chip for these values only; all other source
+  // tags (e.g. "Workflow overview") still render normally.
+  const STALE_LENS_SOURCES = new Set(["A-Z process"]);
+  const sourceChip = STALE_LENS_SOURCES.has(source)
+    ? ""
+    : `<span class="question-lens-chip">${escapeHtml(source)}</span>`;
   els.questionLensBar.innerHTML = `
     <span class="question-lens-chip primary">
       <i data-lucide="${escapeHtml(archetype.icon)}"></i>
       ${escapeHtml(archetype.label)}
     </span>
     <span class="question-lens-chip">${escapeHtml(status)}</span>
-    <span class="question-lens-chip">${escapeHtml(source)}</span>
+    ${sourceChip}
     <span class="question-lens-next">${escapeHtml(truncateUi(nextGap, 96))}</span>
   `;
 }
@@ -7413,8 +7420,13 @@ async function aiExtractAnswer(options = {}) {
       // extraction is applied for this synthetic turn.
       const pivotQuestion = (result.nextQuestion || "").trim();
       const ack = (result.summary || "").trim();
-      const reply = [ack, pivotQuestion].filter(Boolean).join(" ")
-        || "I've pulled your document into the grid. Do these steps look right, or is anything missing or named incorrectly?";
+      // The model's acknowledgement (ack) already contains the step list and the
+      // confirm question, so only append pivotQuestion when ack does not already
+      // include it — otherwise the question renders twice in the recap bubble.
+      const reply = (ack && pivotQuestion && !ack.toLowerCase().includes(pivotQuestion.toLowerCase()))
+        ? `${ack} ${pivotQuestion}`
+        : (ack || pivotQuestion
+          || "I've pulled your document into the grid. Do these steps look right, or is anything missing or named incorrectly?");
       state.currentQuestionOverride = pivotQuestion || reply;
       state.currentQuestionSource = "Document recap";
       setCaptureStage("followup", "Follow-up ready");
