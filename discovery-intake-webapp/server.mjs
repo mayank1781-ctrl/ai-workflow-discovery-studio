@@ -2424,8 +2424,12 @@ function summarizeSession(state = {}) {
   const meta = state.sessionMeta || {};
   const fields = state.fields || {};
   const now = new Date().toISOString();
+  const id = safeIdentifier(meta.id) || `session-${Date.now().toString(36)}`;
   return {
-    id: safeIdentifier(meta.id) || `session-${Date.now().toString(36)}`,
+    id,
+    // `sessionId` / `savedAt` are convenience aliases for the saved-sessions UI
+    // (the canonical fields remain `id` / `updatedAt`).
+    sessionId: id,
     name: meta.name || fields.workflowName || fields.submittedWorkflowTask || "Untitled discovery",
     owner: meta.owner || "",
     source: meta.source || "Live discovery",
@@ -2433,6 +2437,7 @@ function summarizeSession(state = {}) {
     status: meta.status || "Discovery",
     createdAt: meta.createdAt || now,
     updatedAt: meta.updatedAt || now,
+    savedAt: meta.updatedAt || now,
     workflowName: fields.workflowName || fields.submittedWorkflowTask || "",
     category: fields.workflowCategory && fields.workflowCategory !== "unknown" ? fields.workflowCategory : "Category TBD",
     recordType: fields.recordType || "Live Opportunity",
