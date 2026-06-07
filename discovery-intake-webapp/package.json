@@ -6,7 +6,11 @@
   "description": "Local server and frontend for the AI Workflow Discovery Studio intake app.",
   "scripts": {
     "start": "node server.mjs",
-    "dev": "node server.mjs"
+    "dev": "node server.mjs",
+    "pm2:start": "pm2 start ecosystem.config.cjs",
+    "pm2:stop": "pm2 stop discovery-studio",
+    "pm2:logs": "pm2 logs discovery-studio",
+    "pm2:restart": "pm2 restart discovery-studio"
   },
   "dependencies": {
     "busboy": "^1.6.0",
@@ -15,5 +19,8 @@
     "mammoth": "^1.8.0",
     "pdf-parse": "^1.1.1",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "pm2": "^7.0.1"
   }
 }

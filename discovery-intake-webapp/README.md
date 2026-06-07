@@ -30,6 +30,25 @@ If normal `node` is unavailable, use the Node runtime bundled with Codex:
 /Applications/Codex.app/Contents/Resources/node scripts/start-local.mjs
 ```
 
+## Run With Auto-Restart (PM2)
+
+For a longer-running local instance that automatically restarts if the server
+crashes, run it under [PM2](https://pm2.keymetrics.io/). PM2 is installed as a
+dev dependency, and the process is defined in `ecosystem.config.cjs`
+(`name: discovery-studio`, `PORT: 5177`).
+
+From the `discovery-intake-webapp/` directory:
+
+```bash
+npm install            # first time only (installs PM2)
+npm run pm2:start      # start under PM2 (auto-restarts on crash)
+npm run pm2:logs       # tail the server logs
+npm run pm2:restart    # restart after code or .env changes
+npm run pm2:stop       # stop the managed process
+```
+
+`.env` is still loaded the same way, so set your keys there before starting.
+
 ## Local Environment
 
 The local server loads variables from `discovery-intake-webapp/.env` (via
