@@ -4495,14 +4495,16 @@ function renderAnalysisTabRecipe() {
   syncRecipeExportButton(recipeExportBtn);
 }
 
-// Enables the DOCX export only once at least one step carries an AI pattern —
-// the recipe prompts (and therefore the document body) hang off the patterns.
+// Keep the export button clickable whenever the Recipe Book is shown (it only
+// renders once steps exist). An earlier version left the button `disabled`
+// until a step had an AI pattern, but a disabled button silently swallows the
+// click — so the listener appeared "not to fire". handleRecipeExport() now
+// guards the "nothing to export yet" case with a toast instead.
 function syncRecipeExportButton(btn) {
   if (!btn) return;
-  const hasPattern = analysisGridSteps().some((step) => stepPrimaryPattern(step));
-  btn.disabled = !hasPattern;
-  btn.style.opacity = hasPattern ? "1" : "0.4";
-  btn.style.cursor = hasPattern ? "pointer" : "not-allowed";
+  btn.disabled = false;
+  btn.style.opacity = "1";
+  btn.style.cursor = "pointer";
 }
 
 async function generateRecipePrompt(stepId) {
@@ -4564,20 +4566,27 @@ function downloadRecipeBook() {
 async function handleRecipeExport() {
   const btn = document.getElementById("recipe-export-btn");
   if (!btn) return;
+
+  const notify = (message) => (typeof toast === "function" ? toast(message) : alert(message));
+  const workflowName = analysisWorkflowName() || "Workflow";
+  const steps = analysisGridSteps().map((step, index) => ({
+    name: stepDisplayName(step, index),
+    aiPattern: stepPrimaryPattern(step),
+    prompt: state.recipeCache?.[step.id] || "",
+    personaActors: gridCellValue(step, "personaActors"),
+    systemsTools: gridCellValue(step, "systemsTools")
+  }));
+
+  if (!steps.some((step) => step.prompt.trim() || step.aiPattern.trim())) {
+    notify("Generate at least one recipe prompt before exporting.");
+    return;
+  }
+
   btn.textContent = "Preparing…";
   btn.disabled = true;
   btn.style.opacity = "0.4";
   btn.style.cursor = "not-allowed";
   try {
-    const workflowName = analysisWorkflowName() || "Workflow";
-    const steps = analysisGridSteps().map((step, index) => ({
-      name: stepDisplayName(step, index),
-      aiPattern: stepPrimaryPattern(step),
-      prompt: state.recipeCache?.[step.id] || "",
-      personaActors: gridCellValue(step, "personaActors"),
-      systemsTools: gridCellValue(step, "systemsTools")
-    }));
-
     const response = await fetch("/api/recipe-book-export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -4604,12 +4613,7 @@ async function handleRecipeExport() {
     anchor.remove();
     URL.revokeObjectURL(url);
   } catch (error) {
-    const message = error?.message || "Recipe book export failed.";
-    if (typeof toast === "function") {
-      toast(message);
-    } else {
-      alert(message);
-    }
+    notify(error?.message || "Recipe book export failed.");
   } finally {
     btn.textContent = "⬇ Download DOCX";
     syncRecipeExportButton(btn);
