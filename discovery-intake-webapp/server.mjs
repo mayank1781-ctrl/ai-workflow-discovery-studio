@@ -8,7 +8,6 @@ import Busboy from "busboy";
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
 import { detectConnectors, formatForRecipe } from "./connectors/connector-detector.mjs";
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from "docx";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // pdf-parse's package index runs a debug routine against a bundled test PDF
@@ -3119,6 +3118,11 @@ function sendJson(res, status, payload) {
 
 async function handleRecipeBookExport(req, res) {
   try {
+    // Loaded lazily so a missing/broken `docx` install can never crash server
+    // startup or take down unrelated endpoints (e.g. /api/extract). Only this
+    // endpoint depends on it, and it fails gracefully below if it is absent.
+    const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = await import("docx");
+
     const body = await readJson(req);
     const { workflowName = "Workflow", steps = [] } = body;
     const safeName = String(workflowName).replace(/[^a-z0-9]/gi, "-").replace(/-{2,}/g, "-").replace(/^-|-$/, "");
