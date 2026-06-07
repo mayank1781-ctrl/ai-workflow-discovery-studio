@@ -664,3 +664,52 @@ input::placeholder {
   margin-bottom: 6px;
   text-transform: uppercase;
 }
+
+/* --- Process Flow Map (compact + full) ----------------------------------- */
+.pf-map-row {
+  display: flex; align-items: center;
+  overflow-x: auto; scrollbar-width: none;
+  padding: 4px 2px; gap: 0;
+}
+.pf-map-row-full {
+  display: flex; flex-wrap: wrap;
+  gap: 16px 32px; padding: 16px;
+}
+.pf-node {
+  border-radius: 8px; box-sizing: border-box;
+  padding: 8px 10px; flex-shrink: 0;
+  position: relative; overflow: hidden;
+  background: #0d1b2a;
+  border: 1.5px solid #1a2a3a;
+  transition: border-color 0.35s ease;
+}
+.pf-node-compact {
+  width: 100px; min-width: 100px; height: 56px;
+}
+.pf-node-full {
+  width: 160px; min-width: 160px; height: 80px;
+}
+.pf-connector {
+  width: 24px; min-width: 24px; height: 2px;
+  background: #1a3a4a; position: relative;
+  flex-shrink: 0; align-self: center;
+}
+.pf-connector::after {
+  content: ""; position: absolute; right: -4px;
+  top: -3px; border-left: 6px solid #1a3a4a;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+}
+.pf-connector-full {
+  width: 32px; min-width: 32px;
+}
+.pf-coverage-bar {
+  position: absolute; bottom: 0; left: 0;
+  height: 2px; border-radius: 0 0 8px 8px;
+  transition: width 0.4s ease;
+}
+.pf-label {
+  font-size: 9px; font-weight: 700;
+  letter-spacing: 0.08em; color: #00d4b4;
+  margin-bottom: 4px; text-transform: uppercase;
+}
