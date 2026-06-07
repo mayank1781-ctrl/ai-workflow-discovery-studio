@@ -2596,10 +2596,6 @@ body[data-app-mode="interview"] .discovery-support-grid {
   gap: 18px;
 }
 
-body[data-app-mode="interview"] .discovery-inference-strip {
-  min-height: 172px;
-}
-
 body[data-app-mode="interview"] .inference-lens-panel.discovery {
   display: grid;
   grid-template-columns: minmax(220px, 0.34fr) minmax(0, 1fr);
