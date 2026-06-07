@@ -1101,6 +1101,23 @@ async function handleExtract(req, res) {
   return sendJson(res, 200, parsed);
 }
 
+// Count distinct numbered sections in raw document text — list markers like
+// "1." / "2)" and "Step 3". Used only as a completeness heuristic: if the model
+// returns fewer steps than the document appears to contain, we surface a
+// non-blocking warning rather than silently dropping the tail steps.
+function countNumberedSections(text) {
+  if (!text || typeof text !== "string") return 0;
+  const numbers = new Set();
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/^\s*(?:step\s+(\d{1,2})\b|(\d{1,2})[.)]\s)/i);
+    if (match) {
+      const n = Number(match[1] || match[2]);
+      if (n >= 1 && n <= 99) numbers.add(n);
+    }
+  }
+  return numbers.size;
+}
+
 const DOCUMENT_EXTRACTION_SYSTEM_PROMPT = `You are a workflow analysis expert. Extract a structured workflow grid from the provided document. Return ONLY valid JSON — no markdown fences, no explanation, just the raw JSON object.
 
 Return this exact schema:
@@ -1137,7 +1154,8 @@ Confidence rules: 0.9+ = explicitly stated in the document, 0.7 = clearly implie
 State rule: if the document explicitly states a field is unclear, not specified, unknown, TBD, or unavailable, include that cell as { "value": "", "confidence": 0, "state": "unknown" }. If a topic is simply not mentioned at all, leave it empty (do not include a state). Only use state:"unknown" for explicitly-flagged-as-unknown information.
 painFriction: always value '' and confidence 0 — documents describe how things should work, not where they hurt.
 aiPattern: do not include — it is generated later.
-Only extract steps actually present in the document.`;
+Only extract steps actually present in the document — never invent steps that aren't there.
+Extract ALL steps from the document. Do not stop early. A document may have up to 20 steps. Return every step you find, even if the list is long.`;
 
 // Stage 1a Part 2: extract a draft workflow grid from an uploaded document.
 // The file is parsed entirely in memory (no disk writes) and the extracted
@@ -1165,6 +1183,10 @@ async function handleExtractDocument(req, res) {
   // Images go straight to the vision model; everything else (PDF/Word/Excel)
   // is parsed to text first — that path is unchanged.
   let userMessageContent;
+  // Raw parsed document text, kept in function scope so the completeness check
+  // after extraction can compare the model's step count against the number of
+  // numbered sections in the source. Stays "" for image uploads (no text).
+  let rawDocumentText = "";
   if (isImageUpload(upload)) {
     const dataUrl = `data:${upload.mimeType || "image/png"};base64,${upload.buffer.toString("base64")}`;
     userMessageContent = [
@@ -1182,8 +1204,13 @@ async function handleExtractDocument(req, res) {
     if (!text || !text.trim()) {
       return sendJson(res, 200, { success: false, error: "That document didn't contain readable text. Try a different file or start with conversation." });
     }
-    // Keep the prompt within a sane bound; truncate very large documents.
-    userMessageContent = text.length > 120_000 ? text.slice(0, 120_000) : text;
+    rawDocumentText = text;
+    // Send the FULL document text. A multi-page SOP must not be cut short, or
+    // its later steps never reach the model (the cause of long SOPs extracting
+    // only the first handful of steps). The bound below only guards against a
+    // pathologically large file overflowing the model context window — a
+    // 9-page PDF is far below it and is sent in full.
+    userMessageContent = text.length > 300_000 ? text.slice(0, 300_000) : text;
   }
 
   let data;
@@ -1197,6 +1224,10 @@ async function handleExtractDocument(req, res) {
       body: JSON.stringify({
         model: DOCUMENT_EXTRACTION_MODEL,
         response_format: { type: "json_object" },
+        // A 14-step SOP with full cell values produces a large JSON object.
+        // Without enough headroom the response is cut off mid-array and the
+        // tail steps silently disappear, so reserve room for a long step list.
+        max_tokens: 4000,
         messages: [
           { role: "system", content: DOCUMENT_EXTRACTION_SYSTEM_PROMPT },
           { role: "user", content: userMessageContent }
@@ -1220,7 +1251,18 @@ async function handleExtractDocument(req, res) {
     return sendJson(res, 200, { success: false, error: "The model returned an unreadable result. Try again or start with conversation." });
   }
 
-  return sendJson(res, 200, { success: true, grid });
+  // Completeness check: if the document clearly contains more numbered sections
+  // than the model returned steps, the extraction may have been truncated. Flag
+  // it so the UI can prompt the user to add the missing steps manually instead
+  // of silently losing them. Skipped for images (no raw text to count).
+  const stepCount = Array.isArray(grid?.steps) ? grid.steps.length : 0;
+  const detectedSections = countNumberedSections(rawDocumentText);
+  let extractionWarning;
+  if (rawDocumentText && stepCount > 0 && detectedSections > stepCount) {
+    extractionWarning = "Some steps may not have been captured. The document appears to contain more sections than were extracted. You can continue the interview and add missing steps manually.";
+  }
+
+  return sendJson(res, 200, { success: true, grid, extractionWarning });
 }
 
 // Parse a single multipart/form-data file field ("file") fully into memory.
