@@ -40,6 +40,8 @@ loadLocalEnv();
 
 const PORT = Number(process.env.PORT || 5173);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
+const PATTERN_HANDOFF_MODEL = process.env.PATTERN_HANDOFF_MODEL || "claude-sonnet-4-6";
 const REALTIME_MODEL = process.env.REALTIME_MODEL || "gpt-realtime-2";
 const REALTIME_VOICE = process.env.REALTIME_VOICE || "marin";
 const REALTIME_REASONING_EFFORT = process.env.REALTIME_REASONING_EFFORT || "low";
@@ -1029,6 +1031,10 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && requestUrl.pathname === "/api/engineering-doc-export") {
       return await handleEngineeringDocExport(req, res);
+    }
+
+    if (req.method === "POST" && requestUrl.pathname === "/api/pattern-handoff") {
+      return await handlePatternHandoff(req, res);
     }
 
     if (req.method !== "GET") {
@@ -3298,6 +3304,151 @@ async function handleEngineeringDocExport(req, res) {
   } catch (err) {
     console.error("[engineering-doc-export] error:", err);
     return sendJson(res, 500, { error: err.message });
+  }
+}
+
+// Pattern Handoff tab. Two modes, both Anthropic-backed:
+//  - "questions": surface 3-7 operational questions pinned to specific steps.
+//  - "analyse":   assign a best-fit AI pattern + rationale to each step.
+// No external dependencies are required (uses the global fetch plus the shared
+// readJson/sendJson helpers), so there is nothing to lazy-load here.
+async function handlePatternHandoff(req, res) {
+  if (!ANTHROPIC_API_KEY) {
+    return sendJson(res, 400, {
+      error: "ANTHROPIC_API_KEY is not configured. Set it in your terminal and restart the server."
+    });
+  }
+
+  let body;
+  try {
+    body = await readJson(req);
+  } catch (error) {
+    return sendJson(res, 400, { error: error.message || "Invalid request body" });
+  }
+
+  const mode = body.mode === "analyse" ? "analyse" : body.mode === "questions" ? "questions" : "";
+  if (!mode) {
+    return sendJson(res, 400, { error: 'mode must be "questions" or "analyse".' });
+  }
+  const workflowName = typeof body.workflowName === "string" && body.workflowName.trim() ? body.workflowName.trim() : "Workflow";
+  const steps = Array.isArray(body.steps) ? body.steps : [];
+  if (!steps.length) {
+    return sendJson(res, 400, { error: "At least one workflow step is required." });
+  }
+  const answers = body.answers && typeof body.answers === "object" ? body.answers : {};
+
+  // Cell reader tolerant of the live-grid shape ({cells:{key:{value}}}) and of
+  // already-flattened step objects ({key: value}).
+  const cell = (step, key) => {
+    const raw = step?.cells?.[key]?.value ?? step?.[key] ?? "";
+    return typeof raw === "string" ? raw.trim() : Array.isArray(raw) ? raw.map((e) => e?.pattern || "").filter(Boolean).join(", ") : "";
+  };
+  const stepName = (step, index) => cell(step, "name") || step?.name || `Step ${index + 1}`;
+
+  const personaSet = new Set(
+    steps.map((step) => cell(step, "personaActors").toLowerCase()).filter(Boolean)
+  );
+  const singlePersona = personaSet.size <= 1;
+
+  const stepLines = steps.map((step, index) => {
+    const id = step?.id || `step-${index + 1}`;
+    return [
+      `Step ${index + 1} (stepId: ${id}; stepName: ${stepName(step, index)})`,
+      `  Persona/Actors: ${cell(step, "personaActors") || "(none)"}`,
+      `  Systems/Tools: ${cell(step, "systemsTools") || "(none)"}`,
+      `  Data processing: ${cell(step, "dataProcessing") || "(none)"}`,
+      `  Rules/Decision logic: ${cell(step, "rulesDecisionLogic") || "(none)"}`,
+      `  Output: ${cell(step, "output") || "(none)"}`,
+      `  Current AI pattern: ${cell(step, "aiPattern") || "(unset)"}`
+    ].join("\n");
+  }).join("\n\n");
+
+  let system;
+  let userContent;
+  if (mode === "questions") {
+    const skew = singlePersona
+      ? "This is a SINGLE-persona workflow: skew questions toward Retrieve, Generate, and Summarise opportunities."
+      : "This is a MULTI-persona workflow: skew questions toward Match, Route, and Classify opportunities.";
+    system = [
+      "You help a discovery analyst prepare a workflow for AI-pattern handoff.",
+      "Generate between 3 and 7 targeted questions, each pinned to a specific step, that would clarify where AI could help.",
+      "Write every question in plain operational language about the actual work — never use AI/ML taxonomy words (do not say 'classify', 'retrieve', 'route', 'pattern', 'model', etc.).",
+      skew,
+      'Return ONLY valid JSON, no prose, no code fences, in exactly this shape: {"questions":[{"id":"q1","stepId":"<stepId>","stepName":"<stepName>","text":"<question>"}]}'
+    ].join(" ");
+    userContent = `Workflow: ${workflowName}\nDistinct personas: ${personaSet.size}\n\nSteps:\n${stepLines}`;
+  } else {
+    const answerLines = Object.entries(answers)
+      .filter(([, v]) => typeof v === "string" && v.trim())
+      .map(([k, v]) => `- ${k}: ${String(v).trim()}`)
+      .join("\n") || "(no answers provided)";
+    system = [
+      "You assign the single best-fit AI pattern to each workflow step.",
+      "Choose the pattern strictly from this list: Retrieve, Extract, Generate, Summarise, Search, Match, Route, Optimise, Classify.",
+      "Give a one-line rationale in plain English (no jargon) and a confidence between 0 and 1.",
+      'Return ONLY valid JSON, no prose, no code fences, in exactly this shape: {"patterns":[{"stepId":"<stepId>","stepName":"<stepName>","pattern":"<one of the allowed patterns>","rationale":"<one line>","confidence":0.0}]}'
+    ].join(" ");
+    userContent = `Workflow: ${workflowName}\n\nSteps:\n${stepLines}\n\nAnalyst answers:\n${answerLines}`;
+  }
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({
+        model: PATTERN_HANDOFF_MODEL,
+        max_tokens: 1000,
+        system,
+        messages: [{ role: "user", content: userContent }]
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      return sendJson(res, response.status, {
+        error: data?.error?.message || "Anthropic API request failed",
+        detail: data
+      });
+    }
+    const text = (data?.content || [])
+      .filter((block) => block?.type === "text")
+      .map((block) => block.text)
+      .join("")
+      .trim();
+    const parsed = parseModelJson(text);
+    if (!parsed) {
+      return sendJson(res, 502, { error: "The model did not return valid JSON.", raw: text.slice(0, 500) });
+    }
+    if (mode === "questions") {
+      const questions = Array.isArray(parsed.questions) ? parsed.questions : [];
+      return sendJson(res, 200, { questions });
+    }
+    const patterns = Array.isArray(parsed.patterns) ? parsed.patterns : [];
+    return sendJson(res, 200, { patterns });
+  } catch (error) {
+    console.error("[pattern-handoff] error:", error);
+    return sendJson(res, 500, { error: error.message || "Pattern handoff request failed" });
+  }
+}
+
+// Best-effort parse of model output: strip code fences, then fall back to the
+// first balanced {...} object in the text.
+function parseModelJson(text) {
+  if (!text) return null;
+  const cleaned = text.replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch (_) {
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]);
+    } catch (_) {
+      return null;
+    }
   }
 }
 

@@ -1066,6 +1066,10 @@ const defaultState = {
   activeWorkbenchTab: "handoff",
   analysisActiveTab: "grid",
   recipeCache: {},
+  handoffAnswers: {},
+  handoffQuestions: [],
+  handoffPatterns: [],
+  handoffOverrides: {},
   questionFocus: "auto",
   currentQuestionOverride: "",
   currentQuestionSource: "Intake guide",
@@ -4149,7 +4153,7 @@ const AI_PATTERNS = {
   Classify: "#6366f1"
 };
 
-const ANALYSIS_TABS = ["grid", "opportunities", "recipe", "engineering"];
+const ANALYSIS_TABS = ["grid", "opportunities", "recipe", "engineering", "handoff"];
 
 // Implementation-complexity bucket per pattern. Low ends Phase 2, Medium ends
 // Phase 3, High ends Phase 4. Unknown patterns default to Medium.
@@ -4327,6 +4331,7 @@ function renderAnalysisStudio() {
   else if (active === "opportunities") renderAnalysisTabOpportunities();
   else if (active === "recipe") renderAnalysisTabRecipe();
   else if (active === "engineering") renderAnalysisTabEngineering();
+  else if (active === "handoff") renderAnalysisTabHandoff();
 }
 
 // --- TAB 1: Workflow Grid -----------------------------------------------------
@@ -4837,6 +4842,206 @@ function exportEngineeringDoc() {
 
   const safeName = workflowName.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "workflow";
   downloadTextFile(`${safeName}-engineering-doc.txt`, lines.join("\n"));
+}
+
+// --- TAB 5: Pattern Handoff ---------------------------------------------------
+
+const HANDOFF_TEAL_BUTTON =
+  "background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;cursor:pointer;transition:opacity 0.2s;";
+
+// First comma/newline/semicolon-separated value from a cell — the "primary".
+function handoffPrimaryValue(step, key) {
+  const raw = gridCellValue(step, key);
+  if (!raw) return "";
+  return raw.split(/[,;\n]/)[0].trim();
+}
+
+// Confidence (0-1) of a step's primary AI pattern entry, or null when unset.
+function handoffStepConfidence(step) {
+  const value = step?.cells?.aiPattern?.value;
+  if (!Array.isArray(value) || !value.length) return null;
+  const num = Number(value[0]?.confidence);
+  return Number.isFinite(num) ? num : null;
+}
+
+function handoffConfidenceColor(confidence) {
+  if (confidence === null || confidence < 0.4) return "#5b7186"; // grey
+  if (confidence >= 0.8) return "#00d4b4"; // teal
+  return "#f59e0b"; // amber (0.4 - 0.79)
+}
+
+function renderAnalysisTabHandoff() {
+  const container = document.getElementById("analysis-tab-handoff");
+  if (!container) return;
+  state.handoffAnswers = state.handoffAnswers || {};
+  state.handoffQuestions = Array.isArray(state.handoffQuestions) ? state.handoffQuestions : [];
+  state.handoffPatterns = Array.isArray(state.handoffPatterns) ? state.handoffPatterns : [];
+  state.handoffOverrides = state.handoffOverrides || {};
+
+  const steps = analysisGridSteps();
+  if (!steps.length) {
+    container.innerHTML = `<div class="summary-item">No workflow steps yet. Capture a process to prepare the pattern handoff.</div>`;
+    return;
+  }
+
+  const sectionTitleStyle = "font-size:13px;font-weight:700;color:#dde8f5;margin:0 0 10px;text-transform:uppercase;letter-spacing:0.04em;";
+
+  // ZONE 1 — read-only step pattern overview (no API).
+  const zone1Cards = steps.map((step, index) => {
+    const name = stepDisplayName(step, index);
+    const persona = handoffPrimaryValue(step, "personaActors") || "—";
+    const system = handoffPrimaryValue(step, "systemsTools") || "—";
+    const pattern = gridCellValue(step, "aiPattern") || "Unset";
+    const confidence = handoffStepConfidence(step);
+    const color = handoffConfidenceColor(confidence);
+    const confidenceLabel = confidence === null ? "No score" : `${Math.round(confidence * 100)}%`;
+    return `
+      <div style="background:#0d1b2a;border:1px solid #1a2a3a;border-left:3px solid ${color};border-radius:8px;padding:12px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <span style="font-size:10px;color:#5b7186;letter-spacing:0.06em;">${String(index + 1).padStart(2, "0")}</span>
+          <strong style="font-size:14px;color:#dde8f5;flex:1;">${escapeHtml(name)}</strong>
+          <span class="sensitivity-badge" style="background:${color}22;color:${color};">${escapeHtml(confidenceLabel)}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:12px;">
+          <span style="color:#5b7186;">Persona</span><span style="color:#9fb3c8;">${escapeHtml(persona)}</span>
+          <span style="color:#5b7186;">System</span><span style="color:#9fb3c8;">${escapeHtml(system)}</span>
+          <span style="color:#5b7186;">AI pattern</span><span style="color:${color};font-weight:600;">${escapeHtml(pattern)}</span>
+        </div>
+      </div>`;
+  }).join("");
+
+  // ZONE 2 — AI-generated questions with answer textareas.
+  const questionCards = state.handoffQuestions.length
+    ? state.handoffQuestions.map((q) => `
+        <div style="background:#0d1b2a;border:1px solid #1a2a3a;border-radius:8px;padding:12px;margin-bottom:8px;">
+          <div style="font-size:10px;color:#5b7186;letter-spacing:0.06em;margin-bottom:4px;">${escapeHtml(q.stepName || "Workflow")}</div>
+          <p style="font-size:13px;color:#dde8f5;margin:0 0 8px;">${escapeHtml(q.text || "")}</p>
+          <textarea data-handoff-answer="${escapeHtml(q.id)}" rows="2" placeholder="Answer in plain operational language..." style="width:100%;box-sizing:border-box;background:#06101d;border:1px solid #1a2a3a;border-radius:6px;color:#dde8f5;font-size:13px;padding:8px;resize:vertical;">${escapeHtml(state.handoffAnswers[q.id] || "")}</textarea>
+        </div>`).join("")
+    : `<p style="font-size:12px;color:#7a93b4;">No questions yet. Click "Surface Key Questions" to generate them.</p>`;
+
+  // ZONE 3 — AI pattern analysis with plain-text overrides.
+  const patternCards = state.handoffPatterns.length
+    ? state.handoffPatterns.map((p) => {
+        const sid = p.stepId || "";
+        const override = state.handoffOverrides[sid] || "";
+        return `
+          <div style="background:#0d1b2a;border:1px solid #1a2a3a;border-radius:8px;padding:12px;margin-bottom:8px;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+              <strong style="font-size:13px;color:#dde8f5;flex:1;">${escapeHtml(p.stepName || "Step")}</strong>
+              <span class="sensitivity-badge" style="background:#00d4b422;color:#00d4b4;">${escapeHtml(p.pattern || "—")}</span>
+            </div>
+            <p style="font-size:12px;color:#9fb3c8;margin:0 0 8px;">${escapeHtml(p.rationale || "")}</p>
+            <label style="font-size:11px;color:#5b7186;display:block;margin-bottom:4px;">Override pattern (optional)</label>
+            <input type="text" data-handoff-override="${escapeHtml(sid)}" value="${escapeHtml(override)}" placeholder="${escapeHtml(p.pattern || "")}" style="width:100%;box-sizing:border-box;background:#06101d;border:1px solid #1a2a3a;border-radius:6px;color:#dde8f5;font-size:13px;padding:6px 8px;" />
+          </div>`;
+      }).join("")
+    : `<p style="font-size:12px;color:#7a93b4;">No analysis yet. Answer the questions above, then click "Generate AI Analysis".</p>`;
+
+  container.innerHTML = `
+    <section style="margin-bottom:24px;">
+      <h3 style="${sectionTitleStyle}">Step Pattern Overview</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;">${zone1Cards}</div>
+    </section>
+    <section style="margin-bottom:24px;">
+      <h3 style="${sectionTitleStyle}">Key Questions</h3>
+      <button type="button" id="handoffQuestionsBtn" style="${HANDOFF_TEAL_BUTTON}margin-bottom:12px;">Surface Key Questions</button>
+      <div>${questionCards}</div>
+    </section>
+    <section style="margin-bottom:16px;">
+      <h3 style="${sectionTitleStyle}">AI Analysis</h3>
+      <button type="button" id="handoffAnalyseBtn" style="${HANDOFF_TEAL_BUTTON}margin-bottom:12px;">Generate AI Analysis</button>
+      <div>${patternCards}</div>
+    </section>`;
+
+  container.querySelector("#handoffQuestionsBtn")?.addEventListener("click", handleHandoffQuestions);
+  container.querySelector("#handoffAnalyseBtn")?.addEventListener("click", handleHandoffAnalyse);
+  container.querySelectorAll("[data-handoff-answer]").forEach((textarea) => {
+    textarea.addEventListener("input", () => {
+      state.handoffAnswers[textarea.dataset.handoffAnswer] = textarea.value;
+    });
+    textarea.addEventListener("change", persistState);
+  });
+  container.querySelectorAll("[data-handoff-override]").forEach((input) => {
+    input.addEventListener("input", () => {
+      state.handoffOverrides[input.dataset.handoffOverride] = input.value;
+    });
+    input.addEventListener("change", persistState);
+  });
+  refreshIcons();
+}
+
+async function handleHandoffQuestions() {
+  const btn = document.getElementById("handoffQuestionsBtn");
+  const steps = analysisGridSteps();
+  if (!steps.length) {
+    toast("Capture a workflow before surfacing questions.");
+    return;
+  }
+  if (btn) {
+    btn.textContent = "Working…";
+    btn.style.opacity = "0.4";
+    btn.style.cursor = "not-allowed";
+  }
+  try {
+    const response = await fetch("/api/pattern-handoff", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "questions", workflowName: analysisWorkflowName() || "Workflow", steps })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || `Request failed (${response.status}).`);
+    state.handoffQuestions = Array.isArray(data.questions) ? data.questions : [];
+    persistState();
+    renderAnalysisTabHandoff();
+  } catch (error) {
+    toast(error?.message || "Could not surface questions.");
+  } finally {
+    if (btn) {
+      btn.textContent = "Surface Key Questions";
+      btn.style.opacity = "1";
+      btn.style.cursor = "pointer";
+    }
+  }
+}
+
+async function handleHandoffAnalyse() {
+  const btn = document.getElementById("handoffAnalyseBtn");
+  const steps = analysisGridSteps();
+  if (!steps.length) {
+    toast("Capture a workflow before generating analysis.");
+    return;
+  }
+  if (btn) {
+    btn.textContent = "Working…";
+    btn.style.opacity = "0.4";
+    btn.style.cursor = "not-allowed";
+  }
+  try {
+    const response = await fetch("/api/pattern-handoff", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "analyse",
+        workflowName: analysisWorkflowName() || "Workflow",
+        steps,
+        answers: state.handoffAnswers || {}
+      })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || `Request failed (${response.status}).`);
+    state.handoffPatterns = Array.isArray(data.patterns) ? data.patterns : [];
+    persistState();
+    renderAnalysisTabHandoff();
+  } catch (error) {
+    toast(error?.message || "Could not generate analysis.");
+  } finally {
+    if (btn) {
+      btn.textContent = "Generate AI Analysis";
+      btn.style.opacity = "1";
+      btn.style.cursor = "pointer";
+    }
+  }
 }
 
 function renderAppMode() {
