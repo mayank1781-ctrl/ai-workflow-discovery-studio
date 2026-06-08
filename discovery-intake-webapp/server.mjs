@@ -2056,12 +2056,17 @@ async function handleTextToSpeech(req, res) {
 
 async function handleListSessions(req, res) {
   await ensureDataDirs();
+  const userId = currentUserId(req);
   const entries = await fs.readdir(SESSIONS_DIR, { withFileTypes: true }).catch(() => []);
   const summaries = [];
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
     try {
       const payload = JSON.parse(await fs.readFile(path.join(SESSIONS_DIR, entry.name), "utf8"));
+      // No user (auth off) → list everything, as before. With a user, show only
+      // their own sessions; legacy/unclaimed sessions (no userId) stay hidden
+      // until claimed via load/save (claim-on-access).
+      if (userId && payload.userId !== userId) continue;
       summaries.push(payload.summary || summarizeSession(payload.state || {}));
     } catch (error) {
       console.warn(`Could not read session ${entry.name}:`, error.message);
@@ -2075,12 +2080,26 @@ async function handleGetSession(req, res, sessionId) {
   const safeId = safeIdentifier(sessionId);
   if (!safeId) return sendJson(res, 400, { error: "Invalid session id" });
   await ensureDataDirs();
+  const filePath = path.join(SESSIONS_DIR, `${safeId}.json`);
+  let payload;
   try {
-    const payload = JSON.parse(await fs.readFile(path.join(SESSIONS_DIR, `${safeId}.json`), "utf8"));
-    return sendJson(res, 200, payload);
+    payload = JSON.parse(await fs.readFile(filePath, "utf8"));
   } catch {
     return sendJson(res, 404, { error: "Session not found" });
   }
+  const userId = currentUserId(req);
+  if (userId) {
+    // Owned by someone else → 404 (don't leak existence).
+    if (payload.userId && payload.userId !== userId) return sendJson(res, 404, { error: "Session not found" });
+    // Legacy/unclaimed → claim-on-access: stamp this user and resave.
+    if (!payload.userId) {
+      payload.userId = userId;
+      await fs.writeFile(filePath, JSON.stringify(payload, null, 2)).catch((error) => {
+        console.warn(`Could not claim session ${safeId}:`, error.message);
+      });
+    }
+  }
+  return sendJson(res, 200, payload);
 }
 
 async function handleSaveSession(req, res) {
@@ -2089,13 +2108,25 @@ async function handleSaveSession(req, res) {
   const summary = summarizeSession(state);
   if (!summary.id) return sendJson(res, 400, { error: "Session id is required" });
   await ensureDataDirs();
+  const userId = currentUserId(req);
+  const filePath = path.join(SESSIONS_DIR, `${safeIdentifier(summary.id)}.json`);
+  if (userId) {
+    // Block overwriting a session owned by a different user (404, no leak).
+    try {
+      const existing = JSON.parse(await fs.readFile(filePath, "utf8"));
+      if (existing.userId && existing.userId !== userId) return sendJson(res, 404, { error: "Session not found" });
+    } catch {
+      // no existing file — first save
+    }
+  }
   const payload = {
     version: 1,
     savedAt: new Date().toISOString(),
     summary,
     state
   };
-  await fs.writeFile(path.join(SESSIONS_DIR, `${safeIdentifier(summary.id)}.json`), JSON.stringify(payload, null, 2));
+  if (userId) payload.userId = userId; // stamp owner only when a user is present
+  await fs.writeFile(filePath, JSON.stringify(payload, null, 2));
   return sendJson(res, 200, { ok: true, summary });
 }
 
@@ -2103,7 +2134,18 @@ async function handleDeleteSession(req, res, sessionId) {
   const safeId = safeIdentifier(sessionId);
   if (!safeId) return sendJson(res, 400, { error: "Invalid session id" });
   await ensureDataDirs();
-  await fs.rm(path.join(SESSIONS_DIR, `${safeId}.json`), { force: true });
+  const filePath = path.join(SESSIONS_DIR, `${safeId}.json`);
+  const userId = currentUserId(req);
+  if (userId) {
+    // Same ownership check as get: another user's session → 404, don't delete.
+    try {
+      const existing = JSON.parse(await fs.readFile(filePath, "utf8"));
+      if (existing.userId && existing.userId !== userId) return sendJson(res, 404, { error: "Session not found" });
+    } catch {
+      // missing file → fall through to the idempotent rm below
+    }
+  }
+  await fs.rm(filePath, { force: true });
   return sendJson(res, 200, { ok: true });
 }
 
@@ -3283,6 +3325,13 @@ function readSession(req) {
   if (!AUTH_SESSION_SECRET) return null;
   const token = parseCookies(req)[AUTH_COOKIE_NAME];
   return token ? verifySignedValue(token) : null;
+}
+
+// Phase 5c: the stable per-user scoping key (Azure oid). null when the gate is
+// off or there's no valid session — in which case session handlers behave
+// exactly as before (no filtering, no stamping).
+function currentUserId(req) {
+  return readSession(req)?.sub || null;
 }
 
 function azureBaseUrl() {
