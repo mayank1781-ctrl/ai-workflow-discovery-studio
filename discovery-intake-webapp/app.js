@@ -1312,6 +1312,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupEvidenceDictation();
   setupBrowserVoices();
   checkAiStatus();
+  window.setInterval(checkAiStatus, 30000); // Change 3: live AI status every 30s
   syncSessionsFromServer();
   syncPackagesFromServer();
   render();
@@ -1482,8 +1483,15 @@ function setAppMode(mode) {
 }
 
 async function checkAiStatus() {
+  const healthStart = Date.now();
+  let healthTimer;
   try {
-    const data = await requestJson("/api/health");
+    const data = await Promise.race([
+      requestJson("/api/health"),
+      new Promise((_, reject) => { healthTimer = setTimeout(() => reject(new Error("health timeout")), 5000); })
+    ]);
+    clearTimeout(healthTimer);
+    const elapsedMs = Date.now() - healthStart;
     aiAvailable = Boolean(data.aiConfigured);
     realtimeAvailable = Boolean(data.realtimeConfigured);
     transcriptionAvailable = Boolean(data.transcriptionConfigured);
@@ -1492,9 +1500,13 @@ async function checkAiStatus() {
     const realtimeModel = data.realtimeModel || data.primaryModel || "gpt-realtime-2";
     transcriptionModel = data.transcriptionModel || transcriptionModel;
     const extractionModel = data.extractionModel || data.model || "structured extraction";
-    els.aiStatus.textContent = realtimeAvailable ? "AI online" : aiAvailable ? "Extraction online" : "AI offline";
+    // AI status pill reflects the health-ping result (Change 3): pulsing green
+    // "AI online" when the 200 is fast, amber "AI slow" when it took >= 2s.
+    const aiSlow = elapsedMs >= 2000;
+    els.aiStatus.textContent = aiSlow ? "AI slow" : "AI online";
     els.aiStatus.title = realtimeAvailable ? `Primary voice model: ${realtimeModel}. Structured extraction model: ${extractionModel}.` : "";
-    els.aiStatus.classList.toggle("active", aiAvailable || realtimeAvailable);
+    els.aiStatus.classList.toggle("active", !aiSlow);
+    els.aiStatus.style.color = aiSlow ? "#f59e0b" : "";
     renderLiveTestCommandCenter();
     renderOperatorAddOnsPanel();
     renderPilotControlSummary();
@@ -1519,9 +1531,11 @@ async function checkAiStatus() {
     transcriptionAvailable = false;
     ttsAvailable = false;
     addOnProviderStatus = buildFallbackAddOnProviderStatus();
+    clearTimeout(healthTimer);
     els.aiStatus.textContent = "AI offline";
     els.aiStatus.title = "";
     els.aiStatus.classList.remove("active");
+    els.aiStatus.style.color = "";
     renderLiveTestCommandCenter();
     renderOperatorAddOnsPanel();
     renderPilotControlSummary();
@@ -3249,8 +3263,8 @@ function stopRealtimeVoice(options = {}) {
 }
 
 function setRealtimeUi(label, connected) {
-  els.voiceStatus.textContent = label;
-  els.voiceStatus.classList.toggle("active", connected);
+  if (els.voiceStatus) els.voiceStatus.textContent = label;
+  els.voiceStatus?.classList.toggle("active", connected);
   els.startRealtimeButton.disabled = connected || !realtimeAvailable;
   els.stopRealtimeButton.disabled = !connected;
   const normalized = String(label || "").toLowerCase();
@@ -7085,26 +7099,14 @@ function cleanQuestionLabel(text) {
     .trim();
 }
 
-function renderQuestionLensBar(question = {}) {
+function renderQuestionLensBar() {
   if (!els.questionLensBar) return;
+  // Classification tag chips (archetype / confidence / source) are no longer
+  // rendered; only the next-gap preview remains. The archetype is still computed
+  // because it drives the next-question fallback below (logic unchanged).
   const archetype = activeUseCaseArchetype();
-  const source = question.source || state.currentQuestionSource || "Intake guide";
-  const status = archetypeConfidenceLabel(archetype);
   const nextGap = topCompletionQuestions(1)[0] || archetypeFollowUpQuestion(archetype);
-  // Stale source labels from earlier interview architectures should not surface
-  // as a lens-bar tag. Suppress the chip for these values only; all other source
-  // tags (e.g. "Workflow overview") still render normally.
-  const STALE_LENS_SOURCES = new Set(["A-Z process"]);
-  const sourceChip = STALE_LENS_SOURCES.has(source)
-    ? ""
-    : `<span class="question-lens-chip">${escapeHtml(source)}</span>`;
   els.questionLensBar.innerHTML = `
-    <span class="question-lens-chip primary">
-      <i data-lucide="${escapeHtml(archetype.icon)}"></i>
-      ${escapeHtml(archetype.label)}
-    </span>
-    <span class="question-lens-chip">${escapeHtml(status)}</span>
-    ${sourceChip}
     <span class="question-lens-next">${escapeHtml(truncateUi(nextGap, 96))}</span>
   `;
 }
@@ -7486,8 +7488,8 @@ function renderInterviewGuide(section = getActiveSection()) {
 
 function setCaptureStage(stage, label = "") {
   state.captureStage = stage;
-  if (label) els.voiceStatus.textContent = label;
-  els.voiceStatus.classList.toggle("active", stage !== "idle");
+  if (label && els.voiceStatus) els.voiceStatus.textContent = label;
+  els.voiceStatus?.classList.toggle("active", stage !== "idle");
   document.body.dataset.captureStage = stage;
   updateAiTurnStatus(stage);
   renderTurnSignalPanel();
