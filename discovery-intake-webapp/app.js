@@ -1315,6 +1315,12 @@ function bindEvents() {
   });
 
   document.getElementById("topbarNewButton")?.addEventListener("click", () => createNewSession({ appMode: "interview", activeWorkbenchTab: "handoff" }));
+  // Outside-click dismiss for the Open (saved sessions) dropdown — it can get
+  // long, so unlike the Help menu it closes when you click anywhere outside it.
+  document.addEventListener("click", (event) => {
+    const menu = document.getElementById("openSessionsMenu");
+    if (menu?.open && !menu.contains(event.target)) menu.removeAttribute("open");
+  });
   document.querySelectorAll("[data-app-mode]").forEach((button) => {
     button.addEventListener("click", () => setAppMode(button.dataset.appMode || "interview"));
   });
@@ -11058,14 +11064,21 @@ function caseScore(label, score, color) {
   `;
 }
 
-// Compact "Saved Sessions" panel for the Discovery view. Lists disk-persisted
-// sessions (and any local-only ones) from getCombinedSessionLibrary(); clicking
-// a row loads it into state via the existing loadSessionFromLibrary(), which
-// fetches GET /api/sessions/:id for server-only sessions.
+// "Saved Sessions" list shown inside the top-nav "Open" dropdown (the
+// #savedSessionsPanel container now lives in that <details> menu). Lists
+// disk-persisted sessions (and any local-only ones) from
+// getCombinedSessionLibrary(); clicking a row loads it into state via the
+// existing loadSessionFromLibrary(), which fetches GET /api/sessions/:id for
+// server-only sessions, then closes the dropdown.
 function renderSavedSessionsPanel() {
   const container = document.getElementById("savedSessionsPanel");
   if (!container) return;
   const sessions = getCombinedSessionLibrary();
+  const countBadge = document.getElementById("openSessionsCount");
+  if (countBadge) {
+    countBadge.textContent = String(sessions.length);
+    countBadge.style.display = sessions.length ? "" : "none";
+  }
   const currentId = state.sessionMeta?.id;
   const head = `
     <div class="saved-sessions-head" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
@@ -11093,7 +11106,10 @@ function renderSavedSessionsPanel() {
   }).join("");
   container.innerHTML = head + `<div style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow:auto;">${rows}</div>`;
   container.querySelectorAll("[data-load-session]").forEach((button) => {
-    button.addEventListener("click", () => loadSessionFromLibrary(button.dataset.loadSession));
+    button.addEventListener("click", () => {
+      button.closest("details")?.removeAttribute("open");
+      loadSessionFromLibrary(button.dataset.loadSession);
+    });
   });
   refreshIcons();
 }

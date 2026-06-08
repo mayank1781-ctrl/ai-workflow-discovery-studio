@@ -37,6 +37,16 @@
                 <i data-lucide="file-plus-2"></i>
                 New
               </button>
+              <details class="help-menu topbar-trio-help" id="openSessionsMenu">
+                <summary class="topbar-trio-button help-status" title="Open a saved session">
+                  <i data-lucide="folder-open"></i>
+                  Open
+                  <span class="ds-badge ds-badge-teal" id="openSessionsCount" style="display:none;"></span>
+                </summary>
+                <div class="help-popover" role="dialog" aria-label="Saved sessions">
+                  <div id="savedSessionsPanel" aria-label="Saved sessions"></div>
+                </div>
+              </details>
               <button class="topbar-trio-button" id="saveButton" type="button" title="Save locally">
                 <i data-lucide="save"></i>
                 Save
@@ -83,7 +93,6 @@
 
         <section class="interview-room discovery-cockpit" data-app-panel="interview">
           <section class="interview-stage" aria-label="Voice interview">
-            <div id="savedSessionsPanel" class="saved-sessions-panel" aria-label="Saved sessions"></div>
             <div class="question-stage-card discovery-hero-card">
               <div class="discovery-hero-grid">
                 <div class="discovery-question-area">
