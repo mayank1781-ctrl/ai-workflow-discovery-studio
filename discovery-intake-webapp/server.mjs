@@ -1045,6 +1045,25 @@ const server = http.createServer(async (req, res) => {
       return await handleJiraDisconnect(req, res);
     }
 
+    if (req.method === "GET" && requestUrl.pathname === "/api/connectors/confluence/auth") {
+      return await handleConfluenceAuth(req, res);
+    }
+    if (req.method === "GET" && requestUrl.pathname === "/api/connectors/confluence/callback") {
+      return await handleConfluenceCallback(req, res);
+    }
+    if (req.method === "GET" && requestUrl.pathname === "/api/connectors/confluence/status") {
+      return await handleConfluenceStatus(req, res);
+    }
+    if (req.method === "GET" && requestUrl.pathname === "/api/connectors/confluence/spaces") {
+      return await handleConfluenceSpaces(req, res);
+    }
+    if (req.method === "POST" && requestUrl.pathname === "/api/connectors/confluence/push") {
+      return await handleConfluencePush(req, res);
+    }
+    if (req.method === "DELETE" && requestUrl.pathname === "/api/connectors/confluence/disconnect") {
+      return await handleConfluenceDisconnect(req, res);
+    }
+
     if (req.method === "POST" && requestUrl.pathname === "/api/add-ons/test") {
       return await handleAddOnProviderTest(req, res);
     }
@@ -3295,7 +3314,8 @@ const AUTH_PUBLIC_PATHS = new Set([
   "/auth/login",
   "/auth/microsoft/callback",
   "/auth/logout",
-  "/api/connectors/jira/callback"
+  "/api/connectors/jira/callback",
+  "/api/connectors/confluence/callback"
 ]);
 function isPublicPath(pathname) {
   return AUTH_PUBLIC_PATHS.has(pathname);
@@ -3581,6 +3601,148 @@ async function handleJiraDisconnect(req, res) {
   return sendJson(res, 200, { ok: true });
 }
 // === end Phase 6a Jira connector ============================================
+
+// === Phase 6b: Confluence connector (shares the Jira/Atlassian OAuth) =======
+const CONFLUENCE_REDIRECT_URI = "http://localhost:5173/api/connectors/confluence/callback";
+
+function confluenceTokenPath(userId) {
+  return path.join(CONNECTIONS_DIR, `${userId || "anon"}-confluence.json`);
+}
+
+// Prefer a dedicated Confluence token; fall back to the Jira token (shared OAuth app).
+async function readConfluenceToken(userId) {
+  try { return JSON.parse(await fs.readFile(confluenceTokenPath(userId), "utf8")); }
+  catch { /* fall through to the shared Jira token */ }
+  try { return JSON.parse(await fs.readFile(jiraTokenPath(userId), "utf8")); }
+  catch { return null; }
+}
+
+async function writeConfluenceToken(userId, data) {
+  await fs.mkdir(CONNECTIONS_DIR, { recursive: true });
+  await fs.writeFile(confluenceTokenPath(userId), JSON.stringify(data, null, 2));
+}
+
+async function handleConfluenceAuth(req, res) {
+  if (!JIRA_CLIENT_ID) return sendJson(res, 503, { error: "Confluence not configured on this server" });
+  const state = crypto.randomBytes(16).toString("hex");
+  jiraOAuthStates.set(state, { userId: currentUserId(req), exp: Date.now() + 600_000, connector: "confluence" });
+  const url = "https://auth.atlassian.com/authorize"
+    + "?audience=api.atlassian.com"
+    + `&client_id=${JIRA_CLIENT_ID}`
+    + "&scope=read%3Aconfluence-space.summary%20write%3Aconfluence-content%20read%3Aconfluence-content.all%20offline_access"
+    + `&redirect_uri=${encodeURIComponent(CONFLUENCE_REDIRECT_URI)}`
+    + `&state=${state}`
+    + "&response_type=code"
+    + "&prompt=consent";
+  res.writeHead(302, { Location: url });
+  res.end();
+}
+
+async function handleConfluenceCallback(req, res) {
+  const url = new URL(req.url, `http://localhost:${PORT}`);
+  const code = url.searchParams.get("code");
+  const state = url.searchParams.get("state");
+  const error = url.searchParams.get("error");
+  try {
+    if (error) { res.writeHead(302, { Location: "/?confluence=error#engineering-doc" }); res.end(); return; }
+    const entry = jiraOAuthStates.get(state);
+    if (!entry || entry.exp < Date.now()) return sendJson(res, 400, { error: "Invalid or expired state" });
+    const userId = entry.userId;
+    jiraOAuthStates.delete(state);
+
+    const tokenResp = await httpsRequest("POST", "https://auth.atlassian.com/oauth/token",
+      { "Content-Type": "application/json" },
+      { grant_type: "authorization_code", client_id: JIRA_CLIENT_ID, client_secret: JIRA_CLIENT_SECRET, code, redirect_uri: CONFLUENCE_REDIRECT_URI });
+    if (tokenResp.status !== 200) { res.writeHead(302, { Location: "/?confluence=error#engineering-doc" }); res.end(); return; }
+    const { access_token, refresh_token, expires_in } = tokenResp.body;
+
+    const resourcesResp = await httpsRequest("GET", "https://api.atlassian.com/oauth/token/accessible-resources",
+      { Authorization: `Bearer ${access_token}`, Accept: "application/json" });
+    const resources = resourcesResp.body;
+    if (!Array.isArray(resources) || !resources.length) { res.writeHead(302, { Location: "/?confluence=error#engineering-doc" }); res.end(); return; }
+    const cloudId = resources[0].id;
+    const cloudName = resources[0].name;
+
+    await writeConfluenceToken(userId, { access_token, refresh_token, expires_in, cloudId, cloudName, connectedAt: new Date().toISOString() });
+    res.writeHead(302, { Location: "/?confluence=connected#engineering-doc" });
+    res.end();
+  } catch (err) {
+    console.error("[confluence-callback] ERROR:", err?.message || err);
+    res.writeHead(302, { Location: "/?confluence=error#engineering-doc" });
+    res.end();
+  }
+}
+
+async function handleConfluenceStatus(req, res) {
+  const token = await readConfluenceToken(currentUserId(req));
+  if (!token) return sendJson(res, 200, { connected: false });
+  return sendJson(res, 200, { connected: true, cloudName: token.cloudName, connectedAt: token.connectedAt });
+}
+
+async function handleConfluenceSpaces(req, res) {
+  const token = await readConfluenceToken(currentUserId(req));
+  if (!token) return sendJson(res, 401, { error: "Not connected to Confluence" });
+  const resp = await httpsRequest("GET",
+    `https://api.atlassian.com/ex/confluence/${token.cloudId}/wiki/rest/api/space?limit=50&type=global`,
+    { Authorization: `Bearer ${token.access_token}`, Accept: "application/json" });
+  const results = (resp.body && resp.body.results) || [];
+  return sendJson(res, 200, { spaces: results.map((s) => ({ key: s.key, name: s.name })) });
+}
+
+function confluenceEscape(value) {
+  return String(value == null ? "" : value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+async function handleConfluencePush(req, res) {
+  const token = await readConfluenceToken(currentUserId(req));
+  if (!token) return sendJson(res, 401, { error: "Not connected to Confluence" });
+  const body = await readJson(req);
+  const { spaceKey, sessionName, steps } = body;
+  if (!spaceKey) return sendJson(res, 400, { error: "spaceKey required" });
+  if (!steps || !steps.length) return sendJson(res, 400, { error: "No steps to push" });
+
+  const title = `AI Workflow: ${sessionName || "Untitled"} — Engineering Spec`;
+  const stepsHtml = steps.map((step) => `
+    <h2>${confluenceEscape(step.name || "Untitled Step")}</h2>
+    <table>
+      <tbody>
+        <tr><th>AI Pattern</th><td>${confluenceEscape(step.aiPattern || "—")}</td></tr>
+        <tr><th>Systems / Tools</th><td>${confluenceEscape(step.systemsTools || "—")}</td></tr>
+        <tr><th>Description</th><td>${confluenceEscape(step.description || "—")}</td></tr>
+        <tr><th>Scoring Tier</th><td>${confluenceEscape(step.tier || "—")}</td></tr>
+        <tr><th>Time Taken</th><td>${step.timeTaken ? confluenceEscape(step.timeTaken) + " min" : "—"}</td></tr>
+      </tbody>
+    </table>
+  `).join("<hr/>");
+  const pageBody = `
+    <h1>AI Workflow Engineering Specification</h1>
+    <p><strong>Workflow:</strong> ${confluenceEscape(sessionName || "Untitled")}</p>
+    <p><strong>Generated:</strong> ${new Date().toISOString()}</p>
+    <hr/>
+    ${stepsHtml}
+  `;
+
+  const resp = await httpsRequest("POST",
+    `https://api.atlassian.com/ex/confluence/${token.cloudId}/wiki/rest/api/content`,
+    { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json", Accept: "application/json" },
+    { type: "page", title, space: { key: spaceKey }, body: { storage: { value: pageBody, representation: "storage" } } });
+  if (resp.status === 401) return sendJson(res, 401, { error: "Confluence token expired — reconnect" });
+  if (resp.status !== 200 && resp.status !== 201) {
+    console.error("[confluence-push] rejected:", resp.status, JSON.stringify(resp.body));
+    return sendJson(res, 502, { error: "Confluence rejected the page", detail: resp.body });
+  }
+  const pageUrl = `https://${token.cloudName}.atlassian.net/wiki${resp.body._links?.webui || ""}`;
+  return sendJson(res, 200, { pageUrl, title });
+}
+
+async function handleConfluenceDisconnect(req, res) {
+  try { await fs.unlink(confluenceTokenPath(currentUserId(req))); } catch { /* already gone */ }
+  return sendJson(res, 200, { ok: true });
+}
+// === end Phase 6b Confluence connector ======================================
 
 function azureBaseUrl() {
   return `https://login.microsoftonline.com/${encodeURIComponent(AUTH_AZURE_TENANT_ID)}/oauth2/v2.0`;

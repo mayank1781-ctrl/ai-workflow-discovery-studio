@@ -1113,6 +1113,7 @@ let recognition = null;
 let isListening = false;
 let aiAvailable = false;
 let jiraStatus = { connected: false }; // Phase 6a: Jira connector state
+let confluenceStatus = { connected: false }; // Phase 6b: Confluence connector state
 let realtimeAvailable = false;
 let addOnProviderStatus = null;
 let addOnTestRun = {
@@ -1287,6 +1288,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const jiraParam = new URLSearchParams(window.location.search).get("jira");
   if (jiraParam === "connected") { toast("Jira connected successfully"); history.replaceState({}, "", window.location.pathname + window.location.hash); }
   if (jiraParam === "error") { toast("Jira connection failed — check Atlassian app settings"); history.replaceState({}, "", window.location.pathname + window.location.hash); }
+  const confluenceParam = new URLSearchParams(window.location.search).get("confluence");
+  if (confluenceParam === "connected") { toast("Confluence connected successfully"); history.replaceState({}, "", window.location.pathname + window.location.hash); }
+  if (confluenceParam === "error") { toast("Confluence connection failed — check Atlassian app settings"); history.replaceState({}, "", window.location.pathname + window.location.hash); }
 
   window.mermaid?.initialize({
     startOnLoad: false,
@@ -5227,6 +5231,101 @@ function disconnectJira() {
     .catch(() => toast("Failed to disconnect"));
 }
 
+// --- Phase 6b: Confluence connector UI ---
+async function refreshConfluenceStatus() {
+  try {
+    const r = await fetch("/api/connectors/confluence/status");
+    confluenceStatus = await r.json();
+  } catch {
+    confluenceStatus = { connected: false };
+  }
+}
+
+// Confluence status bar, shown below the Jira bar on the Engineering Doc tab.
+function confluenceStatusBarHtml() {
+  if (!confluenceStatus.connected) {
+    return `
+      <div style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:#162438;border:1px solid #1e3350;border-radius:8px;margin-bottom:12px;">
+        <span style="color:#8899aa;font-size:13px;">Confluence not connected</span>
+        <button onclick="connectConfluence()" class="ds-btn-ghost" style="margin-left:auto;font-size:12px;padding:5px 14px;">Connect Confluence</button>
+      </div>`;
+  }
+  return `
+    <div style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:#162438;border:1px solid #1e3350;border-radius:8px;margin-bottom:12px;">
+      <span class="ds-dot ds-dot-purple ds-dot-pulse"></span>
+      <span style="color:#e8f4ff;font-size:13px;">Confluence connected — <strong style="color:#a855f7;">${escapeHtml(confluenceStatus.cloudName || "")}</strong></span>
+      <button onclick="disconnectConfluence()" class="ds-btn-ghost" style="margin-left:auto;font-size:12px;">Disconnect</button>
+    </div>
+    <div style="margin-bottom:20px;display:flex;align-items:center;gap:10px;">
+      <label style="color:#8899aa;font-size:12px;white-space:nowrap;">Push to space:</label>
+      <select id="confluence-space-select" style="background:#0a1525;color:#e8f4ff;border:1px solid #1e3350;border-radius:6px;padding:5px 10px;font-size:13px;">
+        <option value="">Loading spaces…</option>
+      </select>
+      <button onclick="pushDocToConfluence()" class="ds-btn-ghost" style="font-size:12px;padding:5px 14px;">↑ Push full doc to Confluence</button>
+    </div>
+    <div id="confluence-page-link" style="margin-bottom:16px;min-height:20px;"></div>`;
+}
+
+function populateConfluenceSpaces() {
+  fetch("/api/connectors/confluence/spaces")
+    .then((r) => r.json())
+    .then((data) => {
+      const sel = document.getElementById("confluence-space-select");
+      if (!sel) return;
+      sel.innerHTML = '<option value="">Select space…</option>'
+        + (data.spaces || []).map((s) => `<option value="${escapeHtml(s.key)}">${escapeHtml(s.name)} (${escapeHtml(s.key)})</option>`).join("");
+    })
+    .catch(() => {});
+}
+
+function connectConfluence() {
+  window.location.href = "/api/connectors/confluence/auth";
+}
+
+function disconnectConfluence() {
+  fetch("/api/connectors/confluence/disconnect", { method: "DELETE" })
+    .then(() => { confluenceStatus = { connected: false }; renderAnalysisTabEngineering(); })
+    .catch(() => toast("Failed to disconnect"));
+}
+
+async function pushDocToConfluence() {
+  const spaceKey = document.getElementById("confluence-space-select")?.value;
+  if (!spaceKey) { toast("Select a Confluence space first"); return; }
+  if (!state.workflowGrid?.steps?.length) { toast("No workflow steps to push"); return; }
+  const steps = state.workflowGrid.steps.map((step) => {
+    const meta = getStepOpportunityMeta(step);
+    return {
+      name: step.cells.name?.value || "Untitled step",
+      description: step.cells.description?.value || "",
+      aiPattern: gridCellValue(step, "aiPattern"), // cell value is an array; join to a string
+      systemsTools: step.cells.systemsTools?.value || "",
+      timeTaken: step.cells.timeTaken?.value,
+      tier: meta.tier
+    };
+  });
+  toast("Pushing to Confluence…");
+  try {
+    const res = await fetch("/api/connectors/confluence/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        spaceKey,
+        sessionName: state.sessionMeta?.workflowName || state.sessionMeta?.name || "Untitled",
+        steps
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) { toast(data.error || "Push to Confluence failed"); return; }
+    toast("Confluence page created ✓");
+    const bar = document.getElementById("confluence-page-link");
+    if (bar) {
+      bar.innerHTML = `<a href="${escapeHtml(data.pageUrl)}" target="_blank" style="color:#a855f7;font-size:13px;">↗ View in Confluence: ${escapeHtml(data.title)}</a>`;
+    }
+  } catch {
+    toast("Push to Confluence failed");
+  }
+}
+
 async function pushStepToJira(stepId) {
   const projectKey = document.getElementById("jira-project-select")?.value;
   if (!projectKey) { toast("Select a Jira project first"); return; }
@@ -5273,11 +5372,14 @@ async function renderAnalysisTabEngineering() {
   const container = document.getElementById("analysis-tab-engineering");
   if (!container) return;
   await refreshJiraStatus();
+  await refreshConfluenceStatus();
   const jiraBar = jiraStatusBarHtml();
+  const confluenceBar = confluenceStatusBarHtml();
   const steps = analysisGridSteps();
   if (!steps.length) {
-    container.innerHTML = jiraBar + `<div class="summary-item">No workflow steps yet. Capture a process to build the engineering doc.</div>`;
+    container.innerHTML = jiraBar + confluenceBar + `<div class="summary-item">No workflow steps yet. Capture a process to build the engineering doc.</div>`;
     if (jiraStatus.connected) populateJiraProjects();
+    if (confluenceStatus.connected) populateConfluenceSpaces();
     return;
   }
 
@@ -5495,8 +5597,9 @@ async function renderAnalysisTabEngineering() {
       ${cards}
     </div>`;
 
-  container.innerHTML = jiraBar + section1 + toolbar + section2 + section3 + section4;
+  container.innerHTML = jiraBar + confluenceBar + section1 + toolbar + section2 + section3 + section4;
   if (jiraStatus.connected) populateJiraProjects();
+  if (confluenceStatus.connected) populateConfluenceSpaces();
 
   container.querySelector("#exportEngineeringDocBtn")?.addEventListener("click", exportEngineeringDoc);
   const engineeringExportBtn = container.querySelector("#engineering-export-btn");
