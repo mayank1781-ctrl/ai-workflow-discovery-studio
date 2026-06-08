@@ -94,8 +94,9 @@ HMAC-signed, httpOnly cookie — no server-side session store, no new dependenci
 Routes added: `GET /auth/login` → Microsoft authorize redirect; `GET /auth/microsoft/callback`
 → token exchange + set cookie; `POST /auth/logout` → clear cookie; `GET /api/me` → current user.
 `/api/health` and `/login.html` stay public. Azure app registration: scopes `openid profile email`,
-redirect URI = `AUTH_REDIRECT_URI`. (5a trusts the `id_token` over the direct TLS token exchange;
-JWKS signature verification is a 5b hardening step.)
+redirect URI = `AUTH_REDIRECT_URI`. The `id_token` is verified (5b): its RS256 signature is checked
+against the tenant's Azure JWKS, and the issuer, audience (`AUTH_AZURE_CLIENT_ID`), tenant
+(`AUTH_AZURE_TENANT_ID`), and expiry claims are validated before a session is issued.
 
 ## Local Safety Rules
 

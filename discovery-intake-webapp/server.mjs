@@ -3322,12 +3322,53 @@ async function exchangeCodeForToken(code) {
   return data.id_token;
 }
 
-// 5a: decode claims WITHOUT verifying the JWT signature (trusted TLS channel).
-// 5b will validate the signature against the Azure JWKS.
-function decodeIdToken(idToken) {
+// 5b: verify the id_token's RS256 signature against Azure's published JWKS and
+// validate issuer / audience / tenant / expiry. Zero deps — Node crypto builds
+// the public key straight from the JWK. Keys are cached and refetched on a kid
+// miss (Azure rotates signing keys).
+let azureJwksCache = { keys: [], fetchedAt: 0 };
+const AZURE_JWKS_TTL_MS = 60 * 60 * 1000;
+
+async function fetchAzureJwks(force = false) {
+  const fresh = Date.now() - azureJwksCache.fetchedAt < AZURE_JWKS_TTL_MS;
+  if (!force && fresh && azureJwksCache.keys.length) return azureJwksCache.keys;
+  const resp = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(AUTH_AZURE_TENANT_ID)}/discovery/v2.0/keys`);
+  if (!resp.ok) throw new Error(`JWKS fetch failed (${resp.status})`);
+  const data = await resp.json().catch(() => ({}));
+  azureJwksCache = { keys: Array.isArray(data.keys) ? data.keys : [], fetchedAt: Date.now() };
+  return azureJwksCache.keys;
+}
+
+async function getAzureSigningKey(kid) {
+  let jwk = (await fetchAzureJwks(false)).find((k) => k.kid === kid);
+  if (!jwk) jwk = (await fetchAzureJwks(true)).find((k) => k.kid === kid); // refetch on rotation
+  if (!jwk) throw new Error("No matching JWKS key for token kid");
+  return crypto.createPublicKey({ key: jwk, format: "jwk" });
+}
+
+async function verifyIdToken(idToken) {
   const parts = String(idToken).split(".");
-  if (parts.length < 2) throw new Error("Malformed id_token");
-  return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+  if (parts.length !== 3) throw new Error("Malformed id_token");
+  const [headerB64, payloadB64, sigB64] = parts;
+  const header = JSON.parse(Buffer.from(headerB64, "base64url").toString("utf8"));
+  if (header.alg !== "RS256") throw new Error(`Unexpected id_token alg: ${header.alg}`);
+  const pubKey = await getAzureSigningKey(header.kid);
+  const verified = crypto.verify(
+    "RSA-SHA256",
+    Buffer.from(`${headerB64}.${payloadB64}`),
+    pubKey,
+    Buffer.from(sigB64, "base64url")
+  );
+  if (!verified) throw new Error("id_token signature verification failed");
+
+  const claims = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8"));
+  const now = Math.floor(Date.now() / 1000);
+  if (claims.iss !== `https://login.microsoftonline.com/${AUTH_AZURE_TENANT_ID}/v2.0`) throw new Error("id_token issuer mismatch");
+  if (claims.aud !== AUTH_AZURE_CLIENT_ID) throw new Error("id_token audience mismatch");
+  if (claims.tid && claims.tid !== AUTH_AZURE_TENANT_ID) throw new Error("id_token tenant mismatch");
+  if (typeof claims.exp === "number" && now >= claims.exp) throw new Error("id_token expired");
+  if (typeof claims.nbf === "number" && now < claims.nbf - 60) throw new Error("id_token not yet valid");
+  return claims;
 }
 
 function authConfigReady() {
@@ -3348,9 +3389,8 @@ async function handleAuthCallback(req, res) {
   const state = url.searchParams.get("state");
   if (!code || !verifySignedValue(state)) return sendRedirect(res, "/login.html?error=1");
   try {
-    const claims = decodeIdToken(await exchangeCodeForToken(code));
-    // Single-tenant guard: the issuing tenant must match the configured tenant.
-    if (claims.tid && claims.tid !== AUTH_AZURE_TENANT_ID) return sendRedirect(res, "/login.html?error=1");
+    // verifyIdToken checks the RS256 signature + issuer/audience/tenant/expiry.
+    const claims = await verifyIdToken(await exchangeCodeForToken(code));
     setSessionCookie(res, {
       sub: claims.oid || claims.sub || "",
       email: claims.email || claims.preferred_username || "",
