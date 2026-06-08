@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sign in · AI Workflow Discovery Studio</title>
+    <link rel="icon" href="data:," />
+    <style>
+      /* Self-contained so the auth gate only needs to allow /login.html. */
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #0d1b2e;
+        color: #e2e8f0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      .login-card {
+        width: min(380px, calc(100vw - 32px));
+        background: #1a2d42;
+        border: 1px solid #2a3f5f;
+        border-radius: 14px;
+        padding: 32px 28px;
+        text-align: center;
+        box-shadow: 0 24px 90px rgba(0, 0, 0, 0.42);
+      }
+      .brand-mark {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #00d4b4, #ff4fc8);
+        color: #0d1b2e;
+        font-weight: 800;
+        font-size: 18px;
+        margin-bottom: 16px;
+      }
+      h1 { font-size: 1.15rem; margin: 0 0 6px; color: #e8f4ff; }
+      p.sub { margin: 0 0 22px; font-size: 0.82rem; color: #8899aa; line-height: 1.5; }
+      a.signin {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        width: 100%;
+        padding: 11px 18px;
+        border-radius: 8px;
+        background: #00d4b4;
+        color: #0d1b2e;
+        font-weight: 700;
+        font-size: 0.9rem;
+        text-decoration: none;
+        box-shadow: 0 0 18px rgba(0, 212, 180, 0.3);
+      }
+      a.signin:hover { box-shadow: 0 0 28px rgba(0, 212, 180, 0.5); }
+      .error {
+        display: none;
+        margin: 0 0 16px;
+        padding: 9px 12px;
+        border-radius: 8px;
+        background: rgba(239, 68, 68, 0.08);
+        border: 1px solid rgba(239, 68, 68, 0.25);
+        color: #f87171;
+        font-size: 0.78rem;
+        line-height: 1.4;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="login-card">
+      <div class="brand-mark">AI</div>
+      <h1>AI Workflow Discovery Studio</h1>
+      <p class="sub">Sign in with your organization account to continue.</p>
+      <div class="error" id="loginError"></div>
+      <a class="signin" href="/auth/login">Sign in with Microsoft</a>
+    </main>
+    <script>
+      // Surface a friendly message when the callback bounced back with ?error=.
+      (function () {
+        var params = new URLSearchParams(window.location.search);
+        var error = params.get("error");
+        if (!error) return;
+        var el = document.getElementById("loginError");
+        el.textContent = error === "config"
+          ? "Sign-in is not configured yet. Contact your administrator."
+          : "Sign-in could not be completed. Please try again.";
+        el.style.display = "block";
+      })();
+    </script>
+  </body>
+</html>

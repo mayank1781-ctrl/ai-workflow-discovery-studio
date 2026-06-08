@@ -1321,6 +1321,7 @@ function bindEvents() {
     const menu = document.getElementById("openSessionsMenu");
     if (menu?.open && !menu.contains(event.target)) menu.removeAttribute("open");
   });
+  hydrateAuthControls();
   document.querySelectorAll("[data-app-mode]").forEach((button) => {
     button.addEventListener("click", () => setAppMode(button.dataset.appMode || "interview"));
   });
@@ -11112,6 +11113,37 @@ function renderSavedSessionsPanel() {
     });
   });
   refreshIcons();
+}
+
+// Phase 5a auth controls: when the Azure AD gate is enabled and a user is
+// signed in, show their name + a POST logout button in the top nav. Renders
+// nothing when AUTH_ENABLED is false (the gate is a no-op), so the un-gated app
+// is visually unchanged. /api/me is a public endpoint.
+async function hydrateAuthControls() {
+  const host = document.getElementById("authControls");
+  if (!host) return;
+  let data;
+  try {
+    data = await requestJson("/api/me");
+  } catch {
+    return;
+  }
+  if (!data || !data.authEnabled || !data.user) {
+    host.innerHTML = "";
+    return;
+  }
+  const label = escapeHtml(data.user.name || data.user.email || "Signed in");
+  host.innerHTML = `
+    <span style="font-size:0.78rem;color:#8899aa;margin-right:8px;" title="${escapeHtml(data.user.email || "")}">${label}</span>
+    <button type="button" id="logoutButton" class="topbar-trio-button" title="Sign out">Log out</button>`;
+  document.getElementById("logoutButton")?.addEventListener("click", async () => {
+    try {
+      await requestJson("/auth/logout", { method: "POST" });
+    } catch {
+      // fall through to the redirect regardless — the gate will re-challenge
+    }
+    window.location.href = "/login.html";
+  });
 }
 
 function formatSavedSessionDate(value) {

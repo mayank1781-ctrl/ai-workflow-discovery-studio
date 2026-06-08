@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import crypto from "node:crypto";
 import dotenv from "dotenv";
 import Busboy from "busboy";
 import mammoth from "mammoth";
@@ -94,6 +95,24 @@ const BRAINTRUST_API_KEY = process.env.BRAINTRUST_API_KEY || "";
 const LANGFUSE_PUBLIC_KEY = process.env.LANGFUSE_PUBLIC_KEY || "";
 const LANGFUSE_SECRET_KEY = process.env.LANGFUSE_SECRET_KEY || "";
 const ADDON_LIVE_TEST_TIMEOUT_MS = Number(process.env.ADDON_LIVE_TEST_TIMEOUT_MS || 8000);
+
+// --- Phase 5a: Azure AD auth gate (scaffolding) -----------------------------
+// Single-tenant OAuth2 code flow with stateless signed-cookie sessions. The
+// whole gate is a no-op while AUTH_ENABLED is false, so the app runs completely
+// un-gated by default (local dev + CI stay green). JWKS signature verification
+// of the id_token is intentionally deferred to 5b — in 5a the token is trusted
+// because it arrives over a direct server-to-server TLS channel.
+const AUTH_ENABLED = String(process.env.AUTH_ENABLED || "false").toLowerCase() === "true";
+const AUTH_AZURE_TENANT_ID = process.env.AUTH_AZURE_TENANT_ID || "";
+const AUTH_AZURE_CLIENT_ID = process.env.AUTH_AZURE_CLIENT_ID || "";
+const AUTH_AZURE_CLIENT_SECRET = process.env.AUTH_AZURE_CLIENT_SECRET || "";
+const AUTH_REDIRECT_URI = process.env.AUTH_REDIRECT_URI
+  || `${process.env.APP_BASE_URL || `http://localhost:${process.env.PORT || 5173}`}/auth/microsoft/callback`;
+const AUTH_SESSION_SECRET = process.env.AUTH_SESSION_SECRET || "";
+const AUTH_SESSION_TTL_HOURS = Number(process.env.AUTH_SESSION_TTL_HOURS || 12);
+const AUTH_COOKIE_SECURE = String(process.env.APP_ENV || "local").toLowerCase() !== "local";
+const AUTH_COOKIE_NAME = "ds_session";
+
 const DATA_DIR = path.join(__dirname, "data");
 const SESSIONS_DIR = path.join(DATA_DIR, "sessions");
 const PACKAGES_DIR = path.join(DATA_DIR, "packages");
@@ -936,6 +955,16 @@ async function handleDetectConnectors(req, res) {
 const server = http.createServer(async (req, res) => {
   try {
     const requestUrl = new URL(req.url, `http://localhost:${PORT}`);
+
+    // Auth gate (no-op unless AUTH_ENABLED=true): unauthenticated API calls get
+    // 401; unauthenticated page/asset loads are redirected to the login page.
+    if (AUTH_ENABLED && !isPublicPath(requestUrl.pathname) && !readSession(req)) {
+      if (requestUrl.pathname.startsWith("/api/")) {
+        return sendJson(res, 401, { error: "auth_required" });
+      }
+      return sendRedirect(res, "/login.html");
+    }
+
     if (req.method === "GET" && requestUrl.pathname === "/api/health") {
       return sendJson(res, 200, {
         ok: true,
@@ -962,6 +991,22 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         enterprise: buildEnterpriseConfigStatus()
       });
+    }
+
+    if (req.method === "GET" && requestUrl.pathname === "/auth/login") {
+      return await handleAuthLogin(req, res);
+    }
+
+    if (req.method === "GET" && requestUrl.pathname === "/auth/microsoft/callback") {
+      return await handleAuthCallback(req, res);
+    }
+
+    if (req.method === "POST" && requestUrl.pathname === "/auth/logout") {
+      return await handleAuthLogout(req, res);
+    }
+
+    if (req.method === "GET" && requestUrl.pathname === "/api/me") {
+      return await handleMe(req, res);
     }
 
     if (req.method === "POST" && requestUrl.pathname === "/api/add-ons/test") {
@@ -3149,6 +3194,189 @@ function sendJson(res, status, payload) {
   });
   res.end(JSON.stringify(payload));
 }
+
+// === Phase 5a: Azure AD auth gate (scaffolding) =============================
+// All routes are public until AUTH_ENABLED=true. Sessions are stateless: a
+// signed (HMAC-SHA256) httpOnly cookie carrying { sub, email, name, exp }.
+
+// Paths reachable without a session (the login page is self-contained, so only
+// /login.html itself needs to pass — no app.js/CSS exceptions).
+const AUTH_PUBLIC_PATHS = new Set([
+  "/api/health",
+  "/api/me",
+  "/login.html",
+  "/favicon.ico",
+  "/auth/login",
+  "/auth/microsoft/callback",
+  "/auth/logout"
+]);
+function isPublicPath(pathname) {
+  return AUTH_PUBLIC_PATHS.has(pathname);
+}
+
+function sendRedirect(res, location, status = 302) {
+  res.writeHead(status, { Location: location, "Cache-Control": "no-store" });
+  res.end();
+}
+
+function parseCookies(req) {
+  const header = req.headers.cookie || "";
+  const out = {};
+  for (const pair of header.split(";")) {
+    const idx = pair.indexOf("=");
+    if (idx === -1) continue;
+    const key = pair.slice(0, idx).trim();
+    if (key) out[key] = decodeURIComponent(pair.slice(idx + 1).trim());
+  }
+  return out;
+}
+
+function authHmac(value) {
+  return crypto.createHmac("sha256", AUTH_SESSION_SECRET).update(value).digest("base64url");
+}
+
+// payload.signature; payload is base64url(JSON). Returns "" when unsigned/secret missing.
+function signValue(obj) {
+  if (!AUTH_SESSION_SECRET) return "";
+  const payload = Buffer.from(JSON.stringify(obj)).toString("base64url");
+  return `${payload}.${authHmac(payload)}`;
+}
+
+// Verify HMAC (constant-time) + exp; returns the parsed object or null.
+function verifySignedValue(token) {
+  if (!AUTH_SESSION_SECRET || typeof token !== "string" || !token.includes(".")) return null;
+  const [payload, sig] = token.split(".");
+  if (!payload || !sig) return null;
+  const expected = authHmac(payload);
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  let obj;
+  try {
+    obj = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (obj && typeof obj.exp === "number" && Date.now() > obj.exp) return null;
+  return obj;
+}
+
+function setSessionCookie(res, claims) {
+  const attrs = [
+    `${AUTH_COOKIE_NAME}=${signValue(claims)}`,
+    "HttpOnly",
+    "Path=/",
+    "SameSite=Lax",
+    `Max-Age=${AUTH_SESSION_TTL_HOURS * 3600}`
+  ];
+  if (AUTH_COOKIE_SECURE) attrs.push("Secure");
+  res.setHeader("Set-Cookie", attrs.join("; "));
+}
+
+function clearSessionCookie(res) {
+  const attrs = [`${AUTH_COOKIE_NAME}=`, "HttpOnly", "Path=/", "SameSite=Lax", "Max-Age=0"];
+  if (AUTH_COOKIE_SECURE) attrs.push("Secure");
+  res.setHeader("Set-Cookie", attrs.join("; "));
+}
+
+function readSession(req) {
+  if (!AUTH_SESSION_SECRET) return null;
+  const token = parseCookies(req)[AUTH_COOKIE_NAME];
+  return token ? verifySignedValue(token) : null;
+}
+
+function azureBaseUrl() {
+  return `https://login.microsoftonline.com/${encodeURIComponent(AUTH_AZURE_TENANT_ID)}/oauth2/v2.0`;
+}
+
+function buildAuthorizeUrl(state) {
+  const params = new URLSearchParams({
+    client_id: AUTH_AZURE_CLIENT_ID,
+    response_type: "code",
+    redirect_uri: AUTH_REDIRECT_URI,
+    response_mode: "query",
+    scope: "openid profile email",
+    state
+  });
+  return `${azureBaseUrl()}/authorize?${params.toString()}`;
+}
+
+async function exchangeCodeForToken(code) {
+  const body = new URLSearchParams({
+    client_id: AUTH_AZURE_CLIENT_ID,
+    client_secret: AUTH_AZURE_CLIENT_SECRET,
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: AUTH_REDIRECT_URI,
+    scope: "openid profile email"
+  });
+  const resp = await fetch(`${azureBaseUrl()}/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || !data.id_token) {
+    throw new Error(data.error_description || `Token exchange failed (${resp.status})`);
+  }
+  return data.id_token;
+}
+
+// 5a: decode claims WITHOUT verifying the JWT signature (trusted TLS channel).
+// 5b will validate the signature against the Azure JWKS.
+function decodeIdToken(idToken) {
+  const parts = String(idToken).split(".");
+  if (parts.length < 2) throw new Error("Malformed id_token");
+  return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+}
+
+function authConfigReady() {
+  return Boolean(AUTH_AZURE_TENANT_ID && AUTH_AZURE_CLIENT_ID && AUTH_AZURE_CLIENT_SECRET && AUTH_SESSION_SECRET);
+}
+
+async function handleAuthLogin(req, res) {
+  if (!AUTH_ENABLED) return sendJson(res, 404, { error: "Auth disabled" });
+  if (!authConfigReady()) return sendRedirect(res, "/login.html?error=config");
+  const state = signValue({ n: crypto.randomBytes(12).toString("base64url"), exp: Date.now() + 10 * 60 * 1000 });
+  return sendRedirect(res, buildAuthorizeUrl(state));
+}
+
+async function handleAuthCallback(req, res) {
+  if (!AUTH_ENABLED) return sendJson(res, 404, { error: "Auth disabled" });
+  const url = new URL(req.url, `http://localhost:${PORT}`);
+  const code = url.searchParams.get("code");
+  const state = url.searchParams.get("state");
+  if (!code || !verifySignedValue(state)) return sendRedirect(res, "/login.html?error=1");
+  try {
+    const claims = decodeIdToken(await exchangeCodeForToken(code));
+    // Single-tenant guard: the issuing tenant must match the configured tenant.
+    if (claims.tid && claims.tid !== AUTH_AZURE_TENANT_ID) return sendRedirect(res, "/login.html?error=1");
+    setSessionCookie(res, {
+      sub: claims.oid || claims.sub || "",
+      email: claims.email || claims.preferred_username || "",
+      name: claims.name || "",
+      exp: Date.now() + AUTH_SESSION_TTL_HOURS * 3600 * 1000
+    });
+    return sendRedirect(res, "/");
+  } catch (error) {
+    console.error("Auth callback failed:", error.message);
+    return sendRedirect(res, "/login.html?error=1");
+  }
+}
+
+async function handleAuthLogout(req, res) {
+  clearSessionCookie(res);
+  return sendJson(res, 200, { ok: true });
+}
+
+async function handleMe(req, res) {
+  const session = readSession(req);
+  return sendJson(res, 200, {
+    authEnabled: AUTH_ENABLED,
+    user: session ? { name: session.name, email: session.email } : null
+  });
+}
+// === end Phase 5a auth scaffolding =========================================
 
 async function handleRecipeBookExport(req, res) {
   try {
