@@ -1,0 +1,245 @@
+/* ═══ AI Workflow Discovery Studio — Design System v2 ═══ */
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Base ── */
+body { background: #0d1b2e !important; color: #c8d8e8; }
+
+/* ── Dot grid texture ── */
+.ds-dot-grid {
+  background-image: radial-gradient(circle, rgba(255,255,255,0.025) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* ── Gradient brand bar (teal→pink) ── */
+.ds-grad-bar {
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #00d4b4, #ff4fc8);
+}
+.ds-grad-bar-v {
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #00d4b4, #ff4fc8);
+  flex-shrink: 0;
+}
+
+/* ── Card depth system ── */
+.ds-panel {
+  background: #0a1525;
+  border: 1px solid #152236;
+  border-radius: 14px;
+}
+.ds-card {
+  background: #162438;
+  border: 1px solid #1e3350;
+  border-radius: 12px;
+  animation: fade-up 0.3s ease forwards;
+}
+.ds-card-inner {
+  background: #0f1e30;
+  border: 1px solid #1a2d42;
+  border-radius: 8px;
+}
+.ds-chip {
+  background: #09131f;
+  border: 1px solid #162438;
+  border-radius: 7px;
+  padding: 5px 10px;
+}
+.ds-inset {
+  background: #07101a;
+  border: 1px solid #152236;
+  border-radius: 6px;
+}
+
+/* ── Stat card priority accents ── */
+.ds-accent-teal   { border-top: 2px solid #00d4b4 !important; }
+.ds-accent-pink   { border-top: 2px solid #ff4fc8 !important; }
+.ds-accent-purple { border-top: 2px solid #a855f7 !important; }
+.ds-accent-amber  { border-top: 2px solid #f59e0b !important; }
+
+/* ── Priority left-border accents (for opp cards) ── */
+.ds-border-teal   { border-left: 2px solid #00d4b4 !important; }
+.ds-border-pink   { border-left: 2px solid #ff4fc8 !important; }
+.ds-border-purple { border-left: 2px solid #a855f7 !important; }
+.ds-border-amber  { border-left: 2px solid #f59e0b !important; }
+
+/* ── Stat numbers ── */
+.ds-num-teal   { color: #00d4b4; text-shadow: 0 0 20px rgba(0,212,180,0.4); }
+.ds-num-pink   { color: #ff4fc8; text-shadow: 0 0 20px rgba(255,79,200,0.3); }
+.ds-num-purple { color: #a855f7; text-shadow: 0 0 20px rgba(168,85,247,0.3); }
+.ds-num-amber  { color: #f59e0b; text-shadow: 0 0 20px rgba(245,158,11,0.3); }
+
+/* ── Progress bar (gradient) ── */
+.ds-progress {
+  height: 4px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.06);
+  overflow: hidden;
+}
+.ds-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #00d4b4, #ff4fc8);
+}
+
+/* ── Tab navigation ── */
+.ds-tab-wrap {
+  display: flex;
+  gap: 2px;
+  background: #081525;
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: 10px;
+  padding: 3px;
+}
+.ds-tab {
+  font-size: 0.76rem;
+  padding: 7px 14px;
+  border-radius: 7px;
+  color: #445566;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 0.15s;
+}
+.ds-tab.ds-active {
+  background: #1a2d42;
+  color: #e8f4ff;
+  border: 1px solid rgba(255,255,255,0.08);
+  box-shadow: 0 0 12px rgba(0,212,180,0.08);
+}
+
+/* ── Section headers ── */
+.ds-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.ds-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #c8d8e8;
+}
+.ds-section-meta {
+  font-size: 0.68rem;
+  color: #334455;
+}
+.ds-micro {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #445566;
+  font-weight: 500;
+}
+
+/* ── Frosted glass badges ── */
+.ds-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  border-radius: 6px;
+  padding: 3px 9px;
+}
+.ds-badge-teal   { background: rgba(0,212,180,0.12);  color: #00d4b4; border: 1px solid rgba(0,212,180,0.25); }
+.ds-badge-pink   { background: rgba(255,79,200,0.1);  color: #ff4fc8; border: 1px solid rgba(255,79,200,0.22); }
+.ds-badge-purple { background: rgba(168,85,247,0.1);  color: #a855f7; border: 1px solid rgba(168,85,247,0.22); }
+.ds-badge-amber  { background: rgba(245,158,11,0.1);  color: #f59e0b; border: 1px solid rgba(245,158,11,0.22); }
+.ds-badge-blue   { background: rgba(56,189,248,0.1);  color: #38bdf8; border: 1px solid rgba(56,189,248,0.22); }
+.ds-badge-dim    { background: rgba(255,255,255,0.05); color: #445566; border: 1px solid rgba(255,255,255,0.08); }
+
+/* ── Status dots ── */
+.ds-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.ds-dot-teal   { background: #00d4b4; }
+.ds-dot-pink   { background: #ff4fc8; }
+.ds-dot-purple { background: #a855f7; }
+.ds-dot-amber  { background: #f59e0b; }
+.ds-dot-dim    { background: #2a3f5f; }
+.ds-dot-pulse  { animation: pulse-dot 2s ease-in-out infinite; }
+
+/* ── Buttons ── */
+.ds-btn-teal {
+  background: #00d4b4;
+  color: #0d1b2e;
+  border: none;
+  border-radius: 7px;
+  padding: 8px 16px;
+  font-weight: 700;
+  font-size: 0.8rem;
+  cursor: pointer;
+  box-shadow: 0 0 18px rgba(0,212,180,0.3);
+  transition: box-shadow 0.2s, transform 0.1s;
+}
+.ds-btn-teal:hover {
+  box-shadow: 0 0 28px rgba(0,212,180,0.5);
+  transform: translateY(-1px);
+}
+.ds-btn-ghost {
+  background: transparent;
+  color: #445566;
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 7px;
+  padding: 7px 14px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.ds-btn-ghost:hover {
+  border-color: rgba(0,212,180,0.35);
+  color: #00d4b4;
+}
+
+/* ── Gradient CTA button ── */
+.ds-btn-grad {
+  background: linear-gradient(135deg, #00d4b4, #ff4fc8);
+  color: #0d1b2e;
+  border: none;
+  border-radius: 7px;
+  padding: 9px 20px;
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(0,212,180,0.25);
+  transition: box-shadow 0.2s, transform 0.1s;
+}
+.ds-btn-grad:hover {
+  box-shadow: 0 6px 28px rgba(0,212,180,0.4);
+  transform: translateY(-1px);
+}
+
+/* ── Divider ── */
+.ds-divider { border: none; border-top: 1px solid #152236; margin: 0; }
+
+/* ── Glass overlay ── */
+.ds-glass {
+  background: rgba(13,27,46,0.85);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+}
+
+/* ── Bar chart rows ── */
+.ds-bar-row  { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+.ds-bar-name { font-size: 0.72rem; color: #556a7e; flex-shrink: 0; }
+.ds-bar-track { flex: 1; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.05); }
+.ds-bar-fill  { height: 100%; border-radius: 3px; }
+.ds-bar-val   { font-size: 0.68rem; min-width: 28px; text-align: right; }
