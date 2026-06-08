@@ -4488,12 +4488,95 @@ function renderAnalysisTabOpportunities() {
 }
 
 // --- TAB 3: Recipe Book -------------------------------------------------------
+// Each step renders as a full "recipe card": header (step badge + name + time
+// saved), a row of stat pills, a plain-English "what AI does" blurb, the prompt
+// template in a monospace block, numbered "how to use" steps, a human-oversight
+// banner, and a footer (source / confidence / priority). No new CSS variables —
+// every colour is an inline hex; no schema changes — all values read from the
+// existing 17-cell grid.
 
-function recipePromptBlockHtml(prompt) {
-  return `<div class="recipe-prompt-block"><button class="recipe-copy-btn" type="button" data-recipe-copy>Copy</button>${escapeHtml(prompt)}</div>`;
+// Minutes/day saved estimate for the header stat. Parses the first number out
+// of the timeTaken cell and applies the 0.85 factor; null when no number.
+function recipeTimeSaved(step) {
+  const raw = gridCellValue(step, "timeTaken");
+  if (!raw) return null;
+  const match = raw.match(/(\d+(?:\.\d+)?)/);
+  if (!match) return null;
+  const n = Number(match[1]);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round(n * 0.85);
 }
 
-// Fills an accordion body with the prompt block and wires its copy button.
+// Dot colour for the Sensitivity pill: red=high/restricted, amber=medium/internal,
+// teal=low (everything else).
+function recipeSensitivityDot(step) {
+  const text = gridCellValue(step, "dataSensitivity").toLowerCase();
+  if (/high|restricted|confidential|pii|sensitive/.test(text)) return "#ef4444";
+  if (/medium|internal/.test(text)) return "#f59e0b";
+  return "#00d4b4";
+}
+
+// Integer confidence % for the step's primary AI pattern.
+function recipeConfidencePct(step) {
+  return Math.round(oppConfidence(step) * 100);
+}
+
+// "WHAT AI DOES HERE" copy. Prefers the first non-empty line of the generated
+// recipe prompt; otherwise derives a short blurb from the step description and
+// AI pattern.
+function recipeWhatAiDoes(step, index) {
+  const prompt = (state.recipeCache?.[step.id] || "").trim();
+  if (prompt) {
+    const firstLine = prompt.split("\n").map((line) => line.trim()).find(Boolean);
+    if (firstLine) return firstLine;
+  }
+  const pattern = stepPrimaryPattern(step);
+  const description = gridCellValue(step, "description");
+  const name = stepDisplayName(step, index);
+  const action = pattern ? `applies a ${pattern} pattern` : "applies an AI assist";
+  if (description) {
+    return `AI ${action} to handle "${name}". ${description}`;
+  }
+  return `AI ${action} to support "${name}", taking on the repetitive work this step requires today and surfacing a draft for a person to confirm.`;
+}
+
+// 3-4 "HOW TO USE" steps derived from the systems/tools and output cells.
+function recipeHowToUse(step) {
+  const systems = gridCellValue(step, "systemsTools");
+  const output = gridCellValue(step, "output");
+  const steps = [];
+  steps.push("Copy the prompt template above into your AI assistant.");
+  steps.push(systems
+    ? `Paste in the relevant data or context from ${systems}.`
+    : "Paste in the relevant data or context for this step.");
+  steps.push("Run the prompt and review the AI's response carefully.");
+  steps.push(output
+    ? `Confirm the result, then use it to produce ${output}.`
+    : "Confirm the result before using it in the workflow.");
+  return steps;
+}
+
+// Priority badge per spec: Quick Win = painFriction confirmed + timeTaken
+// exists; Strategic = high confidence + complex (high-effort) pattern; Monitor
+// = everything else.
+function recipePriorityBadge(step) {
+  const painConfirmed =
+    gridCellState(step, "painFriction") === "confirmed" && Boolean(gridCellValue(step, "painFriction"));
+  const hasTime = Boolean(gridCellValue(step, "timeTaken"));
+  if (painConfirmed && hasTime) return { label: "Quick Win", color: "#00d4b4" };
+  const highConfidence = oppConfidence(step) >= 0.7;
+  const complex = patternComplexity(stepPrimaryPattern(step)) === "high";
+  if (highConfidence && complex) return { label: "Strategic", color: "#8b5cf6" };
+  return { label: "Monitor", color: "#5b7186" };
+}
+
+// Dark monospace code block holding the prompt, with a "Copy prompt" button in
+// the top-right corner.
+function recipePromptBlockHtml(prompt) {
+  return `<div style="position:relative;background:#0a1422;border:1px solid #1a2a3a;border-radius:8px;padding:16px 16px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.6;color:#cfe0f0;white-space:pre-wrap;word-break:break-word;"><button type="button" data-recipe-copy style="position:absolute;top:8px;right:8px;background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:4px 11px;font-size:11px;font-weight:700;cursor:pointer;">Copy prompt</button>${escapeHtml(prompt)}</div>`;
+}
+
+// Fills the prompt-template body with the code block and wires the copy button.
 function renderRecipeBody(body, prompt) {
   body.innerHTML = recipePromptBlockHtml(prompt);
   const copyBtn = body.querySelector("[data-recipe-copy]");
@@ -4502,7 +4585,7 @@ function renderRecipeBody(body, prompt) {
     navigator.clipboard?.writeText(prompt)
       .then(() => {
         copyBtn.textContent = "Copied!";
-        window.setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
+        window.setTimeout(() => { copyBtn.textContent = "Copy prompt"; }, 1500);
       })
       .catch(() => {});
   });
@@ -4518,28 +4601,82 @@ function renderAnalysisTabRecipe() {
   }
   state.recipeCache = state.recipeCache || {};
 
-  const accordions = steps.map((step, index) => {
-    const name = stepDisplayName(step, index);
-    const pill = patternPill(step);
-    const cached = state.recipeCache[step.id];
+  const labelCss = "font-size:10px;letter-spacing:0.08em;text-transform:uppercase;font-weight:700;";
+  const cards = steps.map((step, index) => {
     const num = String(index + 1).padStart(2, "0");
+    const name = stepDisplayName(step, index);
+    const timeSaved = recipeTimeSaved(step);
+    const frequency = gridCellValue(step, "frequencyVolume") || "—";
+    const sensitivity = gridCellValue(step, "dataSensitivity") || "—";
+    const dot = recipeSensitivityDot(step);
+    const pattern = stepPrimaryPattern(step);
+    const confidence = recipeConfidencePct(step);
+    const whatAi = recipeWhatAiDoes(step, index);
+    const howTo = recipeHowToUse(step);
+    const badge = recipePriorityBadge(step);
+    const source = gridCellValue(step, "trigger") || "doc-extracted";
+    const cached = state.recipeCache[step.id];
+
+    const patternBadge = pattern
+      ? `<span style="background:#00d4b4;color:#0d1b2e;font-weight:700;font-size:11px;padding:2px 9px;border-radius:99px;">${escapeHtml(pattern)}</span>`
+      : `<span style="color:#5b7186;">—</span>`;
+
+    const timeSavedHtml = timeSaved != null
+      ? `<span style="color:#00d4b4;font-size:13px;font-weight:600;white-space:nowrap;">~${timeSaved} min/day saved</span>`
+      : "";
+
+    const howToHtml = howTo.map((s) => `<li style="margin-bottom:3px;">${escapeHtml(s)}</li>`).join("");
+
     return `
-      <div class="recipe-accordion" data-step-id="${escapeHtml(step.id)}">
-        <div class="recipe-accordion-header" data-recipe-toggle="${escapeHtml(step.id)}">
-          <span style="font-size:10px;color:#5b7186;letter-spacing:0.06em;">${num}</span>
-          <strong style="font-size:14px;color:#dde8f5;flex:1;">${escapeHtml(name)}</strong>
-          ${pill}
-          <button class="primary-button compact" type="button" data-recipe-generate="${escapeHtml(step.id)}" style="margin-left:auto;">${cached ? "Regenerate" : "Generate prompt"}</button>
+      <div class="recipe-card" data-step-id="${escapeHtml(step.id)}" style="background:#0f1f33;border:1px solid #16263a;border-radius:12px;padding:18px 20px;margin-bottom:16px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
+            <span style="background:#0d1b2e;color:#00d4b4;font-weight:700;font-size:13px;padding:4px 9px;border-radius:7px;">${num}</span>
+            <strong style="font-size:16px;color:#ffffff;font-weight:700;">${escapeHtml(name)}</strong>
+          </div>
+          ${timeSavedHtml}
         </div>
-        <div class="recipe-accordion-body" data-recipe-body="${escapeHtml(step.id)}"></div>
+
+        <div style="display:flex;flex-wrap:wrap;gap:20px;margin-top:12px;font-size:12px;color:#9fb2c8;align-items:center;">
+          <span><span style="color:#5b7186;">Frequency:</span> ${escapeHtml(frequency)}</span>
+          <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Sensitivity:</span> <span style="width:8px;height:8px;border-radius:50%;background:${dot};display:inline-block;"></span> ${escapeHtml(sensitivity)}</span>
+          <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Pattern:</span> ${patternBadge}</span>
+          <span><span style="color:#5b7186;">Confidence:</span> ${confidence}%</span>
+        </div>
+
+        <div style="margin-top:16px;">
+          <div style="color:#00d4b4;${labelCss}margin-bottom:6px;">What AI Does Here</div>
+          <p style="margin:0;color:#c7d4e3;font-size:13px;line-height:1.55;">${escapeHtml(whatAi)}</p>
+        </div>
+
+        <div style="margin-top:16px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;">
+            <div style="color:#7a93b4;${labelCss}">Prompt Template</div>
+            <button class="primary-button compact" type="button" data-recipe-generate="${escapeHtml(step.id)}">${cached ? "Regenerate" : "Generate prompt"}</button>
+          </div>
+          <div data-recipe-body="${escapeHtml(step.id)}">${cached ? "" : `<div style="background:#0a1422;border:1px dashed #1a2a3a;border-radius:8px;padding:14px 16px;color:#5b7186;font-size:12px;">No prompt yet — click "Generate prompt" to build one for this step.</div>`}</div>
+        </div>
+
+        <div style="margin-top:16px;">
+          <div style="color:#a78bda;${labelCss}margin-bottom:6px;">How To Use</div>
+          <ol style="margin:0;padding-left:18px;color:#c7d4e3;font-size:13px;line-height:1.5;">${howToHtml}</ol>
+        </div>
+
+        <div style="margin-top:16px;background:#3a2a0a;border:1px solid #f59e0b55;border-left:3px solid #f59e0b;border-radius:6px;padding:9px 12px;color:#f5c97a;font-size:12px;line-height:1.5;">⚠ Human oversight required — AI output must be reviewed and confirmed before any action is taken.</div>
+
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid #16263a;display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:#5b7186;font-size:11px;">
+          <span>Source: ${escapeHtml(source)}</span><span>·</span>
+          <span>Confidence: ${confidence}%</span><span>·</span>
+          <span style="background:${badge.color}22;color:${badge.color};font-weight:700;padding:2px 9px;border-radius:99px;">${badge.label}</span>
+        </div>
       </div>`;
   }).join("");
 
   container.innerHTML =
-    accordions +
+    cards +
     `<div style="margin-top:16px;"><button class="secondary-button compact" type="button" id="downloadRecipeBookBtn">Download Recipe Book</button><button type="button" id="recipe-export-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download DOCX</button><button type="button" id="recipe-pdf-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download PDF</button></div>`;
 
-  // Pre-fill cached prompts (bodies stay collapsed by default).
+  // Fill the prompt-template body for any step that already has a cached prompt.
   steps.forEach((step) => {
     const cached = state.recipeCache[step.id];
     if (!cached) return;
@@ -4547,13 +4684,6 @@ function renderAnalysisTabRecipe() {
     if (body) renderRecipeBody(body, cached);
   });
 
-  container.querySelectorAll("[data-recipe-toggle]").forEach((header) => {
-    header.addEventListener("click", (event) => {
-      if (event.target.closest("[data-recipe-generate]")) return;
-      const body = container.querySelector(`[data-recipe-body="${header.dataset.recipeToggle}"]`);
-      if (body) body.classList.toggle("open");
-    });
-  });
   container.querySelectorAll("[data-recipe-generate]").forEach((btn) => {
     btn.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -4600,9 +4730,9 @@ async function generateRecipePrompt(stepId) {
     state.recipeCache = state.recipeCache || {};
     state.recipeCache[stepId] = data.prompt;
     persistState();
-    renderRecipeBody(body, data.prompt);
-    const btn = document.querySelector(`[data-recipe-generate="${stepId}"]`);
-    if (btn) btn.textContent = "Regenerate";
+    // Re-render the whole tab so the "What AI Does Here" blurb, footer, and
+    // button label all pick up the freshly generated prompt.
+    renderAnalysisTabRecipe();
   } catch (error) {
     body.innerHTML = `<div style="color:#ef9a9a;font-size:13px;display:flex;align-items:center;gap:10px;">Failed to generate — <button class="primary-button compact" type="button" data-recipe-retry style="position:static;">retry</button></div>`;
     body.querySelector("[data-recipe-retry]")?.addEventListener("click", (event) => {
