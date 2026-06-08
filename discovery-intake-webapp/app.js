@@ -4579,16 +4579,6 @@ function oppTimeMinutes(step) {
   return parseFloat(gridCellValue(step, "timeTaken"));
 }
 
-// Priority bucket: 1 Quick Win (<30 min), 2 Strategic (<120 min), else 3
-// Monitor. Honours a stored step.priority if one is ever set upstream.
-function oppPriority(step) {
-  if (step?.priority) return step.priority;
-  const minutes = oppTimeMinutes(step);
-  if (minutes < 30) return 1;
-  if (minutes < 120) return 2;
-  return 3;
-}
-
 // Impact proxy 0-1 from the painFriction cell confidence (default 0.5).
 function oppImpact(step) {
   return Number(step?.cells?.painFriction?.confidence) || 0.5;
@@ -4600,11 +4590,49 @@ function oppMapRange(v, inMin, inMax, outMin, outMax) {
   return outMin + ((clamped - inMin) / (inMax - inMin)) * (outMax - outMin);
 }
 
-// Bubble / badge fill by priority: teal (quick win), purple (strategic), amber.
-function oppPriorityColor(priority) {
-  if (priority === 1) return "#00d4b4";
-  if (priority === 2) return "#a855f7";
-  return "#f59e0b";
+// Gated opportunity meta for a step. Two checks gate any productive label: a
+// regulatory override (compliance) runs first, then a completeness gate
+// (speculative). Steps that clear both get the existing time-based Quick Win /
+// Strategic label. Shape { label, tier, priority }; tier is one of
+// quick-win | strategic | speculative | compliance. priority is null for the
+// two gate tiers so no number is shown.
+function getStepOpportunityMeta(step) {
+  const cells = step?.cells || {};
+
+  // Check 2 (runs first): regulatory override — blocks Quick Win entirely.
+  const sensitivity = (cells.dataSensitivity?.value || "").toLowerCase();
+  const regulatory = (cells.regulatoryContext?.value || "").trim();
+  if (sensitivity.includes("very high") || regulatory.length > 0) {
+    return { label: "Compliance review required", tier: "compliance", priority: null };
+  }
+
+  // Check 1: completeness gate across the 5 critical fields.
+  const criticalFields = ["systemsTools", "dataSensitivity", "regulatoryContext", "output", "rulesDecisionLogic"];
+  const confirmedCount = criticalFields.filter((f) => cells[f]?.state === "confirmed").length;
+  if (confirmedCount / criticalFields.length < 0.6) {
+    return { label: "Speculative", tier: "speculative", priority: null };
+  }
+
+  // Cleared both gates: existing time-based scoring.
+  const minutes = parseFloat(cells.timeTaken?.value);
+  if (minutes < 30) return { label: "Quick Win", tier: "quick-win", priority: 1 };
+  return { label: "Strategic", tier: "strategic", priority: 2 };
+}
+
+// ds-badge variant class for an opportunity tier.
+function opportunityTierBadgeClass(tier) {
+  if (tier === "compliance") return "ds-badge-pink";
+  if (tier === "speculative") return "ds-badge-amber";
+  if (tier === "quick-win") return "ds-badge-teal";
+  return "ds-badge-purple";
+}
+
+// Solid hex for an opportunity tier (bubbles, gantt bars).
+function opportunityTierColor(tier) {
+  if (tier === "compliance") return "#ef4444";
+  if (tier === "speculative") return "#f59e0b";
+  if (tier === "quick-win") return "#00d4b4";
+  return "#a855f7";
 }
 
 function renderAnalysisTabOpportunities() {
@@ -4617,7 +4645,7 @@ function renderAnalysisTabOpportunities() {
 
   // --- Section 1: headline stat cards ---------------------------------------
   const oppCount = opps.length;
-  const quickWins = opps.filter(({ step }) => oppPriority(step) === 1).length;
+  const quickWins = opps.filter(({ step }) => getStepOpportunityMeta(step).tier === "quick-win").length;
   const minSavedTotal = opps.reduce((sum, { step }) => sum + (parseFloat(gridCellValue(step, "timeTaken")) || 0) * 0.85, 0);
   const minSaved = minSavedTotal > 0 ? minSavedTotal.toFixed(0) : "—";
   const avgConfidence = oppCount
@@ -4641,12 +4669,11 @@ function renderAnalysisTabOpportunities() {
   // --- Section 2, left: Effort vs Impact bubble map -------------------------
   const bubbles = opps.length
     ? opps.map(({ step, index }) => {
-        const priority = oppPriority(step);
         const minutes = oppTimeMinutes(step);
         const cx = oppMapRange(Number.isFinite(minutes) ? minutes : 30, 0, 180, 30, 350);
         const cy = oppMapRange(oppImpact(step) * 100, 0, 100, 240, 20);
         const label = `${stepDisplayName(step, index)} · ${stepPrimaryPattern(step)}`;
-        return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="9" fill="${oppPriorityColor(priority)}" opacity="0.85" stroke="#0d1b2e" stroke-width="1.5"><title>${escapeHtml(label)}</title></circle>`;
+        return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="9" fill="${opportunityTierColor(getStepOpportunityMeta(step).tier)}" opacity="0.85" stroke="#0d1b2e" stroke-width="1.5"><title>${escapeHtml(label)}</title></circle>`;
       }).join("")
     : `<text x="190" y="135" text-anchor="middle" fill="#445566" font-size="12">No opportunities yet</text>`;
 
@@ -4721,12 +4748,12 @@ function renderAnalysisTabOpportunities() {
     </div>`;
 
   // --- Section 3: priority-ranked opportunity cards -------------------------
-  const ranked = [...opps].sort((a, b) => oppPriority(a.step) - oppPriority(b.step) || a.index - b.index);
-  const priorityBadge = (priority) => {
-    if (priority === 1) return { text: "⚡ Quick Win", bg: "#00d4b4", color: "#0d1b2e" };
-    if (priority === 2) return { text: "🎯 Strategic", bg: "#a855f7", color: "#fff" };
-    return { text: "👁 Monitor", bg: "#f59e0b", color: "#0d1b2e" };
-  };
+  // Gate tiers (compliance/speculative) have a null priority and sort last.
+  const ranked = [...opps].sort((a, b) => {
+    const pa = getStepOpportunityMeta(a.step).priority ?? Infinity;
+    const pb = getStepOpportunityMeta(b.step).priority ?? Infinity;
+    return pa - pb || a.index - b.index;
+  });
   const chip = (label, value) => `
     <div style="background:#0d1b2e;border-radius:6px;padding:6px 12px;">
       <span style="font-size:0.72rem;color:#8899aa;display:block;margin-bottom:2px;">${label}</span>
@@ -4734,11 +4761,10 @@ function renderAnalysisTabOpportunities() {
     </div>`;
 
   const cards = ranked.map(({ step, index }) => {
-    const priority = oppPriority(step);
-    const badge = priorityBadge(priority);
+    const meta = getStepOpportunityMeta(step);
     const minutes = oppTimeMinutes(step);
     const savings = Number.isFinite(minutes) ? (minutes * 0.85).toFixed(0) + " min/day" : "—";
-    const buildTime = priority === 1 ? "Hours" : priority === 2 ? "Days" : "Weeks";
+    const buildTime = meta.priority === 1 ? "Hours" : meta.priority === 2 ? "Days" : "—";
     let description = gridCellValue(step, "description") || gridCellValue(step, "painFriction") || "";
     if (description.length > 120) description = description.slice(0, 120) + "…";
     return `
@@ -4754,7 +4780,7 @@ function renderAnalysisTabOpportunities() {
         </div>
         <div style="margin-top:10px;color:#8899aa;font-size:0.82rem;line-height:1.4;">${escapeHtml(description)}</div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;">
-          <span style="background:${badge.bg};color:${badge.color};font-size:0.72rem;font-weight:700;border-radius:99px;padding:3px 12px;">${badge.text}</span>
+          <span class="ds-badge ${opportunityTierBadgeClass(meta.tier)}">${escapeHtml(meta.label)}</span>
         </div>
       </div>`;
   }).join("");
@@ -4836,20 +4862,6 @@ function recipeHowToUse(step) {
   return steps;
 }
 
-// Priority badge per spec: Quick Win = painFriction confirmed + timeTaken
-// exists; Strategic = high confidence + complex (high-effort) pattern; Monitor
-// = everything else.
-function recipePriorityBadge(step) {
-  const painConfirmed =
-    gridCellState(step, "painFriction") === "confirmed" && Boolean(gridCellValue(step, "painFriction"));
-  const hasTime = Boolean(gridCellValue(step, "timeTaken"));
-  if (painConfirmed && hasTime) return { label: "Quick Win", color: "#00d4b4" };
-  const highConfidence = oppConfidence(step) >= 0.7;
-  const complex = patternComplexity(stepPrimaryPattern(step)) === "high";
-  if (highConfidence && complex) return { label: "Strategic", color: "#8b5cf6" };
-  return { label: "Monitor", color: "#5b7186" };
-}
-
 // Dark monospace code block holding the prompt, with a "Copy prompt" button in
 // the top-right corner.
 function recipePromptBlockHtml(prompt) {
@@ -4893,7 +4905,7 @@ function renderAnalysisTabRecipe() {
     const confidence = recipeConfidencePct(step);
     const whatAi = recipeWhatAiDoes(step, index);
     const howTo = recipeHowToUse(step);
-    const badge = recipePriorityBadge(step);
+    const meta = getStepOpportunityMeta(step);
     const source = gridCellValue(step, "trigger") || "doc-extracted";
     const cached = state.recipeCache[step.id];
 
@@ -4947,7 +4959,7 @@ function renderAnalysisTabRecipe() {
         <div style="margin-top:14px;padding-top:12px;border-top:1px solid #16263a;display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:#5b7186;font-size:11px;">
           <span>Source: ${escapeHtml(source)}</span><span>·</span>
           <span>Confidence: ${confidence}%</span><span>·</span>
-          <span style="background:${badge.color}22;color:${badge.color};font-weight:700;padding:2px 9px;border-radius:99px;">${badge.label}</span>
+          <span class="ds-badge ${opportunityTierBadgeClass(meta.tier)}">${escapeHtml(meta.label)}</span>
         </div>
       </div>`;
   }).join("");
@@ -5215,11 +5227,15 @@ function renderAnalysisTabEngineering() {
     const count = bandCounts[priority];
     const pos = bandSeen[priority]++;
     const width = count <= 1 ? hi : lo + (pos / (count - 1)) * (hi - lo);
-    const fill = priority === 1
-      ? "background:rgba(0,212,180,0.7);"
-      : priority === 2
-        ? "background:rgba(168,85,247,0.7);"
-        : "background:rgba(245,158,11,0.5);border:1px dashed rgba(245,158,11,0.5);box-sizing:border-box;";
+    // Bar colour is driven by the gated opportunity tier (width logic unchanged).
+    const tier = getStepOpportunityMeta(step).tier;
+    const fill = tier === "compliance"
+      ? "background:#ef4444;border:2px dashed #ef4444;box-sizing:border-box;"
+      : tier === "speculative"
+        ? "background:#f59e0b;"
+        : tier === "quick-win"
+          ? "background:#00d4b4;"
+          : "background:#a855f7;";
     const chip = priority === 1
       ? { label: "Days", color: "#00d4b4" }
       : priority === 2
@@ -5241,10 +5257,11 @@ function renderAnalysisTabEngineering() {
   const section2 = `
     <div class="ds-card" style="padding:20px;margin-bottom:16px;">
       ${sectionHead("height:14px;", "Implementation timeline", "estimated build sequence by priority")}
-      <div style="display:flex;gap:16px;margin-bottom:16px;font-size:0.7rem;color:#8899aa;">
+      <div style="display:flex;gap:16px;margin-bottom:16px;font-size:0.7rem;color:#8899aa;flex-wrap:wrap;">
         ${legendSquare("#00d4b4", "Quick win")}
         ${legendSquare("#a855f7", "Strategic")}
-        ${legendSquare("#f59e0b", "Monitor")}
+        ${legendSquare("#f59e0b", "Speculative")}
+        ${legendSquare("#ef4444", "Compliance")}
       </div>
       ${ganttRows}
     </div>`;
