@@ -3439,11 +3439,12 @@ async function handleGetAudit(req, res) {
 // === Phase 6a: Jira connector (Atlassian Cloud OAuth2 3LO) ==================
 // Minimal HTTPS client (Node built-ins only). Resolves { status, body }; body
 // is parsed JSON when possible, otherwise the raw string.
-function httpsRequest(method, url, headers, body) {
+async function httpsRequest(method, url, headers, body) {
+  const u = new URL(url);
+  const mod = await import(u.protocol === "https:" ? "node:https" : "node:http");
   return new Promise((resolve, reject) => {
-    const u = new URL(url);
     const opts = { hostname: u.hostname, path: u.pathname + u.search, method, headers };
-    const req = (u.protocol === "https:" ? require("https") : require("http")).request(opts, (res) => {
+    const req = mod.default.request(opts, (res) => {
       let d = "";
       res.on("data", (c) => { d += c; });
       res.on("end", () => {
@@ -3492,28 +3493,36 @@ async function handleJiraCallback(req, res) {
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   const error = url.searchParams.get("error");
-  if (error) { res.writeHead(302, { Location: "/?jira=error#engineering-doc" }); res.end(); return; }
-  const entry = jiraOAuthStates.get(state);
-  if (!entry || entry.exp < Date.now()) return sendJson(res, 400, { error: "Invalid or expired state" });
-  const userId = entry.userId;
-  jiraOAuthStates.delete(state);
+  console.log('[jira-callback] hit — code:', !!code, 'state:', !!state, 'error:', error);
+  console.log('[jira-callback] JIRA_CLIENT_ID present:', !!JIRA_CLIENT_ID, 'JIRA_CLIENT_SECRET present:', !!JIRA_CLIENT_SECRET);
+  try {
+    if (error) { res.writeHead(302, { Location: "/?jira=error#engineering-doc" }); res.end(); return; }
+    const entry = jiraOAuthStates.get(state);
+    if (!entry || entry.exp < Date.now()) return sendJson(res, 400, { error: "Invalid or expired state" });
+    const userId = entry.userId;
+    jiraOAuthStates.delete(state);
 
-  const tokenResp = await httpsRequest("POST", "https://auth.atlassian.com/oauth/token",
-    { "Content-Type": "application/json" },
-    { grant_type: "authorization_code", client_id: JIRA_CLIENT_ID, client_secret: JIRA_CLIENT_SECRET, code, redirect_uri: JIRA_REDIRECT_URI });
-  if (tokenResp.status !== 200) { res.writeHead(302, { Location: "/?jira=error#engineering-doc" }); res.end(); return; }
-  const { access_token, refresh_token, expires_in } = tokenResp.body;
+    const tokenResp = await httpsRequest("POST", "https://auth.atlassian.com/oauth/token",
+      { "Content-Type": "application/json" },
+      { grant_type: "authorization_code", client_id: JIRA_CLIENT_ID, client_secret: JIRA_CLIENT_SECRET, code, redirect_uri: JIRA_REDIRECT_URI });
+    if (tokenResp.status !== 200) { res.writeHead(302, { Location: "/?jira=error#engineering-doc" }); res.end(); return; }
+    const { access_token, refresh_token, expires_in } = tokenResp.body;
 
-  const resourcesResp = await httpsRequest("GET", "https://api.atlassian.com/oauth/token/accessible-resources",
-    { Authorization: `Bearer ${access_token}`, Accept: "application/json" });
-  const resources = resourcesResp.body;
-  if (!Array.isArray(resources) || !resources.length) { res.writeHead(302, { Location: "/?jira=error#engineering-doc" }); res.end(); return; }
-  const cloudId = resources[0].id;
-  const cloudName = resources[0].name;
+    const resourcesResp = await httpsRequest("GET", "https://api.atlassian.com/oauth/token/accessible-resources",
+      { Authorization: `Bearer ${access_token}`, Accept: "application/json" });
+    const resources = resourcesResp.body;
+    if (!Array.isArray(resources) || !resources.length) { res.writeHead(302, { Location: "/?jira=error#engineering-doc" }); res.end(); return; }
+    const cloudId = resources[0].id;
+    const cloudName = resources[0].name;
 
-  await writeJiraToken(userId, { access_token, refresh_token, expires_in, cloudId, cloudName, connectedAt: new Date().toISOString() });
-  res.writeHead(302, { Location: "/?jira=connected#engineering-doc" });
-  res.end();
+    await writeJiraToken(userId, { access_token, refresh_token, expires_in, cloudId, cloudName, connectedAt: new Date().toISOString() });
+    res.writeHead(302, { Location: "/?jira=connected#engineering-doc" });
+    res.end();
+  } catch (error) {
+    console.error('[jira-callback] ERROR:', error?.message || error);
+    res.writeHead(302, { Location: "/?jira=error#engineering-doc" });
+    res.end();
+  }
 }
 
 async function handleJiraStatus(req, res) {
