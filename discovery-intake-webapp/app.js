@@ -4370,6 +4370,82 @@ function opportunityPriorityBadge(score) {
   return { color: "#4b5563", label: "Low" };
 }
 
+// --- AI Opportunities 360 view ------------------------------------------------
+// Map free-text / scored grid cells onto a 0-1 axis position for the scatter
+// plots. All clamp to [0,1]; empty cells sit at the low end.
+function oppFrequencyLevel(step) {
+  const v = gridCellValue(step, "frequencyVolume").toLowerCase();
+  if (!v) return 0;
+  if (/(daily|hourly|continuous|constant|real.?time|every\s*day|per\s*day|multiple|many\s*times|several\s*times|high|thousands|hundreds)/.test(v)) return 1;
+  if (/(weekly|regular|recurr|moderate|dozens)/.test(v)) return 0.6;
+  return 0.25;
+}
+
+function oppPainLevel(step) {
+  const v = gridCellValue(step, "painFriction");
+  if (!v) return 0;
+  const lower = v.toLowerCase();
+  if (/(severe|major|significant|critical|huge|bottleneck|blocker|painful|very\s+high|high)/.test(lower)) return 1;
+  if (/(minor|small|slight|low|little)/.test(lower)) return 0.3;
+  return gridCellState(step, "painFriction") === "confirmed" ? 0.8 : 0.55;
+}
+
+function oppConfidence(step) {
+  const value = step?.cells?.aiPattern?.value;
+  if (!Array.isArray(value) || !value.length) return 0;
+  const n = Number(value[0]?.confidence);
+  return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0;
+}
+
+function oppEffortLevel(step) { // timeTaken, proxy for effort
+  const v = gridCellValue(step, "timeTaken").toLowerCase();
+  if (!v) return 0;
+  if (/(week|day|days|long|high|significant)/.test(v)) return 1;
+  if (/(hour|hr|hrs)/.test(v)) return 0.65;
+  if (/(min|minute|sec|quick|short|fast|low)/.test(v)) return 0.25;
+  return 0.5;
+}
+
+function oppRiskLevel(step) { // dataSensitivity, proxy for risk
+  const level = sensitivityLevel(step);
+  return level === "high" ? 1 : level === "medium" ? 0.55 : 0.15;
+}
+
+// One 360-view scatter card built as inline SVG. xFn/yFn return 0-1; the Y axis
+// is inverted so "high" sits at the top. highlight: "tr" (top-right) or "bl"
+// (bottom-left) shades that priority quadrant slightly lighter.
+function oppScatterCard(title, steps, xFn, yFn, axisX, axisY, zoneNote, highlight) {
+  const L = 26, R = 192, T = 10, B = 134; // plot bounds inside a 200x160 viewBox
+  const W = R - L, H = B - T;
+  const midX = L + W / 2, midY = T + H / 2;
+  const hx = highlight === "tr" ? midX : L;
+  const hy = highlight === "tr" ? T : midY;
+  const shade = `<rect x="${hx}" y="${hy}" width="${W / 2}" height="${H / 2}" fill="rgba(0,212,180,0.13)"></rect>`;
+  const grid = `
+    <line x1="${midX}" y1="${T}" x2="${midX}" y2="${B}" stroke="#1c3b57" stroke-width="0.6"></line>
+    <line x1="${L}" y1="${midY}" x2="${R}" y2="${midY}" stroke="#1c3b57" stroke-width="0.6"></line>
+    <line x1="${L}" y1="${T}" x2="${L}" y2="${B}" stroke="#37597a" stroke-width="0.9"></line>
+    <line x1="${L}" y1="${B}" x2="${R}" y2="${B}" stroke="#37597a" stroke-width="0.9"></line>`;
+  const axes = `
+    <text x="${L}" y="${B + 9}" fill="#5b7186" font-size="6">low</text>
+    <text x="${R}" y="${B + 9}" fill="#5b7186" font-size="6" text-anchor="end">high</text>
+    <text x="${(L + R) / 2}" y="${B + 9}" fill="#7a93b4" font-size="6.5" text-anchor="middle">${escapeHtml(axisX)} →</text>
+    <text x="6" y="${(T + B) / 2}" fill="#7a93b4" font-size="6.5" text-anchor="middle" transform="rotate(-90 6 ${(T + B) / 2})">↑ ${escapeHtml(axisY)}</text>`;
+  const dots = steps.map((step, index) => {
+    const name = stepDisplayName(step, index);
+    const short = name.length > 12 ? `${name.slice(0, 12)}…` : name;
+    const cx = L + Math.max(0, Math.min(1, xFn(step))) * W;
+    const cy = B - Math.max(0, Math.min(1, yFn(step))) * H;
+    return `<g><circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="#00d4b4" fill-opacity="0.9" stroke="#06141f" stroke-width="0.8"><title>${escapeHtml(name)}</title></circle><text x="${(cx + 5).toFixed(1)}" y="${(cy + 2).toFixed(1)}" fill="#9fb3c8" font-size="6">${escapeHtml(short)}</text></g>`;
+  }).join("");
+  return `
+    <div style="flex:1;min-width:0;background:#0d2137;border:1px solid #1c3b57;border-radius:10px;padding:12px;height:300px;display:flex;flex-direction:column;">
+      <h4 style="margin:0 0 4px;font-size:13px;color:#dde8f5;">${escapeHtml(title)}</h4>
+      <svg viewBox="0 0 200 160" preserveAspectRatio="xMidYMid meet" style="flex:1;width:100%;min-height:0;">${shade}${grid}${axes}${dots}</svg>
+      <p style="margin:4px 0 0;font-size:10px;color:#5b7186;"><span style="color:#00d4b4;">&#9679;</span> step &middot; ${escapeHtml(zoneNote)}</p>
+    </div>`;
+}
+
 function renderAnalysisTabOpportunities() {
   const container = document.getElementById("analysis-tab-opportunities");
   if (!container) return;
@@ -4379,82 +4455,33 @@ function renderAnalysisTabOpportunities() {
     return;
   }
 
-  // The quadrant is only meaningful once at least one step carries a scored AI
-  // pattern (confidence > 0). With no scored patterns every dot collapses into
-  // the bottom-left corner and reads as broken, so swap in an explanatory
-  // empty state and suppress the quadrant entirely.
-  const hasScoredPattern = steps.some(stepHasScoredPattern);
+  // Three 360-view scatter cards, side by side.
+  const scatterCards = [
+    oppScatterCard("Frequency vs Pain", steps, oppFrequencyLevel, oppPainLevel, "Frequency", "Pain", "top-right = highest priority", "tr"),
+    oppScatterCard("Confidence vs Priority", steps, oppConfidence, (step) => (opportunityPriorityScore(step) - 1) / 4, "Confidence", "Priority", "top-right = most actionable", "tr"),
+    oppScatterCard("Effort vs Risk", steps, oppEffortLevel, oppRiskLevel, "Effort", "Risk", "bottom-left = quick wins", "bl")
+  ].join("");
 
-  // One dot per step, positioned by sensitivity (x) and opportunity score (y).
-  const dots = steps.map((step, index) => {
-    const score = opportunityScore(step);
-    const level = sensitivityLevel(step);
-    const xPct = level === "high" ? 80 : level === "medium" ? 50 : 20;
-    const yPct = 90 - (score / 4) * 80; // score 4 -> 10% (top), 0 -> 90% (bottom)
-    const color = patternColor(stepPrimaryPattern(step));
-    const name = stepDisplayName(step, index);
-    return `<div class="opp-dot" style="left:calc(${xPct}% - 16px);top:calc(${yPct}% - 16px);background:${color};" title="${escapeHtml(name)}">${index + 1}</div>`;
-  }).join("");
-
-  const quadrant = hasScoredPattern
-    ? `
-    <div class="opp-quadrant">
-      <div class="opp-quadrant-cell" style="background:rgba(0,212,180,0.10);"><span class="opp-quadrant-label">High Opportunity / Low Risk</span></div>
-      <div class="opp-quadrant-cell" style="background:rgba(245,158,11,0.10);"><span class="opp-quadrant-label">High Opportunity / Needs Review</span></div>
-      <div class="opp-quadrant-cell"><span class="opp-quadrant-label">Lower Priority</span></div>
-      <div class="opp-quadrant-cell" style="background:rgba(236,72,153,0.10);"><span class="opp-quadrant-label">Proceed with Caution</span></div>
-      ${dots}
-    </div>`
-    : `
-    <div class="empty-state-msg" style="text-align:center; color:#8899aa; padding:2rem; font-size:0.95rem;">
-      Complete the interview and assign AI patterns to see opportunities plotted here.
-    </div>`;
-
-  // Ranked cards, sorted by business priority score descending (stable on index).
-  const ranked = steps
+  // Simplified list: name, pattern badge, priority badge (sorted by priority).
+  const list = steps
     .map((step, index) => ({ step, index, score: opportunityPriorityScore(step) }))
-    .sort((a, b) => b.score - a.score || a.index - b.index);
-
-  const cards = ranked.map(({ step, index, score }) => {
-    const badge = opportunityPriorityBadge(score);
-    const name = stepDisplayName(step, index);
-    const coverage = stepCoverage(step);
-    const percent = Math.round(coverage * 100);
-    const glow = coverageGlowColor(coverage);
-    const level = sensitivityLevel(step);
-    const badgeColor = sensitivityColor(level);
-    const gaps = stepGapCells(step).length;
-    const painRaw = gridCellValue(step, "painFriction");
-    const painSnippet = painRaw ? truncateUi(painRaw, 80) : "No pain/friction captured yet.";
-    const pill = patternPill(step) || `<span style="font-size:11px;color:#5b7186;">No pattern</span>`;
-    return `
-      <div style="background:#0d1b2a;border:1px solid ${glow};border-radius:8px;padding:14px;margin-bottom:8px;">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map(({ step, index, score }) => {
+      const badge = opportunityPriorityBadge(score);
+      const name = stepDisplayName(step, index);
+      const pill = patternPill(step) || `<span style="font-size:11px;color:#5b7186;">No pattern</span>`;
+      return `
+        <div style="display:flex;align-items:center;gap:10px;background:#0d1b2a;border:1px solid #1a2a3a;border-radius:8px;padding:8px 12px;margin-bottom:6px;">
           <span style="font-size:10px;color:#5b7186;letter-spacing:0.06em;">${String(index + 1).padStart(2, "0")}</span>
-          <strong style="font-size:14px;color:#dde8f5;flex:1;">${escapeHtml(name)}</strong>
+          <strong style="font-size:13px;color:#dde8f5;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(name)}</strong>
           ${pill}
-          <span title="Priority score (1-5)" style="background:${badge.color}22;color:${badge.color};font-size:11px;font-weight:700;padding:2px 9px;border-radius:99px;white-space:nowrap;">${score} · ${badge.label}</span>
-        </div>
-        <p style="font-size:12px;color:#9fb3c8;margin:0 0 10px;">${escapeHtml(painSnippet)}</p>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <div style="flex:1;height:4px;background:#1a2a3a;border-radius:99px;overflow:hidden;">
-            <div style="width:${percent}%;height:100%;background:${glow};border-radius:99px;"></div>
-          </div>
-          <span style="font-size:10px;color:#7a93b4;">${percent}%</span>
-          <span class="sensitivity-badge" style="background:${badgeColor}22;color:${badgeColor};">${level.toUpperCase()}</span>
-          <span style="font-size:11px;color:#7a93b4;flex-shrink:0;">${gaps} gap${gaps === 1 ? "" : "s"}</span>
-        </div>
-      </div>`;
-  }).join("");
+          <span title="Priority" style="background:${badge.color}22;color:${badge.color};font-size:11px;font-weight:700;padding:2px 9px;border-radius:99px;white-space:nowrap;">${badge.label}</span>
+        </div>`;
+    }).join("");
 
-  const legend = `
-    <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;font-size:11px;color:#7a93b4;">
-      <span style="text-transform:uppercase;letter-spacing:0.06em;">Priority</span>
-      <span style="display:inline-flex;align-items:center;gap:6px;"><i style="width:10px;height:10px;border-radius:99px;background:#00d4b4;display:inline-block;"></i>High (5)</span>
-      <span style="display:inline-flex;align-items:center;gap:6px;"><i style="width:10px;height:10px;border-radius:99px;background:#f59e0b;display:inline-block;"></i>Medium (3-4)</span>
-      <span style="display:inline-flex;align-items:center;gap:6px;"><i style="width:10px;height:10px;border-radius:99px;background:#4b5563;display:inline-block;"></i>Low (1-2)</span>
-    </div>`;
-  container.innerHTML = legend + quadrant + `<div>${cards}</div>`;
+  container.innerHTML = `
+    <div style="display:flex;gap:12px;margin-bottom:16px;align-items:stretch;">${scatterCards}</div>
+    <div>${list}</div>`;
 }
 
 // --- TAB 3: Recipe Book -------------------------------------------------------
