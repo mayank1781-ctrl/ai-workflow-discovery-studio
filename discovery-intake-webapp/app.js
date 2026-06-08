@@ -3367,6 +3367,7 @@ function render() {
   renderFrameAnchorStrip();
   renderCurrentQuestion(section);
   renderTurnSignalPanel();
+  renderDiscoveryPatternInterview();
   renderInterviewGuide(section);
   renderCaptureCoach();
   renderTextIntakeAssist();
@@ -4936,8 +4937,10 @@ function handoffConfidenceColor(confidence) {
   return "#f59e0b"; // amber (0.4 - 0.79)
 }
 
-function renderAnalysisTabHandoff() {
-  const container = document.getElementById("analysis-tab-handoff");
+// Pattern interview, now hosted on the Discovery page as three stacked blocks.
+// The same renderer is reused; the Analysis Studio "Pattern Handoff" tab just
+// links back here (see renderAnalysisTabHandoff below).
+function renderPatternInterview(container) {
   if (!container) return;
   state.handoffAnswers = state.handoffAnswers || {};
   state.handoffQuestions = Array.isArray(state.handoffQuestions) ? state.handoffQuestions : [];
@@ -4946,13 +4949,14 @@ function renderAnalysisTabHandoff() {
 
   const steps = analysisGridSteps();
   if (!steps.length) {
-    container.innerHTML = `<div class="summary-item">No workflow steps yet. Capture a process to prepare the pattern handoff.</div>`;
+    container.innerHTML = `<div class="summary-item">No workflow steps yet. Capture a process in the interview to prepare the pattern interview.</div>`;
     return;
   }
 
   const sectionTitleStyle = "font-size:13px;font-weight:700;color:#dde8f5;margin:0 0 10px;text-transform:uppercase;letter-spacing:0.04em;";
+  const blockStyle = "background:#0d2137;border:1px solid #1c3b57;border-radius:10px;padding:16px;margin-bottom:14px;";
 
-  // ZONE 1 — read-only step pattern overview (no API).
+  // BLOCK 1 — read-only step pattern overview (no API).
   const zone1Cards = steps.map((step, index) => {
     const name = stepDisplayName(step, index);
     const persona = handoffPrimaryValue(step, "personaActors") || "—";
@@ -4976,7 +4980,7 @@ function renderAnalysisTabHandoff() {
       </div>`;
   }).join("");
 
-  // ZONE 2 — AI-generated questions with answer textareas.
+  // BLOCK 2 — AI-generated questions with answer textareas.
   const questionCards = state.handoffQuestions.length
     ? state.handoffQuestions.map((q) => `
         <div style="background:#0d1b2a;border:1px solid #1a2a3a;border-radius:8px;padding:12px;margin-bottom:8px;">
@@ -4986,7 +4990,7 @@ function renderAnalysisTabHandoff() {
         </div>`).join("")
     : `<p style="font-size:12px;color:#7a93b4;">No questions yet. Click "Surface Key Questions" to generate them.</p>`;
 
-  // ZONE 3 — AI pattern analysis with plain-text overrides.
+  // BLOCK 3 — AI pattern analysis with plain-text overrides.
   const patternCards = state.handoffPatterns.length
     ? state.handoffPatterns.map((p) => {
         const sid = p.stepId || "";
@@ -5005,17 +5009,17 @@ function renderAnalysisTabHandoff() {
     : `<p style="font-size:12px;color:#7a93b4;">No analysis yet. Answer the questions above, then click "Generate AI Analysis".</p>`;
 
   container.innerHTML = `
-    <section style="margin-bottom:24px;">
+    <section style="${blockStyle}">
       <h3 style="${sectionTitleStyle}">Step Pattern Overview</h3>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;">${zone1Cards}</div>
     </section>
-    <section style="margin-bottom:24px;">
+    <section style="${blockStyle}">
       <h3 style="${sectionTitleStyle}">Key Questions</h3>
       <button type="button" id="handoffQuestionsBtn" style="${HANDOFF_TEAL_BUTTON}margin-bottom:12px;">Surface Key Questions</button>
       <div>${questionCards}</div>
     </section>
-    <section style="margin-bottom:16px;">
-      <h3 style="${sectionTitleStyle}">AI Analysis</h3>
+    <section style="${blockStyle}margin-bottom:0;">
+      <h3 style="${sectionTitleStyle}">AI Pattern Analysis</h3>
       <button type="button" id="handoffAnalyseBtn" style="${HANDOFF_TEAL_BUTTON}margin-bottom:12px;">Generate AI Analysis</button>
       <div>${patternCards}</div>
       <button type="button" id="handoffConfirmBtn" style="${HANDOFF_TEAL_BUTTON}margin-top:12px;">Confirm Patterns</button>
@@ -5037,6 +5041,37 @@ function renderAnalysisTabHandoff() {
     input.addEventListener("change", persistState);
   });
   refreshIcons();
+}
+
+function patternInterviewContainer() {
+  return document.getElementById("discoveryPatternInterview");
+}
+
+// Called from render(): re-render the Discovery pattern interview, but never
+// clobber an answer/override field the user is currently editing.
+function renderDiscoveryPatternInterview() {
+  const container = patternInterviewContainer();
+  if (!container) return;
+  const active = document.activeElement;
+  if (active && container.contains(active) && (active.tagName === "TEXTAREA" || active.tagName === "INPUT")) return;
+  renderPatternInterview(container);
+}
+
+// Force a refresh (used by the handlers after questions/analysis/confirm change).
+function rerenderPatternInterview() {
+  renderPatternInterview(patternInterviewContainer());
+}
+
+// The Analysis Studio "Pattern Handoff" tab now just points to the Discovery page.
+function renderAnalysisTabHandoff() {
+  const container = document.getElementById("analysis-tab-handoff");
+  if (!container) return;
+  container.innerHTML = `
+    <div style="background:#0d1b2a;border:1px solid #1a2a3a;border-radius:10px;padding:28px;text-align:center;">
+      <p style="font-size:14px;color:#dde8f5;margin:0 0 16px;">Pattern interview has moved to the Discovery page.</p>
+      <button type="button" id="handoffGoToDiscoveryBtn" style="${HANDOFF_TEAL_BUTTON}">Go to Discovery</button>
+    </div>`;
+  container.querySelector("#handoffGoToDiscoveryBtn")?.addEventListener("click", () => setAppMode("interview"));
 }
 
 async function handleHandoffQuestions() {
@@ -5061,7 +5096,7 @@ async function handleHandoffQuestions() {
     if (!response.ok) throw new Error(data?.error || `Request failed (${response.status}).`);
     state.handoffQuestions = Array.isArray(data.questions) ? data.questions : [];
     persistState();
-    renderAnalysisTabHandoff();
+    rerenderPatternInterview();
   } catch (error) {
     toast(error?.message || "Could not surface questions.");
   } finally {
@@ -5100,7 +5135,7 @@ async function handleHandoffAnalyse() {
     if (!response.ok) throw new Error(data?.error || `Request failed (${response.status}).`);
     state.handoffPatterns = Array.isArray(data.patterns) ? data.patterns : [];
     persistState();
-    renderAnalysisTabHandoff();
+    rerenderPatternInterview();
   } catch (error) {
     toast(error?.message || "Could not generate analysis.");
   } finally {
@@ -5138,8 +5173,8 @@ function handleHandoffConfirm() {
     step.cells.aiPattern.confidence = 1;
   });
   persistState();
-  // Re-render the tab so Zone 1's confidence dots flip to teal immediately.
-  renderAnalysisTabHandoff();
+  // Re-render the blocks so Block 1's confidence dots flip to teal immediately.
+  rerenderPatternInterview();
   toast("Patterns confirmed and saved to grid");
 }
 
