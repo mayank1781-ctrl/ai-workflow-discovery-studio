@@ -4373,24 +4373,17 @@ const GRID_DASHBOARD_LABELS = {
   regulatoryContext: "Regulatory"
 };
 
-// Field rows in dashboard display order (17 cells).
+// Underlying cell keys surfaced in the coverage-by-field panel (AI Pattern is
+// no longer a grid field — it is computed downstream, not captured here).
 const GRID_FIELD_ORDER = [
   "name", "personaActors", "systemsTools", "output", "trigger", "handoff",
   "humanCheckpoint", "timeTaken", "frequencyVolume", "painFriction",
-  "dataSensitivity", "aiPattern", "description", "dataProcessing",
+  "dataSensitivity", "description", "dataProcessing",
   "rulesDecisionLogic", "exceptionBranching", "regulatoryContext"
 ];
 
 function gridFieldLabel(key) {
   return GRID_DASHBOARD_LABELS[key] || (key.charAt(0).toUpperCase() + key.slice(1));
-}
-
-// Inline background + left-border for a matrix cell's fill state.
-function gridCellStateStyle(stateName) {
-  if (stateName === "confirmed") return "background:rgba(0,212,180,0.18);border-left:2px solid #00d4b4;";
-  if (stateName === "inferred") return "background:rgba(168,85,247,0.15);border-left:2px solid #a855f7;";
-  if (stateName === "unknown") return "background:rgba(245,158,11,0.12);border-left:2px solid #f59e0b;";
-  return "background:rgba(255,255,255,0.03);border-left:2px solid #1e3350;";
 }
 
 function renderAnalysisTabGrid() {
@@ -4526,57 +4519,49 @@ function renderAnalysisTabGrid() {
       </div>
     </div>`;
 
-  // --- Section 4: live workflow grid matrix ---------------------------------
-  const legendItem = (color, label) =>
-    `<span style="display:flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:2px;background:${color};display:inline-block;"></span>${label}</span>`;
-  const legend = `
-    <div style="display:flex;gap:16px;margin-bottom:14px;font-size:0.68rem;color:#556a7e;">
-      ${legendItem("#00d4b4", "Confirmed")}
-      ${legendItem("#a855f7", "Inferred")}
-      ${legendItem("#f59e0b", "Need input")}
-      ${legendItem("#1e3350", "Empty")}
-    </div>`;
-
-  const thBase = "padding:6px 8px;font-size:0.65rem;color:#445566;text-align:center;background:#09131f;border:1px solid #152236;";
-  const headerCells = steps.map((s, i) => {
-    const name = truncate(s.cells?.name?.value || `Step ${i + 1}`, 10);
-    const oppDot = stepPrimaryPattern(s) !== "" ? `<div><span class="ds-dot ds-dot-teal" style="margin-top:3px;"></span></div>` : "";
-    return `<th style="${thBase}">${escapeHtml(name)}${oppDot}</th>`;
-  }).join("");
-  const headerRow = `<tr><th style="${thBase}"></th>${headerCells}</tr>`;
-
-  const bodyRows = GRID_FIELD_ORDER.map((key) => {
-    const isAiPattern = key === "aiPattern";
-    const rowHeader = `<td style="padding:6px 10px;font-size:0.72rem;color:#556a7e;background:#09131f;border:1px solid #152236;white-space:nowrap;width:140px;">${escapeHtml(gridFieldLabel(key))}</td>`;
-    const cells = steps.map((s) => {
-      const stateName = s.cells?.[key]?.state || "empty";
-      let inner;
-      let fullValue;
-      if (isAiPattern) {
-        fullValue = gridCellValue(s, "aiPattern");
-        inner = fullValue
-          ? `<span class="ds-badge ds-badge-teal" style="font-size:0.6rem;">${escapeHtml(fullValue)}</span>`
-          : `<span style="color:#2a3f5f;font-size:0.65rem;">—</span>`;
-      } else {
-        const value = s.cells?.[key]?.value;
-        fullValue = typeof value === "string" ? value.trim() : "";
-        inner = fullValue
-          ? `<span style="font-size:0.68rem;color:#8899aa;">${escapeHtml(truncate(fullValue, 12))}</span>`
-          : `<span style="color:#2a3f5f;font-size:0.65rem;">—</span>`;
-      }
-      return `<td style="padding:4px 6px;border:1px solid #152236;text-align:center;${gridCellStateStyle(stateName)}" title="${escapeHtml(fullValue)}">${inner}</td>`;
-    }).join("");
-    return `<tr>${rowHeader}${cells}</tr>`;
-  }).join("");
-
-  const minWidth = steps.length * 80 + 160;
+  // --- Section 4: 3-layer workflow grid (9 columns, steps as rows) ----------
+  // Columns are grouped into three coloured layers; existing 17-field data is
+  // merged into the 9 fields. Colour coding is on the headers only.
+  const joinCells = (s, keys) => keys.map((k) => gridCellValue(s, k)).filter(Boolean).join(" ");
+  const GRID_LAYERS = [
+    { name: "THE FLOW", color: "#00d4b4", cols: [
+      { label: "Step Name", get: (s, i) => gridCellValue(s, "name") || `Step ${i + 1}` },
+      { label: "What Happens", get: (s) => gridCellValue(s, "description") },
+      { label: "Flow & Dependencies", get: (s) => joinCells(s, ["trigger", "output", "handoff"]) },
+      { label: "Volume", get: (s) => joinCells(s, ["frequencyVolume", "timeTaken"]) },
+      { label: "Systems & Tools", get: (s) => gridCellValue(s, "systemsTools") }
+    ] },
+    { name: "PEOPLE & FRICTION", color: "#ff4fc8", cols: [
+      { label: "Who's Involved", get: (s) => gridCellValue(s, "personaActors") },
+      { label: "Pain & Rules", get: (s) => joinCells(s, ["painFriction", "rulesDecisionLogic", "exceptionBranching"]) }
+    ] },
+    { name: "DATA & RISK", color: "#f59e0b", cols: [
+      { label: "Data Flow", get: (s) => gridCellValue(s, "dataProcessing") },
+      { label: "Sensitivity", get: (s) => joinCells(s, ["dataSensitivity", "regulatoryContext"]) }
+    ] }
+  ];
+  const groupHeaderRow = GRID_LAYERS.map((layer) =>
+    `<th colspan="${layer.cols.length}" style="padding:6px 10px;text-align:left;background:#0a1525;border:1px solid #152236;border-left:3px solid ${layer.color};color:${layer.color};font-size:0.62rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;">${layer.name}</th>`
+  ).join("");
+  const colHeaderRow = GRID_LAYERS.flatMap((layer) =>
+    layer.cols.map((c) => `<th style="padding:8px 10px;text-align:left;background:#09131f;border:1px solid #152236;color:${layer.color};font-size:0.66rem;font-weight:600;letter-spacing:0.03em;white-space:nowrap;">${escapeHtml(c.label)}</th>`)
+  ).join("");
+  const flatCols = GRID_LAYERS.flatMap((layer) => layer.cols);
+  const gridRows = steps.map((s, i) =>
+    `<tr>${flatCols.map((c) => {
+      const v = c.get(s, i);
+      return `<td style="padding:6px 10px;border:1px solid #152236;vertical-align:top;font-size:0.72rem;color:${v ? "#c8d8e8" : "#2a3f5f"};" title="${escapeHtml(v)}">${v ? escapeHtml(truncate(v, 60)) : "—"}</td>`;
+    }).join("")}</tr>`
+  ).join("");
   const matrix = `
     <div style="padding:20px;border-top:1px solid #152236;overflow-x:auto;">
-      ${sectionHead("height:14px;", "Live workflow grid", "rows = field types · columns = steps · colour = fill state")}
-      ${legend}
-      <table style="width:100%;border-collapse:collapse;min-width:${minWidth}px;">
-        <thead>${headerRow}</thead>
-        <tbody>${bodyRows}</tbody>
+      ${sectionHead("height:14px;", "Workflow grid", "9 fields across 3 layers")}
+      <table style="width:100%;border-collapse:collapse;min-width:1180px;">
+        <thead>
+          <tr>${groupHeaderRow}</tr>
+          <tr>${colHeaderRow}</tr>
+        </thead>
+        <tbody>${gridRows}</tbody>
       </table>
     </div>`;
 
@@ -7062,7 +7047,6 @@ function normalizeWorkbenchTab(tab) {
 function renderCurrentQuestion(section = getActiveSection()) {
   const question = getDisplayQuestion(section);
   els.currentQuestion.textContent = cleanQuestionLabel(question.text);
-  if (els.questionSource) els.questionSource.textContent = question.source;
   renderQuestionLensBar(question);
 }
 
@@ -7099,15 +7083,18 @@ function cleanQuestionLabel(text) {
     .trim();
 }
 
-function renderQuestionLensBar() {
+function renderQuestionLensBar(question = {}) {
   if (!els.questionLensBar) return;
-  // Classification tag chips (archetype / confidence / source) are no longer
-  // rendered; only the next-gap preview remains. The archetype is still computed
-  // because it drives the next-question fallback below (logic unchanged).
-  const archetype = activeUseCaseArchetype();
-  const nextGap = topCompletionQuestions(1)[0] || archetypeFollowUpQuestion(archetype);
+  // Classification tag chips (archetype / confidence / source) are gone; this
+  // space now holds a single "suggested next question" card. The classification
+  // logic itself is untouched and still used elsewhere. Placeholder text is the
+  // current question — PR 4 wires the real next-best-question selection.
+  const suggested = cleanQuestionLabel(question.text || els.currentQuestion?.textContent || "");
   els.questionLensBar.innerHTML = `
-    <span class="question-lens-next">${escapeHtml(truncateUi(nextGap, 96))}</span>
+    <div class="ds-panel ds-border-teal" style="width:100%;box-sizing:border-box;padding:12px 16px;">
+      <div class="ds-micro" style="margin-bottom:4px;">SUGGESTED NEXT QUESTION</div>
+      <div style="font-size:0.9rem;color:#e2e8f0;line-height:1.4;">${escapeHtml(suggested)}</div>
+    </div>
   `;
 }
 
