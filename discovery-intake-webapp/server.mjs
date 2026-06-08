@@ -3674,9 +3674,15 @@ async function handleConfluenceCallback(req, res) {
 }
 
 async function handleConfluenceStatus(req, res) {
-  const token = await readConfluenceToken(currentUserId(req));
-  if (!token) return sendJson(res, 200, { connected: false });
-  return sendJson(res, 200, { connected: true, cloudName: token.cloudName, connectedAt: token.connectedAt });
+  // Status reflects ONLY the dedicated Confluence token; the Jira-token fallback
+  // (in readConfluenceToken) applies to actual API calls, not connection status.
+  try {
+    const data = await fs.readFile(confluenceTokenPath(currentUserId(req)), "utf8");
+    const token = JSON.parse(data);
+    return sendJson(res, 200, { connected: true, cloudName: token.cloudName, connectedAt: token.connectedAt });
+  } catch {
+    return sendJson(res, 200, { connected: false });
+  }
 }
 
 async function handleConfluenceSpaces(req, res) {
