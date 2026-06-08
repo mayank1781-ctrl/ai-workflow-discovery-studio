@@ -5300,11 +5300,8 @@ function renderAnalysisTabEngineering() {
     for (let d = 0; d < 3; d += 1) {
       dots += `<span style="color:${d < priority ? "#00d4b4" : "#2a3f5f"};">${d < priority ? "●" : "○"}</span>`;
     }
-    const priorityBadge = priority === 1
-      ? `<span class="ds-badge ds-badge-teal">Quick win</span>`
-      : priority === 2
-        ? `<span class="ds-badge ds-badge-purple">Strategic</span>`
-        : `<span class="ds-badge ds-badge-amber">Monitor</span>`;
+    const meta = getStepOpportunityMeta(step);
+    const priorityBadge = `<span class="ds-badge ${opportunityTierBadgeClass(meta.tier)}">${escapeHtml(meta.label)}</span>`;
     const patternBadge = pattern ? `<span class="ds-badge ds-badge-teal">${escapeHtml(pattern)}</span>` : "";
 
     const painWarn = gridCellState(step, "painFriction") !== "confirmed"
