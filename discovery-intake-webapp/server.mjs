@@ -3558,6 +3558,7 @@ async function handleJiraPush(req, res) {
       { type: "paragraph", content: [{ type: "text", text: `AI Pattern: ${safeStep.aiPattern || "—"}`, marks: [{ type: "strong" }] }] }
     ]
   };
+  console.log('[jira-push] project:', projectKey, 'priority:', priority);
   const resp = await httpsRequest("POST",
     `https://api.atlassian.com/ex/jira/${token.cloudId}/rest/api/3/issue`,
     { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json", Accept: "application/json" },
@@ -3566,12 +3567,13 @@ async function handleJiraPush(req, res) {
         project: { key: projectKey },
         summary: String(safeStep.name || "Untitled step").slice(0, 255),
         description,
-        issuetype: { name: "Story" },
+        issuetype: { name: "Task" },
         priority: { name: priority },
         labels
       }
     });
   if (resp.status === 401) return sendJson(res, 401, { error: "Jira token expired — reconnect" });
+  if (resp.status !== 201) console.error('[jira-push] rejected:', resp.status, JSON.stringify(resp.body));
   if (resp.status !== 201) return sendJson(res, 502, { error: "Jira rejected the issue", detail: resp.body });
   const issueKey = resp.body.key;
   return sendJson(res, 200, { issueKey, issueUrl: `https://${token.cloudName}.atlassian.net/browse/${issueKey}` });
