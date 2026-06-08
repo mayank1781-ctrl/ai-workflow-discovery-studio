@@ -3493,8 +3493,6 @@ async function handleJiraCallback(req, res) {
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   const error = url.searchParams.get("error");
-  console.log('[jira-callback] hit — code:', !!code, 'state:', !!state, 'error:', error);
-  console.log('[jira-callback] JIRA_CLIENT_ID present:', !!JIRA_CLIENT_ID, 'JIRA_CLIENT_SECRET present:', !!JIRA_CLIENT_SECRET);
   try {
     if (error) { res.writeHead(302, { Location: "/?jira=error#engineering-doc" }); res.end(); return; }
     const entry = jiraOAuthStates.get(state);
@@ -3558,7 +3556,6 @@ async function handleJiraPush(req, res) {
       { type: "paragraph", content: [{ type: "text", text: `AI Pattern: ${safeStep.aiPattern || "—"}`, marks: [{ type: "strong" }] }] }
     ]
   };
-  console.log('[jira-push] project:', projectKey, 'priority:', priority);
   const resp = await httpsRequest("POST",
     `https://api.atlassian.com/ex/jira/${token.cloudId}/rest/api/3/issue`,
     { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json", Accept: "application/json" },
