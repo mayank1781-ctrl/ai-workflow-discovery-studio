@@ -1315,6 +1315,12 @@ function bindEvents() {
   });
 
   document.getElementById("topbarNewButton")?.addEventListener("click", () => createNewSession({ appMode: "interview", activeWorkbenchTab: "handoff" }));
+  // Outside-click dismiss for the Open (saved sessions) dropdown — it can get
+  // long, so unlike the Help menu it closes when you click anywhere outside it.
+  document.addEventListener("click", (event) => {
+    const menu = document.getElementById("openSessionsMenu");
+    if (menu?.open && !menu.contains(event.target)) menu.removeAttribute("open");
+  });
   document.querySelectorAll("[data-app-mode]").forEach((button) => {
     button.addEventListener("click", () => setAppMode(button.dataset.appMode || "interview"));
   });
@@ -11071,6 +11077,11 @@ function renderSavedSessionsPanel() {
   const container = document.getElementById("savedSessionsPanel");
   if (!container) return;
   const sessions = getCombinedSessionLibrary();
+  const countBadge = document.getElementById("openSessionsCount");
+  if (countBadge) {
+    countBadge.textContent = String(sessions.length);
+    countBadge.style.display = sessions.length ? "" : "none";
+  }
   const currentId = state.sessionMeta?.id;
   const head = `
     <div class="saved-sessions-head" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
