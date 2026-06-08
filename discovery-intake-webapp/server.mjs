@@ -3689,8 +3689,9 @@ async function handleConfluenceSpaces(req, res) {
   const token = await readConfluenceToken(currentUserId(req));
   if (!token) return sendJson(res, 401, { error: "Not connected to Confluence" });
   const resp = await httpsRequest("GET",
-    `https://api.atlassian.com/ex/confluence/${token.cloudId}/wiki/rest/api/space?limit=50&type=global`,
+    `https://api.atlassian.com/ex/confluence/${token.cloudId}/wiki/rest/api/space?limit=50`,
     { Authorization: `Bearer ${token.access_token}`, Accept: "application/json" });
+  console.log('[confluence-spaces] status:', resp.status, 'count:', resp.body?.results?.length);
   const results = (resp.body && resp.body.results) || [];
   return sendJson(res, 200, { spaces: results.map((s) => ({ key: s.key, name: s.name })) });
 }
