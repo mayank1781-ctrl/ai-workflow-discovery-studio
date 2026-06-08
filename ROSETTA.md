@@ -24,7 +24,7 @@
 | Field | Value |
 |---|---|
 | **Lever** | Which Claude model generates Pattern Handoff questions |
-| **Location** | `server.mjs` → `handlePatternHandoff()` → `phCallClaude()` |
+| **Location** | `server.mjs` → `handlePatternHandoff()` (inline `fetch` to the Anthropic API) |
 | **Current setting** | `claude-sonnet-4-6` |
 | **Effect of changing** | Faster/cheaper (Haiku) or more nuanced (Opus). Haiku may produce vaguer questions. Opus costs ~15× more. |
 | **Constraints** | Must use an Anthropic model string. Check `https://docs.anthropic.com/models` for current valid strings. Never hardcode a deprecated model. |
@@ -36,7 +36,7 @@
 | **Location** | `server.mjs` → `buildQuestionsPrompt()` → prompt text: `"Generate exactly 3–7 interview questions"` |
 | **Current setting** | 3–7 questions |
 | **Effect of changing** | Fewer = faster, less user effort, lower coverage. More = better gap resolution, higher fatigue. |
-| **Constraints** | Keep the range tight. If you raise the max, also raise `max_tokens` in `phCallClaude()`. The parser expects a JSON array — count is not validated server-side. |
+| **Constraints** | Keep the range tight. If you raise the max, also raise `max_tokens` in `handlePatternHandoff()`. The parser expects a JSON array — count is not validated server-side. |
 
 ### L03 — Persona skewing logic
 | Field | Value |
@@ -105,8 +105,8 @@
 | Field | Value |
 |---|---|
 | **Lever** | Token budget for pattern question and analysis API calls |
-| **Location** | `server.mjs` → `phCallClaude()` → `max_tokens: 2048` |
-| **Current setting** | 2048 tokens |
+| **Location** | `server.mjs` → `handlePatternHandoff()` → `max_tokens: 1000` |
+| **Current setting** | 1000 tokens |
 | **Effect of changing** | Reducing may truncate JSON arrays for large workflows (10+ steps). Increasing raises cost and latency. |
 | **Constraints** | The response parser expects a complete JSON array. If tokens are exhausted mid-array, `JSON.parse()` will throw. Add a try/catch recovery or raise the limit for workflows >8 steps. |
 
@@ -164,7 +164,7 @@
 |---|---|
 | **Lever** | How session IDs are created |
 | **Location** | `app.js` or `server.mjs` → session creation |
-| **Current setting** | `crypto.randomUUID()` |
+| **Current setting** | `ensureSessionMeta()` generates `session-<base36>` ids (not `crypto.randomUUID()`) |
 | **Effect of changing** | Could use timestamp-based IDs for sortability, or user-scoped IDs for multi-tenancy. |
 | **Constraints** | IDs become filenames — avoid characters that are invalid in file paths (`/`, `\`, `:`, `*`, `?`). UUID is safe. |
 
@@ -172,7 +172,7 @@
 | Field | Value |
 |---|---|
 | **Lever** | The four in-memory state keys used by the Pattern Handoff feature |
-| **Location** | `app.js` → state object. Keys: `handoffQuestions`, `handoffAnswers`, `handoffPatterns`, `handoffPatternOverrides` |
+| **Location** | `app.js` → state object. Keys: `handoffQuestions`, `handoffAnswers`, `handoffPatterns`, `handoffOverrides` |
 | **Current setting** | Session-only — lost on tab switch if not persisted |
 | **Effect of changing** | To persist across sessions, save these keys into the session JSON alongside `workflowGrid`. Currently intentionally ephemeral per the original spec. |
 | **Constraints** | Do not add these to `workflowGrid` directly — they are interview scaffolding, not workflow data. Save them as a sibling key if persistence is needed. |
@@ -182,7 +182,7 @@
 |---|---|
 | **Lever** | How answers to Pattern Handoff questions are keyed in state |
 | **Location** | `app.js` → Zone 2 textarea input handlers |
-| **Current setting** | Keyed by question array index (integer). `state.handoffAnswers[0]`, `[1]`, etc. |
+| **Current setting** | Keyed by question `id` (string). `state.handoffAnswers[questionId]`. |
 | **Effect of changing** | If you switch to stepId-based keys, multiple questions per step will collide unless you add a sub-key. |
 | **Constraints** | The analyse prompt receives answers as `Object.entries(answers)` — key format affects how the model reads context. Keep consistent with prompt structure. |
 
@@ -483,7 +483,7 @@
 | **Location** | `app.js` → `handleHandoffConfirm()` (PR #49) |
 | **Current setting** | Sets `step.cells.aiPattern.value`, `state`, and `confidence` for each confirmed step |
 | **Effect of changing** | Could also write to `step.cells.description` with the rationale text. Or trigger a Recipe Book regeneration automatically after confirmation. |
-| **Constraints** | Never overwrite a cell that is already `"confirmed"` unless the user has explicitly provided an override. Check `handoffPatternOverrides[stepId]` first. |
+| **Constraints** | Never overwrite a cell that is already `"confirmed"` unless the user has explicitly provided an override. Check `handoffOverrides[stepId]` first. |
 
 ### L50 — Dump mode merge strategy
 | Field | Value |
