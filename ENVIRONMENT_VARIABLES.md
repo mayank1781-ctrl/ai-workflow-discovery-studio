@@ -74,6 +74,29 @@ Leave these blank unless the work environment has approved the vendor, data boun
 | `LANGFUSE_SECRET_KEY` | Optional | Observability | Pair with Langfuse public key; never commit |
 | `ADDON_LIVE_TEST_TIMEOUT_MS` | Optional | Add-on Test Lab | Timeout for safe live provider preflight checks; defaults to `8000` |
 
+## Phase 5 — Azure AD Sign-in Gate
+
+The app can gate every route behind Microsoft (Azure AD) sign-in. The gate is a
+no-op while `AUTH_ENABLED=false` (the default), so the app runs completely
+un-gated until an Azure app registration is wired. Sessions are a stateless,
+HMAC-signed, httpOnly cookie — no server-side session store, no new dependencies.
+
+| Variable | Required when gated | Purpose |
+|---|---|---|
+| `AUTH_ENABLED` | Always | `true` turns the gate on; `false` (default) leaves the app fully open |
+| `AUTH_AZURE_TENANT_ID` | Yes | Azure AD tenant (directory) ID — single-tenant; the `id_token` `tid` claim must match |
+| `AUTH_AZURE_CLIENT_ID` | Yes | Application (client) ID of the login app registration |
+| `AUTH_AZURE_CLIENT_SECRET` | Yes | Client secret for the code→token exchange; store only in `.env.local`/secret manager |
+| `AUTH_REDIRECT_URI` | Yes | Must exactly match the redirect URI registered in Azure; defaults to `${APP_BASE_URL}/auth/microsoft/callback` |
+| `AUTH_SESSION_SECRET` | Yes | Secret used to HMAC-sign the session cookie; generate with `node -e "console.log(crypto.randomBytes(32).toString('hex'))"` |
+| `AUTH_SESSION_TTL_HOURS` | Optional | Cookie lifetime in hours (default `12`); on expiry the user re-signs in |
+
+Routes added: `GET /auth/login` → Microsoft authorize redirect; `GET /auth/microsoft/callback`
+→ token exchange + set cookie; `POST /auth/logout` → clear cookie; `GET /api/me` → current user.
+`/api/health` and `/login.html` stay public. Azure app registration: scopes `openid profile email`,
+redirect URI = `AUTH_REDIRECT_URI`. (5a trusts the `id_token` over the direct TLS token exchange;
+JWKS signature verification is a 5b hardening step.)
+
 ## Local Safety Rules
 
 - Empty values in `.env.example` are intentional.
