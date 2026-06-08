@@ -3718,10 +3718,22 @@ async function handleConfluencePush(req, res) {
     ${stepsHtml}
   `;
 
+  // Step 1: resolve the space key to a numeric spaceId (v2; v1 content POST is 410 Gone).
+  const spaceResp = await httpsRequest("GET",
+    `https://api.atlassian.com/ex/confluence/${token.cloudId}/wiki/api/v2/spaces?keys=${encodeURIComponent(spaceKey)}`,
+    { Authorization: `Bearer ${token.access_token}`, Accept: "application/json" });
+  if (spaceResp.status === 401) return sendJson(res, 401, { error: "Confluence token expired — reconnect" });
+  const spaceId = spaceResp.body?.results?.[0]?.id;
+  if (!spaceId) {
+    console.error("[confluence-push] space lookup:", spaceResp.status, JSON.stringify(spaceResp.body));
+    return sendJson(res, 400, { error: "Space key not found — check your space key and try again" });
+  }
+
+  // Step 2: create the page (v2).
   const resp = await httpsRequest("POST",
-    `https://api.atlassian.com/ex/confluence/${token.cloudId}/wiki/rest/api/content`,
+    `https://api.atlassian.com/ex/confluence/${token.cloudId}/wiki/api/v2/pages`,
     { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json", Accept: "application/json" },
-    { type: "page", title, space: { key: spaceKey }, body: { storage: { value: pageBody, representation: "storage" } } });
+    { spaceId, title, body: { representation: "storage", value: pageBody } });
   if (resp.status === 401) return sendJson(res, 401, { error: "Confluence token expired — reconnect" });
   if (resp.status !== 200 && resp.status !== 201) {
     console.error("[confluence-push] rejected:", resp.status, JSON.stringify(resp.body));
