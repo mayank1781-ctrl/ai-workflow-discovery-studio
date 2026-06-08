@@ -1188,7 +1188,6 @@ const els = {
   currentQuestion: document.getElementById("currentQuestion"),
   questionSource: document.getElementById("questionSource"),
   questionLensBar: document.getElementById("questionLensBar"),
-  frameAnchorStrip: document.getElementById("frameAnchorStrip"),
   currentStepPanel: document.getElementById("currentStepPanel"),
   turnSignalPanel: document.getElementById("turnSignalPanel"),
   sectionTitle: document.getElementById("sectionTitle"),
@@ -3395,7 +3394,6 @@ function render() {
   if (state.activeSection !== section.id) state.activeSection = section.id;
   renderHeaderContext();
   renderCurrentStepPanel();
-  renderFrameAnchorStrip();
   renderCurrentQuestion(section);
   renderTurnSignalPanel();
   renderDiscoveryDumpMode();
@@ -7031,7 +7029,7 @@ function normalizeWorkbenchTab(tab) {
 function renderCurrentQuestion(section = getActiveSection()) {
   const question = getDisplayQuestion(section);
   els.currentQuestion.textContent = cleanQuestionLabel(question.text);
-  renderQuestionLensBar(question);
+  renderQuestionLensBar();
 }
 
 const OPENING_DISCOVERY_QUESTION = "What task or workflow do you want to talk about? Briefly describe what happens, the business outcome, and the main output.";
@@ -7067,54 +7065,85 @@ function cleanQuestionLabel(text) {
     .trim();
 }
 
-function renderQuestionLensBar(question = {}) {
-  if (!els.questionLensBar) return;
-  // Classification tag chips (archetype / confidence / source) are gone; this
-  // space now holds a single "suggested next question" card. The classification
-  // logic itself is untouched and still used elsewhere. Placeholder text is the
-  // current question — PR 4 wires the real next-best-question selection.
-  const suggested = cleanQuestionLabel(question.text || els.currentQuestion?.textContent || "");
-  els.questionLensBar.innerHTML = `
-    <div class="ds-panel ds-border-teal" style="width:100%;box-sizing:border-box;padding:12px 16px;">
-      <div class="ds-micro" style="margin-bottom:4px;">SUGGESTED NEXT QUESTION</div>
-      <div style="font-size:0.9rem;color:#e2e8f0;line-height:1.4;">${escapeHtml(suggested)}</div>
-    </div>
-  `;
+// The 9 merged grid fields in next-best-question priority order. For each, we
+// surface a natural-language question and the cell keys that, when confirmed,
+// mark the field as covered. Order matches the discovery spec: Flow first,
+// Step Name last. Keys mirror GRID_LAYER_DEF.
+const NEXT_QUESTION_PRIORITY = [
+  { label: "Flow & Dependencies", keys: ["trigger", "output", "handoff"], question: "What kicks this step off, what does it produce, and what does it depend on or hand off to next?" },
+  { label: "Who's Involved", keys: ["personaActors"], question: "Who actually performs this step, and who else is involved or receives the handoff?" },
+  { label: "Data Flow", keys: ["dataProcessing"], question: "What data goes into this step, how is it processed, and what data comes out?" },
+  { label: "Volume", keys: ["frequencyVolume", "timeTaken"], question: "How often does this run, and roughly how long does it take each time?" },
+  { label: "Systems & Tools", keys: ["systemsTools"], question: "Which systems, tools, or applications are used to carry out this step?" },
+  { label: "Pain & Rules", keys: ["painFriction", "rulesDecisionLogic", "exceptionBranching"], question: "What are the main pain points, business rules, or exceptions that shape this step?" },
+  { label: "What Happens", keys: ["description"], question: "In a sentence or two, what actually happens during this step?" },
+  { label: "Sensitivity", keys: ["dataSensitivity", "regulatoryContext"], question: "How sensitive is the data here, and are there any regulatory or compliance constraints?" },
+  { label: "Step Name", keys: ["name"], question: "What would you call this step in a few words?" }
+];
+
+// A field counts as "covered" once any step has a confirmed (not merely
+// inferred) non-empty value for one of its keys.
+function gridFieldHasConfirmedValue(keys) {
+  const steps = analysisGridSteps();
+  return steps.some((step) =>
+    keys.some((key) => gridCellState(step, key) === "confirmed" && gridCellValue(step, key) !== "")
+  );
 }
 
-// Phase 1 Frame Builder — State 3 (Phase 2 handoff). The confirmed frame lives
-// on as a slim, display-only anchor strip across the top of the interview, with
-// the current step highlighted ("now"). It replaces the old Next/Queue 2/Queue 3
-// preview row and gives the deep dive a persistent map of where we are.
-function renderFrameAnchorStrip() {
-  if (!els.frameAnchorStrip) return;
-  const showStrip = state.drilldown?.status === "active" && state.steps.length > 0;
-  if (!showStrip) {
-    els.frameAnchorStrip.hidden = true;
-    els.frameAnchorStrip.innerHTML = "";
+// First priority-order field still lacking a confirmed value, or null when the
+// whole grid is covered.
+function nextBestGridQuestion() {
+  for (const field of NEXT_QUESTION_PRIORITY) {
+    if (!gridFieldHasConfirmedValue(field.keys)) return field;
+  }
+  return null;
+}
+
+function copySuggestedQuestionToAnswer(question) {
+  if (!els.answerInput || !question) return;
+  els.answerInput.value = question;
+  els.answerInput.focus();
+  toast("Suggested question copied to the answer box");
+}
+
+// The narrow strip under the current question. It no longer echoes the current
+// question; it surfaces the next-best discovery question (the first of the 9
+// grid fields with no confirmed value) and is tappable to copy that question
+// into the main answer box.
+function renderQuestionLensBar() {
+  if (!els.questionLensBar) return;
+  const next = nextBestGridQuestion();
+  if (!next) {
+    els.questionLensBar.innerHTML = `
+      <div class="ds-panel ds-border-teal" style="width:100%;box-sizing:border-box;padding:12px 16px;">
+        <div class="ds-micro" style="margin-bottom:4px;">SUGGESTED NEXT QUESTION</div>
+        <div style="font-size:0.9rem;color:#e2e8f0;line-height:1.4;">All key areas covered — ready to analyse.</div>
+      </div>
+    `;
     return;
   }
-  const currentIndex = getCurrentStepIndex();
-  const pills = state.steps
-    .map((step, index) => {
-      const label = step.name || step.action || `Step ${index + 1}`;
-      const isCurrent = index === currentIndex;
-      return `
-        <li class="frame-anchor-pill ${isCurrent ? "current" : ""}">
-          <span class="frame-anchor-pill-number">${index + 1}</span>
-          <span class="frame-anchor-pill-label">${escapeHtml(label)}</span>
-          ${isCurrent ? `<span class="frame-anchor-pill-now">now</span>` : ""}
-        </li>
-      `;
-    })
-    .join("");
-  els.frameAnchorStrip.hidden = false;
-  els.frameAnchorStrip.innerHTML = `
-    <span class="frame-anchor-strip-label">Workflow</span>
-    <ol class="frame-anchor-strip-list">${pills}</ol>
+  els.questionLensBar.innerHTML = `
+    <div class="ds-panel ds-border-teal" role="button" tabindex="0" title="Tap to copy this question into the answer box" style="width:100%;box-sizing:border-box;padding:12px 16px;cursor:pointer;">
+      <div class="ds-micro" style="margin-bottom:4px;">SUGGESTED NEXT QUESTION</div>
+      <div style="font-size:0.9rem;color:#e2e8f0;line-height:1.4;">${escapeHtml(next.question)}</div>
+    </div>
   `;
-  refreshIcons();
+  const panel = els.questionLensBar.firstElementChild;
+  if (panel) {
+    panel.addEventListener("click", () => copySuggestedQuestionToAnswer(next.question));
+    panel.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        copySuggestedQuestionToAnswer(next.question);
+      }
+    });
+  }
 }
+
+// Phase 1 Frame Builder — State 3. The display-only workflow breadcrumb/anchor
+// strip ("WORKFLOW | 1 step now | 2 step ...") was removed from the Discovery
+// page. Step tracking (state.steps, getCurrentStepIndex, drilldown) is untouched
+// — only the rendered bar is gone.
 
 function renderCurrentStepPanel() {
   if (!els.currentStepPanel) return;
@@ -8513,7 +8542,6 @@ function renderTextIntakeAssist() {
   const route = inferTextIntakeRoute(draft);
   const missing = currentMissingTextFields();
   const caution = textDataCaution(draft);
-  const archetype = inferUseCaseArchetypeFromText(draft || useCaseArchetypeSourceText());
   els.textIntakeAssist.innerHTML = `
     <div class="intake-router-card ${escapeHtml(route.tone)}">
       <div class="router-heading">
@@ -8525,7 +8553,6 @@ function renderTextIntakeAssist() {
       </div>
       <p>${escapeHtml(route.reason)}</p>
       <div class="router-chip-row">
-        <span><i data-lucide="${escapeHtml(archetype.icon)}"></i>${escapeHtml(archetype.label)}</span>
         ${route.fields.map((field) => `<span>${escapeHtml(field)}</span>`).join("")}
       </div>
       ${missing ? `<small>Missing next: ${escapeHtml(missing)}</small>` : ""}
