@@ -3489,11 +3489,13 @@ async function handleJiraAuth(req, res) {
 }
 
 async function handleJiraCallback(req, res) {
+  const url = new URL(req.url, `http://localhost:${PORT}`);
+  const code = url.searchParams.get("code");
+  const state = url.searchParams.get("state");
+  const error = url.searchParams.get("error");
+  console.log('[jira-callback] hit — code:', !!code, 'state:', !!state, 'error:', error);
+  console.log('[jira-callback] JIRA_CLIENT_ID present:', !!JIRA_CLIENT_ID, 'JIRA_CLIENT_SECRET present:', !!JIRA_CLIENT_SECRET);
   try {
-    const url = new URL(req.url, `http://localhost:${PORT}`);
-    const code = url.searchParams.get("code");
-    const state = url.searchParams.get("state");
-    const error = url.searchParams.get("error");
     if (error) { res.writeHead(302, { Location: "/?jira=error#engineering-doc" }); res.end(); return; }
     const entry = jiraOAuthStates.get(state);
     if (!entry || entry.exp < Date.now()) return sendJson(res, 400, { error: "Invalid or expired state" });
@@ -3517,7 +3519,7 @@ async function handleJiraCallback(req, res) {
     res.writeHead(302, { Location: "/?jira=connected#engineering-doc" });
     res.end();
   } catch (error) {
-    console.error("Jira callback failed:", error);
+    console.error('[jira-callback] ERROR:', error?.message || error);
     res.writeHead(302, { Location: "/?jira=error#engineering-doc" });
     res.end();
   }
