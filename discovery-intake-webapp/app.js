@@ -5116,6 +5116,36 @@ function ganttEndWeek(complexity) {
   return 7;                             // medium ends Phase 3
 }
 
+// Field rows shown inside each expandable step card, in display order.
+const ENG_FIELD_ORDER = [
+  "name", "personaActors", "systemsTools", "output", "trigger", "handoff",
+  "humanCheckpoint", "timeTaken", "frequencyVolume", "painFriction",
+  "dataSensitivity", "aiPattern", "description", "dataProcessing",
+  "rulesDecisionLogic", "exceptionBranching", "regulatoryContext"
+];
+
+// Priority bucket from time-taken: 1 quick win (<30m), 2 strategic (<120m), 3 monitor.
+function engStepPriority(step) {
+  const t = parseFloat(gridCellValue(step, "timeTaken"));
+  return t < 30 ? 1 : t < 120 ? 2 : 3;
+}
+
+// Provenance descriptor for a cell state (label + colour + ds-badge variant).
+function engProvenance(stateName) {
+  if (stateName === "confirmed") return { label: "confirmed", color: "#00d4b4", badge: "ds-badge-teal" };
+  if (stateName === "inferred") return { label: "inferred", color: "#a855f7", badge: "ds-badge-purple" };
+  return { label: "unconfirmed", color: "#f59e0b", badge: "ds-badge-amber" };
+}
+
+// Sensitivity level (1-4) + colour from a free-text value (case-insensitive).
+function engSensitivity(value) {
+  const v = (value || "").toLowerCase();
+  if (v.includes("very high")) return { level: 4, color: "#ef4444" };
+  if (v.includes("high")) return { level: 3, color: "#f97316" };
+  if (v.includes("medium")) return { level: 2, color: "#f59e0b" };
+  return { level: 1, color: "#445566" };
+}
+
 function renderAnalysisTabEngineering() {
   const container = document.getElementById("analysis-tab-engineering");
   if (!container) return;
@@ -5125,94 +5155,218 @@ function renderAnalysisTabEngineering() {
     return;
   }
 
-  // Section 1: Implementation Gantt.
-  const phaseHeader = `
-    <div class="gantt-row" style="color:#7a93b4;font-weight:700;">
-      <div class="gantt-label">Phase</div>
-      <div class="gantt-track" style="background:transparent;display:flex;gap:2px;">
-        <div style="flex:2;font-size:9px;background:#1a2a3a;border-radius:4px;padding:2px 4px;overflow:hidden;">P1 Discovery</div>
-        <div style="flex:3;font-size:9px;background:#1a2a3a;border-radius:4px;padding:2px 4px;overflow:hidden;">P2 Build</div>
-        <div style="flex:2;font-size:9px;background:#1a2a3a;border-radius:4px;padding:2px 4px;overflow:hidden;">P3 Test</div>
-        <div style="flex:1;font-size:9px;background:#1a2a3a;border-radius:4px;padding:2px 4px;overflow:hidden;">P4</div>
+  const wf = state.workflowGrid || {};
+  const truncate = (s, n) => (s.length > n ? s.slice(0, n) : s);
+  const sectionHead = (barStyle, title, meta) => `
+    <div class="ds-section-head">
+      <div class="ds-section-title"><span class="ds-grad-bar-v" style="${barStyle}"></span>${title}</div>
+      <div class="ds-section-meta">${meta}</div>
+    </div>`;
+
+  // --- Section 1: document header -------------------------------------------
+  const baseline = (wf.dataSensitivityBaseline?.value || "").trim();
+  const baseSens = engSensitivity(baseline);
+  const sensBadge = baseline
+    ? `<span class="ds-badge" style="color:${baseSens.color};background:${baseSens.color}1a;border:1px solid ${baseSens.color}40;">${escapeHtml(baseline)}</span>`
+    : "";
+  const section1 = `
+    <div class="ds-panel" style="padding:20px;margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <div>
+          <div style="font-size:1.2rem;font-weight:700;color:#e8f4ff;margin-bottom:8px;">${escapeHtml(wf.workflowName || "Workflow Engineering Spec")}</div>
+          <div style="font-size:0.75rem;color:#445566;">AI Engineering Specification · Auto-generated from workflow analysis</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          ${sensBadge}
+          <span class="ds-badge ds-badge-dim">${steps.length} steps</span>
+          <span class="ds-badge ds-badge-dim">v1.0</span>
+          ${wf.stepListLocked ? `<span class="ds-badge ds-badge-teal">Locked</span>` : ""}
+        </div>
+      </div>
+      <div class="ds-grad-bar" style="margin-top:14px;"></div>
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
+        <div style="display:flex;gap:8px;align-items:flex-start;background:rgba(168,85,247,0.06);border:1px solid rgba(168,85,247,0.2);border-radius:8px;padding:10px 14px;">
+          <span style="color:#a855f7;font-size:0.8rem;">ⓘ</span>
+          <span style="font-size:0.75rem;color:#8899aa;line-height:1.5;">Fields marked "inferred by AI" were derived from document analysis and pattern matching. Confirm critical fields before implementation.</span>
+        </div>
       </div>
     </div>`;
-  const ganttRows = steps.map((step, index) => {
-    const name = stepDisplayName(step, index);
-    const pattern = stepPrimaryPattern(step);
-    const widthPct = (ganttEndWeek(patternComplexity(pattern)) / 8) * 100;
-    const color = patternColor(pattern);
-    return `
-      <div class="gantt-row">
-        <div class="gantt-label" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
-        <div class="gantt-track"><div class="gantt-bar" style="width:${widthPct}%;background:${color};"></div></div>
-      </div>`;
-  }).join("");
 
-  // Section 2: Data Sensitivity Profile.
-  const sensRows = steps.map((step, index) => {
-    const name = stepDisplayName(step, index);
-    const level = sensitivityLevel(step);
-    const color = sensitivityColor(level);
-    const pct = level === "high" ? 100 : level === "medium" ? 66 : 33;
-    const raw = gridCellValue(step, "dataSensitivity") || "Not captured";
-    return `
-      <div class="sensitivity-row">
-        <div class="gantt-label" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
-        <span class="sensitivity-badge" style="background:${color}22;color:${color};">${level.toUpperCase()}</span>
-        <div class="gantt-track"><div class="gantt-bar" style="width:${pct}%;background:${color};"></div></div>
-        <span style="font-size:10px;color:#5b7186;flex-shrink:0;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(raw)}</span>
-      </div>`;
-  }).join("");
-
-  // Section 3: Open Gaps.
-  const gapRows = [];
-  steps.forEach((step, index) => {
-    stepGapCells(step).forEach((key) => {
-      gapRows.push({
-        index,
-        name: stepDisplayName(step, index),
-        key,
-        label: CELL_PLAIN_NAMES[key] || key,
-        state: gridCellState(step, key)
-      });
-    });
-  });
-  gapRows.sort((a, b) => a.index - b.index || GRID_CELL_KEYS.indexOf(a.key) - GRID_CELL_KEYS.indexOf(b.key));
-  const gapsHtml = gapRows.length
-    ? `<table class="gaps-table"><thead><tr><th>Step</th><th>Cell Name</th><th>State</th></tr></thead><tbody>` +
-      gapRows.map((g) => `<tr><td>${escapeHtml(g.name)}</td><td>${escapeHtml(g.label)}</td><td>${escapeHtml(g.state)}</td></tr>`).join("") +
-      `</tbody></table>`
-    : `<div class="summary-item">All cells addressed — ready to generate outputs.</div>`;
-
-  const workflowName = analysisWorkflowName() || "Workflow";
-  const baselineRaw = (state.workflowGrid?.dataSensitivityBaseline?.value || "").trim();
-  const inferredSensitivity = inferOverallDataSensitivity();
-  const baseline = baselineRaw || (inferredSensitivity && inferredSensitivity !== "Unknown" ? inferredSensitivity : "Not assessed");
-
-  const headerStyle = "display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:#0d1b2a;border:none;color:#dde8f5;padding:12px 14px;cursor:pointer;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;";
+  // --- Export toolbar (preserved) -------------------------------------------
   const tealBtn = "background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;cursor:pointer;transition:opacity 0.2s;";
-  const sections = [
-    { id: "impl", title: "Implementation Plan", content: phaseHeader + ganttRows },
-    { id: "sens", title: "Data Sensitivity Profile", content: sensRows },
-    { id: "gaps", title: "Open Gaps", content: gapsHtml }
-  ];
-  const sectionsHtml = sections.map((section) => `
-    <div style="border:1px solid #1a2a3a;border-radius:8px;margin-bottom:8px;overflow:hidden;">
-      <button type="button" data-eng-section="${section.id}" aria-expanded="false" style="${headerStyle}">
-        <span data-eng-arrow style="display:inline-block;width:10px;color:#00d4b4;transition:transform 0.2s;">&#9654;</span>
-        <span style="flex:1;">${escapeHtml(section.title)}</span>
-      </button>
-      <div data-eng-body="${section.id}" hidden style="padding:12px 14px;background:#0a1521;">${section.content}</div>
-    </div>`).join("");
-
-  container.innerHTML = `
-    <p style="font-size:13px;color:#dde8f5;margin:0 0 14px;font-weight:600;">${escapeHtml(workflowName)} &mdash; ${steps.length} step${steps.length === 1 ? "" : "s"} &mdash; Data sensitivity: ${escapeHtml(baseline)}</p>
+  const toolbar = `
     <div style="margin-bottom:16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
       <button class="secondary-button compact" type="button" id="exportEngineeringDocBtn">Export Engineering Doc</button>
       <button type="button" id="engineering-export-btn" style="${tealBtn}">⬇ Download DOCX</button>
       <button type="button" id="engineering-pdf-btn" style="${tealBtn}">⬇ Download PDF</button>
-    </div>
-    ${sectionsHtml}`;
+    </div>`;
+
+  // --- Section 2: colour-coded gantt ----------------------------------------
+  const ganttSorted = steps
+    .map((step, index) => ({ step, index, priority: engStepPriority(step) }))
+    .sort((a, b) => a.priority - b.priority || a.index - b.index);
+  const bands = { 1: [25, 45], 2: [45, 75], 3: [75, 100] };
+  const bandCounts = { 1: 0, 2: 0, 3: 0 };
+  ganttSorted.forEach((r) => { bandCounts[r.priority] += 1; });
+  const bandSeen = { 1: 0, 2: 0, 3: 0 };
+  const ganttRows = ganttSorted.map(({ step, index, priority }) => {
+    const name = stepDisplayName(step, index);
+    const [lo, hi] = bands[priority];
+    const count = bandCounts[priority];
+    const pos = bandSeen[priority]++;
+    const width = count <= 1 ? hi : lo + (pos / (count - 1)) * (hi - lo);
+    const fill = priority === 1
+      ? "background:rgba(0,212,180,0.7);"
+      : priority === 2
+        ? "background:rgba(168,85,247,0.7);"
+        : "background:rgba(245,158,11,0.5);border:1px dashed rgba(245,158,11,0.5);box-sizing:border-box;";
+    const chip = priority === 1
+      ? { label: "Days", color: "#00d4b4" }
+      : priority === 2
+        ? { label: "Weeks", color: "#a855f7" }
+        : { label: "Months", color: "#f59e0b" };
+    return `
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+        <span style="font-size:0.75rem;color:#8899aa;width:140px;flex-shrink:0;" title="${escapeHtml(name)}">${escapeHtml(truncate(name, 18))}</span>
+        <div style="flex:1;height:22px;background:#09131f;border-radius:4px;overflow:hidden;position:relative;">
+          <div style="height:100%;border-radius:4px;width:${width.toFixed(0)}%;${fill}">
+            <span style="display:block;font-size:0.65rem;color:#0d1b2e;padding-left:8px;line-height:22px;white-space:nowrap;">${escapeHtml(truncate(name, 10))}</span>
+          </div>
+        </div>
+        <span class="ds-chip" style="font-size:0.68rem;color:${chip.color};">${chip.label}</span>
+      </div>`;
+  }).join("");
+  const legendSquare = (color, label) =>
+    `<span style="display:flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:2px;background:${color};display:inline-block;"></span>${label}</span>`;
+  const section2 = `
+    <div class="ds-card" style="padding:20px;margin-bottom:16px;">
+      ${sectionHead("height:14px;", "Implementation timeline", "estimated build sequence by priority")}
+      <div style="display:flex;gap:16px;margin-bottom:16px;font-size:0.7rem;color:#8899aa;">
+        ${legendSquare("#00d4b4", "Quick win")}
+        ${legendSquare("#a855f7", "Strategic")}
+        ${legendSquare("#f59e0b", "Monitor")}
+      </div>
+      ${ganttRows}
+    </div>`;
+
+  // --- Section 3: data sensitivity bars -------------------------------------
+  let anyUnconfirmedSens = false;
+  const sensRows = steps.map((step, index) => {
+    const name = stepDisplayName(step, index);
+    const value = gridCellValue(step, "dataSensitivity");
+    const { level, color } = engSensitivity(value);
+    if (gridCellState(step, "dataSensitivity") !== "confirmed") anyUnconfirmedSens = true;
+    return `
+      <div class="ds-bar-row">
+        <span class="ds-bar-name" style="width:140px;" title="${escapeHtml(name)}">${escapeHtml(truncate(name, 16))}</span>
+        <div class="ds-bar-track"><div class="ds-bar-fill" style="width:${((level / 4) * 100).toFixed(0)}%;background:${color};"></div></div>
+        <span class="ds-bar-val" style="color:${color};">${escapeHtml(truncate(value, 10))}</span>
+      </div>`;
+  }).join("");
+  const sensWarning = anyUnconfirmedSens
+    ? `<div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:8px;padding:10px 14px;margin-top:12px;font-size:0.75rem;color:#f87171;">⚠ One or more sensitivity fields are unconfirmed. Review before connecting to production data sources.</div>`
+    : "";
+  const section3 = `
+    <div class="ds-card" style="padding:20px;margin-bottom:16px;">
+      ${sectionHead("height:14px;background:linear-gradient(180deg,#ff4fc8,#a855f7);", "Data sensitivity by step", "risk level per workflow step")}
+      ${sensRows}
+      ${sensWarning}
+    </div>`;
+
+  // --- Section 4: expandable step cards -------------------------------------
+  const cards = steps.map((step, index) => {
+    const name = stepDisplayName(step, index);
+    const priority = engStepPriority(step);
+    const pattern = stepPrimaryPattern(step);
+    const nameProv = engProvenance(gridCellState(step, "name"));
+    let dots = "";
+    for (let d = 0; d < 3; d += 1) {
+      dots += `<span style="color:${d < priority ? "#00d4b4" : "#2a3f5f"};">${d < priority ? "●" : "○"}</span>`;
+    }
+    const priorityBadge = priority === 1
+      ? `<span class="ds-badge ds-badge-teal">Quick win</span>`
+      : priority === 2
+        ? `<span class="ds-badge ds-badge-purple">Strategic</span>`
+        : `<span class="ds-badge ds-badge-amber">Monitor</span>`;
+    const patternBadge = pattern ? `<span class="ds-badge ds-badge-teal">${escapeHtml(pattern)}</span>` : "";
+
+    const painWarn = gridCellState(step, "painFriction") !== "confirmed"
+      ? `<div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:6px;padding:8px 12px;margin-bottom:14px;font-size:0.72rem;color:#d97706;">⚠ Pain/Friction field is unconfirmed — validate with process owner before prioritising.</div>`
+      : "";
+
+    const fieldRows = ENG_FIELD_ORDER.map((key) => {
+      const value = gridCellValue(step, key);
+      const stateName = gridCellState(step, key);
+      if (!value && stateName === "empty") return "";
+      const prov = engProvenance(stateName);
+      const detail = value
+        ? `<span style="color:#c8d8e8;">${escapeHtml(value)}</span>`
+        : `<span style="color:#2a3f5f;">—</span>`;
+      return `
+        <tr>
+          <td style="padding:6px 10px;border-bottom:1px solid #0f1e30;vertical-align:top;color:#556a7e;font-size:0.72rem;white-space:nowrap;">${escapeHtml(CELL_PLAIN_NAMES[key] || key)}</td>
+          <td style="padding:6px 10px;border-bottom:1px solid #0f1e30;vertical-align:top;">${detail}</td>
+          <td style="padding:6px 10px;border-bottom:1px solid #0f1e30;vertical-align:top;"><span class="ds-badge ${prov.badge}">${prov.label}</span></td>
+        </tr>`;
+    }).join("");
+    const table = `
+      <table style="width:100%;border-collapse:collapse;font-size:0.75rem;">
+        <thead>
+          <tr style="background:#09131f;">
+            <th style="padding:6px 10px;color:#445566;text-align:left;border-bottom:1px solid #152236;font-weight:500;width:140px;">Field</th>
+            <th style="padding:6px 10px;color:#445566;text-align:left;border-bottom:1px solid #152236;font-weight:500;">Detail</th>
+            <th style="padding:6px 10px;color:#445566;text-align:left;border-bottom:1px solid #152236;font-weight:500;">Provenance</th>
+          </tr>
+        </thead>
+        <tbody>${fieldRows}</tbody>
+      </table>`;
+
+    const systems = gridCellValue(step, "systemsTools");
+    let flow = "";
+    if (systems) {
+      const trigger = gridCellValue(step, "trigger") || "Manual trigger";
+      const output = gridCellValue(step, "output") || "Result";
+      const handoffValue = gridCellValue(step, "handoff");
+      flow = `
+        <div class="ds-micro" style="margin-top:14px;margin-bottom:8px;">Integration flow</div>
+        <div style="background:#04080f;border:1px solid #152236;border-radius:8px;padding:14px 16px;font-family:monospace;font-size:0.72rem;color:#00d4b4;overflow-x:auto;">
+          <div style="color:#445566;"># Step ${index + 1}: ${escapeHtml(name)}</div>
+          <div style="color:#8899aa;">[INPUT]  ${escapeHtml(trigger)}</div>
+          <div style="color:#00d4b4;">→ [SYSTEM] ${escapeHtml(systems)}</div>
+          <div style="color:#a855f7;">→ [OUTPUT] ${escapeHtml(output)}</div>
+          ${handoffValue ? `<div style="color:#f59e0b;">→ [HANDOFF] ${escapeHtml(handoffValue)}</div>` : ""}
+        </div>`;
+    }
+
+    return `
+      <div class="ds-card" style="margin-bottom:10px;overflow:hidden;">
+        <div data-eng-card-header style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;cursor:pointer;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span class="ds-chip" style="font-size:0.68rem;color:#445566;">Step ${index + 1}</span>
+            <span style="font-weight:600;color:#dde8f2;font-size:0.88rem;">${escapeHtml(name)}</span>
+            ${patternBadge}
+            <span title="Step name: ${nameProv.label}" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${nameProv.color};"></span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:0.9rem;letter-spacing:1px;">${dots}</span>
+            ${priorityBadge}
+            <span data-eng-chevron style="color:#445566;">▸</span>
+          </div>
+        </div>
+        <div data-eng-card-body style="display:none;padding:0 20px 20px;">
+          ${painWarn}
+          ${table}
+          ${flow}
+        </div>
+      </div>`;
+  }).join("");
+  const section4 = `
+    <div style="margin-bottom:16px;">
+      ${sectionHead("height:14px;", "Step implementation details", `${steps.length} steps`)}
+      ${cards}
+    </div>`;
+
+  container.innerHTML = section1 + toolbar + section2 + section3 + section4;
 
   container.querySelector("#exportEngineeringDocBtn")?.addEventListener("click", exportEngineeringDoc);
   const engineeringExportBtn = container.querySelector("#engineering-export-btn");
@@ -5220,24 +5374,15 @@ function renderAnalysisTabEngineering() {
   container.querySelector("#engineering-pdf-btn")?.addEventListener("click", handleEngineeringPdfExport);
   syncEngineeringExportButton(engineeringExportBtn);
 
-  // Accordion: collapsed by default; only one section open at a time.
-  container.querySelectorAll("[data-eng-section]").forEach((header) => {
+  // Expandable cards: toggle the body div between display none/block.
+  container.querySelectorAll("[data-eng-card-header]").forEach((header) => {
     header.addEventListener("click", () => {
-      const id = header.dataset.engSection;
-      const body = container.querySelector(`[data-eng-body="${id}"]`);
-      const willOpen = body.hidden;
-      container.querySelectorAll("[data-eng-body]").forEach((node) => { node.hidden = true; });
-      container.querySelectorAll("[data-eng-section]").forEach((node) => {
-        node.setAttribute("aria-expanded", "false");
-        const arrow = node.querySelector("[data-eng-arrow]");
-        if (arrow) arrow.style.transform = "rotate(0deg)";
-      });
-      if (willOpen) {
-        body.hidden = false;
-        header.setAttribute("aria-expanded", "true");
-        const arrow = header.querySelector("[data-eng-arrow]");
-        if (arrow) arrow.style.transform = "rotate(90deg)";
-      }
+      const body = header.parentElement.querySelector("[data-eng-card-body]");
+      const chevron = header.querySelector("[data-eng-chevron]");
+      if (!body) return;
+      const open = body.style.display !== "none";
+      body.style.display = open ? "none" : "block";
+      if (chevron) chevron.textContent = open ? "▸" : "▾";
     });
   });
 }
