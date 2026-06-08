@@ -4120,23 +4120,6 @@ function updateProcessFlowMapCompact() {
     `<div class="pf-map-row">${pfMapBuildNodes(steps, "compact", currentIndex)}</div>`;
 }
 
-// FULL: Analysis Studio Process Matrix section. Renders the same step pipeline
-// at a larger size with coverage percentages.
-function updateProcessFlowMapFull() {
-  const container = document.getElementById("process-flow-map-full");
-  if (!container) return;
-
-  const steps = Array.isArray(state.workflowGrid?.steps) ? state.workflowGrid.steps : [];
-  if (!steps.length) {
-    container.innerHTML = "";
-    return;
-  }
-
-  const currentIndex = Math.max(0, Math.min(Number(state.activeStepIndex) || 0, steps.length - 1));
-  container.innerHTML =
-    `<div class="pf-map-row-full">${pfMapBuildNodes(steps, "full", currentIndex)}</div>`;
-}
-
 // ============================================================================
 // Analysis Studio — 4-tab interface: Workflow Grid | AI Opportunities |
 // Recipe Book | Engineering Doc. Every tab render function reads
@@ -4338,9 +4321,235 @@ function renderAnalysisStudio() {
 }
 
 // --- TAB 1: Workflow Grid -----------------------------------------------------
+// Intelligence dashboard: header bar (coverage), 4 stat cards, coverage-by-field
+// + confidence-by-step panels, and a live fill-state matrix. Styling leans on
+// the ds-* classes in design-system.css; non-ds colours are inline hex.
+
+// Human-readable label for a grid cell key; unmapped keys are title-cased.
+const GRID_DASHBOARD_LABELS = {
+  name: "Step Name",
+  personaActors: "Persona / Actors",
+  systemsTools: "Systems & Tools",
+  aiPattern: "AI Pattern",
+  humanCheckpoint: "Human Checkpoint",
+  timeTaken: "Time Taken",
+  frequencyVolume: "Frequency",
+  painFriction: "Pain / Friction",
+  dataSensitivity: "Data Sensitivity",
+  dataProcessing: "Data Processing",
+  rulesDecisionLogic: "Rules & Logic",
+  exceptionBranching: "Exceptions",
+  regulatoryContext: "Regulatory"
+};
+
+// Field rows in dashboard display order (17 cells).
+const GRID_FIELD_ORDER = [
+  "name", "personaActors", "systemsTools", "output", "trigger", "handoff",
+  "humanCheckpoint", "timeTaken", "frequencyVolume", "painFriction",
+  "dataSensitivity", "aiPattern", "description", "dataProcessing",
+  "rulesDecisionLogic", "exceptionBranching", "regulatoryContext"
+];
+
+function gridFieldLabel(key) {
+  return GRID_DASHBOARD_LABELS[key] || (key.charAt(0).toUpperCase() + key.slice(1));
+}
+
+// Inline background + left-border for a matrix cell's fill state.
+function gridCellStateStyle(stateName) {
+  if (stateName === "confirmed") return "background:rgba(0,212,180,0.18);border-left:2px solid #00d4b4;";
+  if (stateName === "inferred") return "background:rgba(168,85,247,0.15);border-left:2px solid #a855f7;";
+  if (stateName === "unknown") return "background:rgba(245,158,11,0.12);border-left:2px solid #f59e0b;";
+  return "background:rgba(255,255,255,0.03);border-left:2px solid #1e3350;";
+}
 
 function renderAnalysisTabGrid() {
-  updateProcessFlowMapFull();
+  const container = document.getElementById("process-flow-map-full");
+  if (!container) return;
+
+  const grid = state.workflowGrid || {};
+  const steps = grid.steps || [];
+
+  if (!steps.length) {
+    container.innerHTML = `<div class="ds-micro" style="text-align:center;padding:60px 20px;">No workflow steps yet. Upload a document or use the discovery interview to get started.</div>`;
+    return;
+  }
+
+  const truncate = (str, n) => (str.length > n ? str.slice(0, n) : str);
+  const allCells = steps.flatMap((s) => Object.values(s.cells || {}));
+  const totalFields = allCells.length;
+  const confirmedCells = allCells.filter((c) => c?.state === "confirmed");
+  const inferredCells = allCells.filter((c) => c?.state === "inferred");
+  const unknownCells = allCells.filter((c) => c?.state === "unknown" || c?.state === "empty");
+  const aiOppSteps = steps.filter((s) => stepPrimaryPattern(s) !== "");
+  const fieldPct = (n) => (totalFields ? (n / totalFields) * 100 : 0);
+  const coveragePct = fieldPct(confirmedCells.length).toFixed(0);
+
+  const sectionHead = (barStyle, title, meta) => `
+    <div class="ds-section-head">
+      <div class="ds-section-title"><span class="ds-grad-bar-v" style="${barStyle}"></span>${title}</div>
+      <div class="ds-section-meta">${meta}</div>
+    </div>`;
+
+  // --- Section 1: header bar ------------------------------------------------
+  const lockBadge = grid.stepListLocked ? `<span class="ds-badge ds-badge-teal">Locked</span>` : "";
+  const baseline = (grid.dataSensitivityBaseline?.value || "").trim();
+  const baselineLow = baseline.toLowerCase();
+  const sensitivityBadge = baseline
+    ? `<span class="ds-badge ${baselineLow === "high" || baselineLow === "very high" ? "ds-badge-pink" : "ds-badge-dim"}">${escapeHtml(baseline)}</span>`
+    : "";
+  const dotPill = (dotClass, count, label) =>
+    `<span style="display:flex;align-items:center;gap:4px;font-size:0.7rem;color:#556a7e;"><span class="${dotClass}"></span>${count} ${label}</span>`;
+
+  const header = `
+    <div style="padding:16px 20px;background:#0a1525;border-bottom:1px solid #152236;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:1.1rem;font-weight:700;color:#e8f4ff;">${escapeHtml(grid.workflowName || "Untitled Workflow")}</span>
+          ${lockBadge}
+          ${sensitivityBadge}
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          ${dotPill("ds-dot ds-dot-teal", confirmedCells.length, "confirmed")}
+          ${dotPill("ds-dot ds-dot-purple", inferredCells.length, "inferred")}
+          ${dotPill("ds-dot ds-dot-amber", unknownCells.length, "need input")}
+          ${dotPill("ds-dot ds-dot-teal ds-dot-pulse", aiOppSteps.length, "AI opps")}
+          <span style="width:1px;height:16px;background:#1e3350;"></span>
+          <span class="ds-micro">${steps.length} steps</span>
+        </div>
+      </div>
+      <div style="margin-top:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span class="ds-micro">Coverage</span>
+          <span style="color:#00d4b4;font-size:0.75rem;">${coveragePct}%</span>
+        </div>
+        <div class="ds-progress" style="width:100%;margin-top:4px;">
+          <div class="ds-progress-fill" style="width:${coveragePct}%;"></div>
+        </div>
+      </div>
+    </div>`;
+
+  // --- Section 2: 4 stat cards ----------------------------------------------
+  const inferredPct = fieldPct(inferredCells.length).toFixed(0);
+  const stats = `
+    <div style="padding:20px;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;">
+      <div class="ds-card ds-accent-teal" style="padding:20px;">
+        <div class="ds-micro">Total fields</div>
+        <div class="ds-num-teal" style="font-size:2rem;font-weight:700;">${totalFields}</div>
+      </div>
+      <div class="ds-card ds-accent-teal" style="padding:20px;">
+        <div class="ds-micro">Confirmed</div>
+        <div class="ds-num-teal" style="font-size:2rem;font-weight:700;">${confirmedCells.length}</div>
+        <div style="font-size:0.7rem;color:#1a4a40;">${coveragePct}% complete</div>
+      </div>
+      <div class="ds-card ds-accent-purple" style="padding:20px;">
+        <div class="ds-micro">Inferred by AI</div>
+        <div class="ds-num-purple" style="font-size:2rem;font-weight:700;">${inferredCells.length}</div>
+        <div class="ds-progress" style="margin-top:10px;">
+          <div class="ds-progress-fill" style="width:${inferredPct}%;"></div>
+        </div>
+      </div>
+      <div class="ds-card ds-accent-amber" style="padding:20px;">
+        <div class="ds-micro">Need input</div>
+        <div class="ds-num-amber" style="font-size:2rem;font-weight:700;">${unknownCells.length}</div>
+        <div style="font-size:0.7rem;color:#4a3010;">fields awaiting review</div>
+      </div>
+    </div>`;
+
+  // --- Section 3: coverage-by-field + confidence-by-step --------------------
+  const leftRows = GRID_FIELD_ORDER.map((key) => {
+    const confirmedCount = steps.filter((s) => s.cells?.[key]?.state === "confirmed").length;
+    const p = steps.length ? (confirmedCount / steps.length) * 100 : 0;
+    const color = p === 0 ? "#2a3f5f" : p < 30 ? "#f59e0b" : "#00d4b4";
+    return `
+      <div class="ds-bar-row">
+        <span class="ds-bar-name" style="width:130px;">${escapeHtml(gridFieldLabel(key))}</span>
+        <div class="ds-bar-track"><div class="ds-bar-fill" style="width:${p.toFixed(0)}%;background:${color};"></div></div>
+        <span class="ds-bar-val" style="color:${color};">${p.toFixed(0)}%</span>
+      </div>`;
+  }).join("");
+
+  const rightRows = steps.map((s, i) => {
+    const name = s.cells?.name?.value || `Step ${i + 1}`;
+    const confCells = Object.values(s.cells || {}).filter((c) => Number(c?.confidence) > 0);
+    const avgConf = confCells.length
+      ? (confCells.reduce((sum, c) => sum + Number(c.confidence), 0) / confCells.length) * 100
+      : 0;
+    const color = avgConf >= 80 ? "#00d4b4" : avgConf >= 50 ? "#a855f7" : "#f59e0b";
+    return `
+      <div class="ds-bar-row">
+        <span class="ds-bar-name" style="width:110px;">${escapeHtml(truncate(name, 12))}</span>
+        <div class="ds-bar-track"><div class="ds-bar-fill" style="width:${avgConf.toFixed(0)}%;background:${color};"></div></div>
+        <span class="ds-bar-val" style="color:${color};">${avgConf.toFixed(0)}%</span>
+      </div>`;
+  }).join("");
+
+  const panels = `
+    <div style="display:flex;border-top:1px solid #152236;">
+      <div style="flex:1;padding:20px;border-right:1px solid #152236;">
+        ${sectionHead("height:14px;", "Coverage by field type", "% cells confirmed per field")}
+        ${leftRows}
+      </div>
+      <div style="flex:1;padding:20px;">
+        ${sectionHead("height:14px;background:linear-gradient(180deg,#ff4fc8,#a855f7);", "Confidence by step", "avg confidence across all cells")}
+        ${rightRows}
+      </div>
+    </div>`;
+
+  // --- Section 4: live workflow grid matrix ---------------------------------
+  const legendItem = (color, label) =>
+    `<span style="display:flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:2px;background:${color};display:inline-block;"></span>${label}</span>`;
+  const legend = `
+    <div style="display:flex;gap:16px;margin-bottom:14px;font-size:0.68rem;color:#556a7e;">
+      ${legendItem("#00d4b4", "Confirmed")}
+      ${legendItem("#a855f7", "Inferred")}
+      ${legendItem("#f59e0b", "Need input")}
+      ${legendItem("#1e3350", "Empty")}
+    </div>`;
+
+  const thBase = "padding:6px 8px;font-size:0.65rem;color:#445566;text-align:center;background:#09131f;border:1px solid #152236;";
+  const headerCells = steps.map((s, i) => {
+    const name = truncate(s.cells?.name?.value || `Step ${i + 1}`, 10);
+    const oppDot = stepPrimaryPattern(s) !== "" ? `<div><span class="ds-dot ds-dot-teal" style="margin-top:3px;"></span></div>` : "";
+    return `<th style="${thBase}">${escapeHtml(name)}${oppDot}</th>`;
+  }).join("");
+  const headerRow = `<tr><th style="${thBase}"></th>${headerCells}</tr>`;
+
+  const bodyRows = GRID_FIELD_ORDER.map((key) => {
+    const isAiPattern = key === "aiPattern";
+    const rowHeader = `<td style="padding:6px 10px;font-size:0.72rem;color:#556a7e;background:#09131f;border:1px solid #152236;white-space:nowrap;width:140px;">${escapeHtml(gridFieldLabel(key))}</td>`;
+    const cells = steps.map((s) => {
+      const stateName = s.cells?.[key]?.state || "empty";
+      let inner;
+      let fullValue;
+      if (isAiPattern) {
+        fullValue = gridCellValue(s, "aiPattern");
+        inner = fullValue
+          ? `<span class="ds-badge ds-badge-teal" style="font-size:0.6rem;">${escapeHtml(fullValue)}</span>`
+          : `<span style="color:#2a3f5f;font-size:0.65rem;">—</span>`;
+      } else {
+        const value = s.cells?.[key]?.value;
+        fullValue = typeof value === "string" ? value.trim() : "";
+        inner = fullValue
+          ? `<span style="font-size:0.68rem;color:#8899aa;">${escapeHtml(truncate(fullValue, 12))}</span>`
+          : `<span style="color:#2a3f5f;font-size:0.65rem;">—</span>`;
+      }
+      return `<td style="padding:4px 6px;border:1px solid #152236;text-align:center;${gridCellStateStyle(stateName)}" title="${escapeHtml(fullValue)}">${inner}</td>`;
+    }).join("");
+    return `<tr>${rowHeader}${cells}</tr>`;
+  }).join("");
+
+  const minWidth = steps.length * 80 + 160;
+  const matrix = `
+    <div style="padding:20px;border-top:1px solid #152236;overflow-x:auto;">
+      ${sectionHead("height:14px;", "Live workflow grid", "rows = field types · columns = steps · colour = fill state")}
+      ${legend}
+      <table style="width:100%;border-collapse:collapse;min-width:${minWidth}px;">
+        <thead>${headerRow}</thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+    </div>`;
+
+  container.innerHTML = header + stats + panels + matrix;
 }
 
 // --- TAB 2: AI Opportunities --------------------------------------------------
