@@ -11061,10 +11061,12 @@ function caseScore(label, score, color) {
   `;
 }
 
-// Compact "Saved Sessions" panel for the Discovery view. Lists disk-persisted
-// sessions (and any local-only ones) from getCombinedSessionLibrary(); clicking
-// a row loads it into state via the existing loadSessionFromLibrary(), which
-// fetches GET /api/sessions/:id for server-only sessions.
+// "Saved Sessions" list shown inside the top-nav "Open" dropdown (the
+// #savedSessionsPanel container now lives in that <details> menu). Lists
+// disk-persisted sessions (and any local-only ones) from
+// getCombinedSessionLibrary(); clicking a row loads it into state via the
+// existing loadSessionFromLibrary(), which fetches GET /api/sessions/:id for
+// server-only sessions, then closes the dropdown.
 function renderSavedSessionsPanel() {
   const container = document.getElementById("savedSessionsPanel");
   if (!container) return;
@@ -11096,7 +11098,10 @@ function renderSavedSessionsPanel() {
   }).join("");
   container.innerHTML = head + `<div style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow:auto;">${rows}</div>`;
   container.querySelectorAll("[data-load-session]").forEach((button) => {
-    button.addEventListener("click", () => loadSessionFromLibrary(button.dataset.loadSession));
+    button.addEventListener("click", () => {
+      button.closest("details")?.removeAttribute("open");
+      loadSessionFromLibrary(button.dataset.loadSession);
+    });
   });
   refreshIcons();
 }
