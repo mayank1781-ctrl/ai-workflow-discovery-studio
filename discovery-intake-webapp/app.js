@@ -1112,6 +1112,7 @@ let pendingUploadFile = null;
 let recognition = null;
 let isListening = false;
 let aiAvailable = false;
+let jiraStatus = { connected: false }; // Phase 6a: Jira connector state
 let realtimeAvailable = false;
 let addOnProviderStatus = null;
 let addOnTestRun = {
@@ -1282,6 +1283,11 @@ const els = {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+  // Phase 6a: surface the Jira OAuth round-trip result, then clean the URL.
+  const jiraParam = new URLSearchParams(window.location.search).get("jira");
+  if (jiraParam === "connected") { toast("Jira connected successfully"); history.replaceState({}, "", window.location.pathname + window.location.hash); }
+  if (jiraParam === "error") { toast("Jira connection failed — check Atlassian app settings"); history.replaceState({}, "", window.location.pathname + window.location.hash); }
+
   window.mermaid?.initialize({
     startOnLoad: false,
     securityLevel: "loose",
@@ -5165,12 +5171,113 @@ function engSensitivity(value) {
   return { level: 1, color: "#445566" };
 }
 
-function renderAnalysisTabEngineering() {
+// === Phase 6a: Jira connector UI =============================================
+async function refreshJiraStatus() {
+  try {
+    const r = await fetch("/api/connectors/jira/status");
+    jiraStatus = await r.json();
+  } catch {
+    jiraStatus = { connected: false };
+  }
+}
+
+// Status bar shown at the top of the Engineering Doc tab.
+function jiraStatusBarHtml() {
+  if (!jiraStatus.connected) {
+    return `
+      <div style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:#162438;border:1px solid #1e3350;border-radius:8px;margin-bottom:20px;">
+        <span style="color:#8899aa;font-size:13px;">Jira not connected</span>
+        <button onclick="connectJira()" class="ds-btn-teal" style="margin-left:auto;font-size:12px;padding:5px 14px;">Connect Jira</button>
+      </div>`;
+  }
+  return `
+    <div style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:#162438;border:1px solid #1e3350;border-radius:8px;margin-bottom:12px;">
+      <span class="ds-dot ds-dot-teal ds-dot-pulse"></span>
+      <span style="color:#e8f4ff;font-size:13px;">Jira connected — <strong style="color:#00d4b4;">${escapeHtml(jiraStatus.cloudName || "")}</strong></span>
+      <button onclick="disconnectJira()" class="ds-btn-ghost" style="margin-left:auto;font-size:12px;">Disconnect</button>
+    </div>
+    <div style="margin-bottom:20px;display:flex;align-items:center;gap:10px;">
+      <label style="color:#8899aa;font-size:12px;white-space:nowrap;">Push to project:</label>
+      <select id="jira-project-select" style="background:#0a1525;color:#e8f4ff;border:1px solid #1e3350;border-radius:6px;padding:5px 10px;font-size:13px;">
+        <option value="">Loading projects…</option>
+      </select>
+    </div>`;
+}
+
+// Populate the project <select> once the connected bar is in the DOM.
+function populateJiraProjects() {
+  fetch("/api/connectors/jira/projects")
+    .then((r) => r.json())
+    .then((data) => {
+      const sel = document.getElementById("jira-project-select");
+      if (!sel) return;
+      sel.innerHTML = '<option value="">Select project…</option>'
+        + (data.projects || []).map((p) => `<option value="${escapeHtml(p.key)}">${escapeHtml(p.name)} (${escapeHtml(p.key)})</option>`).join("");
+    })
+    .catch(() => {});
+}
+
+function connectJira() {
+  window.location.href = "/api/connectors/jira/auth";
+}
+
+function disconnectJira() {
+  fetch("/api/connectors/jira/disconnect", { method: "DELETE" })
+    .then(() => { jiraStatus = { connected: false }; renderAnalysisTabEngineering(); })
+    .catch(() => toast("Failed to disconnect"));
+}
+
+async function pushStepToJira(stepId) {
+  const projectKey = document.getElementById("jira-project-select")?.value;
+  if (!projectKey) { toast("Select a Jira project first"); return; }
+  const step = state.workflowGrid?.steps?.find((s) => s.id === stepId);
+  if (!step) { toast("Step not found"); return; }
+  const meta = getStepOpportunityMeta(step);
+  const btn = document.querySelector(`[data-jira-step="${stepId}"]`);
+  if (btn) btn.textContent = "Pushing…";
+  try {
+    const res = await fetch("/api/connectors/jira/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectKey,
+        step: {
+          name: step.cells.name?.value || "Untitled step",
+          description: step.cells.description?.value || "",
+          aiPattern: gridCellValue(step, "aiPattern"), // cell value is an array; join to a string
+
+          systemsTools: step.cells.systemsTools?.value || "",
+          timeTaken: step.cells.timeTaken?.value,
+          tier: meta.tier
+        }
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) { toast(data.error || "Push to Jira failed"); if (btn) btn.textContent = "↑ Push to Jira"; return; }
+    if (btn) {
+      const link = document.createElement("a");
+      link.href = data.issueUrl;
+      link.target = "_blank";
+      link.style.cssText = "color:#00d4b4;font-size:12px;text-decoration:none;";
+      link.textContent = `✓ ${data.issueKey}`;
+      btn.replaceWith(link);
+    }
+  } catch {
+    toast("Push to Jira failed");
+    if (btn) btn.textContent = "↑ Push to Jira";
+  }
+}
+// === end Phase 6a Jira connector UI ==========================================
+
+async function renderAnalysisTabEngineering() {
   const container = document.getElementById("analysis-tab-engineering");
   if (!container) return;
+  await refreshJiraStatus();
+  const jiraBar = jiraStatusBarHtml();
   const steps = analysisGridSteps();
   if (!steps.length) {
-    container.innerHTML = `<div class="summary-item">No workflow steps yet. Capture a process to build the engineering doc.</div>`;
+    container.innerHTML = jiraBar + `<div class="summary-item">No workflow steps yet. Capture a process to build the engineering doc.</div>`;
+    if (jiraStatus.connected) populateJiraProjects();
     return;
   }
 
@@ -5375,6 +5482,7 @@ function renderAnalysisTabEngineering() {
           </div>
         </div>
         <div data-eng-card-body style="display:none;padding:0 20px 20px;">
+          ${jiraStatus.connected ? `<div style="margin-bottom:12px;"><button data-jira-step="${step.id}" onclick="pushStepToJira('${step.id}')" class="ds-btn-ghost" style="font-size:12px;padding:4px 10px;">↑ Push to Jira</button></div>` : ""}
           ${painWarn}
           ${table}
           ${flow}
@@ -5387,7 +5495,8 @@ function renderAnalysisTabEngineering() {
       ${cards}
     </div>`;
 
-  container.innerHTML = section1 + toolbar + section2 + section3 + section4;
+  container.innerHTML = jiraBar + section1 + toolbar + section2 + section3 + section4;
+  if (jiraStatus.connected) populateJiraProjects();
 
   container.querySelector("#exportEngineeringDocBtn")?.addEventListener("click", exportEngineeringDoc);
   const engineeringExportBtn = container.querySelector("#engineering-export-btn");

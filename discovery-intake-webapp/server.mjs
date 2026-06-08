@@ -122,6 +122,13 @@ const DATA_DIR = path.join(__dirname, "data");
 const SESSIONS_DIR = path.join(DATA_DIR, "sessions");
 const AUDIT_DIR = path.join(DATA_DIR, "audit");
 const PACKAGES_DIR = path.join(DATA_DIR, "packages");
+const CONNECTIONS_DIR = path.join(DATA_DIR, "connections");
+
+// Phase 6a: Jira (Atlassian Cloud) connector — OAuth2 3LO, zero new deps.
+const JIRA_CLIENT_ID = process.env.JIRA_CLIENT_ID || "";
+const JIRA_CLIENT_SECRET = process.env.JIRA_CLIENT_SECRET || "";
+const JIRA_REDIRECT_URI = process.env.JIRA_REDIRECT_URI || "http://localhost:5173/api/connectors/jira/callback";
+const jiraOAuthStates = new Map(); // state → { userId, exp }
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -1017,6 +1024,25 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && requestUrl.pathname === "/api/audit") {
       return await handleGetAudit(req, res);
+    }
+
+    if (req.method === "GET" && requestUrl.pathname === "/api/connectors/jira/auth") {
+      return await handleJiraAuth(req, res);
+    }
+    if (req.method === "GET" && requestUrl.pathname === "/api/connectors/jira/callback") {
+      return await handleJiraCallback(req, res);
+    }
+    if (req.method === "GET" && requestUrl.pathname === "/api/connectors/jira/status") {
+      return await handleJiraStatus(req, res);
+    }
+    if (req.method === "GET" && requestUrl.pathname === "/api/connectors/jira/projects") {
+      return await handleJiraProjects(req, res);
+    }
+    if (req.method === "POST" && requestUrl.pathname === "/api/connectors/jira/push") {
+      return await handleJiraPush(req, res);
+    }
+    if (req.method === "DELETE" && requestUrl.pathname === "/api/connectors/jira/disconnect") {
+      return await handleJiraDisconnect(req, res);
     }
 
     if (req.method === "POST" && requestUrl.pathname === "/api/add-ons/test") {
@@ -3268,7 +3294,8 @@ const AUTH_PUBLIC_PATHS = new Set([
   "/favicon.ico",
   "/auth/login",
   "/auth/microsoft/callback",
-  "/auth/logout"
+  "/auth/logout",
+  "/api/connectors/jira/callback"
 ]);
 function isPublicPath(pathname) {
   return AUTH_PUBLIC_PATHS.has(pathname);
@@ -3408,6 +3435,144 @@ async function handleGetAudit(req, res) {
   return sendJson(res, 200, { entries: entries.slice(0, limit), admin: isAdmin });
 }
 // === end Phase 5e audit trail ===============================================
+
+// === Phase 6a: Jira connector (Atlassian Cloud OAuth2 3LO) ==================
+// Minimal HTTPS client (Node built-ins only). Resolves { status, body }; body
+// is parsed JSON when possible, otherwise the raw string.
+function httpsRequest(method, url, headers, body) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const opts = { hostname: u.hostname, path: u.pathname + u.search, method, headers };
+    const req = (u.protocol === "https:" ? require("https") : require("http")).request(opts, (res) => {
+      let d = "";
+      res.on("data", (c) => { d += c; });
+      res.on("end", () => {
+        try { resolve({ status: res.statusCode, body: JSON.parse(d) }); }
+        catch { resolve({ status: res.statusCode, body: d }); }
+      });
+    });
+    req.on("error", reject);
+    if (body) req.write(typeof body === "string" ? body : JSON.stringify(body));
+    req.end();
+  });
+}
+
+function jiraTokenPath(userId) {
+  return path.join(CONNECTIONS_DIR, `${userId || "anon"}-jira.json`);
+}
+
+async function readJiraToken(userId) {
+  try { return JSON.parse(await fs.readFile(jiraTokenPath(userId), "utf8")); }
+  catch { return null; }
+}
+
+async function writeJiraToken(userId, data) {
+  await fs.mkdir(CONNECTIONS_DIR, { recursive: true });
+  await fs.writeFile(jiraTokenPath(userId), JSON.stringify(data, null, 2));
+}
+
+async function handleJiraAuth(req, res) {
+  if (!JIRA_CLIENT_ID) return sendJson(res, 503, { error: "Jira not configured on this server" });
+  const state = crypto.randomBytes(16).toString("hex");
+  jiraOAuthStates.set(state, { userId: currentUserId(req), exp: Date.now() + 600_000 });
+  const url = "https://auth.atlassian.com/authorize"
+    + "?audience=api.atlassian.com"
+    + `&client_id=${JIRA_CLIENT_ID}`
+    + "&scope=read%3Ajira-work%20write%3Ajira-work%20read%3Ajira-user%20offline_access"
+    + `&redirect_uri=${encodeURIComponent(JIRA_REDIRECT_URI)}`
+    + `&state=${state}`
+    + "&response_type=code"
+    + "&prompt=consent";
+  res.writeHead(302, { Location: url });
+  res.end();
+}
+
+async function handleJiraCallback(req, res) {
+  const url = new URL(req.url, `http://localhost:${PORT}`);
+  const code = url.searchParams.get("code");
+  const state = url.searchParams.get("state");
+  const error = url.searchParams.get("error");
+  if (error) { res.writeHead(302, { Location: "/?jira=error#engineering-doc" }); res.end(); return; }
+  const entry = jiraOAuthStates.get(state);
+  if (!entry || entry.exp < Date.now()) return sendJson(res, 400, { error: "Invalid or expired state" });
+  const userId = entry.userId;
+  jiraOAuthStates.delete(state);
+
+  const tokenResp = await httpsRequest("POST", "https://auth.atlassian.com/oauth/token",
+    { "Content-Type": "application/json" },
+    { grant_type: "authorization_code", client_id: JIRA_CLIENT_ID, client_secret: JIRA_CLIENT_SECRET, code, redirect_uri: JIRA_REDIRECT_URI });
+  if (tokenResp.status !== 200) { res.writeHead(302, { Location: "/?jira=error#engineering-doc" }); res.end(); return; }
+  const { access_token, refresh_token, expires_in } = tokenResp.body;
+
+  const resourcesResp = await httpsRequest("GET", "https://api.atlassian.com/oauth/token/accessible-resources",
+    { Authorization: `Bearer ${access_token}`, Accept: "application/json" });
+  const resources = resourcesResp.body;
+  if (!Array.isArray(resources) || !resources.length) { res.writeHead(302, { Location: "/?jira=error#engineering-doc" }); res.end(); return; }
+  const cloudId = resources[0].id;
+  const cloudName = resources[0].name;
+
+  await writeJiraToken(userId, { access_token, refresh_token, expires_in, cloudId, cloudName, connectedAt: new Date().toISOString() });
+  res.writeHead(302, { Location: "/?jira=connected#engineering-doc" });
+  res.end();
+}
+
+async function handleJiraStatus(req, res) {
+  const token = await readJiraToken(currentUserId(req));
+  if (!token) return sendJson(res, 200, { connected: false });
+  return sendJson(res, 200, { connected: true, cloudName: token.cloudName, connectedAt: token.connectedAt });
+}
+
+async function handleJiraProjects(req, res) {
+  const token = await readJiraToken(currentUserId(req));
+  if (!token) return sendJson(res, 401, { error: "Not connected to Jira" });
+  const resp = await httpsRequest("GET",
+    `https://api.atlassian.com/ex/jira/${token.cloudId}/rest/api/3/project/search?maxResults=50`,
+    { Authorization: `Bearer ${token.access_token}`, Accept: "application/json" });
+  const values = (resp.body && resp.body.values) || [];
+  return sendJson(res, 200, { projects: values.map((p) => ({ id: p.id, key: p.key, name: p.name })) });
+}
+
+async function handleJiraPush(req, res) {
+  const token = await readJiraToken(currentUserId(req));
+  if (!token) return sendJson(res, 401, { error: "Not connected to Jira" });
+  const body = await readJson(req);
+  const { projectKey, step } = body;
+  if (!projectKey) return sendJson(res, 400, { error: "projectKey required" });
+  const safeStep = step || {};
+  const priority = safeStep.tier === "quick-win" ? "High" : safeStep.tier === "compliance" ? "Highest" : "Medium";
+  const labels = String(safeStep.systemsTools || "").split(",").map((s) => s.trim().replace(/\s+/g, "_")).filter(Boolean).slice(0, 10);
+  const description = {
+    version: 1,
+    type: "doc",
+    content: [
+      { type: "paragraph", content: [{ type: "text", text: safeStep.description || "" }] },
+      { type: "paragraph", content: [{ type: "text", text: `AI Pattern: ${safeStep.aiPattern || "—"}`, marks: [{ type: "strong" }] }] }
+    ]
+  };
+  const resp = await httpsRequest("POST",
+    `https://api.atlassian.com/ex/jira/${token.cloudId}/rest/api/3/issue`,
+    { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json", Accept: "application/json" },
+    {
+      fields: {
+        project: { key: projectKey },
+        summary: String(safeStep.name || "Untitled step").slice(0, 255),
+        description,
+        issuetype: { name: "Story" },
+        priority: { name: priority },
+        labels
+      }
+    });
+  if (resp.status === 401) return sendJson(res, 401, { error: "Jira token expired — reconnect" });
+  if (resp.status !== 201) return sendJson(res, 502, { error: "Jira rejected the issue", detail: resp.body });
+  const issueKey = resp.body.key;
+  return sendJson(res, 200, { issueKey, issueUrl: `https://${token.cloudName}.atlassian.net/browse/${issueKey}` });
+}
+
+async function handleJiraDisconnect(req, res) {
+  try { await fs.unlink(jiraTokenPath(currentUserId(req))); } catch { /* already gone */ }
+  return sendJson(res, 200, { ok: true });
+}
+// === end Phase 6a Jira connector ============================================
 
 function azureBaseUrl() {
   return `https://login.microsoftonline.com/${encodeURIComponent(AUTH_AZURE_TENANT_ID)}/oauth2/v2.0`;
