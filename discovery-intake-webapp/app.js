@@ -4771,29 +4771,62 @@ function renderAnalysisTabEngineering() {
       `</tbody></table>`
     : `<div class="summary-item">All cells addressed — ready to generate outputs.</div>`;
 
-  const sectionTitleStyle = "font-size:13px;font-weight:700;color:#dde8f5;margin:0 0 10px;text-transform:uppercase;letter-spacing:0.04em;";
+  const workflowName = analysisWorkflowName() || "Workflow";
+  const baselineRaw = (state.workflowGrid?.dataSensitivityBaseline?.value || "").trim();
+  const inferredSensitivity = inferOverallDataSensitivity();
+  const baseline = baselineRaw || (inferredSensitivity && inferredSensitivity !== "Unknown" ? inferredSensitivity : "Not assessed");
+
+  const headerStyle = "display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:#0d1b2a;border:none;color:#dde8f5;padding:12px 14px;cursor:pointer;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;";
+  const tealBtn = "background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;cursor:pointer;transition:opacity 0.2s;";
+  const sections = [
+    { id: "impl", title: "Implementation Plan", content: phaseHeader + ganttRows },
+    { id: "sens", title: "Data Sensitivity Profile", content: sensRows },
+    { id: "gaps", title: "Open Gaps", content: gapsHtml }
+  ];
+  const sectionsHtml = sections.map((section) => `
+    <div style="border:1px solid #1a2a3a;border-radius:8px;margin-bottom:8px;overflow:hidden;">
+      <button type="button" data-eng-section="${section.id}" aria-expanded="false" style="${headerStyle}">
+        <span data-eng-arrow style="display:inline-block;width:10px;color:#00d4b4;transition:transform 0.2s;">&#9654;</span>
+        <span style="flex:1;">${escapeHtml(section.title)}</span>
+      </button>
+      <div data-eng-body="${section.id}" hidden style="padding:12px 14px;background:#0a1521;">${section.content}</div>
+    </div>`).join("");
+
   container.innerHTML = `
-    <section style="margin-bottom:24px;">
-      <h3 style="${sectionTitleStyle}">Implementation Gantt</h3>
-      ${phaseHeader}
-      ${ganttRows}
-    </section>
-    <section style="margin-bottom:24px;">
-      <h3 style="${sectionTitleStyle}">Data Sensitivity Profile</h3>
-      ${sensRows}
-    </section>
-    <section style="margin-bottom:16px;">
-      <h3 style="${sectionTitleStyle}">Open Gaps</h3>
-      ${gapsHtml}
-    </section>
-    <div><button class="secondary-button compact" type="button" id="exportEngineeringDocBtn">Export Engineering Doc</button><button type="button" id="engineering-export-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download DOCX</button><button type="button" id="engineering-pdf-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download PDF</button></div>`;
+    <p style="font-size:13px;color:#dde8f5;margin:0 0 14px;font-weight:600;">${escapeHtml(workflowName)} &mdash; ${steps.length} step${steps.length === 1 ? "" : "s"} &mdash; Data sensitivity: ${escapeHtml(baseline)}</p>
+    <div style="margin-bottom:16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+      <button class="secondary-button compact" type="button" id="exportEngineeringDocBtn">Export Engineering Doc</button>
+      <button type="button" id="engineering-export-btn" style="${tealBtn}">⬇ Download DOCX</button>
+      <button type="button" id="engineering-pdf-btn" style="${tealBtn}">⬇ Download PDF</button>
+    </div>
+    ${sectionsHtml}`;
 
   container.querySelector("#exportEngineeringDocBtn")?.addEventListener("click", exportEngineeringDoc);
-
   const engineeringExportBtn = container.querySelector("#engineering-export-btn");
   engineeringExportBtn?.addEventListener("click", handleEngineeringExport);
   container.querySelector("#engineering-pdf-btn")?.addEventListener("click", handleEngineeringPdfExport);
   syncEngineeringExportButton(engineeringExportBtn);
+
+  // Accordion: collapsed by default; only one section open at a time.
+  container.querySelectorAll("[data-eng-section]").forEach((header) => {
+    header.addEventListener("click", () => {
+      const id = header.dataset.engSection;
+      const body = container.querySelector(`[data-eng-body="${id}"]`);
+      const willOpen = body.hidden;
+      container.querySelectorAll("[data-eng-body]").forEach((node) => { node.hidden = true; });
+      container.querySelectorAll("[data-eng-section]").forEach((node) => {
+        node.setAttribute("aria-expanded", "false");
+        const arrow = node.querySelector("[data-eng-arrow]");
+        if (arrow) arrow.style.transform = "rotate(0deg)";
+      });
+      if (willOpen) {
+        body.hidden = false;
+        header.setAttribute("aria-expanded", "true");
+        const arrow = header.querySelector("[data-eng-arrow]");
+        if (arrow) arrow.style.transform = "rotate(90deg)";
+      }
+    });
+  });
 }
 
 // Mirrors syncRecipeExportButton: keep the button clickable whenever the
