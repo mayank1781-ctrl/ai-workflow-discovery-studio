@@ -4157,7 +4157,7 @@ const AI_PATTERNS = {
   Classify: "#6366f1"
 };
 
-const ANALYSIS_TABS = ["grid", "opportunities", "recipe", "engineering", "handoff"];
+const ANALYSIS_TABS = ["grid", "opportunities", "recipe", "engineering"];
 
 // Implementation-complexity bucket per pattern. Low ends Phase 2, Medium ends
 // Phase 3, High ends Phase 4. Unknown patterns default to Medium.
@@ -4335,7 +4335,6 @@ function renderAnalysisStudio() {
   else if (active === "opportunities") renderAnalysisTabOpportunities();
   else if (active === "recipe") renderAnalysisTabRecipe();
   else if (active === "engineering") renderAnalysisTabEngineering();
-  else if (active === "handoff") renderAnalysisTabHandoff();
 }
 
 // --- TAB 1: Workflow Grid -----------------------------------------------------
@@ -5362,9 +5361,7 @@ async function handleAiMirrorRefresh() {
   }
 }
 
-// Pattern interview, now hosted on the Discovery page as three stacked blocks.
-// The same renderer is reused; the Analysis Studio "Pattern Handoff" tab just
-// links back here (see renderAnalysisTabHandoff below).
+// Pattern interview, hosted on the Discovery page as three stacked blocks.
 function renderPatternInterview(container) {
   if (!container) return;
   state.handoffAnswers = state.handoffAnswers || {};
@@ -5485,18 +5482,6 @@ function renderDiscoveryPatternInterview() {
 // Force a refresh (used by the handlers after questions/analysis/confirm change).
 function rerenderPatternInterview() {
   renderPatternInterview(patternInterviewContainer());
-}
-
-// The Analysis Studio "Pattern Handoff" tab now just points to the Discovery page.
-function renderAnalysisTabHandoff() {
-  const container = document.getElementById("analysis-tab-handoff");
-  if (!container) return;
-  container.innerHTML = `
-    <div style="background:#0d1b2a;border:1px solid #1a2a3a;border-radius:10px;padding:28px;text-align:center;">
-      <p style="font-size:14px;color:#dde8f5;margin:0 0 16px;">Pattern interview has moved to the Discovery page.</p>
-      <button type="button" id="handoffGoToDiscoveryBtn" style="${HANDOFF_TEAL_BUTTON}">Go to Discovery</button>
-    </div>`;
-  container.querySelector("#handoffGoToDiscoveryBtn")?.addEventListener("click", () => setAppMode("interview"));
 }
 
 async function handleHandoffQuestions() {
