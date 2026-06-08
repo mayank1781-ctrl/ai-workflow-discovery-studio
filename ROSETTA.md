@@ -555,3 +555,52 @@
 
 *Last updated: June 2026 — reflects PRs #41–#65 merged on main.*  
 *Update this file as part of every PR that changes a lever. Keep entries short.*
+
+---
+
+## PHASE 7 — GRID & DISCOVERY REDESIGN
+
+### Decision: 3-Layer Grid (replaces 17-field flat grid)
+Layer 1 — THE FLOW: Step Name, What Happens, Flow & Dependencies, Volume, Systems & Tools
+Layer 2 — PEOPLE & FRICTION: Who's Involved, Pain & Rules
+Layer 3 — DATA & RISK: Data Flow, Sensitivity
+AI Output Layer (computed): Solution Recipe, Automation Tier, Regulatory Flag, AI Readiness Score
+
+AI Pattern removed as user input — now computed inside Solution Recipe output.
+Regulatory removed as standalone field — inferred from Layer 3 sensitivity.
+Flow & Dependencies chosen over split Trigger/Handoff/Output fields — Option B selected for conversational extraction accuracy.
+
+### Visual Language
+Layer 1 = Teal #00d4b4
+Layer 2 = Pink→Purple #ff4fc8 → #a855f7
+Layer 3 = Amber #f59e0b
+AI Output = full gradient
+
+### Extraction Prompt Principles (6)
+P1: Sketch first, fill second — populate partial grid immediately, confidence scores reflect completeness
+P2: Assume multi-hop — single step descriptions always have hidden hops, always probe before and after
+P3: Listen for system signals — unfamiliar system names or "internal"/"proprietary" qualifiers auto-flag Layer 3 sensitivity as medium
+P4: Default gaps — always assume missing until stated: frequency, time per instance, decision owner, what "update/process" means technically
+P5: Recipe over label — solution output is a named pipeline: agent roles, tools per agent, human gates, handoff triggers. Minimum 2 agents.
+P6: One question, highest yield — Flow & Dependencies first, then Who's Involved, then Data Flow, Volume always last
+
+### Next-Best-Question System
+Tappable suggestion chip in Discovery below last AI message.
+Computed from lowest-confidence cells across layers.
+Priority: Layer 1 Flow & Dependencies → Layer 2 Who's Involved → Layer 3 Data Flow → Volume last.
+
+### Discovery Page Decisions
+- Voice idle + AI speaks back merged into single "AI Voice" toggle
+- Unknown/Needs lens/Workflow overview tags removed
+- AI online button wired to /api/health ping — green/amber/grey
+- Current question stays prominent, next-best-question appears as tappable chip below it
+
+### PR Build Sequence
+PR 1: Discovery cleanup (voice merge, tags removal, AI status)
+PR 2: Grid column restructure + 3-layer visual system
+PR 3: Extraction prompt rewrite (6 principles)
+PR 4: Next-best-question tappable chip
+PR 5: Confluence push (parked — resume after PR 4)
+
+### Phase 6b Status (parked)
+PRs 85 + 86 merged. v1 content API and v2 spaces lookup both 410 Gone on this Atlassian instance. Space key AW confirmed correct. Parked after PR 86 — resume at PR 5 with v1 single-space GET /wiki/rest/api/space/{key} → id → v2 page POST.
