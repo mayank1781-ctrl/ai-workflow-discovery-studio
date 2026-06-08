@@ -48,6 +48,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 const PATTERN_HANDOFF_MODEL = process.env.PATTERN_HANDOFF_MODEL || "claude-sonnet-4-6";
 const AI_MIRROR_MODEL = process.env.AI_MIRROR_MODEL || "claude-sonnet-4-6";
+const DUMP_EXTRACT_MODEL = process.env.DUMP_EXTRACT_MODEL || "claude-sonnet-4-6";
 const REALTIME_MODEL = process.env.REALTIME_MODEL || "gpt-realtime-2";
 const REALTIME_VOICE = process.env.REALTIME_VOICE || "marin";
 const REALTIME_REASONING_EFFORT = process.env.REALTIME_REASONING_EFFORT || "low";
@@ -1045,6 +1046,10 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && requestUrl.pathname === "/api/ai-mirror") {
       return await handleAiMirror(req, res);
+    }
+
+    if (req.method === "POST" && requestUrl.pathname === "/api/dump-extract") {
+      return await handleDumpExtract(req, res);
     }
 
     if (req.method === "POST" && requestUrl.pathname === "/api/pdf-export") {
@@ -3630,6 +3635,94 @@ async function handleAiMirror(req, res) {
   } catch (error) {
     console.error("[ai-mirror] error:", error);
     return sendJson(res, 500, { error: error.message || "AI mirror request failed" });
+  }
+}
+
+// "Tell me anything" free-text extraction: turn a raw description into a
+// structured workflow (name + steps with persona/systems/pain/output). No
+// external deps (global fetch + readJson/sendJson), so nothing to lazy-load.
+async function handleDumpExtract(req, res) {
+  if (!ANTHROPIC_API_KEY) {
+    return sendJson(res, 400, {
+      error: "ANTHROPIC_API_KEY is not configured. Set it in your terminal and restart the server."
+    });
+  }
+
+  let body;
+  try {
+    body = await readJson(req);
+  } catch (error) {
+    return sendJson(res, 400, { error: error.message || "Invalid request body" });
+  }
+
+  const text = typeof body.text === "string" ? body.text.trim() : "";
+  if (!text) return sendJson(res, 400, { error: "text is required" });
+  const grid = body.grid && typeof body.grid === "object" ? body.grid : {};
+  const existingSteps = Array.isArray(grid.steps) ? grid.steps : [];
+
+  const cellValue = (step, key) => {
+    const raw = step?.cells?.[key]?.value;
+    return typeof raw === "string" ? raw.trim() : "";
+  };
+  const existingSummary = existingSteps.length
+    ? existingSteps.map((step, index) => `${index + 1}. ${cellValue(step, "name") || "(unnamed)"}`).join("\n")
+    : "(none yet)";
+
+  const system = [
+    "You extract a structured workflow from a user's free-text description (which may be meeting notes, an email, or a rough explanation).",
+    "Identify the workflow name and its ordered steps. For each step capture: name, the persona/actors who perform it, the systems/tools used, any pain or friction mentioned, and the output it produces.",
+    "Only include details actually present in the text — leave a field as an empty string if it is not mentioned. Do not invent anything.",
+    "Return ONLY valid JSON, no prose, no code fences, in exactly this shape:",
+    '{"extracted":{"workflowName":"<name or empty>","steps":[{"name":"<step name>","personaActors":"<who>","systemsTools":"<systems>","painFriction":"<pain or empty>","output":"<output or empty>"}]}}'
+  ].join(" ");
+  const userContent = `Existing workflow name: ${grid.workflowName || "(none)"}\nExisting steps:\n${existingSummary}\n\nUser description:\n${text}`;
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({
+        model: DUMP_EXTRACT_MODEL,
+        max_tokens: 1500,
+        system,
+        messages: [{ role: "user", content: userContent }]
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      return sendJson(res, response.status, {
+        error: data?.error?.message || "Anthropic API request failed",
+        detail: data
+      });
+    }
+    const rawText = (data?.content || [])
+      .filter((block) => block?.type === "text")
+      .map((block) => block.text)
+      .join("")
+      .trim();
+    const parsed = parseModelJson(rawText);
+    const extractedRaw = parsed?.extracted && typeof parsed.extracted === "object" ? parsed.extracted : null;
+    if (!extractedRaw) {
+      return sendJson(res, 502, { error: "The model did not return valid JSON.", raw: rawText.slice(0, 500) });
+    }
+    const str = (value) => (typeof value === "string" ? value : "");
+    const steps = (Array.isArray(extractedRaw.steps) ? extractedRaw.steps : [])
+      .map((step) => ({
+        name: str(step?.name).trim(),
+        personaActors: str(step?.personaActors),
+        systemsTools: str(step?.systemsTools),
+        painFriction: str(step?.painFriction),
+        output: str(step?.output)
+      }))
+      .filter((step) => step.name);
+    return sendJson(res, 200, { extracted: { workflowName: str(extractedRaw.workflowName), steps } });
+  } catch (error) {
+    console.error("[dump-extract] error:", error);
+    return sendJson(res, 500, { error: error.message || "Dump extraction failed" });
   }
 }
 

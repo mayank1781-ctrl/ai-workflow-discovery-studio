@@ -3367,6 +3367,7 @@ function render() {
   renderFrameAnchorStrip();
   renderCurrentQuestion(section);
   renderTurnSignalPanel();
+  renderDiscoveryDumpMode();
   renderAiMirror();
   renderDiscoveryPatternInterview();
   renderInterviewGuide(section);
@@ -4936,6 +4937,142 @@ function handoffConfidenceColor(confidence) {
   if (confidence === null || confidence < 0.4) return "#5b7186"; // grey
   if (confidence >= 0.8) return "#00d4b4"; // teal
   return "#f59e0b"; // amber (0.4 - 0.79)
+}
+
+// --- Dump mode: "Tell me anything" free-text extraction -----------------------
+// A textarea + "Extract and Fill" that turns a raw description into structured
+// steps. State is module-level (no schema change): the typed text, the pending
+// extraction result, and a loading flag.
+let dumpText = "";
+let dumpExtractResult = null; // { workflowName, steps:[...] } awaiting Apply/Discard, or null
+let dumpExtracting = false;
+
+function renderDumpMode() {
+  const container = document.getElementById("dumpModePanel");
+  if (!container) return;
+
+  let confirmHtml = "";
+  if (dumpExtractResult) {
+    const steps = Array.isArray(dumpExtractResult.steps) ? dumpExtractResult.steps : [];
+    const split = (value) => String(value || "").split(/[,;\n]/).map((part) => part.trim()).filter(Boolean);
+    const personas = new Set();
+    const systems = new Set();
+    steps.forEach((step) => {
+      split(step.personaActors).forEach((p) => personas.add(p.toLowerCase()));
+      split(step.systemsTools).forEach((s) => systems.add(s.toLowerCase()));
+    });
+    const plural = (n) => (n === 1 ? "" : "s");
+    confirmHtml = `
+      <div style="margin-top:12px;background:#0d1b2a;border:1px solid #1a2a3a;border-radius:8px;padding:12px;">
+        <p style="font-size:13px;color:#dde8f5;margin:0 0 10px;">Found: ${steps.length} step${plural(steps.length)}, ${personas.size} persona${plural(personas.size)}, ${systems.size} system${plural(systems.size)} — Apply to grid?</p>
+        <div style="display:flex;gap:8px;">
+          <button type="button" id="dumpApplyBtn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Apply</button>
+          <button type="button" id="dumpDiscardBtn" style="background:#4b5563;color:#dde8f5;border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Discard</button>
+        </div>
+      </div>`;
+  }
+
+  container.innerHTML = `
+    <div style="background:#0d2137;border:1px solid #1c3b57;border-radius:10px;padding:16px;margin-bottom:14px;">
+      <label for="dumpModeTextarea" style="display:block;font-size:13px;font-weight:600;color:#dde8f5;margin-bottom:8px;">Describe this process in your own words</label>
+      <textarea id="dumpModeTextarea" rows="4" placeholder="Paste meeting notes, a rough description, an email — anything. I'll extract what's relevant." style="width:100%;box-sizing:border-box;background:#06101d;border:1px solid #1a2a3a;border-radius:6px;color:#dde8f5;font-size:13px;padding:10px;resize:vertical;">${escapeHtml(dumpText)}</textarea>
+      <button type="button" id="dumpExtractBtn" style="margin-top:10px;background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;transition:opacity 0.2s;">${dumpExtracting ? "Extracting…" : "Extract and Fill"}</button>
+      ${confirmHtml}
+    </div>`;
+
+  const textarea = container.querySelector("#dumpModeTextarea");
+  textarea?.addEventListener("input", () => { dumpText = textarea.value; });
+  container.querySelector("#dumpExtractBtn")?.addEventListener("click", handleDumpExtract);
+  container.querySelector("#dumpApplyBtn")?.addEventListener("click", handleDumpApply);
+  container.querySelector("#dumpDiscardBtn")?.addEventListener("click", handleDumpDiscard);
+}
+
+// Called from render(): don't clobber the textarea while the user is typing.
+function renderDiscoveryDumpMode() {
+  const container = document.getElementById("dumpModePanel");
+  if (!container) return;
+  const active = document.activeElement;
+  if (active && container.contains(active) && active.tagName === "TEXTAREA") return;
+  renderDumpMode();
+}
+
+async function handleDumpExtract() {
+  if (dumpExtracting) return; // soft guard; button is never hard-disabled
+  if (!dumpText.trim()) {
+    toast("Type or paste a description first.");
+    return;
+  }
+  dumpExtracting = true;
+  renderDumpMode();
+  try {
+    const response = await fetch("/api/dump-extract", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: dumpText, grid: state.workflowGrid })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || `Request failed (${response.status}).`);
+    const extracted = data.extracted && typeof data.extracted === "object" ? data.extracted : null;
+    if (!extracted || !Array.isArray(extracted.steps) || !extracted.steps.length) {
+      dumpExtractResult = null;
+      toast("Couldn't find any workflow steps in that text.");
+    } else {
+      dumpExtractResult = extracted;
+    }
+  } catch (error) {
+    toast(error?.message || "Extraction failed.");
+  } finally {
+    dumpExtracting = false;
+    renderDumpMode();
+  }
+}
+
+// Merge extracted steps into the grid: match existing steps by name, add new
+// ones otherwise, and never overwrite a cell that is already "confirmed".
+function handleDumpApply() {
+  const result = dumpExtractResult;
+  if (!result) return;
+  if (!state.workflowGrid || typeof state.workflowGrid !== "object") state.workflowGrid = newWorkflowGrid();
+  const grid = state.workflowGrid;
+  if (!Array.isArray(grid.steps)) grid.steps = [];
+
+  if (typeof result.workflowName === "string" && result.workflowName.trim() && !String(grid.workflowName || "").trim()) {
+    grid.workflowName = result.workflowName.trim();
+  }
+
+  const norm = (value) => String(value || "").trim().toLowerCase();
+  const fields = ["personaActors", "systemsTools", "painFriction", "output"];
+
+  (Array.isArray(result.steps) ? result.steps : []).forEach((extracted) => {
+    const exName = String(extracted.name || "").trim();
+    if (!exName) return;
+    let step = grid.steps.find((item) => norm(item?.cells?.name?.value) === norm(exName));
+    if (!step) {
+      step = newGridStep();
+      step.cells.name.value = exName;
+      step.cells.name.state = "inferred";
+      grid.steps.push(step);
+    }
+    fields.forEach((key) => {
+      const value = String(extracted[key] || "").trim();
+      if (!value) return;
+      const cell = step.cells[key];
+      if (!cell || cell.state === "confirmed") return; // never overwrite confirmed cells
+      cell.value = value;
+      cell.state = "inferred";
+    });
+  });
+
+  dumpExtractResult = null;
+  dumpText = "";
+  persistState();
+  render();
+  toast("Workflow updated from your description");
+}
+
+function handleDumpDiscard() {
+  dumpExtractResult = null;
+  renderDumpMode();
 }
 
 // --- AI Understanding ("AI Mirror") -------------------------------------------
