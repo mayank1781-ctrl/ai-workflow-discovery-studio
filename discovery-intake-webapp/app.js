@@ -5258,24 +5258,10 @@ function confluenceStatusBarHtml() {
     </div>
     <div style="margin-bottom:20px;display:flex;align-items:center;gap:10px;">
       <label style="color:#8899aa;font-size:12px;white-space:nowrap;">Push to space:</label>
-      <select id="confluence-space-select" style="background:#0a1525;color:#e8f4ff;border:1px solid #1e3350;border-radius:6px;padding:5px 10px;font-size:13px;">
-        <option value="">Loading spaces…</option>
-      </select>
+      <input id="confluence-space-select" type="text" placeholder="Space key (e.g. AW)" style="background:#0a1525;color:#e8f4ff;border:1px solid #1e3350;border-radius:6px;padding:5px 10px;font-size:13px;width:140px;" />
       <button onclick="pushDocToConfluence()" class="ds-btn-ghost" style="font-size:12px;padding:5px 14px;">↑ Push full doc to Confluence</button>
     </div>
     <div id="confluence-page-link" style="margin-bottom:16px;min-height:20px;"></div>`;
-}
-
-function populateConfluenceSpaces() {
-  fetch("/api/connectors/confluence/spaces")
-    .then((r) => r.json())
-    .then((data) => {
-      const sel = document.getElementById("confluence-space-select");
-      if (!sel) return;
-      sel.innerHTML = '<option value="">Select space…</option>'
-        + (data.spaces || []).map((s) => `<option value="${escapeHtml(s.key)}">${escapeHtml(s.name)} (${escapeHtml(s.key)})</option>`).join("");
-    })
-    .catch(() => {});
 }
 
 function connectConfluence() {
@@ -5379,7 +5365,6 @@ async function renderAnalysisTabEngineering() {
   if (!steps.length) {
     container.innerHTML = jiraBar + confluenceBar + `<div class="summary-item">No workflow steps yet. Capture a process to build the engineering doc.</div>`;
     if (jiraStatus.connected) populateJiraProjects();
-    if (confluenceStatus.connected) populateConfluenceSpaces();
     return;
   }
 
@@ -5599,7 +5584,6 @@ async function renderAnalysisTabEngineering() {
 
   container.innerHTML = jiraBar + confluenceBar + section1 + toolbar + section2 + section3 + section4;
   if (jiraStatus.connected) populateJiraProjects();
-  if (confluenceStatus.connected) populateConfluenceSpaces();
 
   container.querySelector("#exportEngineeringDocBtn")?.addEventListener("click", exportEngineeringDoc);
   const engineeringExportBtn = container.querySelector("#engineering-export-btn");
