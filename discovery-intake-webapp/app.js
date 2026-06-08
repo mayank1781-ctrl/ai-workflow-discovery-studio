@@ -4356,35 +4356,26 @@ function renderAnalysisStudio() {
 // + confidence-by-step panels, and a live fill-state matrix. Styling leans on
 // the ds-* classes in design-system.css; non-ds colours are inline hex.
 
-// Human-readable label for a grid cell key; unmapped keys are title-cased.
-const GRID_DASHBOARD_LABELS = {
-  name: "Step Name",
-  personaActors: "Persona / Actors",
-  systemsTools: "Systems & Tools",
-  aiPattern: "AI Pattern",
-  humanCheckpoint: "Human Checkpoint",
-  timeTaken: "Time Taken",
-  frequencyVolume: "Frequency",
-  painFriction: "Pain / Friction",
-  dataSensitivity: "Data Sensitivity",
-  dataProcessing: "Data Processing",
-  rulesDecisionLogic: "Rules & Logic",
-  exceptionBranching: "Exceptions",
-  regulatoryContext: "Regulatory"
-};
-
-// Underlying cell keys surfaced in the coverage-by-field panel (AI Pattern is
-// no longer a grid field — it is computed downstream, not captured here).
-const GRID_FIELD_ORDER = [
-  "name", "personaActors", "systemsTools", "output", "trigger", "handoff",
-  "humanCheckpoint", "timeTaken", "frequencyVolume", "painFriction",
-  "dataSensitivity", "description", "dataProcessing",
-  "rulesDecisionLogic", "exceptionBranching", "regulatoryContext"
+// Phase 7 3-layer grid: the 9 merged fields, each mapped to its underlying
+// cell key(s) and its layer colour. Shared by the grid matrix and the
+// coverage-by-field panel so they can never drift. Merge order matches PR #88.
+const GRID_LAYER_DEF = [
+  { name: "THE FLOW", color: "#00d4b4", fields: [
+    { label: "Step Name", keys: ["name"] },
+    { label: "What Happens", keys: ["description"] },
+    { label: "Flow & Dependencies", keys: ["trigger", "output", "handoff"] },
+    { label: "Volume", keys: ["frequencyVolume", "timeTaken"] },
+    { label: "Systems & Tools", keys: ["systemsTools"] }
+  ] },
+  { name: "PEOPLE & FRICTION", color: "#ff4fc8", fields: [
+    { label: "Who's Involved", keys: ["personaActors"] },
+    { label: "Pain & Rules", keys: ["painFriction", "rulesDecisionLogic", "exceptionBranching"] }
+  ] },
+  { name: "DATA & RISK", color: "#f59e0b", fields: [
+    { label: "Data Flow", keys: ["dataProcessing"] },
+    { label: "Sensitivity", keys: ["dataSensitivity", "regulatoryContext"] }
+  ] }
 ];
-
-function gridFieldLabel(key) {
-  return GRID_DASHBOARD_LABELS[key] || (key.charAt(0).toUpperCase() + key.slice(1));
-}
 
 function renderAnalysisTabGrid() {
   const container = document.getElementById("process-flow-map-full");
@@ -4480,17 +4471,24 @@ function renderAnalysisTabGrid() {
     </div>`;
 
   // --- Section 3: coverage-by-field + confidence-by-step --------------------
-  const leftRows = GRID_FIELD_ORDER.map((key) => {
-    const confirmedCount = steps.filter((s) => s.cells?.[key]?.state === "confirmed").length;
-    const p = steps.length ? (confirmedCount / steps.length) * 100 : 0;
-    const color = p === 0 ? "#2a3f5f" : p < 30 ? "#f59e0b" : "#00d4b4";
-    return `
+  // Coverage per merged field = % of steps where any underlying key is
+  // confirmed (the "merge = union" semantics used for the grid columns).
+  const fieldConfirmedPct = (field) => {
+    if (!steps.length) return 0;
+    const n = steps.filter((s) => field.keys.some((k) => s.cells?.[k]?.state === "confirmed")).length;
+    return (n / steps.length) * 100;
+  };
+  const leftRows = GRID_LAYER_DEF.flatMap((layer) =>
+    layer.fields.map((field) => {
+      const p = fieldConfirmedPct(field);
+      return `
       <div class="ds-bar-row">
-        <span class="ds-bar-name" style="width:130px;">${escapeHtml(gridFieldLabel(key))}</span>
-        <div class="ds-bar-track"><div class="ds-bar-fill" style="width:${p.toFixed(0)}%;background:${color};"></div></div>
-        <span class="ds-bar-val" style="color:${color};">${p.toFixed(0)}%</span>
+        <span class="ds-bar-name" style="width:150px;color:${layer.color};">${escapeHtml(field.label)}</span>
+        <div class="ds-bar-track"><div class="ds-bar-fill" style="width:${p.toFixed(0)}%;background:${layer.color};"></div></div>
+        <span class="ds-bar-val" style="color:${layer.color};">${p.toFixed(0)}%</span>
       </div>`;
-  }).join("");
+    })
+  ).join("");
 
   const rightRows = steps.map((s, i) => {
     const name = s.cells?.name?.value || `Step ${i + 1}`;
@@ -4520,36 +4518,22 @@ function renderAnalysisTabGrid() {
     </div>`;
 
   // --- Section 4: 3-layer workflow grid (9 columns, steps as rows) ----------
-  // Columns are grouped into three coloured layers; existing 17-field data is
-  // merged into the 9 fields. Colour coding is on the headers only.
-  const joinCells = (s, keys) => keys.map((k) => gridCellValue(s, k)).filter(Boolean).join(" ");
-  const GRID_LAYERS = [
-    { name: "THE FLOW", color: "#00d4b4", cols: [
-      { label: "Step Name", get: (s, i) => gridCellValue(s, "name") || `Step ${i + 1}` },
-      { label: "What Happens", get: (s) => gridCellValue(s, "description") },
-      { label: "Flow & Dependencies", get: (s) => joinCells(s, ["trigger", "output", "handoff"]) },
-      { label: "Volume", get: (s) => joinCells(s, ["frequencyVolume", "timeTaken"]) },
-      { label: "Systems & Tools", get: (s) => gridCellValue(s, "systemsTools") }
-    ] },
-    { name: "PEOPLE & FRICTION", color: "#ff4fc8", cols: [
-      { label: "Who's Involved", get: (s) => gridCellValue(s, "personaActors") },
-      { label: "Pain & Rules", get: (s) => joinCells(s, ["painFriction", "rulesDecisionLogic", "exceptionBranching"]) }
-    ] },
-    { name: "DATA & RISK", color: "#f59e0b", cols: [
-      { label: "Data Flow", get: (s) => gridCellValue(s, "dataProcessing") },
-      { label: "Sensitivity", get: (s) => joinCells(s, ["dataSensitivity", "regulatoryContext"]) }
-    ] }
-  ];
-  const groupHeaderRow = GRID_LAYERS.map((layer) =>
-    `<th colspan="${layer.cols.length}" style="padding:6px 10px;text-align:left;background:#0a1525;border:1px solid #152236;border-left:3px solid ${layer.color};color:${layer.color};font-size:0.62rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;">${layer.name}</th>`
+  // Columns are grouped into three coloured layers (GRID_LAYER_DEF); existing
+  // 17-field data is merged into the 9 fields. Colour coding is on headers only.
+  const fieldValue = (s, field, i) => {
+    const v = field.keys.map((k) => gridCellValue(s, k)).filter(Boolean).join(" ");
+    return v || (field.label === "Step Name" ? `Step ${i + 1}` : "");
+  };
+  const groupHeaderRow = GRID_LAYER_DEF.map((layer) =>
+    `<th colspan="${layer.fields.length}" style="padding:6px 10px;text-align:left;background:#0a1525;border:1px solid #152236;border-left:3px solid ${layer.color};color:${layer.color};font-size:0.62rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;">${layer.name}</th>`
   ).join("");
-  const colHeaderRow = GRID_LAYERS.flatMap((layer) =>
-    layer.cols.map((c) => `<th style="padding:8px 10px;text-align:left;background:#09131f;border:1px solid #152236;color:${layer.color};font-size:0.66rem;font-weight:600;letter-spacing:0.03em;white-space:nowrap;">${escapeHtml(c.label)}</th>`)
+  const colHeaderRow = GRID_LAYER_DEF.flatMap((layer) =>
+    layer.fields.map((f) => `<th style="padding:8px 10px;text-align:left;background:#09131f;border:1px solid #152236;color:${layer.color};font-size:0.66rem;font-weight:600;letter-spacing:0.03em;white-space:nowrap;">${escapeHtml(f.label)}</th>`)
   ).join("");
-  const flatCols = GRID_LAYERS.flatMap((layer) => layer.cols);
+  const flatFields = GRID_LAYER_DEF.flatMap((layer) => layer.fields);
   const gridRows = steps.map((s, i) =>
-    `<tr>${flatCols.map((c) => {
-      const v = c.get(s, i);
+    `<tr>${flatFields.map((f) => {
+      const v = fieldValue(s, f, i);
       return `<td style="padding:6px 10px;border:1px solid #152236;vertical-align:top;font-size:0.72rem;color:${v ? "#c8d8e8" : "#2a3f5f"};" title="${escapeHtml(v)}">${v ? escapeHtml(truncate(v, 60)) : "—"}</td>`;
     }).join("")}</tr>`
   ).join("");
