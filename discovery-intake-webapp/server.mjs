@@ -47,6 +47,7 @@ const PORT = Number(process.env.PORT || 5173);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 const PATTERN_HANDOFF_MODEL = process.env.PATTERN_HANDOFF_MODEL || "claude-sonnet-4-6";
+const AI_MIRROR_MODEL = process.env.AI_MIRROR_MODEL || "claude-sonnet-4-6";
 const REALTIME_MODEL = process.env.REALTIME_MODEL || "gpt-realtime-2";
 const REALTIME_VOICE = process.env.REALTIME_VOICE || "marin";
 const REALTIME_REASONING_EFFORT = process.env.REALTIME_REASONING_EFFORT || "low";
@@ -1040,6 +1041,10 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && requestUrl.pathname === "/api/pattern-handoff") {
       return await handlePatternHandoff(req, res);
+    }
+
+    if (req.method === "POST" && requestUrl.pathname === "/api/ai-mirror") {
+      return await handleAiMirror(req, res);
     }
 
     if (req.method === "POST" && requestUrl.pathname === "/api/pdf-export") {
@@ -3543,6 +3548,88 @@ async function handlePdfExport(req, res) {
   } catch (err) {
     console.error("[pdf-export] error:", err);
     return sendJson(res, 500, { error: err.message });
+  }
+}
+
+// Live "AI Understanding" summary of the current workflow grid. No external
+// dependencies (global fetch + readJson/sendJson), so nothing to lazy-load.
+async function handleAiMirror(req, res) {
+  if (!ANTHROPIC_API_KEY) {
+    return sendJson(res, 400, {
+      error: "ANTHROPIC_API_KEY is not configured. Set it in your terminal and restart the server."
+    });
+  }
+
+  let body;
+  try {
+    body = await readJson(req);
+  } catch (error) {
+    return sendJson(res, 400, { error: error.message || "Invalid request body" });
+  }
+
+  const grid = body.grid && typeof body.grid === "object" ? body.grid : {};
+  const steps = Array.isArray(grid.steps) ? grid.steps : [];
+  if (!steps.length) {
+    return sendJson(res, 200, { summary: "Add some workflow steps first to generate a summary." });
+  }
+
+  const cell = (step, key) => {
+    const raw = step?.cells?.[key]?.value;
+    if (Array.isArray(raw)) return raw.map((entry) => entry?.pattern || "").filter(Boolean).join(", ");
+    return typeof raw === "string" ? raw.trim() : "";
+  };
+  const workflowName = typeof grid.workflowName === "string" && grid.workflowName.trim() ? grid.workflowName.trim() : "Workflow";
+  const stepLines = steps.map((step, index) => {
+    const name = cell(step, "name") || `Step ${index + 1}`;
+    return [
+      `Step ${index + 1}: ${name}`,
+      `  Persona/Actors: ${cell(step, "personaActors") || "(none)"}`,
+      `  Systems/Tools: ${cell(step, "systemsTools") || "(none)"}`,
+      `  AI pattern: ${cell(step, "aiPattern") || "(unset)"}`,
+      `  Pain/friction: ${cell(step, "painFriction") || "(none)"}`,
+      `  Data sensitivity: ${cell(step, "dataSensitivity") || "(none)"}`
+    ].join("\n");
+  }).join("\n\n");
+
+  const system = [
+    "You write a short plain-English 'AI Understanding' summary of a captured business workflow for a non-technical reader.",
+    "Write 3 to 5 sentences in plain operational language — no AI/ML jargon.",
+    "Cover: what the workflow is and who does it; which systems are involved; where AI looks most confident (steps with an assigned AI pattern); and what is least clear or still missing.",
+    "Return only the paragraph text — no preamble, no headings, no bullet points, no markdown."
+  ].join(" ");
+  const userContent = `Workflow: ${workflowName}\nSteps: ${steps.length}\n\n${stepLines}`;
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({
+        model: AI_MIRROR_MODEL,
+        max_tokens: 512,
+        system,
+        messages: [{ role: "user", content: userContent }]
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      return sendJson(res, response.status, {
+        error: data?.error?.message || "Anthropic API request failed",
+        detail: data
+      });
+    }
+    const summary = (data?.content || [])
+      .filter((block) => block?.type === "text")
+      .map((block) => block.text)
+      .join("")
+      .trim();
+    return sendJson(res, 200, { summary: summary || "Could not generate a summary from the current workflow." });
+  } catch (error) {
+    console.error("[ai-mirror] error:", error);
+    return sendJson(res, 500, { error: error.message || "AI mirror request failed" });
   }
 }
 

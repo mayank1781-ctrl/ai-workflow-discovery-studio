@@ -3367,6 +3367,7 @@ function render() {
   renderFrameAnchorStrip();
   renderCurrentQuestion(section);
   renderTurnSignalPanel();
+  renderAiMirror();
   renderDiscoveryPatternInterview();
   renderInterviewGuide(section);
   renderCaptureCoach();
@@ -4935,6 +4936,58 @@ function handoffConfidenceColor(confidence) {
   if (confidence === null || confidence < 0.4) return "#5b7186"; // grey
   if (confidence >= 0.8) return "#00d4b4"; // teal
   return "#f59e0b"; // amber (0.4 - 0.79)
+}
+
+// --- AI Understanding ("AI Mirror") -------------------------------------------
+// Live plain-English summary of the current workflow grid. Summary + loading are
+// module-level (survive re-renders within the page session; no state schema
+// change). The Refresh button re-calls /api/ai-mirror.
+let aiMirrorSummary = "";
+let aiMirrorLoading = false;
+
+function renderAiMirror() {
+  const container = document.getElementById("aiMirrorPanel");
+  if (!container) return;
+  const body = aiMirrorLoading
+    ? `<p style="font-size:13px;color:#5b7186;font-style:italic;margin:0;">Analysing workflow…</p>`
+    : aiMirrorSummary
+      ? `<p style="font-size:13px;color:#dde8f5;line-height:1.55;margin:0;">${escapeHtml(aiMirrorSummary)}</p>`
+      : `<p style="font-size:13px;color:#7a93b4;margin:0;">Click Refresh to generate a plain-English summary of the workflow so far.</p>`;
+  container.innerHTML = `
+    <div style="background:#0d2137;border:1px solid #1c3b57;border-radius:10px;padding:16px;margin-bottom:14px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+        <h3 style="font-size:13px;font-weight:700;color:#dde8f5;margin:0;text-transform:uppercase;letter-spacing:0.04em;flex:1;">AI Understanding</h3>
+        <button type="button" id="aiMirrorRefreshBtn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:6px 14px;font-weight:600;font-size:13px;cursor:pointer;transition:opacity 0.2s;">Refresh</button>
+      </div>
+      ${body}
+    </div>`;
+  container.querySelector("#aiMirrorRefreshBtn")?.addEventListener("click", handleAiMirrorRefresh);
+}
+
+async function handleAiMirrorRefresh() {
+  if (aiMirrorLoading) return; // soft re-entrancy guard (button is never hard-disabled)
+  const steps = analysisGridSteps();
+  if (!steps.length) {
+    toast("Capture some workflow steps before generating a summary.");
+    return;
+  }
+  aiMirrorLoading = true;
+  renderAiMirror();
+  try {
+    const response = await fetch("/api/ai-mirror", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ grid: state.workflowGrid })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || `Request failed (${response.status}).`);
+    aiMirrorSummary = typeof data.summary === "string" ? data.summary : "";
+  } catch (error) {
+    toast(error?.message || "Could not generate the summary.");
+  } finally {
+    aiMirrorLoading = false;
+    renderAiMirror();
+  }
 }
 
 // Pattern interview, now hosted on the Discovery page as three stacked blocks.
