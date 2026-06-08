@@ -1054,9 +1054,6 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && requestUrl.pathname === "/api/connectors/confluence/status") {
       return await handleConfluenceStatus(req, res);
     }
-    if (req.method === "GET" && requestUrl.pathname === "/api/connectors/confluence/spaces") {
-      return await handleConfluenceSpaces(req, res);
-    }
     if (req.method === "POST" && requestUrl.pathname === "/api/connectors/confluence/push") {
       return await handleConfluencePush(req, res);
     }
@@ -3664,7 +3661,6 @@ async function handleConfluenceCallback(req, res) {
     const cloudName = resources[0].name;
 
     await writeConfluenceToken(userId, { access_token, refresh_token, expires_in, cloudId, cloudName, connectedAt: new Date().toISOString() });
-    console.log('[confluence-callback] token scopes:', tokenResp.body.scope);
     res.writeHead(302, { Location: "/?confluence=connected#engineering-doc" });
     res.end();
   } catch (err) {
@@ -3684,18 +3680,6 @@ async function handleConfluenceStatus(req, res) {
   } catch {
     return sendJson(res, 200, { connected: false });
   }
-}
-
-async function handleConfluenceSpaces(req, res) {
-  const token = await readConfluenceToken(currentUserId(req));
-  if (!token) return sendJson(res, 401, { error: "Not connected to Confluence" });
-  const resp = await httpsRequest("GET",
-    `https://api.atlassian.com/ex/confluence/${token.cloudId}/wiki/rest/api/space?limit=50`,
-    { Authorization: `Bearer ${token.access_token}`, Accept: "application/json" });
-  console.log('[confluence-spaces] status:', resp.status, 'count:', resp.body?.results?.length);
-  if (resp.status !== 200) console.error('[confluence-spaces] error:', JSON.stringify(resp.body));
-  const results = (resp.body && resp.body.results) || [];
-  return sendJson(res, 200, { spaces: results.map((s) => ({ key: s.key, name: s.name })) });
 }
 
 function confluenceEscape(value) {
