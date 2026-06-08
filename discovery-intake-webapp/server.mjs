@@ -112,9 +112,15 @@ const AUTH_SESSION_SECRET = process.env.AUTH_SESSION_SECRET || "";
 const AUTH_SESSION_TTL_HOURS = Number(process.env.AUTH_SESSION_TTL_HOURS || 12);
 const AUTH_COOKIE_SECURE = String(process.env.APP_ENV || "local").toLowerCase() !== "local";
 const AUTH_COOKIE_NAME = "ds_session";
+// Phase 5e: Azure oids allowed to read the full audit log (comma-separated).
+// Everyone else only sees their own entries via /api/audit.
+const AUTH_ADMIN_SUBS = new Set(
+  String(process.env.AUTH_ADMIN_SUBS || "").split(",").map((s) => s.trim()).filter(Boolean)
+);
 
 const DATA_DIR = path.join(__dirname, "data");
 const SESSIONS_DIR = path.join(DATA_DIR, "sessions");
+const AUDIT_DIR = path.join(DATA_DIR, "audit");
 const PACKAGES_DIR = path.join(DATA_DIR, "packages");
 
 const mimeTypes = {
@@ -1009,6 +1015,10 @@ const server = http.createServer(async (req, res) => {
       return await handleMe(req, res);
     }
 
+    if (req.method === "GET" && requestUrl.pathname === "/api/audit") {
+      return await handleGetAudit(req, res);
+    }
+
     if (req.method === "POST" && requestUrl.pathname === "/api/add-ons/test") {
       return await handleAddOnProviderTest(req, res);
     }
@@ -1121,6 +1131,7 @@ async function handleExtract(req, res) {
   }
 
   const body = await readJson(req);
+  appendAudit(req, "ai_analysis_run", { detail: "extract", content: body });
   const payload = {
     currentSection: body.currentSection,
     transcript: body.transcript,
@@ -1594,6 +1605,7 @@ async function handleHarvestGrid(req, res) {
     return sendJson(res, 200, empty);
   }
 
+  appendAudit(req, "ai_analysis_run", { detail: "harvest-grid", content: body });
   const payload = {
     transcript: body.transcript || [],
     currentGrid: body.currentGrid || null,
@@ -1646,6 +1658,7 @@ async function handleEvidenceAnalyze(req, res) {
   }
 
   const body = await readJson(req);
+  appendAudit(req, "ai_analysis_run", { detail: "evidence-analyze", content: body });
   const evidence = body.evidence || {};
   const metadata = {
     fileName: evidence.fileName,
@@ -2099,6 +2112,7 @@ async function handleGetSession(req, res, sessionId) {
       });
     }
   }
+  appendAudit(req, "session_loaded", { sessionId: safeId, content: payload.state });
   return sendJson(res, 200, payload);
 }
 
@@ -2110,10 +2124,12 @@ async function handleSaveSession(req, res) {
   await ensureDataDirs();
   const userId = currentUserId(req);
   const filePath = path.join(SESSIONS_DIR, `${safeIdentifier(summary.id)}.json`);
+  let existed = false;
   if (userId) {
     // Block overwriting a session owned by a different user (404, no leak).
     try {
       const existing = JSON.parse(await fs.readFile(filePath, "utf8"));
+      existed = true;
       if (existing.userId && existing.userId !== userId) return sendJson(res, 404, { error: "Session not found" });
     } catch {
       // no existing file — first save
@@ -2127,6 +2143,7 @@ async function handleSaveSession(req, res) {
   };
   if (userId) payload.userId = userId; // stamp owner only when a user is present
   await fs.writeFile(filePath, JSON.stringify(payload, null, 2));
+  appendAudit(req, existed ? "session_saved" : "session_created", { sessionId: safeIdentifier(summary.id), content: state });
   return sendJson(res, 200, { ok: true, summary });
 }
 
@@ -2146,6 +2163,7 @@ async function handleDeleteSession(req, res, sessionId) {
     }
   }
   await fs.rm(filePath, { force: true });
+  appendAudit(req, "session_deleted", { sessionId: safeId });
   return sendJson(res, 200, { ok: true });
 }
 
@@ -3334,6 +3352,63 @@ function currentUserId(req) {
   return readSession(req)?.sub || null;
 }
 
+// === Phase 5e: append-only audit trail ======================================
+// Hash inputs/outputs rather than storing raw content (privacy; ROSETTA L39).
+function auditHash(input) {
+  const text = typeof input === "string" ? input : JSON.stringify(input ?? "");
+  return crypto.createHash("sha256").update(text).digest("hex").slice(0, 32);
+}
+
+// Fire-and-forget audit logger. No-op when there's no authenticated user
+// (AUTH_ENABLED=false / no session), so un-gated dev and CI are unaffected.
+// Never throws and never blocks the caller — failures are swallowed.
+function appendAudit(req, action, { sessionId = "", detail = "", content } = {}) {
+  const session = readSession(req);
+  if (!session?.sub) return;
+  const record = {
+    ts: new Date().toISOString(),
+    userId: session.sub,
+    email: session.email || "",
+    tid: session.tid || "",
+    action,
+    sessionId,
+    detail,
+    contentHash: content === undefined ? "" : auditHash(content)
+  };
+  const file = path.join(AUDIT_DIR, `audit-${record.ts.slice(0, 10)}.jsonl`);
+  fs.mkdir(AUDIT_DIR, { recursive: true })
+    .then(() => fs.appendFile(file, `${JSON.stringify(record)}\n`))
+    .catch((error) => console.warn("Audit write failed:", error.message));
+}
+
+// GET /api/audit — same-user filtered; AUTH_ADMIN_SUBS members see everything.
+async function handleGetAudit(req, res) {
+  const userId = currentUserId(req);
+  if (!userId) return sendJson(res, 401, { error: "auth_required" });
+  const isAdmin = AUTH_ADMIN_SUBS.has(userId);
+  const url = new URL(req.url, `http://localhost:${PORT}`);
+  const limit = Math.min(Number(url.searchParams.get("limit")) || 500, 5000);
+
+  const entries = [];
+  const files = (await fs.readdir(AUDIT_DIR).catch(() => []))
+    .filter((name) => name.startsWith("audit-") && name.endsWith(".jsonl"));
+  for (const name of files) {
+    const text = await fs.readFile(path.join(AUDIT_DIR, name), "utf8").catch(() => "");
+    for (const line of text.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const record = JSON.parse(line);
+        if (isAdmin || record.userId === userId) entries.push(record);
+      } catch {
+        // skip malformed lines
+      }
+    }
+  }
+  entries.sort((a, b) => String(b.ts).localeCompare(String(a.ts)));
+  return sendJson(res, 200, { entries: entries.slice(0, limit), admin: isAdmin });
+}
+// === end Phase 5e audit trail ===============================================
+
 function azureBaseUrl() {
   return `https://login.microsoftonline.com/${encodeURIComponent(AUTH_AZURE_TENANT_ID)}/oauth2/v2.0`;
 }
@@ -3444,6 +3519,9 @@ async function handleAuthCallback(req, res) {
       sub: claims.oid || claims.sub || "",
       email: claims.email || claims.preferred_username || "",
       name: claims.name || "",
+      // Captured for future use (e.g. multi-tenancy); not used for isolation yet.
+      tid: claims.tid || "",
+      preferred_username: claims.preferred_username || "",
       exp: Date.now() + AUTH_SESSION_TTL_HOURS * 3600 * 1000
     });
     return sendRedirect(res, "/");
@@ -3476,6 +3554,7 @@ async function handleRecipeBookExport(req, res) {
 
     const body = await readJson(req);
     const { workflowName = "Workflow", steps = [] } = body;
+    appendAudit(req, "export_generated", { detail: "recipe-book-docx", content: { workflowName, steps } });
     const safeName = String(workflowName).replace(/[^a-z0-9]/gi, "-").replace(/-{2,}/g, "-").replace(/^-|-$/, "");
     const children = [];
 
@@ -3572,6 +3651,7 @@ async function handleEngineeringDocExport(req, res) {
 
     const body = await readJson(req);
     const { workflowName = "Workflow", steps = [] } = body;
+    appendAudit(req, "export_generated", { detail: "engineering-doc-docx", content: { workflowName, steps } });
     const safeName = String(workflowName).replace(/[^a-z0-9]/gi, "-").replace(/-{2,}/g, "-").replace(/^-|-$/, "");
     const children = [];
 
@@ -3667,6 +3747,7 @@ async function handlePatternHandoff(req, res) {
     return sendJson(res, 400, { error: error.message || "Invalid request body" });
   }
 
+  appendAudit(req, "ai_analysis_run", { detail: "pattern-handoff", content: body });
   const mode = body.mode === "analyse" ? "analyse" : body.mode === "questions" ? "questions" : "";
   if (!mode) {
     return sendJson(res, 400, { error: 'mode must be "questions" or "analyse".' });
@@ -3802,6 +3883,7 @@ async function handlePdfExport(req, res) {
   try {
     const body = await readJson(req);
     const kind = body.kind === "engineering" ? "engineering" : "recipe";
+    appendAudit(req, "export_generated", { detail: `pdf-${kind}`, content: body });
     const workflowName = typeof body.workflowName === "string" && body.workflowName.trim() ? body.workflowName.trim() : "Workflow";
     const steps = Array.isArray(body.steps) ? body.steps : [];
     const safeName = String(workflowName).replace(/[^a-z0-9]/gi, "-").replace(/-{2,}/g, "-").replace(/^-|-$/g, "") || "workflow";
@@ -3972,6 +4054,7 @@ async function handleDumpExtract(req, res) {
     return sendJson(res, 400, { error: error.message || "Invalid request body" });
   }
 
+  appendAudit(req, "ai_analysis_run", { detail: "dump-extract", content: body });
   const text = typeof body.text === "string" ? body.text.trim() : "";
   if (!text) return sendJson(res, 400, { error: "text is required" });
   const grid = body.grid && typeof body.grid === "object" ? body.grid : {};

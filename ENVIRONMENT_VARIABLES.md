@@ -93,6 +93,20 @@ HMAC-signed, httpOnly cookie — no server-side session store, no new dependenci
 
 Routes added: `GET /auth/login` → Microsoft authorize redirect; `GET /auth/microsoft/callback`
 → token exchange + set cookie; `POST /auth/logout` → clear cookie; `GET /api/me` → current user.
+
+### Audit trail (Phase 5e)
+
+When a user is signed in, meaningful actions are appended to `data/audit/audit-YYYY-MM-DD.jsonl`
+(one JSON object per line, append-only; `data/` is gitignored). Each record is
+`{ ts, userId (Azure sub), email, tid, action, sessionId, detail, contentHash }` — inputs/outputs are
+**hashed (SHA-256), never stored raw**. Action types: `session_created`, `session_saved`,
+`session_loaded`, `session_deleted`, `ai_analysis_run` (extract / evidence-analyze / harvest-grid /
+pattern-handoff / dump-extract), `export_generated` (docx / pdf). Writes are fire-and-forget — a
+failed audit never blocks the action — and logging is a **no-op when `AUTH_ENABLED=false`** (no user).
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `AUTH_ADMIN_SUBS` | Optional | Comma-separated Azure oids that may read the **full** audit log via `GET /api/audit`. Everyone else sees only their own entries. Blank = no admins. |
 `/api/health` and `/login.html` stay public. Azure app registration: scopes `openid profile email`,
 redirect URI = `AUTH_REDIRECT_URI`. The `id_token` is verified (5b): its RS256 signature is checked
 against the tenant's Azure JWKS, and the issuer, audience (`AUTH_AZURE_CLIENT_ID`), tenant
