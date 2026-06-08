@@ -173,7 +173,7 @@
 |---|---|
 | **Lever** | The four in-memory state keys used by the Pattern Handoff feature |
 | **Location** | `app.js` → state object. Keys: `handoffQuestions`, `handoffAnswers`, `handoffPatterns`, `handoffOverrides` |
-| **Current setting** | Session-only — lost on tab switch if not persisted |
+| **Current setting** | Session-only — lost on tab switch if not persisted. The pattern interview UI moved to the Discovery page and the standalone Pattern Handoff tab was removed (PR #63); these keys are unchanged. |
 | **Effect of changing** | To persist across sessions, save these keys into the session JSON alongside `workflowGrid`. Currently intentionally ephemeral per the original spec. |
 | **Constraints** | Do not add these to `workflowGrid` directly — they are interview scaffolding, not workflow data. Save them as a sibling key if persistence is needed. |
 
@@ -289,18 +289,18 @@
 |---|---|
 | **Lever** | The exact CSS for every primary action button |
 | **Location** | Inline styles throughout `app.js` |
-| **Current setting** | `background:#00d4b4; color:#0d1b2e; border:none; border-radius:6px; padding:8px 16px; font-weight:600; font-size:14px; cursor:pointer` |
-| **Effect of changing** | Any deviation creates visual inconsistency. If you want a secondary button style, define it explicitly — don't vary the teal button. |
-| **Constraints** | No new CSS variables. All styles are inline. The design system has no stylesheet for component variants. |
+| **Current setting** | Inline `background:#00d4b4; color:#0d1b2e; border:none; border-radius:6px; padding:8px 16px; font-weight:600; cursor:pointer`. Since PR #60 the same contract is also available as the `ds-btn-teal` class (alongside `ds-btn-ghost` and `ds-btn-grad`) in `design-system.css`. |
+| **Effect of changing** | Any deviation creates visual inconsistency. If you want a secondary button style, use an existing `ds-btn-*` class — don't vary the teal button. |
+| **Constraints** | No new CSS variables. Prefer the `ds-btn-*` classes for new buttons; inline hex is still fine for one-offs. |
 
 ### L30 — No new CSS variables rule
 | Field | Value |
 |---|---|
 | **Lever** | Whether new CSS custom properties can be introduced |
-| **Location** | `styles.css`, `cockpit.css`, `future.css` |
-| **Current setting** | Existing variables only. New styles use hex literals inline. |
-| **Effect of changing** | Breaking this rule creates invisible coupling — changing a variable affects components you didn't intend. |
-| **Constraints** | Use hex literals (`#00d4b4`) in all new code. Only use existing variables when referencing established theme tokens. |
+| **Location** | `styles.css`, `cockpit.css`, `future.css`, and `design-system.css` (added in PR #60, linked from `index.html` before `</head>`) |
+| **Current setting** | No new CSS custom properties. Shared component styling now lives as `ds-*` utility classes in `design-system.css` (e.g. `ds-panel`, `ds-card`, `ds-chip`, `ds-badge` + `ds-badge-{teal,pink,purple,amber,blue,dim}`, `ds-dot`, `ds-bar-row`, `ds-section-head`, `ds-grad-bar`/`ds-grad-bar-v`, `ds-btn-*`, plus `pulse-dot`/`fade-up` keyframes). One-off colours still use inline hex literals. |
+| **Effect of changing** | Breaking the no-variables rule creates invisible coupling — changing a variable affects components you didn't intend. |
+| **Constraints** | Use `ds-*` classes for reusable patterns and inline hex (`#00d4b4`) for one-offs. Still no new CSS custom properties. |
 
 ### L31 — State object structure
 | Field | Value |
@@ -337,10 +337,10 @@
 | Field | Value |
 |---|---|
 | **Lever** | Which sections appear in the Engineering Doc and in what order |
-| **Location** | `app.js` → Engineering Doc tab render function |
-| **Current setting** | Executive summary, Implementation Gantt (collapsible), Data Sensitivity Profile (collapsible), Open Gaps (collapsible) — post PR #53 |
-| **Effect of changing** | Adding a new section (e.g. "API Integration Map") requires adding a render function and wiring the toggle. |
-| **Constraints** | Sections are collapsed by default. Never auto-expand a section — let the user choose. |
+| **Location** | `app.js` → `renderAnalysisTabEngineering()` |
+| **Current setting** | Redesigned as an engineering spec in PR #64: (1) document-metadata header (`ds-panel`) with sensitivity/steps/version/lock badges + an "inferred by AI" provenance notice, (2) colour-coded implementation gantt (`ds-card`) whose bar colours are tier-driven via `getStepOpportunityMeta` (L47), (3) data-sensitivity bars (`ds-card`, `ds-bar-row`) with an unconfirmed-fields warning, (4) expandable per-step cards (`ds-card`) holding a field table with provenance badges + an `[INPUT]→[SYSTEM]→[OUTPUT]→[HANDOFF]` integration-flow code block. |
+| **Effect of changing** | Adding a section requires a new render block; expandable cards toggle a body div via vanilla `display` none/block. |
+| **Constraints** | Step cards are collapsed by default — never auto-expand. The export toolbar (Export Engineering Doc / DOCX / PDF) and its handlers must be preserved on this tab. Uses `ds-*` classes; non-ds colours inline hex. |
 
 ### L35 — PDF content model
 | Field | Value |
@@ -461,17 +461,17 @@
 ### L47 — Opportunity scoring formula
 | Field | Value |
 |---|---|
-| **Lever** | How each AI Opportunity card's priority score is calculated |
-| **Location** | `app.js` → AI Opportunities tab → scoring function |
-| **Current setting** | Base 3. +1 if `painFriction` confirmed + non-empty. +1 if `frequencyVolume` suggests daily/high. −1 if `dataSensitivity` contains "high" or "sensitive". Clamped 1–5. |
-| **Effect of changing** | Add `+1 if regulatoryContext non-empty` to surface compliance-heavy steps. Change weights to push financial risk higher. |
-| **Constraints** | Always clamp output between 1 and 5. Badge colours depend on this range: 5=teal, 3-4=amber, 1-2=grey. |
+| **Lever** | How each step's opportunity label/tier is decided |
+| **Location** | `app.js` → `getStepOpportunityMeta(step)` — a shared helper that replaced the old base-3 formula in PR #65 |
+| **Current setting** | Two gates run before any productive label. **(1) Regulatory override (first):** if `dataSensitivity.value` contains "very high" **OR** `regulatoryContext.value` is non-empty → `{ label: "Compliance review required", tier: "compliance", priority: null }`. **(2) Completeness gate:** across the 5 critical fields `systemsTools, dataSensitivity, regulatoryContext, output, rulesDecisionLogic`, if fewer than 60% are `confirmed` → `{ label: "Speculative", tier: "speculative", priority: null }`. **Otherwise** time-based: `timeTaken < 30` → Quick Win (priority 1), else Strategic (priority 2). |
+| **Effect of changing** | This one helper drives the AI Opportunities badges/bubbles/ranking, the Recipe Book card badge, and the Engineering gantt bar + step-card badge. Changing a threshold (the 0.6 gate, the 30-min cut, or the 5-field set) shifts labels everywhere at once. |
+| **Constraints** | Tier → `ds-badge` variant: compliance=`ds-badge-pink`, speculative=`ds-badge-amber`, quick-win=`ds-badge-teal`, strategic=`ds-badge-purple`; tier → solid hex via `opportunityTierColor()`. Gate tiers carry `priority: null` — never render a priority number for them. The regulatory override must run before the completeness gate. |
 
 ### L48 — Confidence dot colour thresholds (Zone 1)
 | Field | Value |
 |---|---|
-| **Lever** | The visual colour mapping for step confidence in Pattern Handoff Zone 1 |
-| **Location** | `app.js` → Pattern Handoff tab → Zone 1 render |
+| **Lever** | The visual colour mapping for step confidence in the pattern interview |
+| **Location** | `app.js` → Discovery-page pattern interview (`renderPatternInterview`). The standalone Analysis Studio "Pattern Handoff" tab was removed in PR #63; the interview lives on the Discovery page. |
 | **Current setting** | `confirmed` → `#00d4b4` (teal), `inferred` → `#f59e0b` (amber), all else → `#4b5563` (grey) |
 | **Effect of changing** | Change here to add a new visual state — e.g. pink for `rejected` or red for `conflicted`. |
 | **Constraints** | Must match the confidence state machine (L13). Adding a colour for a state that doesn't exist in the machine is a silent no-op. |
@@ -480,7 +480,7 @@
 | Field | Value |
 |---|---|
 | **Lever** | Which cell fields are updated when Zone 3 "Confirm Patterns" is clicked |
-| **Location** | `app.js` → `handleHandoffConfirm()` (PR #49) |
+| **Location** | `app.js` → `handleHandoffConfirm()` (PR #49), now invoked from the Discovery-page pattern interview since the Pattern Handoff tab was removed in PR #63 |
 | **Current setting** | Sets `step.cells.aiPattern.value`, `state`, and `confidence` for each confirmed step |
 | **Effect of changing** | Could also write to `step.cells.description` with the rationale text. Or trigger a Recipe Book regeneration automatically after confirmation. |
 | **Constraints** | Never overwrite a cell that is already `"confirmed"` unless the user has explicitly provided an override. Check `handoffOverrides[stepId]` first. |
@@ -546,12 +546,12 @@
 | L44 | Port configuration | Operational |
 | L45 | Node.js runtime | Operational |
 | L46 | Data directory gitignore | Operational |
-| L47 | Opportunity scoring formula | Operational |
+| L47 | Opportunity scoring (gated — `getStepOpportunityMeta`) | Operational |
 | L48 | Confidence dot colour thresholds | Operational |
 | L49 | Pattern writeback target fields | Operational |
 | L50 | Dump mode merge strategy | Operational |
 
 ---
 
-*Last updated: June 2026 — reflects PRs #41–#52 merged on main.*  
+*Last updated: June 2026 — reflects PRs #41–#65 merged on main.*  
 *Update this file as part of every PR that changes a lever. Keep entries short.*
