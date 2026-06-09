@@ -145,7 +145,6 @@
                     </button>
                   </div>
                   <div id="step-confidence-cards"></div>
-                  <div id="process-flow-map-compact"></div>
                   <p id="voiceHint" class="hint">
                     Optional dictation. The primary flow is typing a concise answer, then accepting it for analysis.
                   </p>
@@ -172,14 +171,8 @@
 
                 <aside class="embedded-transcript-card" aria-label="Live transcript" data-help="This rail shows the running conversation and gives users a typing fallback when they do not want to use voice.">
                   <div class="conversation-card">
-                    <div class="conversation-heading">
-                      <div>
-                        <p class="eyebrow">Conversation</p>
-                        <h2>Live transcript</h2>
-                      </div>
-                    </div>
-                    <div id="conversationLog" class="conversation-log" aria-live="polite"></div>
-                    <div id="liveSpeechDraft" class="live-speech-draft" aria-live="polite"></div>
+                    <!-- PR 27: composer moved above the transcript log so the
+                         text input + Accept & Analyze are above the fold. -->
                     <div class="transcript-composer">
                       <div class="conversation-heading compact">
                         <div>
@@ -210,6 +203,14 @@
                         </div>
                       </div>
                     </div>
+                    <div class="conversation-heading">
+                      <div>
+                        <p class="eyebrow">Conversation</p>
+                        <h2>Live transcript</h2>
+                      </div>
+                    </div>
+                    <div id="conversationLog" class="conversation-log" aria-live="polite"></div>
+                    <div id="liveSpeechDraft" class="live-speech-draft" aria-live="polite"></div>
                   </div>
                   <section id="liveExtractionGrid" class="live-extraction-grid" aria-label="Live extraction grid"></section>
                 </aside>
@@ -217,8 +218,6 @@
             </div>
 
             <section id="liveWorkflowGridPanel" class="live-grid-panel" aria-label="Live workflow grid" hidden></section>
-            <div id="dumpModePanel" class="dump-mode-panel" aria-live="polite"></div>
-            <div id="aiMirrorPanel" class="ai-mirror-panel" aria-live="polite"></div>
             <div id="discoveryPatternInterview" class="discovery-pattern-interview" aria-live="polite"></div>
           </section>
         </section>

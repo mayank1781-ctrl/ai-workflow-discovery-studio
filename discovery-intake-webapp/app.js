@@ -1353,6 +1353,7 @@ function bindEvents() {
   els.stopRealtimeButton.addEventListener("click", stopRealtimeVoice);
   els.sendChatButton.addEventListener("click", sendChatMessage);
   els.processChatButton.addEventListener("click", processChatIntoIntake);
+  renderIntakeModeToggle(); // PR 27: Answer question / Paste context toggle
   els.captureFeedbackQuickButton?.addEventListener("click", () => openPilotSettingsDrawer("feedback"));
   els.evidenceFileInput?.addEventListener("change", handleEvidenceUpload);
   els.evidenceNoteInput?.addEventListener("input", updateEvidenceWorkbenchDraft);
@@ -1900,6 +1901,10 @@ function transcriptionDomainTerms() {
   ].filter(isCapturedValue)).slice(0, 32);
 }
 
+// PR 27: the chat composer has two modes — "answer" (normal) and "paste"
+// (the merged "Extract and Fill" context dump). Same box, same submit button.
+let intakeMode = "answer";
+
 async function sendChatMessage() {
   const text = els.aiChatInput.value.trim();
   if (!text) {
@@ -1908,6 +1913,14 @@ async function sendChatMessage() {
   }
   if (!aiAvailable) {
     toast("Typed answers need server.mjs running with OPENAI_API_KEY.");
+    return;
+  }
+
+  // "Paste context" routes the same box/button through document-style
+  // extraction (merged from the old standalone "Extract and Fill" box).
+  if (intakeMode === "paste") {
+    els.aiChatInput.value = "";
+    await runPasteContext(text);
     return;
   }
 
@@ -1960,6 +1973,52 @@ async function sendChatMessage() {
     els.sendChatButton.innerHTML = original;
     refreshIcons();
   }
+}
+
+// PR 27: run the merged "Paste context" extraction — the same flow the old
+// "Extract and Fill" box used (/api/dump-extract), then auto-apply to the grid.
+async function runPasteContext(text) {
+  dumpText = text;
+  await handleDumpExtract();
+  if (dumpExtractResult) handleDumpApply();
+}
+
+// Injects the "Answer question" / "Paste context" toggle above the chat input.
+// Built in JS so index.html stays minimal; inline hex only.
+function renderIntakeModeToggle() {
+  const input = els.aiChatInput;
+  const composer = input?.closest(".chat-composer");
+  if (!composer || document.getElementById("intakeModeToggle")) return;
+  const wrap = document.createElement("div");
+  wrap.id = "intakeModeToggle";
+  wrap.style.cssText = "display:flex;gap:6px;margin-bottom:8px;";
+  wrap.innerHTML = `
+    <button type="button" data-intake-mode="answer" style="border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;cursor:pointer;">Answer question</button>
+    <button type="button" data-intake-mode="paste" style="border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;cursor:pointer;">Paste context</button>`;
+  composer.insertBefore(wrap, input);
+  wrap.querySelectorAll("[data-intake-mode]").forEach((btn) => {
+    btn.addEventListener("click", () => setIntakeMode(btn.dataset.intakeMode));
+  });
+  updateIntakeModeToggle();
+}
+
+function setIntakeMode(mode) {
+  intakeMode = mode === "paste" ? "paste" : "answer";
+  if (els.aiChatInput) {
+    els.aiChatInput.placeholder = intakeMode === "paste"
+      ? "Paste notes, an email, or a rough description — I'll extract the workflow."
+      : "Type an answer, rough notes, or a numbered workflow...";
+  }
+  updateIntakeModeToggle();
+}
+
+function updateIntakeModeToggle() {
+  document.querySelectorAll("#intakeModeToggle [data-intake-mode]").forEach((btn) => {
+    const active = btn.dataset.intakeMode === intakeMode;
+    btn.style.background = active ? "#1e3350" : "transparent";
+    btn.style.color = active ? "#00d4b4" : "#8899aa";
+    btn.style.border = `1px solid ${active ? "#00d4b4" : "#1e3350"}`;
+  });
 }
 
 function processChatIntoIntake() {
@@ -7131,55 +7190,25 @@ function renderPatternInterview(container) {
         </div>`).join("")
     : `<p style="font-size:12px;color:#7a93b4;">No questions yet. Click "Surface Key Questions" to generate them.</p>`;
 
-  // BLOCK 3 — AI pattern analysis with plain-text overrides.
-  const patternCards = state.handoffPatterns.length
-    ? state.handoffPatterns.map((p) => {
-        const sid = p.stepId || "";
-        const override = state.handoffOverrides[sid] || "";
-        return `
-          <div style="background:#0d1b2a;border:1px solid #1a2a3a;border-radius:8px;padding:12px;margin-bottom:8px;">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-              <strong style="font-size:13px;color:#dde8f5;flex:1;">${escapeHtml(p.stepName || "Step")}</strong>
-              <span class="sensitivity-badge" style="background:#00d4b422;color:#00d4b4;">${escapeHtml(p.pattern || "—")}</span>
-            </div>
-            <p style="font-size:12px;color:#9fb3c8;margin:0 0 8px;">${escapeHtml(p.rationale || "")}</p>
-            <label style="font-size:11px;color:#5b7186;display:block;margin-bottom:4px;">Override pattern (optional)</label>
-            <input type="text" data-handoff-override="${escapeHtml(sid)}" value="${escapeHtml(override)}" placeholder="${escapeHtml(p.pattern || "")}" style="width:100%;box-sizing:border-box;background:#06101d;border:1px solid #1a2a3a;border-radius:6px;color:#dde8f5;font-size:13px;padding:6px 8px;" />
-          </div>`;
-      }).join("")
-    : `<p style="font-size:12px;color:#7a93b4;">No analysis yet. Answer the questions above, then click "Generate AI Analysis".</p>`;
-
+  // PR 27: the standalone "AI Pattern Analysis" block (with the per-step
+  // override inputs) is removed — pattern info now shows inline on step cards.
   container.innerHTML = `
     <section style="${blockStyle}">
       <h3 style="${sectionTitleStyle}">Step Pattern Overview</h3>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;">${zone1Cards}</div>
     </section>
-    <section style="${blockStyle}">
+    <section style="${blockStyle}margin-bottom:0;">
       <h3 style="${sectionTitleStyle}">Key Questions</h3>
       <button type="button" id="handoffQuestionsBtn" style="${HANDOFF_TEAL_BUTTON}margin-bottom:12px;">Surface Key Questions</button>
       <div>${questionCards}</div>
-    </section>
-    <section style="${blockStyle}margin-bottom:0;">
-      <h3 style="${sectionTitleStyle}">AI Pattern Analysis</h3>
-      <button type="button" id="handoffAnalyseBtn" style="${HANDOFF_TEAL_BUTTON}margin-bottom:12px;">Generate AI Analysis</button>
-      <div>${patternCards}</div>
-      <button type="button" id="handoffConfirmBtn" style="${HANDOFF_TEAL_BUTTON}margin-top:12px;">Confirm Patterns</button>
     </section>`;
 
   container.querySelector("#handoffQuestionsBtn")?.addEventListener("click", handleHandoffQuestions);
-  container.querySelector("#handoffAnalyseBtn")?.addEventListener("click", handleHandoffAnalyse);
-  container.querySelector("#handoffConfirmBtn")?.addEventListener("click", handleHandoffConfirm);
   container.querySelectorAll("[data-handoff-answer]").forEach((textarea) => {
     textarea.addEventListener("input", () => {
       state.handoffAnswers[textarea.dataset.handoffAnswer] = textarea.value;
     });
     textarea.addEventListener("change", persistState);
-  });
-  container.querySelectorAll("[data-handoff-override]").forEach((input) => {
-    input.addEventListener("input", () => {
-      state.handoffOverrides[input.dataset.handoffOverride] = input.value;
-    });
-    input.addEventListener("change", persistState);
   });
   refreshIcons();
 }
@@ -10588,9 +10617,15 @@ function recordCard(type, record, index) {
   const card = document.createElement("div");
   card.className = "record-card";
   const title = recordTitle(type, record, index);
+  // PR 27: show the step's AI pattern inline as a badge on the card header
+  // (matches the teal pattern badge used elsewhere; only on step cards).
+  const patternBadge = (type === "steps" && String(record.pattern || "").trim())
+    ? `<span style="background:#00d4b4;color:#0d1b2e;font-size:0.65rem;font-weight:700;border-radius:99px;padding:2px 9px;text-transform:uppercase;letter-spacing:0.03em;margin-left:8px;">${escapeHtml(String(record.pattern).trim())}</span>`
+    : "";
   card.innerHTML = `
     <div class="record-card-header">
       <span class="record-card-title">${escapeHtml(title)}</span>
+      ${patternBadge}
       <span class="record-actions">
         <button class="mini-button" data-action="delete" title="Delete" type="button"><i data-lucide="trash-2"></i></button>
       </span>
