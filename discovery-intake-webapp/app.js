@@ -1878,7 +1878,6 @@ function transcriptionDomainTerms() {
     state.fields?.workflowCategory,
     ...(state.systems || []).map((item) => item.name),
     ...(state.data || []).map((item) => item.category),
-    "Capco",
     "PDR",
     "MSA",
     "FRRF",
@@ -7557,7 +7556,7 @@ function renderCurrentQuestion(section = getActiveSection()) {
 
 const OPENING_DISCOVERY_QUESTION = "What task or workflow do you want to talk about? Briefly describe what happens, the business outcome, and the main output.";
 const DOMAIN_CONTEXT_QUESTION = "What practice or domain does this task or workflow usually belong to? If it spans multiple practices, name them.";
-const WORK_CONTEXT_QUESTION = "Where is this work done today: internally at Capco, on a client delivery project, for business development, at the client site, or somewhere else?";
+const WORK_CONTEXT_QUESTION = "Where is this work done today: internally at the firm, on a client delivery project, for business development, at the client site, or somewhere else?";
 const WORKFLOW_FRAME_PRIMARY_QUESTION = "What do you call this workflow?";
 // Back-compat alias: existing routing references WORKFLOW_FRAME_QUESTION as the
 // "frame" question. It now resolves to the single primary question only.
@@ -8362,7 +8361,7 @@ function interviewFocus(section) {
       title: "Validate the working description",
       description: "Check whether the submitted idea matches the real current-state workflow, and capture practice/domain or work context.",
       fills: "Idea validation, build readiness, primary time driver, practice/domain, work context",
-      listenFor: "Cross-practice applicability, client delivery, internal Capco work, business development, client site, current-state facts"
+      listenFor: "Cross-practice applicability, client delivery, internal firm work, business development, client site, current-state facts"
     };
   }
   if (section.id === "workflow") {
