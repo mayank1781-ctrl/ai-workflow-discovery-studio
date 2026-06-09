@@ -3504,7 +3504,7 @@ function transcriptionPrompt({ currentQuestion = "", domainTerms = "" } = {}) {
   return [
     "Transcribe a workflow discovery interview for a finance-industry consulting AI intake app.",
     "Preserve concrete nouns, acronyms, tool names, and numbered steps. Use punctuation and sentence breaks.",
-    "Common terms include Capco, PDR, MSA, FRRF, SharePoint, Teams, Outlook, PowerPoint, Word, Excel, Miro, Mural, Jira, Confluence, ChatGPT Enterprise, Microsoft 365 Copilot, Copilot Studio, SME, PMO, UAT, QA, and engagement lead.",
+    "Common terms include PDR, MSA, FRRF, SharePoint, Teams, Outlook, PowerPoint, Word, Excel, Miro, Mural, Jira, Confluence, ChatGPT Enterprise, Microsoft 365 Copilot, Copilot Studio, SME, PMO, UAT, QA, and engagement lead.",
     domainTerms ? `Session terms: ${domainTerms}.` : "",
     currentQuestion ? `The user is answering this question: ${currentQuestion}` : ""
   ].filter(Boolean).join(" ");
