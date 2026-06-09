@@ -1074,6 +1074,11 @@ const server = http.createServer(async (req, res) => {
       if (req.method === "POST") return await handleSaveSession(req, res);
     }
 
+    if (req.method === "PATCH" && requestUrl.pathname.startsWith("/api/sessions/") && requestUrl.pathname.endsWith("/metadata")) {
+      const sessionId = requestUrl.pathname.split("/").at(-2);
+      return await handleUpdateSessionMetadata(req, res, sessionId);
+    }
+
     if (requestUrl.pathname.startsWith("/api/sessions/")) {
       const sessionId = requestUrl.pathname.split("/").pop();
       if (req.method === "GET") return await handleGetSession(req, res, sessionId);
@@ -2339,6 +2344,51 @@ async function handleGetSession(req, res, sessionId) {
   return sendJson(res, 200, payload);
 }
 
+// PR 10: set the explicit workflowName / engagementContext metadata on a saved
+// session. Writes into the canonical state.sessionMeta, refreshes the summary,
+// and mirrors both at the payload top level for GET consumers. Same ownership
+// scoping as the other session endpoints.
+async function handleUpdateSessionMetadata(req, res, sessionId) {
+  const safeId = safeIdentifier(sessionId);
+  if (!safeId) return sendJson(res, 400, { error: "Invalid session id" });
+  await ensureDataDirs();
+  const filePath = path.join(SESSIONS_DIR, `${safeId}.json`);
+  let payload;
+  try {
+    payload = JSON.parse(await fs.readFile(filePath, "utf8"));
+  } catch {
+    return sendJson(res, 404, { error: "Session not found" });
+  }
+  const userId = currentUserId(req);
+  if (userId) {
+    if (payload.userId && payload.userId !== userId) return sendJson(res, 404, { error: "Session not found" });
+    if (!payload.userId) payload.userId = userId; // claim-on-access
+  }
+  let body;
+  try {
+    body = await readJson(req);
+  } catch {
+    body = {};
+  }
+  payload.state = payload.state || {};
+  payload.state.sessionMeta = payload.state.sessionMeta || {};
+  if (typeof body.workflowName === "string") {
+    const value = body.workflowName.trim();
+    payload.state.sessionMeta.workflowName = value;
+    if (value) payload.state.sessionMeta.name = value;
+  }
+  if (typeof body.engagementContext === "string") {
+    payload.state.sessionMeta.engagementContext = body.engagementContext.trim();
+  }
+  payload.savedAt = new Date().toISOString();
+  payload.summary = summarizeSession(payload.state);
+  payload.workflowName = payload.summary.workflowName;
+  payload.engagementContext = payload.summary.engagementContext;
+  await fs.writeFile(filePath, JSON.stringify(payload, null, 2));
+  appendAudit(req, "session_saved", { sessionId: safeId, detail: "metadata" });
+  return sendJson(res, 200, { ok: true, workflowName: payload.workflowName, engagementContext: payload.engagementContext });
+}
+
 async function handleSaveSession(req, res) {
   const body = await readJson(req);
   const state = body.state || {};
@@ -2362,7 +2412,10 @@ async function handleSaveSession(req, res) {
     version: 1,
     savedAt: new Date().toISOString(),
     summary,
-    state
+    state,
+    // Top-level mirror of the naming metadata for GET consumers (PR 10).
+    workflowName: summary.workflowName,
+    engagementContext: summary.engagementContext
   };
   if (userId) payload.userId = userId; // stamp owner only when a user is present
   await fs.writeFile(filePath, JSON.stringify(payload, null, 2));
@@ -2772,7 +2825,7 @@ function summarizeSession(state = {}) {
     // `sessionId` / `savedAt` are convenience aliases for the saved-sessions UI
     // (the canonical fields remain `id` / `updatedAt`).
     sessionId: id,
-    name: meta.name || fields.workflowName || fields.submittedWorkflowTask || "Untitled discovery",
+    name: meta.name || meta.workflowName || fields.workflowName || fields.submittedWorkflowTask || "Untitled discovery",
     owner: meta.owner || "",
     source: meta.source || "Live discovery",
     dataClassification: meta.dataClassification || "Unknown",
@@ -2780,7 +2833,8 @@ function summarizeSession(state = {}) {
     createdAt: meta.createdAt || now,
     updatedAt: meta.updatedAt || now,
     savedAt: meta.updatedAt || now,
-    workflowName: fields.workflowName || fields.submittedWorkflowTask || "",
+    workflowName: meta.workflowName || fields.workflowName || fields.submittedWorkflowTask || "",
+    engagementContext: meta.engagementContext || "",
     category: fields.workflowCategory && fields.workflowCategory !== "unknown" ? fields.workflowCategory : "Category TBD",
     recordType: fields.recordType || "Live Opportunity",
     practice: fields.practice || "unknown",
@@ -3450,7 +3504,7 @@ function transcriptionPrompt({ currentQuestion = "", domainTerms = "" } = {}) {
   return [
     "Transcribe a workflow discovery interview for a finance-industry consulting AI intake app.",
     "Preserve concrete nouns, acronyms, tool names, and numbered steps. Use punctuation and sentence breaks.",
-    "Common terms include Capco, PDR, MSA, FRRF, SharePoint, Teams, Outlook, PowerPoint, Word, Excel, Miro, Mural, Jira, Confluence, ChatGPT Enterprise, Microsoft 365 Copilot, Copilot Studio, SME, PMO, UAT, QA, and engagement lead.",
+    "Common terms include PDR, MSA, FRRF, SharePoint, Teams, Outlook, PowerPoint, Word, Excel, Miro, Mural, Jira, Confluence, ChatGPT Enterprise, Microsoft 365 Copilot, Copilot Studio, SME, PMO, UAT, QA, and engagement lead.",
     domainTerms ? `Session terms: ${domainTerms}.` : "",
     currentQuestion ? `The user is answering this question: ${currentQuestion}` : ""
   ].filter(Boolean).join(" ");
