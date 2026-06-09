@@ -1,155 +1,160 @@
-# Discovery Intake Studio
+# AI Workflow Discovery Studio
 
-This is the local AI Workflow Discovery Studio web app for discovering colleague workflows, structuring the intake, and producing Product, Engineering, Business, and governance-input handoff material.
+AI Workflow Discovery Studio is an enterprise single-page app for Finance-focused Management Consulting teams. Users run a structured AI discovery interview (or upload a SOP/document) that maps any business workflow into a scored automation opportunity — a 3-layer process grid, a 10-principle score, a tier classification, and an OpenAI-first "recipe" with a business case and DOCX export. It's built for analysts, consultants, transformation leads, AI strategists, and programme managers who want to identify and start building AI automations themselves.
 
-The current product direction is text-first with optional voice. Typed answers and pasted notes are the most reliable primary intake path; dictation and spoken AI replies are available when useful, but the Discovery flow should still work well without voice.
+---
 
-## Run The App
+## Prerequisites
 
-From the `discovery-intake-webapp/` directory, set up your environment once and start the server:
+- **Node.js 24+** — required for the built-in `node:sqlite` module used for session storage.
+- **npm 10+**
+- **An OpenAI API key** with **GPT-4o** access (document extraction, vision, realtime voice, transcription, and TTS all run on OpenAI).
+- **Optional:** an Atlassian account if you want the Jira and Confluence push integrations.
 
-```bash
-cp .env.example .env   # then open .env and fill in your API keys
-npm install            # first time only (installs dotenv and other deps)
-npm run dev            # starts the server on http://localhost:5177/
-```
+---
 
-`npm run dev` and `npm run start` both run the server on port 5177. Keys are
-loaded automatically from `.env` (via dotenv), so you no longer need to export
-them in the terminal.
-
-Then open:
-
-```text
-http://localhost:5177/
-```
-
-If normal `node` is unavailable, use the Node runtime bundled with Codex:
+## Quick start (local)
 
 ```bash
-/Applications/Codex.app/Contents/Resources/node scripts/start-local.mjs
+# 1. Clone the repo and enter the app directory
+git clone https://github.com/mayank1781-ctrl/ai-workflow-discovery-studio.git
+cd ai-workflow-discovery-studio/discovery-intake-webapp
+
+# 2. Create your env file and add your OpenAI key
+cp .env.example .env
+#   then open .env and set:  OPENAI_API_KEY=sk-...
+
+# 3. Install dependencies (first time only)
+npm install
+
+# 4. Start the server
+npm run dev
 ```
 
-## Run With Auto-Restart (PM2)
+Then open the URL printed on startup — **http://localhost:5177** with the sample `.env` (the port follows the `PORT` variable; it falls back to `5173` if `PORT` is unset).
 
-For a longer-running local instance that automatically restarts if the server
-crashes, run it under [PM2](https://pm2.keymetrics.io/). PM2 is installed as a
-dev dependency, and the process is defined in `ecosystem.config.cjs`
-(`name: discovery-studio`, `PORT: 5177`).
+> You can also set the OpenAI key at runtime from the in-app **⚙ Settings** panel — but that key lives in process memory only and is lost on restart. For anything persistent, use the `OPENAI_API_KEY` env var.
 
-From the `discovery-intake-webapp/` directory:
+---
+
+## Environment variables
+
+Copy `.env.example` to `.env` and fill in what you need. The app runs **completely un-gated** with auth off, so the only variable required for core functionality is `OPENAI_API_KEY`.
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENAI_API_KEY` | **Yes** (for all AI) | OpenAI API key with GPT-4o access. Without it, extraction/recipe/voice features return a "not configured" message. |
+| `PORT` | No | Port the server binds to. `.env.example` sets `5177`; defaults to `5173` if unset. (Docker/Railway set this for you.) |
+| `NODE_ENV` | No | Conventional environment flag. Set to `production` in the Docker image. |
+| `AUTH_ENABLED` | No | `true`/`false` (default `false`). When `false` the app is fully open with no sign-in. Set `true` to enable Azure AD SSO. |
+| `AUTH_SESSION_SECRET` | If auth on | Secret used to sign session cookies. Generate with `node -e "console.log(crypto.randomBytes(32).toString('hex'))"`. |
+| `AUTH_AZURE_TENANT_ID` | If auth on | Azure AD tenant ID for the sign-in app registration. |
+| `AUTH_AZURE_CLIENT_ID` | If auth on | Azure AD application (client) ID. |
+| `AUTH_AZURE_CLIENT_SECRET` | If auth on | Azure AD client secret. |
+| `AUTH_REDIRECT_URI` | If auth on | OAuth callback, e.g. `https://your-host/auth/microsoft/callback`. |
+| `AUTH_SESSION_TTL_HOURS` | No | Session lifetime in hours (default `12`). |
+| `AUTH_ADMIN_SUBS` | No | Comma-separated Azure object IDs (`sub`) allowed to read the **full** audit log via `GET /api/audit`. Everyone else sees only their own entries. Blank = no admins. |
+| `JIRA_CLIENT_ID` | If using Jira/Confluence | Atlassian OAuth 2.0 (3LO) app client ID. **Confluence reuses this same app** — there is no separate Confluence credential. |
+| `JIRA_CLIENT_SECRET` | If using Jira/Confluence | Atlassian OAuth app client secret. |
+| `JIRA_REDIRECT_URI` | If using Jira/Confluence | Jira OAuth callback (default `http://localhost:5173/api/connectors/jira/callback`). The Confluence callback (`/api/connectors/confluence/callback`) is derived automatically. |
+
+`.env.example` also contains additional optional settings — model selection (`EXTRACTION_MODEL`, `REALTIME_MODEL`, `TRANSCRIPTION_MODEL`, `TTS_MODEL`), Microsoft 365 connector planning, and add-on provider keys. These are optional and safe to leave blank.
+
+> **Never commit `.env` or `.env.local`** — only `.env.example` is tracked.
+
+---
+
+## Data persistence
+
+All persistent data lives under a single `data/` directory:
+
+- **`data/sessions.db`** — every saved discovery session, stored in **SQLite** (via the built-in `node:sqlite`). On first run, any pre-existing flat-JSON sessions in `data/sessions/` are migrated in automatically.
+- **`data/connections/`** — Jira and Confluence OAuth tokens (one JSON file per user).
+- **`data/settings.json`** — the optional blended-rate override set from the Settings panel.
+
+**This `data/` directory must be persisted across deploys**, or every session and integration token is lost on each restart/redeploy:
+
+- **Docker:** mount a host directory or named volume at `/app/data` (`-v $(pwd)/data:/app/data`).
+- **Railway:** attach a **persistent volume** mounted at `/app/data`.
+
+`data/` is git-ignored and never committed.
+
+---
+
+## Deployment — Railway
+
+1. Fork or push the repo to GitHub.
+2. Create a new Railway project and connect the GitHub repo.
+3. Set the **service root** to `discovery-intake-webapp/` (so the Dockerfile and app resolve).
+4. Add all required environment variables in the Railway dashboard (at minimum `OPENAI_API_KEY`; plus the `AUTH_*` and `JIRA_*` vars if you use those features). Railway sets `PORT` automatically.
+5. Add a **Railway volume mounted at `/app/data`** so `sessions.db` and connection tokens survive redeploys.
+6. Railway auto-deploys on every push to `main`.
+
+> **Note on `railway.json`:** the repo ships a `railway.json` whose `dockerfilePath` is `discovery-intake-webapp/Dockerfile` (repo-root-relative). If you deploy using that file, set the Railway **service root to the repo root** instead of the subfolder so the path resolves. Choose one approach — subfolder root, or repo root with `railway.json` — not both.
+
+---
+
+## Deployment — Docker
 
 ```bash
-npm install            # first time only (installs PM2)
-npm run pm2:start      # start under PM2 (auto-restarts on crash)
-npm run pm2:logs       # tail the server logs
-npm run pm2:restart    # restart after code or .env changes
-npm run pm2:stop       # stop the managed process
+cd discovery-intake-webapp
+docker build -t discovery-studio .
+docker run -p 3000:3000 --env-file .env -v $(pwd)/data:/app/data discovery-studio
 ```
 
-`.env` is still loaded the same way, so set your keys there before starting.
+The image is based on `node:24-slim`, installs production dependencies with `npm ci --omit=dev`, exposes port `3000`, and sets `PORT=3000` / `NODE_ENV=production`. The `-v $(pwd)/data:/app/data` mount keeps `sessions.db` and tokens on the host so they survive container restarts. A `/health` endpoint (`{ ok, uptime }`) is available for container/orchestrator healthchecks.
 
-## Local Environment
+---
 
-The local server loads variables from `discovery-intake-webapp/.env` (via
-dotenv); `.env.local` is also still supported and takes precedence if present.
-
-Start from the template:
+## Running tests
 
 ```bash
-cp discovery-intake-webapp/.env.example discovery-intake-webapp/.env
+npm test
 ```
 
-Then fill in keys. Required for live AI features:
-
-```text
-OPENAI_API_KEY=...
-ANTHROPIC_API_KEY=...
-```
-
-Current model defaults:
-
-```text
-EXTRACTION_MODEL=gpt-5.5
-REALTIME_MODEL=gpt-realtime-2
-REALTIME_VOICE=marin
-TRANSCRIPTION_MODEL=gpt-4o-transcribe
-```
-
-The API keys are used only by the local server. Never commit `.env` or
-`.env.local` — only the `.env.example` template is tracked.
-
-## Stabilization Check
-
-Before changing the Discovery interview flow or sharing a build, run this from the repository root:
+Runs **19 `node:test` specs** (`test/**/*.test.mjs`). All 19 must pass before any PR. Also run the syntax check on both source files:
 
 ```bash
-node scripts/run-stabilization-checks.mjs
+node --check server.mjs && node --check app.js
 ```
 
-This runs syntax checks, the browser/server DOCX output generator check, local server health, a package ZIP endpoint smoke test, and the Discovery interview regression. The regression verifies that the app asks broad workflow questions before detailed access, data-boundary, value, or governance-heavy questions.
+---
 
-Regression output is written to:
+## Tech stack
 
-```text
-discovery-intake-webapp/test-outputs/regression/interview-flow.json
+| Layer | Choice |
+|-------|--------|
+| Runtime | Node.js 24, **raw Node HTTP server** — no Express |
+| Frontend | **Vanilla JS SPA** (`app.js` + `index.html`), no build step |
+| Storage | **SQLite** via built-in `node:sqlite` (`data/sessions.db`); OAuth tokens as JSON in `data/connections/` |
+| AI | **OpenAI** — GPT-4o for document/vision extraction; realtime voice, transcription, and TTS |
+| Integrations | **Jira & Confluence** push (Atlassian OAuth 2.0 3LO) |
+| Auth | Optional **Azure AD SSO** (off by default) |
+| Deployment | **Docker** + **Railway** |
+| Tests | `node:test` (19 specs) |
+
+---
+
+## Project layout
+
+```
+discovery-intake-webapp/
+├── server.mjs          # raw Node HTTP server + all API routes
+├── app.js              # the Vanilla JS SPA
+├── index.html          # SPA shell
+├── design-system.css   # ds-* design tokens/classes
+├── connectors/         # connector catalog + detector
+├── test/               # node:test specs (19)
+├── Dockerfile          # node:24-slim production image
+├── railway.json        # Railway build/deploy config
+├── DEPLOYMENT.md       # condensed deploy checklist
+├── .env.example        # env var template (copy to .env)
+└── data/               # SQLite DB + tokens + settings (git-ignored, persist this)
 ```
 
-## Discovery Flow
+---
 
-The intended interview sequence is:
+## Currency & scope notes
 
-1. Capture the submitted idea or starting topic.
-2. Ask for the broad workflow frame: workflow name, start, end, and output.
-3. Ask for broad components: tools/systems, main inputs/data, and outputs.
-4. Ask for the rough numbered A-to-Z process.
-5. Drill into each workflow step for actor, tools, access/source mode, input, output, handoff, decisions, data sensitivity, exceptions, and confidence.
-6. Surface the most important unanswered questions and handoff readiness gaps.
-
-Governance inputs should be captured lightly as later-review inputs. They should not dominate preparedness scoring during early discovery.
-
-## Manual Self-Test Script
-
-For the current workshop benchmark, use a short self-test like this:
-
-1. Click `New`.
-2. Answer: `Let's explore the Workshop use case.`
-3. Confirm the next question asks for workflow name, start, end, and output.
-4. Answer with the workflow frame.
-5. Confirm the next question asks for broad tools/systems, input/data, and outputs before the A-to-Z process.
-6. Provide a rough numbered process.
-7. Confirm the app starts drilling into Step 1, not the final step and not governance/access questions too early.
-
-Watch that the `Session %` pill moves above `0%` after the first real topic and continues increasing as the frame, components, process skeleton, and step detail are captured.
-
-## Main Surfaces
-
-- `index.html`: app shell
-- `app.js`: state, interview routing, AI extraction mapping, exports, and rendering
-- `future.css`: primary visual styling
-- `server.mjs`: local API server for extraction, transcription, realtime session setup, evidence review, export package generation, and health checks
-- `scripts/regression-interview-flow.mjs`: seeded browser regression for Discovery question routing
-- `scripts/check-docx-output.mjs`: regression check for browser-generated Word-compatible output downloads
-- `scripts/check-workbook-import.mjs`: browser smoke check for importing an exported workbook back into session state
-- `scripts/check-evidence-linkage.mjs`: browser smoke check for optional evidence-to-field, record, risk, and question provenance
-- `scripts/check-reviewer-decision.mjs`: browser smoke check for Reviewer Decision Summary aggregation, rows, Markdown, and visible panel rendering
-- `scripts/check-review-package.mjs`: Node-only package doctor for the latest coworker review ZIP
-- `scripts/check-review-package-install.mjs`: clean-install smoke for the latest coworker review ZIP
-- `scripts/check-package-zip.mjs`: smoke check for creating and downloading a package ZIP
-
-## Outputs
-
-Analysis Studio > Outputs provides current downloadable briefs for Product PDR, Engineering Brief, Business Value, Governance Inputs, the ChatGPT + Microsoft Copilot Build Recipe, the Solution Execution Plan, Enterprise Readiness Brief, and the Combined Packet. Output fields carry route, source type, treatment, and supplement-later metadata so reviewers can distinguish captured facts, AI inferences, open gaps, and Finance/Ops or governance follow-ups. Optional evidence also exports an Evidence Linkage contract that maps artifacts to suggested fields, records, risks, and open questions. Testing & Release now exports a Reviewer Decision Summary that turns saved coworker feedback into an aggregate decision, reviewer snapshots, quality signals, and comment-derived backlog items. The direct output buttons generate Word-compatible `.docx` files in the browser, and package creation now includes `.docx`, Markdown, JSON, workbook artifacts, execution-plan documents/rows, enterprise connector contract documents/rows, connector approval checklist documents/rows, connector validation plan documents/rows, connector validation evidence log documents/rows, connector build request documents/rows, connector pilot runbook documents/rows, connector promotion decision documents/rows, and enterprise-readiness evidence used for review and connector planning. Use `Download ZIP` to pull the latest local package into one shareable archive.
-
-Analysis Studio > Live Session + Library includes `Import Workbook` for restoring a prior app-exported `.xlsx` workbook into the local session ledger, including core fields, process steps, data handling rows, systems, decisions, ideas, evidence-reference metadata, and evidence linkage rows.
-
-Analysis Studio > Evidence Analysis Workbench lets reviewers type, dictate, or upload workflow evidence such as notes, transcripts, screenshots, PDFs, Word docs, and Excel trackers. Extracted suggestions stay in the evidence review queue until applied, then feed the Solution Build Recipe, Workflow Map Studio, Product PDR, Engineering Brief, Business Value, Governance Inputs, Enterprise Readiness Brief, and Combined Packet through the existing session ledger.
-
-## Roadmap
-
-Next major build phases:
-
-1. Finish stabilization and small refactors around Discovery routing, transcript display, and testability.
-2. Continue Template Alignment Pass for Product PDR, Engineering Brief, Business Value, Build Recipe, Solution Execution Plan, Enterprise Readiness Brief, Combined Packet, field provenance, and open-question routing.
-3. Improve package generation with richer server-side DOCX/PDF options once the output templates settle.
-4. Prepare self-test, share-test, and enterprise-release modes for controlled rollout.
+- All monetary values are **USD / en-US** throughout.
+- The output recipe is a **personal implementation guide** — specific enough to start building today in ChatGPT, a Custom GPT, GPT Actions, or the OpenAI Assistants API — not a formal client deliverable.
