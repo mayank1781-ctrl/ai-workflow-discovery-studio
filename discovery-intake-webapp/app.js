@@ -4588,33 +4588,198 @@ function oppMapRange(v, inMin, inMax, outMin, outMax) {
   return outMin + ((clamped - inMin) / (inMax - inMin)) * (outMax - outMin);
 }
 
-// Gated opportunity meta for a step. Two checks gate any productive label: a
-// regulatory override (compliance) runs first, then a completeness gate
-// (speculative). Steps that clear both get the existing time-based Quick Win /
-// Strategic label. Shape { label, tier, priority }; tier is one of
-// quick-win | strategic | speculative | compliance. priority is null for the
-// two gate tiers so no number is shown.
+// 10-principle AI opportunity scoring (ROSETTA L47). Each principle scores 1
+// (low AI fit) to 3 (high AI fit) from the session grid; the 10 scores sum to a
+// 10–30 total that maps to a tier. Two overrides apply on top: P9 = 1 (highly
+// sensitive) forces "compliance"; P7 = 1 (heavy human judgment) caps the tier at
+// "strategic" (never quick-win). Shape { label, tier, priority, principleScores }
+// where principleScores[name] = { score, reason }. A field with no data scores 2
+// (neutral) with reason "insufficient data". Self-contained on purpose: the unit
+// tests extract and eval this function in isolation, so it calls no helpers.
 function getStepOpportunityMeta(step) {
   const cells = step?.cells || {};
+  const NO_DATA = "insufficient data";
 
-  // Check 2 (runs first): regulatory override — blocks Quick Win entirely.
-  const sensitivity = (cells.dataSensitivity?.value || "").toLowerCase();
-  const regulatory = (cells.regulatoryContext?.value || "").trim();
-  if (sensitivity.includes("very high") || regulatory.length > 0) {
-    return { label: "Compliance review required", tier: "compliance", priority: null };
+  // Combined, lower-cased text across one or more grid cell keys (aiPattern's
+  // value is an array of { pattern } entries; everything else is a string).
+  const text = (...keys) => keys
+    .map((key) => {
+      const value = cells[key]?.value;
+      if (Array.isArray(value)) return value.map((entry) => entry?.pattern || "").join(" ");
+      return typeof value === "string" ? value : "";
+    })
+    .join(" ")
+    .trim();
+  const hits = (haystack, re) => re.test(haystack);
+
+  // First parseable duration in minutes (hours/days normalised), else NaN.
+  const minutesIn = (raw) => {
+    const t = String(raw || "").toLowerCase();
+    let m = t.match(/(\d+(?:\.\d+)?)\s*(hours?|hrs?|h)\b/);
+    if (m) return parseFloat(m[1]) * 60;
+    m = t.match(/(\d+(?:\.\d+)?)\s*(days?)\b/);
+    if (m) return parseFloat(m[1]) * 480;
+    m = t.match(/(\d+(?:\.\d+)?)\s*(mins?|minutes?|m)\b/);
+    if (m) return parseFloat(m[1]);
+    m = t.match(/(\d+(?:\.\d+)?)/);
+    return m ? parseFloat(m[1]) : NaN;
+  };
+
+  const P = {};
+
+  // P1 repetitiveness — frequency + flowAndDependencies
+  P.repetitiveness = (() => {
+    const t = text("frequencyVolume", "trigger", "output", "handoff");
+    if (!t) return { score: 2, reason: NO_DATA };
+    const l = t.toLowerCase();
+    if (hits(l, /every time|same way|same steps|standardi|standard|routine|consistent|identical|repeatable|each time/))
+      return { score: 3, reason: "Runs the same standard way each time — highly repetitive." };
+    if (hits(l, /varies|depends|ad-?hoc|case[ -]by[ -]case|different each|inconsistent|one-?off|bespoke/))
+      return { score: 1, reason: "The flow varies case by case rather than a fixed path." };
+    return { score: 2, reason: "Mostly consistent with some variation between runs." };
+  })();
+
+  // P2 ruleDensity — painAndRules
+  P.ruleDensity = (() => {
+    const t = text("painFriction", "rulesDecisionLogic", "exceptionBranching");
+    if (!t) return { score: 2, reason: NO_DATA };
+    const l = t.toLowerCase();
+    if (hits(l, /judg|discretion|interpret|subjective|experience|gut feel|nuance|negotiat/))
+      return { score: 1, reason: "Decisions lean on human judgment more than explicit rules." };
+    if (hits(l, /rule|threshold|policy|\bsop\b|criteria|checklist|approval matrix|deterministic|if .*then/))
+      return { score: 3, reason: "Decisions are governed by clear, explicit rules." };
+    return { score: 2, reason: "Mostly rule-based with some judgment calls." };
+  })();
+
+  // P3 dataStructure — dataFlow + systemsTools
+  P.dataStructure = (() => {
+    const t = text("dataProcessing", "systemsTools");
+    if (!t) return { score: 2, reason: NO_DATA };
+    const l = t.toLowerCase();
+    if (hits(l, /email|free ?text|narrative|hand-?written|conversation|phone call|unstructured|screenshot|scan/))
+      return { score: 1, reason: "Data is largely unstructured (emails / free text)." };
+    if (hits(l, /table|form|database|spreadsheet|excel|\bcsv\b|structured|\bfield\b|record|\bsql\b|schema|tabular|\bapi\b/))
+      return { score: 3, reason: "Data is structured (tables / forms / records)." };
+    return { score: 2, reason: "A mix of structured and unstructured data." };
+  })();
+
+  // P4 volumeFrequency — volume
+  P.volumeFrequency = (() => {
+    const t = text("frequencyVolume");
+    if (!t) return { score: 2, reason: NO_DATA };
+    const l = t.toLowerCase();
+    if (hits(l, /daily|every day|each day|multiple times|times a day|times per day|times a week|times per week|hourly|several .*week|per day/))
+      return { score: 3, reason: "Happens daily or several times a week — high volume." };
+    if (hits(l, /month|quarter|annual|year|rare|occasional|infrequent|seldom|once in a while/))
+      return { score: 1, reason: "Runs only monthly or rarely — low volume." };
+    if (hits(l, /week/))
+      return { score: 2, reason: "Runs roughly weekly — moderate volume." };
+    return { score: 2, reason: "Volume is unclear; assuming moderate frequency." };
+  })();
+
+  // P5 timeCostPerInstance — volume (time component)
+  P.timeCostPerInstance = (() => {
+    const t = text("timeTaken") || text("frequencyVolume");
+    const mins = minutesIn(t);
+    if (!t || Number.isNaN(mins)) return { score: 2, reason: NO_DATA };
+    if (mins > 60) return { score: 3, reason: `About ${mins} minutes per instance — a heavy time cost.` };
+    if (mins >= 15) return { score: 2, reason: `About ${mins} minutes per instance — a moderate time cost.` };
+    return { score: 1, reason: `Under 15 minutes per instance — a small time cost.` };
+  })();
+
+  // P6 errorRateAndConsequence — painAndRules
+  P.errorRateAndConsequence = (() => {
+    const t = text("painFriction", "rulesDecisionLogic", "exceptionBranching");
+    if (!t) return { score: 2, reason: NO_DATA };
+    const l = t.toLowerCase();
+    const errorish = hits(l, /error|mistake|wrong|fail|rework|breach|penalty|miss|defect|discrepan/);
+    if (errorish && hits(l, /frequent|often|many|regular|high|critical|costly|significant|severe|material/))
+      return { score: 3, reason: "Errors are frequent and carry high consequence." };
+    if (errorish && hits(l, /rare|seldom|hardly|minor|low|negligible|small/))
+      return { score: 1, reason: "Errors are rare and low-consequence." };
+    if (errorish) return { score: 2, reason: "Errors happen occasionally with moderate impact." };
+    return { score: 2, reason: "Error rate and consequence are unclear." };
+  })();
+
+  // P7 humanJudgmentRequired — painAndRules + whoIsInvolved
+  P.humanJudgmentRequired = (() => {
+    const t = text("painFriction", "rulesDecisionLogic", "exceptionBranching", "personaActors");
+    if (!t) return { score: 2, reason: NO_DATA };
+    const l = t.toLowerCase();
+    if (hits(l, /judg|discretion|expert|experience|interpret|negotiat|relationship|empath|creativ|subjective|nuance/))
+      return { score: 1, reason: "Needs nuanced human judgment or expertise." };
+    if (hits(l, /rule|automatic|straightforward|mechanical|clear criteria|deterministic|routine|standard/))
+      return { score: 3, reason: "Largely rule-driven, so little human judgment is needed." };
+    return { score: 2, reason: "Some human judgment is involved." };
+  })();
+
+  // P8 integrationComplexity — systemsTools (fewer systems = better AI fit)
+  P.integrationComplexity = (() => {
+    const t = text("systemsTools");
+    if (!t) return { score: 2, reason: NO_DATA };
+    const count = t.split(/[,/;+\n]|\band\b/i).map((s) => s.trim()).filter(Boolean).length;
+    if (count <= 2) return { score: 3, reason: `Only ${count} system(s) involved — simple to integrate.` };
+    if (count <= 4) return { score: 2, reason: `${count} systems to connect — moderate integration.` };
+    return { score: 1, reason: `${count} systems involved — complex integration.` };
+  })();
+
+  // P9 dataSensitivity — sensitivity + dataFlow (low risk = better AI fit)
+  P.dataSensitivity = (() => {
+    if (text("regulatoryContext"))
+      return { score: 1, reason: "A regulatory/compliance context applies — treat as highly sensitive." };
+    const t = text("dataSensitivity", "dataProcessing");
+    if (!t) return { score: 2, reason: NO_DATA };
+    const l = t.toLowerCase();
+    if (hits(l, /pii|mnpi|pci|phi|highly sensitive|very high|restricted|personal data|regulated|client confidential/))
+      return { score: 1, reason: "Highly sensitive or regulated data is involved." };
+    if (hits(l, /confidential|sensitive|\bhigh\b/))
+      return { score: 2, reason: "Confidential data requiring controlled handling." };
+    if (hits(l, /public|internal|low|non-?sensitive|anonymi|synthetic/))
+      return { score: 3, reason: "Low-risk public or internal data." };
+    return { score: 2, reason: "Data sensitivity is unclear." };
+  })();
+
+  // P10 outputClarity — flowAndDependencies + whatHappens
+  P.outputClarity = (() => {
+    const t = text("output", "trigger", "handoff", "description");
+    if (!t) return { score: 2, reason: NO_DATA };
+    const l = t.toLowerCase();
+    if (hits(l, /vague|unclear|varies|depends|not defined|undefined|\btbd\b|ambiguous|fuzzy/))
+      return { score: 1, reason: "The expected output is vague or varies." };
+    if (hits(l, /report|table|file|email|list|decision|approved|deliverable|document|summary|spreadsheet|record|specific|memo|deck/))
+      return { score: 3, reason: "Produces a clear, well-defined output." };
+    return { score: 2, reason: "Output is mostly defined but not fully specific." };
+  })();
+
+  const order = [
+    "repetitiveness", "ruleDensity", "dataStructure", "volumeFrequency", "timeCostPerInstance",
+    "errorRateAndConsequence", "humanJudgmentRequired", "integrationComplexity", "dataSensitivity", "outputClarity"
+  ];
+  const principleScores = {};
+  let total = 0;
+  for (const name of order) {
+    principleScores[name] = P[name];
+    total += P[name].score;
   }
 
-  // Check 1: completeness gate across the 5 critical fields.
-  const criticalFields = ["systemsTools", "dataSensitivity", "regulatoryContext", "output", "rulesDecisionLogic"];
-  const confirmedCount = criticalFields.filter((f) => cells[f]?.state === "confirmed").length;
-  if (confirmedCount / criticalFields.length < 0.6) {
-    return { label: "Speculative", tier: "speculative", priority: null };
+  // Total → tier.
+  let label;
+  let tier;
+  let priority;
+  if (total >= 24) { label = "Quick Win"; tier = "quick-win"; priority = 1; }
+  else if (total >= 16) { label = "Strategic"; tier = "strategic"; priority = 2; }
+  else { label = "Speculative"; tier = "speculative"; priority = null; }
+
+  // P7 cap: heavy human judgment can never be a Quick Win.
+  if (P.humanJudgmentRequired.score === 1 && tier === "quick-win") {
+    label = "Strategic"; tier = "strategic"; priority = 2;
+  }
+  // P9 override: highly sensitive data forces Compliance, regardless of total.
+  if (P.dataSensitivity.score === 1) {
+    label = "Compliance review required"; tier = "compliance"; priority = null;
   }
 
-  // Cleared both gates: existing time-based scoring.
-  const minutes = parseFloat(cells.timeTaken?.value);
-  if (minutes < 30) return { label: "Quick Win", tier: "quick-win", priority: 1 };
-  return { label: "Strategic", tier: "strategic", priority: 2 };
+  return { label, tier, priority, principleScores };
 }
 
 // ds-badge variant class for an opportunity tier.
@@ -26614,6 +26779,15 @@ function compactSessionStateForLibrary(sessionState = state) {
     dataUrl: "",
     rawContent: ""
   }));
+  // Persist the computed 10-principle opportunity scoring onto each grid step so
+  // tier / priority / principleScores travel with the saved session JSON. The
+  // clone is disposable, so this never mutates live state.
+  if (Array.isArray(clone.workflowGrid?.steps)) {
+    clone.workflowGrid.steps = clone.workflowGrid.steps.map((step) => {
+      const meta = getStepOpportunityMeta(step);
+      return { ...step, opportunity: { tier: meta.tier, priority: meta.priority, principleScores: meta.principleScores } };
+    });
+  }
   return clone;
 }
 
