@@ -5561,10 +5561,167 @@ function recipeWorkflowHeaderHtml() {
   const when = formatSavedSessionDate(state.sessionMeta?.updatedAt) || "";
   const label = name || when || "Untitled workflow";
   return `
-    <div style="margin-bottom:14px;">
-      <div style="font-size:16px;font-weight:700;color:#e8f4ff;">${escapeHtml(label)}</div>
-      ${engagement ? `<div style="font-size:12px;color:#8899aa;margin-top:2px;">${escapeHtml(engagement)}</div>` : ""}
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px;">
+      <div>
+        <div style="font-size:16px;font-weight:700;color:#e8f4ff;">${escapeHtml(label)}</div>
+        ${engagement ? `<div style="font-size:12px;color:#8899aa;margin-top:2px;">${escapeHtml(engagement)}</div>` : ""}
+      </div>
+      <button type="button" id="exportWordRecipeBtn" class="ds-btn-ghost" style="flex-shrink:0;display:inline-flex;align-items:center;gap:6px;">
+        <i data-lucide="download" style="width:14px;height:14px;"></i>Export to Word
+      </button>
     </div>`;
+}
+
+// === DOCX export: recipe + business case + scoring (PR 11) ==================
+// Builds a Word document entirely client-side from data already in state and
+// triggers a direct browser download. docx is lazy-loaded so the bundle only
+// loads when the user actually exports. mode is "recipe" or "engineering" and
+// only changes the middle section heading.
+async function exportWorkflowWord(mode = "recipe") {
+  const steps = analysisGridSteps();
+  if (!steps.length) { toast("Nothing to export yet — capture a workflow first."); return; }
+
+  let docx;
+  try {
+    docx = await import("docx");
+  } catch {
+    toast("Export failed — try again");
+    return;
+  }
+
+  try {
+    const {
+      Document, Packer, Paragraph, TextRun, HeadingLevel,
+      Table, TableRow, TableCell, WidthType, BorderStyle
+    } = docx;
+
+    const repStep = steps[0];
+    const meta = getStepOpportunityMeta(repStep);
+    const workflowName = (state.sessionMeta?.workflowName || analysisWorkflowName() || "").trim();
+    const engagement = (state.sessionMeta?.engagementContext || "").trim();
+    const tierLabel = { "quick-win": "Quick Win", strategic: "Strategic", compliance: "Compliance", speculative: "Speculative" }[meta.tier] || "Strategic";
+    const today = new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+
+    const h1 = (text) => new Paragraph({ heading: HeadingLevel.HEADING_1, spacing: { before: 240, after: 120 }, children: [new TextRun(text)] });
+    const h2 = (text) => new Paragraph({ heading: HeadingLevel.HEADING_2, spacing: { before: 160, after: 60 }, children: [new TextRun(text)] });
+    const para = (text, opts = {}) => new Paragraph({ spacing: { after: 60 }, children: [new TextRun({ text, bold: !!opts.bold, italics: !!opts.italic, color: opts.color })] });
+
+    const BORDER = { style: BorderStyle.SINGLE, size: 4, color: "BFBFBF" };
+    const cell = (text, opts = {}) => new TableCell({
+      width: opts.width ? { size: opts.width, type: WidthType.PERCENTAGE } : undefined,
+      shading: opts.shaded ? { fill: "E7E6E6" } : undefined,
+      margins: { top: 40, bottom: 40, left: 80, right: 80 },
+      children: [new Paragraph({ children: [new TextRun({ text: String(text), bold: !!opts.bold })] })]
+    });
+    const table = (rows) => new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      borders: { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER, insideHorizontal: BORDER, insideVertical: BORDER },
+      rows
+    });
+
+    const children = [];
+
+    // --- Cover block ---------------------------------------------------------
+    children.push(new Paragraph({ heading: HeadingLevel.TITLE, children: [new TextRun(workflowName || "Unnamed workflow")] }));
+    if (engagement) children.push(para(`Engagement: ${engagement}`, { color: "595959" }));
+    children.push(para(`Date generated: ${today}`, { color: "595959" }));
+    children.push(para(`Automation tier: ${tierLabel}`, { bold: true }));
+
+    // --- Recipe / Engineering direction -------------------------------------
+    children.push(h1(mode === "engineering" ? "Engineering direction" : "Agent recipe"));
+    let anyRecipe = false;
+    steps.forEach((step, index) => {
+      const text = state.recipeCache?.[step.id];
+      if (!text) return;
+      anyRecipe = true;
+      if (steps.length > 1) children.push(para(stepDisplayName(step, index), { bold: true }));
+      String(text).split(/\r?\n/).forEach((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        if (/^agent\s+\d+/i.test(trimmed)) children.push(h2(trimmed));
+        else children.push(para(trimmed));
+      });
+    });
+    if (!anyRecipe) children.push(para("No recipe generated yet. Open the Recipe tab and generate a recipe first."));
+
+    // --- Business case -------------------------------------------------------
+    const bc = computeBusinessCase(steps, businessCaseConversationText());
+    const gbp = (n) => "£" + Math.round(n).toLocaleString("en-GB");
+    const hrs = (n) => n.toLocaleString("en-GB", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    children.push(h1("Business case estimate"));
+    children.push(para(`Mode: ${bc.workflowMode === "role" ? "Role-based" : "Project-based"}`, { bold: true }));
+    const inputsText = bc.workflowMode === "role"
+      ? `${bc.inputs.instances_per_week} instances/week, ${Math.round(bc.inputs.mins_per_instance)} mins/instance`
+      : `${bc.inputs.instances_per_week} instances/week, ${Math.round(bc.inputs.mins_per_instance)} mins/instance, ${bc.inputs.project_duration_weeks}-week engagement`;
+    const hoursText = bc.workflowMode === "role"
+      ? `${hrs(bc.results.hoursPerWeek)} hrs/week, ${hrs(bc.results.annualHours)} hrs/year`
+      : `${hrs(bc.results.totalHours)} total hrs`;
+    const valueText = bc.workflowMode === "role" ? `${gbp(bc.results.annualValue)} / year` : `${gbp(bc.results.projectValue)} (engagement)`;
+    children.push(table([
+      new TableRow({ children: [cell("Metric", { bold: true, shaded: true, width: 35 }), cell("Value", { bold: true, shaded: true, width: 65 })] }),
+      new TableRow({ children: [cell("Inputs"), cell(inputsText)] }),
+      new TableRow({ children: [cell("Estimated hours"), cell(hoursText)] }),
+      new TableRow({ children: [cell("Estimated value"), cell(valueText)] })
+    ]));
+    children.push(para("Based on £75/hr blended rate.", { italic: true, color: "595959" }));
+    if (bc.workflowMode === "project") children.push(para("Value bounded to this engagement.", { italic: true, color: "595959" }));
+    if (bc.defaulted) children.push(para("Figures are estimates — refine in a follow-up session.", { italic: true, color: "595959" }));
+
+    // --- Scoring breakdown ---------------------------------------------------
+    children.push(h1("AI opportunity score"));
+    const ps = meta.principleScores || {};
+    const overrides = (scoringOverridesStepId === repStep.id) ? scoringOverrides : {};
+    let totalScore = 0;
+    let anyModified = false;
+    const currentScores = {};
+    const scoreRows = [new TableRow({ children: [
+      cell("Principle", { bold: true, shaded: true, width: 34 }),
+      cell("Score", { bold: true, shaded: true, width: 12 }),
+      cell("Reason", { bold: true, shaded: true, width: 54 })
+    ] })];
+    SCORING_PRINCIPLES.forEach((p) => {
+      const original = ps[p.key]?.score ?? 2;
+      const ov = overrides[p.key];
+      const score = (ov != null) ? ov : original;
+      const modified = ov != null && ov !== original;
+      if (modified) anyModified = true;
+      currentScores[p.key] = score;
+      totalScore += score;
+      scoreRows.push(new TableRow({ children: [
+        cell(`P${p.n} ${p.name}`),
+        cell(modified ? `${score} *` : String(score)),
+        cell(ps[p.key]?.reason || "")
+      ] }));
+    });
+    const liveTier = scoringTierBadge(scoringTierFromScores(currentScores).tier).label;
+    children.push(para(`Overall score: ${totalScore} / 30 — ${liveTier}`, { bold: true }));
+    children.push(table(scoreRows));
+    if (anyModified) children.push(para("* Score modified from AI original.", { italic: true, color: "595959" }));
+
+    // --- Footer --------------------------------------------------------------
+    children.push(new Paragraph({ spacing: { before: 240 }, border: { top: { style: BorderStyle.SINGLE, size: 4, color: "D9D9D9" } }, children: [new TextRun({ text: "Generated by AI Workflow Discovery Studio", color: "8C8C8C", size: 18 })] }));
+
+    const doc = new Document({
+      sections: [{
+        properties: { page: { margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 } } },
+        children
+      }]
+    });
+
+    const blob = await Packer.toBlob(doc);
+    const safeName = (workflowName || "workflow").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "workflow";
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${safeName}-recipe.docx`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast("Word document downloaded.");
+  } catch {
+    toast("Export failed — try again");
+  }
 }
 
 // Fills the prompt-template body with the code block and wires the copy button.
@@ -5691,6 +5848,7 @@ function renderAnalysisTabRecipe() {
   container.querySelector("#recipe-pdf-btn")?.addEventListener("click", handleRecipePdfExport);
   syncRecipeExportButton(recipeExportBtn);
   wireScoringCards(container);
+  container.querySelector("#exportWordRecipeBtn")?.addEventListener("click", () => exportWorkflowWord("recipe"));
 }
 
 // Keep the export button clickable whenever the Recipe Book is shown (it only
@@ -6106,6 +6264,9 @@ async function renderAnalysisTabEngineering() {
       <button class="secondary-button compact" type="button" id="exportEngineeringDocBtn">Export Engineering Doc</button>
       <button type="button" id="engineering-export-btn" style="${tealBtn}">⬇ Download DOCX</button>
       <button type="button" id="engineering-pdf-btn" style="${tealBtn}">⬇ Download PDF</button>
+      <button type="button" id="exportWordEngineeringBtn" class="ds-btn-ghost" style="margin-left:auto;display:inline-flex;align-items:center;gap:6px;">
+        <i data-lucide="download" style="width:14px;height:14px;"></i>Export to Word
+      </button>
     </div>`;
 
   // --- Section 2: colour-coded gantt ----------------------------------------
@@ -6280,6 +6441,7 @@ async function renderAnalysisTabEngineering() {
   if (jiraStatus.connected) populateJiraProjects();
 
   container.querySelector("#exportEngineeringDocBtn")?.addEventListener("click", exportEngineeringDoc);
+  container.querySelector("#exportWordEngineeringBtn")?.addEventListener("click", () => exportWorkflowWord("engineering"));
   const engineeringExportBtn = container.querySelector("#engineering-export-btn");
   engineeringExportBtn?.addEventListener("click", handleEngineeringExport);
   container.querySelector("#engineering-pdf-btn")?.addEventListener("click", handleEngineeringPdfExport);
