@@ -4356,7 +4356,7 @@ async function handleAuthCallback(req, res) {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
-  if (!code || !verifySignedValue(state)) return sendRedirect(res, "/login.html?error=1");
+  if (!code || !verifySignedValue(state)) return sendRedirect(res, "/login.html?error=state");
   try {
     // verifyIdToken checks the RS256 signature + issuer/audience/tenant/expiry.
     const claims = await verifyIdToken(await exchangeCodeForToken(code));
@@ -4375,7 +4375,7 @@ async function handleAuthCallback(req, res) {
     return sendRedirect(res, "/");
   } catch (error) {
     console.error("Auth callback failed:", error.message);
-    return sendRedirect(res, "/login.html?error=1");
+    return sendRedirect(res, "/login.html?error=token");
   }
 }
 
