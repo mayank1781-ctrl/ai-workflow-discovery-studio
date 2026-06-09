@@ -880,7 +880,10 @@ const defaultState = {
     status: "Discovery",
     createdAt: "",
     updatedAt: "",
-    lastPackagePath: ""
+    lastPackagePath: "",
+    workflowName: "",
+    engagementContext: "",
+    namingPromptDone: false
   },
   pilotControls: {
     enterpriseReadinessMode: "Local test",
@@ -3392,6 +3395,8 @@ function render() {
   const section = getActiveSection();
   if (state.activeSection !== section.id) state.activeSection = section.id;
   renderHeaderContext();
+  renderWorkflowHeaderName();
+  renderWorkflowNamingPrompt();
   renderCurrentStepPanel();
   renderCurrentQuestion(section);
   renderTurnSignalPanel();
@@ -5548,6 +5553,20 @@ function wireScoringCards(container) {
   });
 }
 
+// Recipe Book header: workflow name (primary) + engagement (secondary muted),
+// falling back to the saved timestamp when the workflow is unnamed (PR 10).
+function recipeWorkflowHeaderHtml() {
+  const name = (state.sessionMeta?.workflowName || analysisWorkflowName() || "").trim();
+  const engagement = (state.sessionMeta?.engagementContext || "").trim();
+  const when = formatSavedSessionDate(state.sessionMeta?.updatedAt) || "";
+  const label = name || when || "Untitled workflow";
+  return `
+    <div style="margin-bottom:14px;">
+      <div style="font-size:16px;font-weight:700;color:#e8f4ff;">${escapeHtml(label)}</div>
+      ${engagement ? `<div style="font-size:12px;color:#8899aa;margin-top:2px;">${escapeHtml(engagement)}</div>` : ""}
+    </div>`;
+}
+
 // Fills the prompt-template body with the code block and wires the copy button.
 function renderRecipeBody(body, prompt) {
   body.innerHTML = recipePromptBlockHtml(prompt);
@@ -5645,6 +5664,7 @@ function renderAnalysisTabRecipe() {
   }).join("");
 
   container.innerHTML =
+    recipeWorkflowHeaderHtml() +
     cards +
     businessCaseBlockForCurrentWorkflow() +
     scoringTransparencyBlockForCurrentWorkflow() +
@@ -11995,6 +12015,115 @@ function caseScore(label, score, color) {
 // getCombinedSessionLibrary(); clicking a row loads it into state via the
 // existing loadSessionFromLibrary(), which fetches GET /api/sessions/:id for
 // server-only sessions, then closes the dropdown.
+// === Workflow naming + engagement context (PR 10) ==========================
+// Lets users name the workflow and tag an engagement before/during discovery.
+// Stored on state.sessionMeta (the canonical source), persisted locally and,
+// best-effort, to the server via PATCH /api/sessions/:id/metadata.
+
+// True once the user has engaged (a step exists or they have sent a message),
+// which is when the start-of-discovery naming prompt auto-dismisses.
+function discoveryHasStarted() {
+  const conversation = state.conversation || [];
+  const aiChat = state.aiChat || [];
+  return (state.steps?.length || 0) > 0
+    || conversation.some((message) => message.role === "user")
+    || aiChat.some((message) => message.role === "user");
+}
+
+function setWorkflowMetadata(patch = {}) {
+  ensureSessionMeta();
+  if (typeof patch.workflowName === "string") {
+    state.sessionMeta.workflowName = patch.workflowName.trim();
+    if (state.sessionMeta.workflowName) state.sessionMeta.name = state.sessionMeta.workflowName;
+  }
+  if (typeof patch.engagementContext === "string") {
+    state.sessionMeta.engagementContext = patch.engagementContext.trim();
+  }
+  state.sessionMeta.updatedAt = new Date().toISOString();
+  persistState();
+  patchSessionMetadata();
+  renderWorkflowHeaderName();
+  renderSavedSessionsPanel();
+}
+
+// Best-effort server sync. If the session isn't saved server-side yet, the
+// values still persist on the next full save (sessionMeta travels with state).
+function patchSessionMetadata() {
+  const id = state.sessionMeta?.id;
+  if (!id) return;
+  requestJson(`/api/sessions/${encodeURIComponent(id)}/metadata`, {
+    method: "PATCH",
+    body: {
+      workflowName: state.sessionMeta.workflowName || "",
+      engagementContext: state.sessionMeta.engagementContext || ""
+    }
+  }).catch(() => {});
+}
+
+// Editable inline workflow title in the Discovery header. Always shows an input
+// (styled as a label); blur / Enter saves. Skips re-render while focused so it
+// never disrupts typing.
+function renderWorkflowHeaderName() {
+  const host = document.getElementById("workflowHeaderName");
+  if (!host) return;
+  const name = (state.sessionMeta?.workflowName || "").trim();
+  const existing = host.querySelector("#workflowNameInput");
+  if (existing) {
+    if (document.activeElement === existing) return;
+    existing.value = name;
+    existing.style.color = name ? "#e8f4ff" : "#8899aa";
+    return;
+  }
+  host.innerHTML = `
+    <input id="workflowNameInput" type="text" value="${escapeHtml(name)}" placeholder="Unnamed workflow" aria-label="Workflow name"
+      title="Click to name this workflow"
+      style="background:transparent;border:none;border-bottom:1px dashed #1e3350;color:${name ? "#e8f4ff" : "#8899aa"};font-size:15px;font-weight:700;padding:3px 0;min-width:220px;max-width:100%;outline:none;" />`;
+  const input = host.querySelector("#workflowNameInput");
+  const save = () => {
+    const value = input.value.trim();
+    if (value === (state.sessionMeta?.workflowName || "").trim()) return;
+    setWorkflowMetadata({ workflowName: value });
+  };
+  input.addEventListener("blur", save);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); input.blur(); }
+  });
+}
+
+// Compact inline name prompt shown at the start of a fresh discovery session.
+// Two optional fields + "Save & start"; auto-dismisses once discovery begins.
+function renderWorkflowNamingPrompt() {
+  const host = document.getElementById("workflowNamingPrompt");
+  if (!host) return;
+  const show = !state.sessionMeta?.namingPromptDone && !discoveryHasStarted();
+  if (!show) {
+    if (host.innerHTML) host.innerHTML = "";
+    return;
+  }
+  if (host.querySelector("#namingWorkflowInput") && host.contains(document.activeElement)) return;
+  const inputStyle = "display:block;width:100%;margin-top:3px;background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;color:#e8f4ff;font-size:13px;padding:6px 8px;outline:none;box-sizing:border-box;";
+  host.innerHTML = `
+    <div class="ds-panel" style="padding:10px 14px;margin-bottom:10px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+      <label style="flex:1;min-width:170px;font-size:11px;color:#8899aa;">Workflow name
+        <input id="namingWorkflowInput" type="text" placeholder="e.g. Month-end close reporting" value="${escapeHtml(state.sessionMeta?.workflowName || "")}" style="${inputStyle}" />
+      </label>
+      <label style="flex:1;min-width:170px;font-size:11px;color:#8899aa;">Engagement / project
+        <input id="namingEngagementInput" type="text" placeholder="e.g. Q3 finance transformation" value="${escapeHtml(state.sessionMeta?.engagementContext || "")}" style="${inputStyle}" />
+      </label>
+      <button class="primary-button compact" id="namingSaveBtn" type="button">Save &amp; start</button>
+    </div>`;
+  host.querySelector("#namingSaveBtn")?.addEventListener("click", () => {
+    const workflowName = host.querySelector("#namingWorkflowInput")?.value || "";
+    const engagementContext = host.querySelector("#namingEngagementInput")?.value || "";
+    ensureSessionMeta();
+    state.sessionMeta.namingPromptDone = true;
+    setWorkflowMetadata({ workflowName, engagementContext });
+    renderWorkflowNamingPrompt();
+    document.getElementById("aiChatInput")?.focus();
+    toast("Workflow named — start describing it whenever you're ready.");
+  });
+}
+
 function renderSavedSessionsPanel() {
   const container = document.getElementById("savedSessionsPanel");
   if (!container) return;
@@ -12018,14 +12147,17 @@ function renderSavedSessionsPanel() {
   }
   const rows = sessions.map((entry) => {
     const id = entry.sessionId || entry.id;
-    const name = entry.workflowName || entry.name || "Untitled workflow";
-    const steps = Number.isFinite(entry.stepCount) ? entry.stepCount : 0;
     const when = formatSavedSessionDate(entry.savedAt || entry.updatedAt);
+    // workflowName is the primary label; fall back to the existing timestamp.
+    const name = entry.workflowName || entry.name || when || "Untitled workflow";
+    const engagement = (entry.engagementContext || "").trim();
+    const steps = Number.isFinite(entry.stepCount) ? entry.stepCount : 0;
     const active = id === currentId;
     const meta = `${steps} step${steps === 1 ? "" : "s"}${when ? ` · ${escapeHtml(when)}` : ""}${entry.remoteOnly ? " · on disk" : ""}`;
     return `
       <button type="button" data-load-session="${escapeHtml(id)}" ${active ? 'aria-current="true"' : ""} style="display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;background:${active ? "#102338" : "#0d1b2a"};border:1px solid ${active ? "#00d4b4" : "#1a2a3a"};border-radius:8px;padding:8px 10px;color:#dde8f5;cursor:pointer;">
         <strong style="font-size:13px;">${escapeHtml(name)}</strong>
+        ${engagement ? `<span style="font-size:11px;color:#5b7186;">${escapeHtml(engagement)}</span>` : ""}
         <span style="font-size:11px;color:#7a93b4;">${meta}</span>
       </button>`;
   }).join("");
@@ -27334,7 +27466,8 @@ function sessionSummaryMeta(sessionState = state) {
     lastPackagePath: meta.lastPackagePath || "",
     createdAt: meta.createdAt || "",
     updatedAt: meta.updatedAt || "",
-    workflowName: fields.workflowName || fields.submittedWorkflowTask || "",
+    workflowName: meta.workflowName || fields.workflowName || fields.submittedWorkflowTask || "",
+    engagementContext: meta.engagementContext || "",
     category: fields.workflowCategory && fields.workflowCategory !== "unknown" ? fields.workflowCategory : "Category TBD",
     domain: fields.domain || "",
     readiness: fields.buildReadiness || "unknown",
