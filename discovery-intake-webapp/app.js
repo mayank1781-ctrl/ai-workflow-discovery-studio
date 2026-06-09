@@ -7356,9 +7356,13 @@ function renderAppMode() {
   renderDocumentModePlaceholder(docMode);
 }
 
-// PR 17: lazily-created placeholder shown in document mode (the upload UI lands
-// in PR 18). Inserted as a sibling of the app panels so it occupies the same
-// space; toggled rather than rebuilt.
+// PR 18: document-mode upload panel. Lazily created as a sibling of the app
+// panels and toggled rather than rebuilt. Default content is (re)rendered on
+// every show EXCEPT while an upload is in flight, so the loading state is never
+// clobbered by an incidental re-render. Inline hex only; no new CSS variables
+// (the spinner reuses the existing `spin` keyframes).
+let docUploadInProgress = false;
+
 function renderDocumentModePlaceholder(show) {
   let el = document.getElementById("documentModePlaceholder");
   if (!show) {
@@ -7371,10 +7375,104 @@ function renderDocumentModePlaceholder(show) {
     if (!anchor || !anchor.parentElement) return;
     el = document.createElement("div");
     el.id = "documentModePlaceholder";
-    el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:320px;padding:48px 24px;text-align:center;color:#8899aa;font-size:15px;line-height:1.6;">Document analysis coming in the next update — use Interview mode for now</div>`;
     anchor.parentElement.appendChild(el);
   }
+  if (!docUploadInProgress) renderDocUploadDefault(el);
   el.hidden = false;
+}
+
+function renderDocUploadDefault(el) {
+  el.innerHTML = `
+    <div style="width:100%;min-height:400px;display:flex;align-items:center;justify-content:center;">
+      <div id="docUploadZone" style="border:2px dashed #1e3350;border-radius:12px;padding:48px;text-align:center;background:#0d1b2e;max-width:480px;cursor:pointer;">
+        <div style="font-size:48px;line-height:1;">📄</div>
+        <div style="color:#ffffff;font-size:18px;font-weight:600;margin:16px 0 8px;">Upload a document</div>
+        <div style="color:#8899aa;font-size:14px;">Word, PDF, or screenshot — AI will map it to the 3-layer workflow grid</div>
+        <div style="color:#445566;font-size:12px;margin-top:8px;">Supports .docx, .pdf, .png, .jpg, .xlsx</div>
+        <input type="file" id="docUploadInput" accept=".pdf,.docx,.xlsx,.png,.jpg,.jpeg,.webp" style="display:none;" />
+      </div>
+    </div>`;
+  wireDocUploadZone(el);
+}
+
+function renderDocUploadLoading(el) {
+  el.innerHTML = `
+    <div style="width:100%;min-height:400px;display:flex;align-items:center;justify-content:center;">
+      <div style="border:2px dashed #1e3350;border-radius:12px;padding:48px;text-align:center;background:#0d1b2e;max-width:480px;">
+        <div style="display:flex;align-items:center;justify-content:center;gap:10px;color:#8899aa;font-size:14px;">
+          <span style="width:16px;height:16px;border:2px solid #1a2a3a;border-top-color:#00d4b4;border-radius:50%;display:inline-block;animation:spin 1.1s linear infinite;"></span>
+          Reading and extracting workflow…
+        </div>
+      </div>
+    </div>`;
+}
+
+function wireDocUploadZone(el) {
+  const zone = el.querySelector("#docUploadZone");
+  const input = el.querySelector("#docUploadInput");
+  if (!zone || !input) return;
+  // Guard against the input's own bubbled click re-triggering the picker.
+  zone.addEventListener("click", (event) => {
+    if (event.target === input) return;
+    input.click();
+  });
+  input.addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = ""; // allow re-selecting the same filename later
+    if (file) handleDocumentUpload(file, el);
+  });
+  zone.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    zone.style.borderColor = "#00d4b4";
+  });
+  zone.addEventListener("dragleave", () => {
+    zone.style.borderColor = "#1e3350";
+  });
+  zone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    zone.style.borderColor = "#1e3350";
+    const file = event.dataTransfer?.files?.[0];
+    if (file) handleDocumentUpload(file, el);
+  });
+}
+
+// Uploads the chosen file to the existing /api/extract-document endpoint, maps
+// the returned grid into state.workflowGrid via buildWorkflowGridFromExtraction
+// (the shared EXTRACTION_CELL_KEY_MAP mapper), then drops the user into the
+// interview view to review their grid. Soft-fails back to the upload zone.
+async function handleDocumentUpload(file, el) {
+  docUploadInProgress = true;
+  toast("Analysing document…");
+  renderDocUploadLoading(el);
+
+  let payload;
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await fetch("/api/extract-document", { method: "POST", body: formData });
+    payload = await response.json();
+  } catch {
+    payload = { success: false, error: "Document extraction failed — try again" };
+  }
+
+  if (!payload || payload.success !== true) {
+    docUploadInProgress = false;
+    renderDocUploadDefault(el);
+    toast((payload && payload.error) || "Document extraction failed — try again");
+    return;
+  }
+
+  state.workflowGrid = buildWorkflowGridFromExtraction(payload.grid);
+  state.extractionWarning = typeof payload.extractionWarning === "string" ? payload.extractionWarning : "";
+  if (payload.extractionWarning) toast(payload.extractionWarning);
+  toast("Workflow extracted — review your grid");
+  // Land on the Analysis Studio Workflow Grid tab so the populated 3-layer grid
+  // is immediately visible (analysisActiveTab drives that tab, not activeWorkbenchTab).
+  state.appMode = "analysis";
+  state.analysisActiveTab = "grid";
+  docUploadInProgress = false;
+  persistState();
+  render();
 }
 
 function renderHeaderContext() {
