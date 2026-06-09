@@ -7065,36 +7065,68 @@ function cleanQuestionLabel(text) {
     .trim();
 }
 
-// The 9 merged grid fields in next-best-question priority order. For each, we
-// surface a natural-language question and the cell keys that, when confirmed,
-// mark the field as covered. Order matches the discovery spec: Flow first,
-// Step Name last. Keys mirror GRID_LAYER_DEF.
+// The 9 merged grid fields in next-best-question priority order. Each field maps
+// to one natural-language question and the underlying grid cell keys that carry
+// its data (keys mirror GRID_LAYER_DEF). The strip walks this list against the
+// CURRENT step's extraction confidence and asks about the first "missing" field.
+// Order is fixed by spec: Flow & Dependencies first, Step Name last.
 const NEXT_QUESTION_PRIORITY = [
-  { label: "Flow & Dependencies", keys: ["trigger", "output", "handoff"], question: "What kicks this step off, what does it produce, and what does it depend on or hand off to next?" },
-  { label: "Who's Involved", keys: ["personaActors"], question: "Who actually performs this step, and who else is involved or receives the handoff?" },
-  { label: "Data Flow", keys: ["dataProcessing"], question: "What data goes into this step, how is it processed, and what data comes out?" },
-  { label: "Volume", keys: ["frequencyVolume", "timeTaken"], question: "How often does this run, and roughly how long does it take each time?" },
-  { label: "Systems & Tools", keys: ["systemsTools"], question: "Which systems, tools, or applications are used to carry out this step?" },
-  { label: "Pain & Rules", keys: ["painFriction", "rulesDecisionLogic", "exceptionBranching"], question: "What are the main pain points, business rules, or exceptions that shape this step?" },
-  { label: "What Happens", keys: ["description"], question: "In a sentence or two, what actually happens during this step?" },
-  { label: "Sensitivity", keys: ["dataSensitivity", "regulatoryContext"], question: "How sensitive is the data here, and are there any regulatory or compliance constraints?" },
-  { label: "Step Name", keys: ["name"], question: "What would you call this step in a few words?" }
+  { field: "flowAndDependencies", keys: ["trigger", "output", "handoff"], question: "What kicks this off, what does it produce, and what does it depend on or hand off?" },
+  { field: "whoIsInvolved", keys: ["personaActors"], question: "Who owns this step, who else touches it, and who has to approve before it moves on?" },
+  { field: "dataFlow", keys: ["dataProcessing"], question: "What data is actually moving here — what form is it in, and where does it go?" },
+  { field: "volume", keys: ["frequencyVolume", "timeTaken"], question: "How often does this happen, and roughly how long does each instance take?" },
+  { field: "systemsTools", keys: ["systemsTools"], question: "Which specific tools or systems are being used in this step?" },
+  { field: "painAndRules", keys: ["painFriction", "rulesDecisionLogic", "exceptionBranching"], question: "Where does this step usually go wrong, and are there rules or exceptions that govern it?" },
+  { field: "whatHappens", keys: ["description"], question: "Can you describe in more detail what actually happens in this step?" },
+  { field: "sensitivity", keys: ["dataSensitivity", "regulatoryContext"], question: "How sensitive is the data involved — is any of it confidential or regulated?" },
+  { field: "stepName", keys: ["name"], question: "What would you call this step in one short phrase?" }
 ];
 
-// A field counts as "covered" once any step has a confirmed (not merely
-// inferred) non-empty value for one of its keys.
-function gridFieldHasConfirmedValue(keys) {
-  const steps = analysisGridSteps();
-  return steps.some((step) =>
-    keys.some((key) => gridCellState(step, key) === "confirmed" && gridCellValue(step, key) !== "")
-  );
+// The grid step currently in focus on Discovery. state.steps and the
+// workflowGrid.steps are kept parallel by name, so we match on the active
+// step's name and fall back to index alignment. Returns null when no grid
+// exists yet (first turn, before any extraction).
+function currentGridStep() {
+  const grid = analysisGridSteps();
+  if (!grid.length) return null;
+  const activeName = String(getCurrentStep()?.name || "").trim().toLowerCase();
+  if (activeName) {
+    const byName = grid.find((step) => String(step.cells?.name?.value || "").trim().toLowerCase() === activeName);
+    if (byName) return byName;
+  }
+  return grid[getCurrentStepIndex()] || grid[grid.length - 1] || null;
 }
 
-// First priority-order field still lacking a confirmed value, or null when the
-// whole grid is covered.
+// Collapse a field's cell keys into a single extraction-confidence verdict that
+// mirrors the API's confirmed / inferred / missing model:
+//   - "missing"   → no key holds a value yet
+//   - "confirmed" → at least one key was confirmed by the user
+//   - "inferred"  → values exist but only AI-inferred (state empty/unknown/inferred)
+function gridFieldConfidence(step, keys) {
+  if (!step) return "missing";
+  let hasValue = false;
+  let hasConfirmed = false;
+  for (const key of keys) {
+    if (gridCellValue(step, key) !== "") {
+      hasValue = true;
+      if (gridCellState(step, key) === "confirmed") hasConfirmed = true;
+    }
+  }
+  if (!hasValue) return "missing";
+  return hasConfirmed ? "confirmed" : "inferred";
+}
+
+// Pick the next-best question from the current step's confidence:
+//   - no grid yet (first turn) → default to the flowAndDependencies question (#6)
+//   - first field whose confidence is "missing", in priority order (#2)
+//   - nothing missing → null, so the strip shows the "ready to analyse" message.
+//     (#4 names the all-confirmed case; an all-inferred step has no missing gap
+//     left to ask about, so it also reads as covered.)
 function nextBestGridQuestion() {
+  const step = currentGridStep();
+  if (!step) return NEXT_QUESTION_PRIORITY[0];
   for (const field of NEXT_QUESTION_PRIORITY) {
-    if (!gridFieldHasConfirmedValue(field.keys)) return field;
+    if (gridFieldConfidence(step, field.keys) === "missing") return field;
   }
   return null;
 }
@@ -7106,10 +7138,11 @@ function copySuggestedQuestionToAnswer(question) {
   toast("Suggested question copied to the answer box");
 }
 
-// The narrow strip under the current question. It no longer echoes the current
-// question; it surfaces the next-best discovery question (the first of the 9
-// grid fields with no confirmed value) and is tappable to copy that question
-// into the main answer box.
+// The narrow strip under the current question. It surfaces the next-best
+// discovery question — the first field on the current step whose extraction
+// confidence is still "missing" — and is tappable to copy that question into
+// the main answer box. Recomputed on every render(), i.e. after each
+// Accept & Analyze cycle once the new grid confidence has landed.
 function renderQuestionLensBar() {
   if (!els.questionLensBar) return;
   const next = nextBestGridQuestion();
