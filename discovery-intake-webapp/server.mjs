@@ -3868,6 +3868,26 @@ async function writeConfluenceToken(userId, data) {
   await fs.writeFile(confluenceTokenPath(userId), JSON.stringify(data, null, 2));
 }
 
+// PR 15: exchange the stored refresh_token for a fresh access token. Atlassian
+// rotates the refresh_token on each use, so the rotated value is persisted too.
+// Returns the new access_token string, or null if refresh is not possible.
+async function refreshConfluenceAccessToken(userId) {
+  const tokenData = await readConfluenceToken(userId);
+  if (!tokenData || !tokenData.refresh_token) return null;
+  const resp = await httpsRequest("POST", "https://auth.atlassian.com/oauth/token",
+    { "Content-Type": "application/json" },
+    { grant_type: "refresh_token", client_id: JIRA_CLIENT_ID, client_secret: JIRA_CLIENT_SECRET, refresh_token: tokenData.refresh_token });
+  if (resp.status !== 200) return null;
+  await writeConfluenceToken(userId, {
+    ...tokenData,
+    access_token: resp.body.access_token,
+    refresh_token: resp.body.refresh_token,
+    expires_in: resp.body.expires_in,
+    connectedAt: new Date().toISOString()
+  });
+  return resp.body.access_token;
+}
+
 async function handleConfluenceAuth(req, res) {
   if (!JIRA_CLIENT_ID) return sendJson(res, 503, { error: "Confluence not configured on this server" });
   const state = crypto.randomBytes(16).toString("hex");
@@ -3939,12 +3959,21 @@ function confluenceEscape(value) {
 }
 
 async function handleConfluencePush(req, res) {
-  const token = await readConfluenceToken(currentUserId(req));
+  const userId = currentUserId(req);
+  let token = await readConfluenceToken(userId);
   if (!token) return sendJson(res, 401, { error: "Not connected to Confluence" });
   const body = await readJson(req);
   const { spaceKey, sessionName, steps } = body;
   if (!spaceKey) return sendJson(res, 400, { error: "spaceKey required" });
   if (!steps || !steps.length) return sendJson(res, 400, { error: "No steps to push" });
+
+  // PR 15: proactively refresh when the stored token is already past its expiry.
+  if (token.connectedAt && token.expires_in &&
+      new Date(token.connectedAt).getTime() + (token.expires_in * 1000) < Date.now()) {
+    const refreshed = await refreshConfluenceAccessToken(userId);
+    if (!refreshed) return sendJson(res, 401, { error: "Confluence token expired — reconnect" });
+    token = await readConfluenceToken(userId);
+  }
 
   const title = `AI Workflow: ${sessionName || "Untitled"} — Engineering Spec`;
   const stepsHtml = steps.map((step) => `
@@ -3967,29 +3996,47 @@ async function handleConfluencePush(req, res) {
     ${stepsHtml}
   `;
 
-  // Step 1: resolve the space key to a numeric spaceId (v1 GET space; v1 content POST is 410 Gone).
-  const spaceResp = await httpsRequest("GET",
-    `https://api.atlassian.com/ex/confluence/${token.cloudId}/wiki/rest/api/space/${encodeURIComponent(spaceKey)}`,
-    { Authorization: `Bearer ${token.access_token}`, Accept: "application/json" });
-  if (spaceResp.status === 401) return sendJson(res, 401, { error: "Confluence token expired — reconnect" });
-  const spaceId = spaceResp.body?.id;
-  if (!spaceId) {
-    console.error("[confluence-push] space lookup:", spaceResp.status, JSON.stringify(spaceResp.body));
-    return sendJson(res, 400, { error: "Space key not found — check your space key and try again" });
+  // Runs the two-step push (space lookup → page create) with a given access token.
+  // Returns { spaceUnauthorized: true } on a 401 space lookup so the caller can
+  // refresh-and-retry once; otherwise returns { error } or { ok } to send.
+  async function doPush(accessToken) {
+    // Step 1: resolve the space key to a numeric spaceId (v1 GET space; v1 content POST is 410 Gone).
+    const spaceResp = await httpsRequest("GET",
+      `https://api.atlassian.com/ex/confluence/${token.cloudId}/wiki/rest/api/space/${encodeURIComponent(spaceKey)}`,
+      { Authorization: `Bearer ${accessToken}`, Accept: "application/json" });
+    if (spaceResp.status === 401) return { spaceUnauthorized: true };
+    const spaceId = spaceResp.body?.id;
+    if (!spaceId) {
+      console.error("[confluence-push] space lookup:", spaceResp.status, JSON.stringify(spaceResp.body));
+      return { error: { status: 400, payload: { error: "Space key not found — check your space key and try again" } } };
+    }
+
+    // Step 2: create the page (v2).
+    const resp = await httpsRequest("POST",
+      `https://api.atlassian.com/ex/confluence/${token.cloudId}/wiki/api/v2/pages`,
+      { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json", Accept: "application/json" },
+      { spaceId, title, body: { representation: "storage", value: pageBody } });
+    if (resp.status === 401) return { error: { status: 401, payload: { error: "Confluence token expired — reconnect" } } };
+    if (resp.status !== 200 && resp.status !== 201) {
+      console.error("[confluence-push] rejected:", resp.status, JSON.stringify(resp.body));
+      return { error: { status: 502, payload: { error: "Confluence rejected the page", detail: resp.body } } };
+    }
+    const pageUrl = `https://${token.cloudName}.atlassian.net/wiki${resp.body._links?.webui || ""}`;
+    return { ok: { pageUrl, title } };
   }
 
-  // Step 2: create the page (v2).
-  const resp = await httpsRequest("POST",
-    `https://api.atlassian.com/ex/confluence/${token.cloudId}/wiki/api/v2/pages`,
-    { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json", Accept: "application/json" },
-    { spaceId, title, body: { representation: "storage", value: pageBody } });
-  if (resp.status === 401) return sendJson(res, 401, { error: "Confluence token expired — reconnect" });
-  if (resp.status !== 200 && resp.status !== 201) {
-    console.error("[confluence-push] rejected:", resp.status, JSON.stringify(resp.body));
-    return sendJson(res, 502, { error: "Confluence rejected the page", detail: resp.body });
+  let result = await doPush(token.access_token);
+  // PR 15: a 401 on the space lookup means the access token lapsed mid-flight —
+  // refresh once and retry the full push before asking the user to reconnect.
+  if (result.spaceUnauthorized) {
+    const refreshed = await refreshConfluenceAccessToken(userId);
+    if (!refreshed) return sendJson(res, 401, { error: "Confluence token expired — reconnect" });
+    token = await readConfluenceToken(userId);
+    result = await doPush(refreshed);
+    if (result.spaceUnauthorized) return sendJson(res, 401, { error: "Confluence token expired — reconnect" });
   }
-  const pageUrl = `https://${token.cloudName}.atlassian.net/wiki${resp.body._links?.webui || ""}`;
-  return sendJson(res, 200, { pageUrl, title });
+  if (result.error) return sendJson(res, result.error.status, result.error.payload);
+  return sendJson(res, 200, { pageUrl: result.ok.pageUrl, title: result.ok.title });
 }
 
 async function handleConfluenceDisconnect(req, res) {
