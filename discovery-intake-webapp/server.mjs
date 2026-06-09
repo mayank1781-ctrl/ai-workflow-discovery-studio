@@ -103,9 +103,9 @@ const ADDON_LIVE_TEST_TIMEOUT_MS = Number(process.env.ADDON_LIVE_TEST_TIMEOUT_MS
 // --- Phase 5a: Azure AD auth gate (scaffolding) -----------------------------
 // Single-tenant OAuth2 code flow with stateless signed-cookie sessions. The
 // whole gate is a no-op while AUTH_ENABLED is false, so the app runs completely
-// un-gated by default (local dev + CI stay green). JWKS signature verification
-// of the id_token is intentionally deferred to 5b — in 5a the token is trusted
-// because it arrives over a direct server-to-server TLS channel.
+// un-gated by default (local dev + CI stay green). verifyIdToken() performs full
+// RS256/JWKS signature validation of the id_token, plus issuer, audience, tenant,
+// and expiry checks, before a session cookie is issued.
 const AUTH_ENABLED = String(process.env.AUTH_ENABLED || "false").toLowerCase() === "true";
 const AUTH_AZURE_TENANT_ID = process.env.AUTH_AZURE_TENANT_ID || "";
 const AUTH_AZURE_CLIENT_ID = process.env.AUTH_AZURE_CLIENT_ID || "";
@@ -4333,6 +4333,17 @@ function authConfigReady() {
   return Boolean(AUTH_AZURE_TENANT_ID && AUTH_AZURE_CLIENT_ID && AUTH_AZURE_CLIENT_SECRET && AUTH_SESSION_SECRET);
 }
 
+// PR 25: fail loudly at startup if auth is switched on but misconfigured, so a
+// broken login is obvious in the logs rather than only at first sign-in.
+if (AUTH_ENABLED && !authConfigReady()) {
+  console.warn("[auth] AUTH_ENABLED=true but missing required vars:",
+    [!AUTH_AZURE_TENANT_ID && "AUTH_AZURE_TENANT_ID",
+     !AUTH_AZURE_CLIENT_ID && "AUTH_AZURE_CLIENT_ID",
+     !AUTH_AZURE_CLIENT_SECRET && "AUTH_AZURE_CLIENT_SECRET",
+     !AUTH_SESSION_SECRET && "AUTH_SESSION_SECRET"].filter(Boolean).join(", "));
+  console.warn("[auth] Auth gate is active but login will fail until these are set.");
+}
+
 async function handleAuthLogin(req, res) {
   if (!AUTH_ENABLED) return sendJson(res, 404, { error: "Auth disabled" });
   if (!authConfigReady()) return sendRedirect(res, "/login.html?error=config");
@@ -4349,7 +4360,7 @@ async function handleAuthCallback(req, res) {
   try {
     // verifyIdToken checks the RS256 signature + issuer/audience/tenant/expiry.
     const claims = await verifyIdToken(await exchangeCodeForToken(code));
-    setSessionCookie(res, {
+    const session = {
       sub: claims.oid || claims.sub || "",
       email: claims.email || claims.preferred_username || "",
       name: claims.name || "",
@@ -4357,7 +4368,10 @@ async function handleAuthCallback(req, res) {
       tid: claims.tid || "",
       preferred_username: claims.preferred_username || "",
       exp: Date.now() + AUTH_SESSION_TTL_HOURS * 3600 * 1000
-    });
+    };
+    setSessionCookie(res, session);
+    // exp is stored in ms (Date.now() + …), so convert without a *1000 factor.
+    console.log(`[auth] Session created for user ${session.email} (expires ${new Date(session.exp).toISOString()})`);
     return sendRedirect(res, "/");
   } catch (error) {
     console.error("Auth callback failed:", error.message);
@@ -4962,6 +4976,7 @@ async function handleDumpExtract(req, res) {
 
 server.listen(PORT, () => {
   console.log(`Discovery Intake Studio running at http://localhost:${PORT}`);
+  console.log(`Auth: ${AUTH_ENABLED ? (authConfigReady() ? "enabled (Azure AD)" : "ENABLED BUT MISCONFIGURED") : "disabled (dev mode)"}`);
   console.log(getOpenAiKey() ? `Primary live voice enabled with model ${REALTIME_MODEL}` : "Realtime voice disabled: OPENAI_API_KEY is not set");
   console.log(getOpenAiKey() ? `Structured extraction enabled with model ${EXTRACTION_MODEL} at ${EXTRACTION_REASONING_EFFORT} reasoning` : "AI extraction disabled: OPENAI_API_KEY is not set");
 });
