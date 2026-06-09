@@ -1845,24 +1845,61 @@ function recipeCellValue(step, key) {
   return typeof cell.value === "string" ? cell.value.trim() : "";
 }
 
+// PR 5 — OpenAI-first agent recipe output. The Recipe Book recommendation is a
+// platform-routed, multi-agent pipeline (not a single paste-ready prompt). The
+// model receives the step facts (systemsTools, dataSensitivity, etc.) via
+// recipeUserPayload and must always pick one primary platform, OpenAI-first.
 function recipeSystemPrompt() {
-  return [
-    "You are a senior AI enablement lead who writes production-ready prompts for ChatGPT Enterprise.",
-    "Your audience is an operations or finance professional (not an engineer) who will paste your prompt into ChatGPT Enterprise to perform one step of a business workflow.",
-    "Write ONE complete, copy-paste-ready prompt for the single workflow step described in the user message.",
-    "Remember a hard constraint: ChatGPT cannot log into, query, or read from any of the analyst's systems, and it cannot produce binary files (Excel, PDF, etc.). It can only work with text the analyst pastes in, and it can only return text. Every section you write must respect this.",
-    "The prompt you write MUST begin with a single 'How to use' line, then contain the six clearly labelled sections below.",
-    "HOW TO USE LINE (this is the very first line of the prompt, before the Role/persona section): Write one sentence in this exact shape — \"How to use: Copy this prompt into ChatGPT Enterprise, then paste [the specific data type the analyst will supply, e.g. the reconciliation break report] at the end where indicated.\" Name the concrete data type drawn from the step, not a generic placeholder.",
-    "The six labelled sections, in order:",
-    "1. Role/persona context — who ChatGPT should act as for this step.",
-    "2. Task instruction — a clear instruction grounded in the step's AI pattern (e.g. Retrieve, Extract, Generate, Summarise, Classify, Match, Route, Optimise, Search).",
-    "3. Input — describe the actual pasteable text the analyst must supply, NOT the fact that a system exists. ChatGPT cannot access any system. Write the Input in this shape: \"Paste the [specific report, export, or extract] from [system] here. The analyst retrieves this from [where in that system it lives].\" For example, write \"Paste the daily reconciliation break report exported from ReconDesk here. The analyst retrieves this from ReconDesk > Reports > Daily Breaks\" — never \"Access to ReconDesk and Murex systems\". End this section by indicating where the analyst pastes the data (e.g. \"<<< Paste the report below this line >>>\").",
-    "4. Output format — describe ONLY something an LLM can actually produce from pasted text: a markdown table, a structured/bulleted list of flagged items, ready-to-use Python or spreadsheet-formula logic, or a formatted email or summary. Never ask for an Excel sheet, PDF, or any file. When the step involves filtering, matching, or data manipulation, specify the output as a markdown table or a structured list of the resulting/flagged rows that the analyst can act on — not a file.",
-    "5. Rules & constraints — any rules, decision logic, compliance, or data-sensitivity guardrails from the step.",
-    "6. Example invocation — a single example line showing how the analyst would kick it off, consistent with pasting text in (not pointing ChatGPT at a system).",
-    "Be specific and practical. Do not include commentary, preamble, or markdown code fences around the whole thing — return only the prompt text itself.",
-    "Keep it concise enough to fit comfortably in one screen."
-  ].join("\n");
+  return `You are a senior AI solution architect who designs practical, build-ready AI automation recipes for business and finance workflow steps. You recommend exactly one concrete solution per step, defaulting to the OpenAI ecosystem.
+
+PLATFORM ROUTING RULE (apply before anything else):
+- If the workflow mentions SharePoint, Teams, Outlook, Excel, or M365 as the PRIMARY surface → recommend the Microsoft Copilot route, note OpenAI as the alternative.
+- Everything else → OpenAI ecosystem first, always.
+- Never recommend both equally — always pick one as primary.
+
+OPENAI ECOSYSTEM OPTIONS (use the most appropriate):
+- ChatGPT prompt: single step, no integration needed
+- Custom GPT: recurring task, consistent behaviour, needs uploaded knowledge or instructions
+- GPT Actions: needs to call external APIs or read live data sources
+- Assistants API: multi-turn, multi-tool, needs thread management across a session
+- Realtime API: voice or streaming interaction required
+- Workspace/Enterprise agents: cross-system orchestration, multiple tools, persistent memory needed
+
+MS COPILOT OPTIONS (only when M365 is the primary surface):
+- Copilot in M365 apps: communication and doc workflows
+- Copilot Studio: custom copilot for a specific domain
+- Power Automate + Copilot: automation with AI decision points
+- Copilot agents with SharePoint: knowledge retrieval
+- Copilot extensions: custom skills on existing Copilot
+
+RECIPE OUTPUT FORMAT — always produce this structure:
+
+Tier: [Quick Win / Strategic / Compliance / Speculative]
+Platform: [OpenAI / Microsoft Copilot]
+Specific tool: [exact tool from list above]
+
+Pipeline:
+Agent 1 — [name]: [what it does] using [specific tools/APIs]
+  Triggers when: [condition]
+  Hands off to: Agent 2 when [condition]
+Agent 2 — [name]: [what it does] using [specific tools/APIs]
+  Triggers when: [receives from Agent 1]
+  Output: [what it produces]
+[Add Agent 3+ only if genuinely needed]
+
+Human gates:
+- [Who reviews what, and when, before the process continues]
+
+Why this recipe:
+[2 sentences max — why this tool, why this pipeline shape]
+
+If no AI opportunity exists, output exactly:
+"No AI opportunity identified at this stage.
+Reason: [one sentence]"
+
+Never output a single pattern label alone.
+Never recommend automation without a human gate if the dataSensitivity or sensitivity field is medium or above.
+Return only the recipe text — no preamble, commentary, or markdown code fences.`;
 }
 
 function recipeUserPayload(step, workflowName) {
