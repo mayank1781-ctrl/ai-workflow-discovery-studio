@@ -4997,6 +4997,61 @@ function opportunityTierColor(tier) {
   return "#a855f7";
 }
 
+// Cross-session portfolio summary strip for the AI Opportunities dashboard
+// (PR 14). Aggregates tier + business case across every saved session (reusing
+// the PR 12 sessionCardMetrics helper). Returns "" when there are no sessions.
+function opportunityPortfolioStripHtml() {
+  const sessions = getCombinedSessionLibrary().map((entry) => sessionCardMetrics(entry));
+  if (!sessions.length) return "";
+
+  const num = (n) => Math.round(n).toLocaleString("en-US");
+  let quickWins = 0;
+  let hoursTotal = 0;
+  let valueTotal = 0;
+  let anyBc = false;
+  const tierCounts = { "quick-win": 0, strategic: 0, compliance: 0, speculative: 0 };
+  sessions.forEach(({ tier, bc }) => {
+    if (tier === "quick-win") quickWins += 1;
+    if (tier in tierCounts) tierCounts[tier] += 1;
+    if (bc) {
+      anyBc = true;
+      hoursTotal += (bc.results.annualHours || 0) + (bc.results.totalHours || 0);
+      valueTotal += (bc.results.annualValue || 0) + (bc.results.projectValue || 0);
+    }
+  });
+
+  const cellStyle = "flex:1;text-align:center;padding:8px 6px;";
+  const bigNum = (value, color) => `<div style="font-size:1.8rem;font-weight:800;color:${color};line-height:1.1;">${value}</div>`;
+  const cellLabel = (text) => `<div style="font-size:0.7rem;color:#5b7186;text-transform:uppercase;letter-spacing:0.06em;margin-top:6px;">${text}</div>`;
+
+  const hoursValue = anyBc ? `${hoursTotal.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} hrs` : "—";
+  const dollarValue = anyBc ? `$${num(valueTotal)}` : "—";
+
+  // Tier breakdown stacked bar — colour blocks only, no numbers.
+  const tierColor = { "quick-win": "#00d4b4", strategic: "#a855f7", compliance: "#ff4fc8", speculative: "#f59e0b" };
+  const tieredTotal = Object.values(tierCounts).reduce((s, n) => s + n, 0);
+  const tiersPresent = Object.values(tierCounts).filter((n) => n > 0).length;
+  const segments = tieredTotal
+    ? ["quick-win", "strategic", "compliance", "speculative"]
+      .filter((t) => tierCounts[t] > 0)
+      .map((t) => `<span style="display:block;height:100%;width:${((tierCounts[t] / tieredTotal) * 100).toFixed(1)}%;background:${tierColor[t]};"></span>`)
+      .join("")
+    : `<span style="display:block;height:100%;width:100%;background:#1e3350;"></span>`;
+  const barCell = `
+    <div style="${cellStyle}">
+      <div style="display:flex;height:14px;border-radius:4px;overflow:hidden;margin:6px 4px 0;">${segments}</div>
+      ${cellLabel(`${sessions.length} session${sessions.length === 1 ? "" : "s"} across ${tiersPresent} tier${tiersPresent === 1 ? "" : "s"}`)}
+    </div>`;
+
+  return `
+    <div class="ds-panel" style="display:flex;gap:8px;align-items:stretch;padding:14px 16px;margin-bottom:20px;border-bottom:1px solid #1e3350;">
+      <div style="${cellStyle}">${bigNum(num(quickWins), "#00d4b4")}${cellLabel("Quick Wins identified")}</div>
+      <div style="${cellStyle}">${bigNum(hoursValue, "#00d4b4")}${cellLabel("Est. hours saved")}</div>
+      <div style="${cellStyle}">${bigNum(dollarValue, "#f59e0b")}${cellLabel("Est. time value")}</div>
+      ${barCell}
+    </div>`;
+}
+
 function renderAnalysisTabOpportunities() {
   const container = document.getElementById("analysis-tab-opportunities");
   if (!container) return;
@@ -5152,7 +5207,7 @@ function renderAnalysisTabOpportunities() {
        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">${cards}</div>`
     : `<div style="text-align:center;padding:60px 20px;color:#445566;font-size:0.9rem;">No AI opportunities identified yet. Complete the workflow grid to generate opportunities.</div>`;
 
-  container.innerHTML = statsRow + sectionTwo + sectionThree;
+  container.innerHTML = opportunityPortfolioStripHtml() + statsRow + sectionTwo + sectionThree;
 }
 
 // --- TAB 3: Recipe Book -------------------------------------------------------
