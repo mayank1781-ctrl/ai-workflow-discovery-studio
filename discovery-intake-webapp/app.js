@@ -1328,7 +1328,7 @@ function bindEvents() {
     toast("Session saved locally.");
   });
 
-  document.getElementById("topbarNewButton")?.addEventListener("click", () => createNewSession({ appMode: "interview", activeWorkbenchTab: "handoff" }));
+  document.getElementById("topbarNewButton")?.addEventListener("click", openDiscoveryModePicker);
   // Outside-click dismiss for the Open (saved sessions) dropdown — it can get
   // long, so unlike the Help menu it closes when you click anywhere outside it.
   document.addEventListener("click", (event) => {
