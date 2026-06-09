@@ -1924,6 +1924,106 @@ function recipeUserPayload(step, workflowName) {
   return lines.join("\n");
 }
 
+// === Business case estimate (PR 7) =========================================
+// Auto-calculated hours + value attached to the recipe response. Role mode =
+// recurring work valued annually; project mode = engagement-bounded work valued
+// for the engagement. Blended rate £75/hr. Mirrors computeBusinessCase in
+// app.js — keep the two in sync.
+const BC_BLENDED_RATE = 75;
+const BC_WORKING_WEEKS = 48;
+
+function bcDetectWorkflowMode(text) {
+  const t = String(text || "").toLowerCase();
+  const project = /\bproject\b|\bengagement\b|\bclient\b|this quarter|this month'?s|for this work|we'?re doing this for|the bank|at the firm/.test(t);
+  const role = /every week|monthly|part of my job|recurring|always do|routine/.test(t);
+  // Project wins ties and is the default: the primary users are Finance/Tech
+  // consultants almost always describing client-side engagement work, not their
+  // own recurring internal role. Role only when it is the only signal present.
+  if (project) return "project";
+  if (role) return "role";
+  return "project";
+}
+
+function bcParseInstancesPerWeek(text) {
+  const t = String(text || "").toLowerCase();
+  let m = t.match(/(\d+(?:\.\d+)?)\s*(?:times?|x)?\s*(?:per|a|\/)\s*day/);
+  if (m) return { value: parseFloat(m[1]) * 5, parsed: true };
+  m = t.match(/(\d+(?:\.\d+)?)\s*(?:times?|x)?\s*(?:per|a|\/)\s*week/);
+  if (m) return { value: parseFloat(m[1]), parsed: true };
+  if (/daily|every day|each day/.test(t)) return { value: 5, parsed: true };
+  if (/fortnight|bi-?weekly|every two weeks/.test(t)) return { value: 0.5, parsed: true };
+  if (/weekly|every week|once a week/.test(t)) return { value: 1, parsed: true };
+  if (/monthly|every month|per month/.test(t)) return { value: 0.25, parsed: true };
+  if (/quarter/.test(t)) return { value: 1 / 13, parsed: true };
+  m = t.match(/(\d+(?:\.\d+)?)/);
+  if (m) return { value: parseFloat(m[1]), parsed: true };
+  return { value: 5, parsed: false };
+}
+
+function bcParseMinutes(text) {
+  const t = String(text || "").toLowerCase();
+  let m = t.match(/(\d+(?:\.\d+)?)\s*(hours?|hrs?|h)\b/);
+  if (m) return { value: parseFloat(m[1]) * 60, parsed: true };
+  m = t.match(/(\d+(?:\.\d+)?)\s*(days?)\b/);
+  if (m) return { value: parseFloat(m[1]) * 480, parsed: true };
+  m = t.match(/(\d+(?:\.\d+)?)\s*(mins?|minutes?|m)\b/);
+  if (m) return { value: parseFloat(m[1]), parsed: true };
+  m = t.match(/(\d+(?:\.\d+)?)/);
+  if (m) return { value: parseFloat(m[1]), parsed: true };
+  return { value: 30, parsed: false };
+}
+
+function bcParseDurationWeeks(text) {
+  const t = String(text || "").toLowerCase();
+  let m = t.match(/(\d+(?:\.\d+)?)\s*month/);
+  if (m) return { value: Math.round(parseFloat(m[1]) * 4.3), parsed: true };
+  m = t.match(/(\d+(?:\.\d+)?)\s*week/);
+  if (m) return { value: parseFloat(m[1]), parsed: true };
+  return { value: 12, parsed: false };
+}
+
+function bcStepCellValue(step, key) {
+  const value = step?.cells?.[key]?.value;
+  return typeof value === "string" ? value : "";
+}
+
+function computeBusinessCase(steps, conversationText) {
+  const workflowMode = bcDetectWorkflowMode(conversationText);
+  let instances = 0;
+  let mins = 0;
+  let instParsed = false;
+  let minsParsed = false;
+  (Array.isArray(steps) ? steps : []).forEach((step) => {
+    const i = bcParseInstancesPerWeek(bcStepCellValue(step, "frequencyVolume"));
+    const mm = bcParseMinutes(bcStepCellValue(step, "timeTaken") || bcStepCellValue(step, "frequencyVolume"));
+    if (i.parsed) { instParsed = true; instances = Math.max(instances, i.value); }
+    if (mm.parsed) { minsParsed = true; mins += mm.value; }
+  });
+  const instances_per_week = instParsed ? instances : 5;
+  const mins_per_instance = minsParsed ? mins : 30;
+  const project_duration_weeks = workflowMode === "project" ? bcParseDurationWeeks(conversationText).value : null;
+
+  const results = {
+    hoursPerWeek: null, annualHours: null, annualValue: null,
+    totalHours: null, projectValue: null,
+    blendedRate: BC_BLENDED_RATE, currency: "GBP"
+  };
+  if (workflowMode === "role") {
+    results.hoursPerWeek = (instances_per_week * mins_per_instance) / 60;
+    results.annualHours = results.hoursPerWeek * BC_WORKING_WEEKS;
+    results.annualValue = results.annualHours * BC_BLENDED_RATE;
+  } else {
+    results.totalHours = (instances_per_week * project_duration_weeks * mins_per_instance) / 60;
+    results.projectValue = results.totalHours * BC_BLENDED_RATE;
+  }
+  return {
+    workflowMode,
+    inputs: { instances_per_week, mins_per_instance, project_duration_weeks },
+    results,
+    reusabilityFlag: workflowMode === "project"
+  };
+}
+
 async function handleRecipe(req, res) {
   if (!OPENAI_API_KEY) {
     return sendJson(res, 400, {
@@ -1971,7 +2071,12 @@ async function handleRecipe(req, res) {
     if (!prompt) {
       return sendJson(res, 502, { error: "The model returned an empty prompt." });
     }
-    return sendJson(res, 200, { prompt });
+    // Business case estimate travels with the recipe (and, client-side, the
+    // engineering doc). Use the full step list when the client sends it so the
+    // estimate is workflow-level; otherwise fall back to the single step.
+    const bcSteps = Array.isArray(body.steps) && body.steps.length ? body.steps : [step];
+    const businessCase = computeBusinessCase(bcSteps, typeof body.conversationText === "string" ? body.conversationText : "");
+    return sendJson(res, 200, { prompt, businessCase });
   } catch (error) {
     return sendJson(res, 500, { error: error.message || "Recipe generation failed" });
   }

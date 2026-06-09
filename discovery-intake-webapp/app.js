@@ -5031,6 +5031,161 @@ function recipePromptBlockHtml(prompt) {
   return `<div style="position:relative;background:#0a1422;border:1px solid #1a2a3a;border-radius:8px;padding:16px 16px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.6;color:#cfe0f0;white-space:pre-wrap;word-break:break-word;"><button type="button" data-recipe-copy style="position:absolute;top:8px;right:8px;background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:4px 11px;font-size:11px;font-weight:700;cursor:pointer;">Copy prompt</button>${escapeHtml(prompt)}</div>`;
 }
 
+// === Business case estimate (PR 7) =========================================
+// Auto-calculated hours + value shown below the Recipe Book and Engineering Doc.
+// Role mode = recurring "part of my job" work valued annually; project mode =
+// engagement-bounded work valued for the engagement. Blended rate £75/hr. The
+// numeric/mode logic mirrors computeBusinessCase in server.mjs — keep in sync.
+const BC_BLENDED_RATE = 75;
+const BC_WORKING_WEEKS = 48;
+
+function bcDetectWorkflowMode(text) {
+  const t = String(text || "").toLowerCase();
+  const project = /\bproject\b|\bengagement\b|\bclient\b|this quarter|this month'?s|for this work|we'?re doing this for|the bank|at the firm/.test(t);
+  const role = /every week|monthly|part of my job|recurring|always do|routine/.test(t);
+  // Project wins ties and is the default: the primary users are Finance/Tech
+  // consultants almost always describing client-side engagement work, not their
+  // own recurring internal role. Role only when it is the only signal present.
+  if (project) return "project";
+  if (role) return "role";
+  return "project";
+}
+
+function bcParseInstancesPerWeek(text) {
+  const t = String(text || "").toLowerCase();
+  let m = t.match(/(\d+(?:\.\d+)?)\s*(?:times?|x)?\s*(?:per|a|\/)\s*day/);
+  if (m) return { value: parseFloat(m[1]) * 5, parsed: true };
+  m = t.match(/(\d+(?:\.\d+)?)\s*(?:times?|x)?\s*(?:per|a|\/)\s*week/);
+  if (m) return { value: parseFloat(m[1]), parsed: true };
+  if (/daily|every day|each day/.test(t)) return { value: 5, parsed: true };
+  if (/fortnight|bi-?weekly|every two weeks/.test(t)) return { value: 0.5, parsed: true };
+  if (/weekly|every week|once a week/.test(t)) return { value: 1, parsed: true };
+  if (/monthly|every month|per month/.test(t)) return { value: 0.25, parsed: true };
+  if (/quarter/.test(t)) return { value: 1 / 13, parsed: true };
+  m = t.match(/(\d+(?:\.\d+)?)/);
+  if (m) return { value: parseFloat(m[1]), parsed: true };
+  return { value: 5, parsed: false };
+}
+
+function bcParseMinutes(text) {
+  const t = String(text || "").toLowerCase();
+  let m = t.match(/(\d+(?:\.\d+)?)\s*(hours?|hrs?|h)\b/);
+  if (m) return { value: parseFloat(m[1]) * 60, parsed: true };
+  m = t.match(/(\d+(?:\.\d+)?)\s*(days?)\b/);
+  if (m) return { value: parseFloat(m[1]) * 480, parsed: true };
+  m = t.match(/(\d+(?:\.\d+)?)\s*(mins?|minutes?|m)\b/);
+  if (m) return { value: parseFloat(m[1]), parsed: true };
+  m = t.match(/(\d+(?:\.\d+)?)/);
+  if (m) return { value: parseFloat(m[1]), parsed: true };
+  return { value: 30, parsed: false };
+}
+
+function bcParseDurationWeeks(text) {
+  const t = String(text || "").toLowerCase();
+  let m = t.match(/(\d+(?:\.\d+)?)\s*month/);
+  if (m) return { value: Math.round(parseFloat(m[1]) * 4.3), parsed: true };
+  m = t.match(/(\d+(?:\.\d+)?)\s*week/);
+  if (m) return { value: parseFloat(m[1]), parsed: true };
+  return { value: 12, parsed: false };
+}
+
+// Conversation text used for workflowMode + project-duration detection.
+function businessCaseConversationText() {
+  const convo = (state.conversation || []).map((msg) => msg?.text || "").join("\n");
+  return [convo, state.transcript || ""].filter(Boolean).join("\n");
+}
+
+// Workflow-level estimate across all grid steps. instances/week = the workflow
+// cadence (max parsed across steps); mins/instance = total hands-on minutes for
+// one full run (sum of parsed step times). `defaulted` is true when either input
+// fell back to its default (drives the "Estimates — refine" badge).
+function computeBusinessCase(steps, conversationText) {
+  const workflowMode = bcDetectWorkflowMode(conversationText);
+  let instances = 0;
+  let mins = 0;
+  let instParsed = false;
+  let minsParsed = false;
+  (steps || []).forEach((step) => {
+    const i = bcParseInstancesPerWeek(gridCellValue(step, "frequencyVolume"));
+    const mm = bcParseMinutes(gridCellValue(step, "timeTaken") || gridCellValue(step, "frequencyVolume"));
+    if (i.parsed) { instParsed = true; instances = Math.max(instances, i.value); }
+    if (mm.parsed) { minsParsed = true; mins += mm.value; }
+  });
+  const instances_per_week = instParsed ? instances : 5;
+  const mins_per_instance = minsParsed ? mins : 30;
+  const project_duration_weeks = workflowMode === "project" ? bcParseDurationWeeks(conversationText).value : null;
+
+  const results = {
+    hoursPerWeek: null, annualHours: null, annualValue: null,
+    totalHours: null, projectValue: null,
+    blendedRate: BC_BLENDED_RATE, currency: "GBP"
+  };
+  if (workflowMode === "role") {
+    results.hoursPerWeek = (instances_per_week * mins_per_instance) / 60;
+    results.annualHours = results.hoursPerWeek * BC_WORKING_WEEKS;
+    results.annualValue = results.annualHours * BC_BLENDED_RATE;
+  } else {
+    results.totalHours = (instances_per_week * project_duration_weeks * mins_per_instance) / 60;
+    results.projectValue = results.totalHours * BC_BLENDED_RATE;
+  }
+  return {
+    workflowMode,
+    inputs: { instances_per_week, mins_per_instance, project_duration_weeks },
+    results,
+    reusabilityFlag: workflowMode === "project",
+    defaulted: !instParsed || !minsParsed
+  };
+}
+
+// Renders the "Business Case Estimate" ds-card from a computed businessCase.
+function businessCaseBlockHtml(bc) {
+  const gbp = (n) => "£" + Math.round(n).toLocaleString("en-GB");
+  const hrs = (n) => n.toLocaleString("en-GB", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const count = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+  const numCss = "font-size:2rem;font-weight:800;line-height:1.1;";
+  const subCss = "font-size:0.7rem;color:#5b7186;text-transform:uppercase;letter-spacing:0.08em;margin-top:4px;";
+  const estBadge = bc.defaulted
+    ? `<span class="ds-badge ds-badge-amber" style="margin-left:8px;">Estimates — refine in conversation</span>`
+    : "";
+
+  let callouts;
+  let basis;
+  let note = "";
+  if (bc.workflowMode === "role") {
+    const r = bc.results;
+    callouts =
+      `<div><div class="ds-num-teal" style="${numCss}">${hrs(r.hoursPerWeek)} hrs/week</div><div style="${subCss}">Time spent</div></div>` +
+      `<div><div class="ds-num-amber" style="${numCss}">${gbp(r.annualValue)} / year</div><div style="${subCss}">Annual value</div></div>`;
+    basis = `Based on: ${count(bc.inputs.instances_per_week)} instances/week × ${Math.round(bc.inputs.mins_per_instance)} min each × ${BC_WORKING_WEEKS} weeks`;
+  } else {
+    const r = bc.results;
+    callouts =
+      `<div><div class="ds-num-teal" style="${numCss}">${hrs(r.totalHours)} total hrs</div><div style="${subCss}">Engagement effort</div></div>` +
+      `<div><div class="ds-num-amber" style="${numCss}">${gbp(r.projectValue)} project value</div><div style="${subCss}">Bounded value</div></div>`;
+    basis = `Based on: ${count(bc.inputs.instances_per_week)} instances/week × ${Math.round(bc.inputs.mins_per_instance)} min each × ${bc.inputs.project_duration_weeks}-week engagement`;
+    note = `<div style="margin-top:10px;color:#00d4b4;font-style:italic;font-size:0.78rem;">Value bounded to this engagement. Can this agent be reused across future engagements?</div>`;
+  }
+
+  return `
+    <div class="ds-card" style="padding:20px;margin-top:16px;">
+      <div style="display:flex;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
+        <strong style="font-size:1rem;color:#e8f4ff;">Business Case Estimate</strong>
+        <span class="ds-badge ds-badge-amber" style="margin-left:8px;">Auto-calculated</span>
+        ${estBadge}
+      </div>
+      <div style="display:flex;gap:40px;flex-wrap:wrap;">${callouts}</div>
+      <div style="margin-top:12px;color:#8899aa;font-size:0.8rem;">${escapeHtml(basis)}</div>
+      ${note}
+    </div>`;
+}
+
+// Business case block for the whole current workflow, or "" when no steps exist.
+function businessCaseBlockForCurrentWorkflow() {
+  const steps = analysisGridSteps();
+  if (!steps.length) return "";
+  return businessCaseBlockHtml(computeBusinessCase(steps, businessCaseConversationText()));
+}
+
 // Fills the prompt-template body with the code block and wires the copy button.
 function renderRecipeBody(body, prompt) {
   body.innerHTML = recipePromptBlockHtml(prompt);
@@ -5129,6 +5284,7 @@ function renderAnalysisTabRecipe() {
 
   container.innerHTML =
     cards +
+    businessCaseBlockForCurrentWorkflow() +
     `<div style="margin-top:16px;"><button class="secondary-button compact" type="button" id="downloadRecipeBookBtn">Download Recipe Book</button><button type="button" id="recipe-export-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download DOCX</button><button type="button" id="recipe-pdf-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download PDF</button></div>`;
 
   // Fill the prompt-template body for any step that already has a cached prompt.
@@ -5176,7 +5332,15 @@ async function generateRecipePrompt(stepId) {
     const response = await fetch("/api/recipe", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ step, workflowName: analysisWorkflowName() })
+      // steps + conversationText let the server compute a workflow-level
+      // businessCase (returned alongside the prompt) consistent with the
+      // block rendered client-side.
+      body: JSON.stringify({
+        step,
+        workflowName: analysisWorkflowName(),
+        steps: analysisGridSteps(),
+        conversationText: businessCaseConversationText()
+      })
     });
     const data = await response.json();
     if (!response.ok || !data.prompt) {
@@ -5728,7 +5892,7 @@ async function renderAnalysisTabEngineering() {
       ${cards}
     </div>`;
 
-  container.innerHTML = jiraBar + confluenceBar + section1 + toolbar + section2 + section3 + section4;
+  container.innerHTML = jiraBar + confluenceBar + section1 + toolbar + section2 + section3 + section4 + businessCaseBlockForCurrentWorkflow();
   if (jiraStatus.connected) populateJiraProjects();
 
   container.querySelector("#exportEngineeringDocBtn")?.addEventListener("click", exportEngineeringDoc);
