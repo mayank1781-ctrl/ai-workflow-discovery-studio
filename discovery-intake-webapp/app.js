@@ -7466,8 +7466,10 @@ async function handleDocumentUpload(file, el) {
   state.extractionWarning = typeof payload.extractionWarning === "string" ? payload.extractionWarning : "";
   if (payload.extractionWarning) toast(payload.extractionWarning);
   toast("Workflow extracted — review your grid");
-  state.appMode = "interview";
-  state.activeWorkbenchTab = "grid";
+  // Land on the Analysis Studio Workflow Grid tab so the populated 3-layer grid
+  // is immediately visible (analysisActiveTab drives that tab, not activeWorkbenchTab).
+  state.appMode = "analysis";
+  state.analysisActiveTab = "grid";
   docUploadInProgress = false;
   persistState();
   render();
