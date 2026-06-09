@@ -641,3 +641,55 @@ PR 3 (Phase 7): conversational extraction only — 3-layer
 structure, 6 principles, next-best-question priority queue.
 Document analysis path added separately in Phase 8 to avoid 
 diluting either prompt.
+
+## OUTPUT TIER DESIGN (Phase 7 planned — Recipe + Engineering)
+
+### Priority Order
+Tier 1: Agent Recipe — most practical, implementable now
+Tier 2: Engineering Spec — custom LLM build direction
+Tier 3: No opportunity — honest, not forced
+
+### Platform Preference
+PRIMARY: OpenAI ecosystem (full stack, not just ChatGPT):
+- ChatGPT prompts (simplest, no integration)
+- Custom GPTs (recurring task, consistent behaviour, 
+  uploaded knowledge)
+- GPT Actions (external API calls, live data)
+- Assistants API (multi-turn, multi-tool, thread management)
+- Responses API / Realtime API (voice, streaming)
+- Workspace/Enterprise agents (cross-system orchestration)
+- Function calling, file search, code interpreter
+- Growing — prescribe from full current palette
+
+SECONDARY: MS Copilot ecosystem
+Only recommended when workflow is deeply embedded in M365
+(Teams, Outlook, SharePoint, Excel as primary surfaces).
+Options: Copilot in M365 apps, Copilot Studio, 
+Power Automate + Copilot, Copilot agents, extensions.
+
+### Routing Logic
+Mentions SharePoint/Teams/Outlook/Excel as primary surface
+→ Copilot route, flag OpenAI as alternative
+Everything else → OpenAI route first
+Both apply → recommend OpenAI, note Copilot as option
+
+### Recipe Output Format (P5 from extraction prompt)
+Named pipeline with:
+- Agent roles (what each does)
+- Tools/APIs required per agent  
+- Human review gates
+- Handoff triggers
+Minimum 2 agents. No single pattern labels.
+
+### Engineering Doc Scope (intentionally broad)
+Three questions only:
+1. What problem is being solved technically?
+2. What LLM-powered components would be involved?
+3. What integrations or data access would be needed?
+Short and directional — not a full software spec.
+Not every step produces an engineering opportunity.
+"Not automatable yet" is a valid output.
+
+### Open Question (decision needed before Recipe PR)
+Single platform recommendation with reasoning, 
+or show both when both apply?
