@@ -5561,10 +5561,261 @@ function recipeWorkflowHeaderHtml() {
   const when = formatSavedSessionDate(state.sessionMeta?.updatedAt) || "";
   const label = name || when || "Untitled workflow";
   return `
-    <div style="margin-bottom:14px;">
-      <div style="font-size:16px;font-weight:700;color:#e8f4ff;">${escapeHtml(label)}</div>
-      ${engagement ? `<div style="font-size:12px;color:#8899aa;margin-top:2px;">${escapeHtml(engagement)}</div>` : ""}
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px;">
+      <div>
+        <div style="font-size:16px;font-weight:700;color:#e8f4ff;">${escapeHtml(label)}</div>
+        ${engagement ? `<div style="font-size:12px;color:#8899aa;margin-top:2px;">${escapeHtml(engagement)}</div>` : ""}
+      </div>
+      <button type="button" id="exportWordRecipeBtn" class="ds-btn-ghost" style="flex-shrink:0;display:inline-flex;align-items:center;gap:6px;">
+        <i data-lucide="download" style="width:14px;height:14px;"></i>Export to Word
+      </button>
     </div>`;
+}
+
+// Parses the platform + specific tool out of a recipe response and returns a
+// short, plain-English, imperative build guide for that tool (PR 11). Used by
+// the "How to implement this" section of the Word export.
+function implementationGuide(recipeText) {
+  const text = String(recipeText || "");
+  const platform = (text.match(/^\s*platform:\s*(.+)$/im)?.[1] || "").trim();
+  const tool = (text.match(/^\s*specific tool:\s*(.+)$/im)?.[1] || "").trim();
+  const key = tool.toLowerCase();
+  let steps;
+  if (/custom gpt/.test(key)) {
+    steps = [
+      "Open ChatGPT, go to My GPTs, and click Create.",
+      "Paste the recipe's system prompt into the Instructions field.",
+      "Upload any reference documents the workflow needs as Knowledge files.",
+      "Add an Action to connect the GPT to the systems named in the recipe if it needs live data.",
+      "Save the GPT and share it with the people who run this step."
+    ];
+  } else if (/gpt action/.test(key)) {
+    steps = [
+      "Open ChatGPT, create a Custom GPT, and add an Action.",
+      "Paste the recipe's system prompt into the Instructions field.",
+      "Define the Action's API schema for the system the recipe calls.",
+      "Authenticate the Action and test it against a sample request."
+    ];
+  } else if (/assistants? api/.test(key)) {
+    steps = [
+      "Create an Assistant in platform.openai.com.",
+      "Set the model to GPT-4o and paste the recipe instructions.",
+      "Upload knowledge files and turn on file search.",
+      "Add the tools or functions the recipe lists for each agent.",
+      "Call the Assistant from your app or a short script."
+    ];
+  } else if (/realtime|responses api/.test(key)) {
+    steps = [
+      "Create a session in platform.openai.com for the Realtime API.",
+      "Set the model and paste the recipe instructions.",
+      "Wire the streaming input and output to your interface.",
+      "Add the tools the recipe lists and test one live turn."
+    ];
+  } else if (/copilot studio/.test(key)) {
+    steps = [
+      "Open Copilot Studio and create a New agent.",
+      "Paste the recipe instructions into the agent's instructions.",
+      "Connect the data sources and actions the recipe names.",
+      "Publish the agent to Teams or the relevant Microsoft 365 surface."
+    ];
+  } else if (/power automate/.test(key)) {
+    steps = [
+      "Open Power Automate and create a new flow.",
+      "Add the trigger that starts this step.",
+      "Insert a Copilot or AI Builder action and paste the recipe instructions.",
+      "Connect the systems the recipe names and test the flow end to end."
+    ];
+  } else if (/copilot/.test(key)) {
+    steps = [
+      "Open the Microsoft 365 app where this work happens (Teams, Outlook, or Excel).",
+      "Start Copilot and paste the recipe instructions as your prompt.",
+      "Point Copilot at the file or thread that holds the step's input.",
+      "Review the output before sending it on."
+    ];
+  } else if (/workspace|enterprise agent/.test(key)) {
+    steps = [
+      "Open your OpenAI workspace and create an agent.",
+      "Paste the recipe instructions and connect the tools it names.",
+      "Grant the agent access to the required systems.",
+      "Test the handoff between agents, then roll it out."
+    ];
+  } else if (/chatgpt|prompt/.test(key)) {
+    steps = [
+      "Open ChatGPT or a Project for this workflow.",
+      "Paste the recipe's prompt at the start of the chat.",
+      "Paste the step's input where the prompt indicates.",
+      "Review the output before using it downstream."
+    ];
+  } else {
+    steps = [
+      `Set up ${tool || "the tool named in the recipe"} for this step.`,
+      "Paste the recipe's instructions or system prompt into it.",
+      "Connect the systems and data the recipe names.",
+      "Test it against a sample input before using it for real."
+    ];
+  }
+  return { platform, tool: tool || "See the recipe above", steps };
+}
+
+// === DOCX export: recipe + business case + scoring (PR 11) ==================
+// Builds a Word document entirely client-side from data already in state and
+// triggers a direct browser download. docx is lazy-loaded so the bundle only
+// loads when the user actually exports. mode is "recipe" or "engineering" and
+// only changes the middle section heading. Framed as a personal implementation
+// guide (not a client report).
+async function exportWorkflowWord(mode = "recipe") {
+  const steps = analysisGridSteps();
+  if (!steps.length) { toast("Nothing to export yet — capture a workflow first."); return; }
+
+  let docx;
+  try {
+    docx = await import("docx");
+  } catch {
+    toast("Export failed — try again");
+    return;
+  }
+
+  try {
+    const {
+      Document, Packer, Paragraph, TextRun, HeadingLevel,
+      Table, TableRow, TableCell, WidthType, BorderStyle
+    } = docx;
+
+    const repStep = steps[0];
+    const meta = getStepOpportunityMeta(repStep);
+    const workflowName = (state.sessionMeta?.workflowName || analysisWorkflowName() || "").trim();
+    const engagement = (state.sessionMeta?.engagementContext || "").trim();
+    const tierLabel = { "quick-win": "Quick Win", strategic: "Strategic", compliance: "Compliance", speculative: "Speculative" }[meta.tier] || "Strategic";
+    const today = new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+
+    const h1 = (text) => new Paragraph({ heading: HeadingLevel.HEADING_1, spacing: { before: 240, after: 120 }, children: [new TextRun(text)] });
+    const h2 = (text) => new Paragraph({ heading: HeadingLevel.HEADING_2, spacing: { before: 160, after: 60 }, children: [new TextRun(text)] });
+    const para = (text, opts = {}) => new Paragraph({ spacing: { after: 60 }, children: [new TextRun({ text, bold: !!opts.bold, italics: !!opts.italic, color: opts.color })] });
+
+    const BORDER = { style: BorderStyle.SINGLE, size: 4, color: "BFBFBF" };
+    const cell = (text, opts = {}) => new TableCell({
+      width: opts.width ? { size: opts.width, type: WidthType.PERCENTAGE } : undefined,
+      shading: opts.shaded ? { fill: "E7E6E6" } : undefined,
+      margins: { top: 40, bottom: 40, left: 80, right: 80 },
+      children: [new Paragraph({ children: [new TextRun({ text: String(text), bold: !!opts.bold })] })]
+    });
+    const table = (rows) => new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      borders: { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER, insideHorizontal: BORDER, insideVertical: BORDER },
+      rows
+    });
+
+    const children = [];
+
+    // --- Header: workflow name, engagement, date (a personal guide) ----------
+    children.push(new Paragraph({ heading: HeadingLevel.TITLE, children: [new TextRun(workflowName || "Unnamed workflow")] }));
+    if (engagement) children.push(new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: engagement, color: "595959", size: 24 })] }));
+    children.push(new Paragraph({ spacing: { after: 160 }, children: [new TextRun({ text: today, color: "8C8C8C", size: 18 })] }));
+
+    // --- Recipe / Engineering direction (tier lives here, not the header) ----
+    const firstRecipeText = steps.map((step) => state.recipeCache?.[step.id]).find(Boolean) || "";
+    children.push(h1(mode === "engineering" ? "Engineering direction" : "Agent recipe"));
+    children.push(para(`Automation tier: ${tierLabel}`, { bold: true }));
+    let anyRecipe = false;
+    steps.forEach((step, index) => {
+      const text = state.recipeCache?.[step.id];
+      if (!text) return;
+      anyRecipe = true;
+      if (steps.length > 1) children.push(para(stepDisplayName(step, index), { bold: true }));
+      String(text).split(/\r?\n/).forEach((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        if (/^agent\s+\d+/i.test(trimmed)) children.push(h2(trimmed));
+        else children.push(para(trimmed));
+      });
+    });
+    if (!anyRecipe) children.push(para("No recipe generated yet. Open the Recipe tab and generate a recipe first."));
+
+    // --- How to implement this ----------------------------------------------
+    const impl = implementationGuide(firstRecipeText);
+    children.push(h1("How to implement this"));
+    children.push(para(`${impl.platform ? impl.platform + " — " : ""}${impl.tool}`, { bold: true }));
+    impl.steps.forEach((step) => children.push(para(step)));
+    children.push(para("Estimated build time: 1–3 hours for a Custom GPT, 1–2 days for an API integration.", { italic: true, color: "595959" }));
+
+    // --- Time savings estimate ----------------------------------------------
+    const bc = computeBusinessCase(steps, businessCaseConversationText());
+    const RATE_PER_HOUR = 100;
+    const usd = (n) => "$" + Math.round(n).toLocaleString("en-US");
+    const hrs = (n) => n.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    children.push(h1("Time savings estimate"));
+    children.push(para(`Mode: ${bc.workflowMode === "role" ? "Role-based" : "Project-based"}`, { bold: true }));
+    const inputsText = bc.workflowMode === "role"
+      ? `${bc.inputs.instances_per_week} instances/week, ${Math.round(bc.inputs.mins_per_instance)} mins/instance`
+      : `${bc.inputs.instances_per_week} instances/week, ${Math.round(bc.inputs.mins_per_instance)} mins/instance, ${bc.inputs.project_duration_weeks}-week engagement`;
+    const hoursText = bc.workflowMode === "role"
+      ? `${hrs(bc.results.hoursPerWeek)} hrs/week, ${hrs(bc.results.annualHours)} hrs/year`
+      : `${hrs(bc.results.totalHours)} total hrs`;
+    const annualValue = bc.results.annualHours != null ? bc.results.annualHours * RATE_PER_HOUR : 0;
+    const projectValue = bc.results.totalHours != null ? bc.results.totalHours * RATE_PER_HOUR : 0;
+    const valueText = bc.workflowMode === "role" ? `${usd(annualValue)} / year` : `${usd(projectValue)} (engagement)`;
+    children.push(table([
+      new TableRow({ children: [cell("Metric", { bold: true, width: 35 }), cell("Value", { bold: true, width: 65 })] }),
+      new TableRow({ children: [cell("Inputs"), cell(inputsText)] }),
+      new TableRow({ children: [cell("Estimated hours"), cell(hoursText)] }),
+      new TableRow({ children: [cell("Estimated value"), cell(valueText)] })
+    ]));
+    children.push(para("Based on $100/hr blended rate.", { italic: true, color: "595959" }));
+    if (bc.workflowMode === "project") children.push(para("Value bounded to this engagement.", { italic: true, color: "595959" }));
+    if (bc.defaulted) children.push(para("Figures are estimates — refine in a follow-up session.", { italic: true, color: "595959" }));
+
+    // --- Scoring breakdown ---------------------------------------------------
+    children.push(h1("AI opportunity score"));
+    const ps = meta.principleScores || {};
+    const overrides = (scoringOverridesStepId === repStep.id) ? scoringOverrides : {};
+    let totalScore = 0;
+    let anyModified = false;
+    const currentScores = {};
+    const scoreRows = [new TableRow({ children: [
+      cell("Principle", { bold: true, width: 34 }),
+      cell("Score", { bold: true, width: 12 }),
+      cell("Reason", { bold: true, width: 54 })
+    ] })];
+    SCORING_PRINCIPLES.forEach((p) => {
+      const original = ps[p.key]?.score ?? 2;
+      const ov = overrides[p.key];
+      const score = (ov != null) ? ov : original;
+      const modified = ov != null && ov !== original;
+      if (modified) anyModified = true;
+      currentScores[p.key] = score;
+      totalScore += score;
+      scoreRows.push(new TableRow({ children: [
+        cell(`P${p.n} ${p.name}`),
+        cell(modified ? `${score} *` : String(score)),
+        cell(ps[p.key]?.reason || "")
+      ] }));
+    });
+    const liveTier = scoringTierBadge(scoringTierFromScores(currentScores).tier).label;
+    children.push(para(`Overall score: ${totalScore} / 30 — ${liveTier}`, { bold: true }));
+    children.push(table(scoreRows));
+    if (anyModified) children.push(para("* Score modified from AI original.", { italic: true, color: "595959" }));
+
+    const doc = new Document({
+      sections: [{
+        properties: { page: { margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 } } },
+        children
+      }]
+    });
+
+    const blob = await Packer.toBlob(doc);
+    const safeName = (workflowName || "workflow").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "workflow";
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${safeName}-recipe.docx`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast("Word document downloaded.");
+  } catch {
+    toast("Export failed — try again");
+  }
 }
 
 // Fills the prompt-template body with the code block and wires the copy button.
@@ -5691,6 +5942,7 @@ function renderAnalysisTabRecipe() {
   container.querySelector("#recipe-pdf-btn")?.addEventListener("click", handleRecipePdfExport);
   syncRecipeExportButton(recipeExportBtn);
   wireScoringCards(container);
+  container.querySelector("#exportWordRecipeBtn")?.addEventListener("click", () => exportWorkflowWord("recipe"));
 }
 
 // Keep the export button clickable whenever the Recipe Book is shown (it only
@@ -6106,6 +6358,9 @@ async function renderAnalysisTabEngineering() {
       <button class="secondary-button compact" type="button" id="exportEngineeringDocBtn">Export Engineering Doc</button>
       <button type="button" id="engineering-export-btn" style="${tealBtn}">⬇ Download DOCX</button>
       <button type="button" id="engineering-pdf-btn" style="${tealBtn}">⬇ Download PDF</button>
+      <button type="button" id="exportWordEngineeringBtn" class="ds-btn-ghost" style="margin-left:auto;display:inline-flex;align-items:center;gap:6px;">
+        <i data-lucide="download" style="width:14px;height:14px;"></i>Export to Word
+      </button>
     </div>`;
 
   // --- Section 2: colour-coded gantt ----------------------------------------
@@ -6280,6 +6535,7 @@ async function renderAnalysisTabEngineering() {
   if (jiraStatus.connected) populateJiraProjects();
 
   container.querySelector("#exportEngineeringDocBtn")?.addEventListener("click", exportEngineeringDoc);
+  container.querySelector("#exportWordEngineeringBtn")?.addEventListener("click", () => exportWorkflowWord("engineering"));
   const engineeringExportBtn = container.querySelector("#engineering-export-btn");
   engineeringExportBtn?.addEventListener("click", handleEngineeringExport);
   container.querySelector("#engineering-pdf-btn")?.addEventListener("click", handleEngineeringPdfExport);
