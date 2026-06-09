@@ -555,3 +555,89 @@
 
 *Last updated: June 2026 — reflects PRs #41–#65 merged on main.*  
 *Update this file as part of every PR that changes a lever. Keep entries short.*
+
+---
+
+## PHASE 8 — DOCUMENT ANALYSIS MODE (planned)
+
+### Core Decision
+Two explicit input modes — do not merge into one:
+
+MODE 1: "Interview a workflow" (current)
+Conversational discovery. One person, one workflow, voice or 
+text, progressive questioning, next-best-question arc.
+PRs 1-4 (Phase 7) build this out fully.
+
+MODE 2: "Analyse a document" (Phase 8)
+User uploads SOP, process doc, Excel tracker, or screenshot.
+AI extracts full workflow family, presents structured mapping 
+for confirmation, populates multiple grid rows simultaneously.
+No interview arc — document IS the primary source.
+
+Both modes feed into the same 3-layer grid and Recipe output.
+Difference is input path only, not output.
+
+### Attachment Analysis — Per File Type
+
+Word/PDF:
+- Extract workflow chain first: numbered steps, role mentions, 
+  system names, handoff language ("sends to", "receives from", 
+  "escalates to")
+- Map to Layer 1 Flow & Dependencies + Layer 2 Who's Involved
+- Any compliance/regulatory language auto-flags Layer 3 Sensitivity
+- Confidence: "inferred from document" (not confirmed)
+
+Excel:
+- Distinguish type first:
+  - Has process/status columns → tracker → extract workflow 
+    states as steps
+  - Has data columns → artifact → extract data handling 
+    for Layer 3 Data Flow and Sensitivity
+- Confidence: "inferred from document" (not confirmed)
+
+Screenshots:
+- Vision-analyse for: system name (Layer 1 Systems & Tools), 
+  data fields visible (Layer 3 Data Flow), actor/role shown 
+  (Layer 2 Who's Involved)
+- Auto-populate those three layers directly
+- Confidence: "inferred from screenshot" (not confirmed)
+
+All attachment-extracted data: next-best-question system asks 
+user to confirm highest-importance extracted values rather than 
+asking from scratch.
+
+### SOP Mode — What Makes It Different
+
+1. AI reads and maps, does not interview. 
+   Arc inverts: "I found these workflows — confirm or correct"
+   not "tell me about your workflow"
+
+2. SOPs are non-linear — contain workflow families:
+   main process + exception paths + escalation procedures + 
+   role definitions. Grid must handle multiple related workflows 
+   with shared components (same systems/roles across steps).
+
+3. SOP metadata to capture: owner, last updated, version, 
+   whether current. Relevant for compliance and Recipe output.
+
+### Current Coverage Estimate
+Interview mode: 75% complete after Phase 7 PRs 1-4
+SOP/document mode: ~20% — attachment handling exists but 
+not doing structured extraction. Grid handles one workflow 
+well but has no workflow-family concept. No 
+"multiple workflows found" UI state yet.
+
+### Phase 8 Build Sequence (planned, not started)
+8a: Document upload entry point — distinct from interview mode
+8b: Per-filetype extraction paths (Word/PDF, Excel, screenshot)
+8c: Workflow family detection — "I found N workflows in this 
+    document" UI state, multiple grid rows populated at once
+8d: Confirmation arc — AI presents mapping, user confirms 
+    or corrects, confidence upgrades to confirmed
+8e: SOP metadata capture (owner, version, date)
+
+### Extraction Prompt Scope Decision
+PR 3 (Phase 7): conversational extraction only — 3-layer 
+structure, 6 principles, next-best-question priority queue.
+Document analysis path added separately in Phase 8 to avoid 
+diluting either prompt.
