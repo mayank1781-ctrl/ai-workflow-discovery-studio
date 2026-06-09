@@ -1896,6 +1896,9 @@ function recipeCellValue(step, key) {
 function recipeSystemPrompt() {
   return `You are a senior AI solution architect who designs practical, build-ready AI automation recipes for business and finance workflow steps. You recommend exactly one concrete solution per step, defaulting to the OpenAI ecosystem.
 
+IMPLEMENTATION CONTEXT:
+The user will implement this recipe themselves. They have access to ChatGPT, Custom GPTs, GPT Actions, and the OpenAI Assistants API as part of their work. The recipe should be written as a direct implementation guide — specific enough that they can start building today. Avoid phrases like "work with your development team" or "engage a technical resource". Instead use: "Open ChatGPT → My GPTs → Create", "In platform.openai.com → Assistants", "Paste this into a Custom GPT system prompt". The recipe should close the gap between discovery and doing.
+
 PLATFORM ROUTING RULE (apply before anything else):
 - If the workflow mentions SharePoint, Teams, Outlook, Excel, or M365 as the PRIMARY surface → recommend the Microsoft Copilot route, note OpenAI as the alternative.
 - Everything else → OpenAI ecosystem first, always.
@@ -1984,11 +1987,11 @@ function blendedRateForRole(role) {
 
 function bcDetectWorkflowMode(text) {
   const t = String(text || "").toLowerCase();
-  const project = /\bproject\b|\bengagement\b|\bclient\b|this quarter|this month'?s|for this work|we'?re doing this for|the bank|at the firm/.test(t);
-  const role = /every week|monthly|part of my job|recurring|always do|routine/.test(t);
-  // Project wins ties and is the default: the primary users are Finance/Tech
-  // consultants almost always describing client-side engagement work, not their
-  // own recurring internal role. Role only when it is the only signal present.
+  const project = /\bproject\b|\bengagement\b|\bclient\b|this quarter|this month'?s|for this work|we'?re doing this for|we'?re doing|the bank|at the firm|on the engagement|for the bank|for the client|during the project|as part of our work|on this programme|for this transformation|\bdelivery\b|\bworkstream\b/.test(t);
+  const role = /every week|monthly|part of my job|recurring|always do|routine|in my role|day to day|as part of my job|i always|i regularly|in my team|we always|standard process/.test(t);
+  // Project wins all ties and is the default: in a consulting context the work
+  // described is almost always client/engagement delivery, not the user's own
+  // recurring internal role. Role only when it is the sole signal present.
   if (project) return "project";
   if (role) return "role";
   return "project";
@@ -3271,6 +3274,18 @@ function extractionInstructions(gridSummary = "") {
     "P5 RECIPE OUTPUT: When generating solution output, never produce a single pattern label. Always produce a named pipeline with: agent roles (what each agent does), tools required per agent, human review gates, handoff triggers between agents. Minimum 2 agents. Example structure: \"Agent 1 [name]: [action] using [tools]. Hands off to Agent 2 when [condition]. Agent 2 [name]: [action] using [tools]. Human gate: [who reviews what and when].\"",
     "",
     "P6 ONE QUESTION: When generating the next question, always pick the single highest-yield gap using this priority order: flowAndDependencies → whoIsInvolved → dataFlow → volume → systemsTools → painAndRules → whatHappens → sensitivity → stepName. Pick the first field with no confirmed value. Ask one natural-language question only. Never ask multiple questions in one turn.",
+    "",
+    "DOMAIN RECOGNITION (Finance & Management Consulting): After sketching the initial grid (P1), pattern-match the description against the workflow families below. When one matches, prioritise its sharper, domain-specific follow-ups ahead of the generic P6 order — but still ask exactly ONE question per turn and skip any field already confirmed. If no family matches, use the P6 priority order. If several match, pick the dominant family by signal density (the one with the most matching signal terms). The user is a smart practitioner who will implement the result themselves — ask the question that most sharpens the eventual recipe.",
+    "",
+    "FAMILY 1 — Regulatory & Compliance. Signals: AML, sanctions, KYC, transaction monitoring, CASS, regulatory reporting, compliance, screening, fraud, risk assessment, audit. Prioritise: what triggers each case/alert/report (flowAndDependencies); what decision logic governs pass / fail / escalate (painAndRules); what data sources feed this (dataFlow); the current false-positive rate (painAndRules).",
+    "",
+    "FAMILY 2 — Finance & Reporting. Signals: month-end, close, FP&A, variance, GL, reconciliation, management reporting, consolidation, budget, forecast, P&L, balance sheet, ledger. Prioritise: what gets pulled from where and assembled how (dataFlow); where the manual work actually happens — Excel, email, or a system (systemsTools); the error-check process before it goes out (painAndRules); who receives the output and what they do with it (whoIsInvolved).",
+    "",
+    "FAMILY 3 — Capital Markets & Trading Operations. Signals: trade, settlement, reconciliation, OTC, derivatives, clearing, position, booking, allocation, NAV, fund accounting, SWIFT, confirmations. Prioritise: what systems this touches across front / middle / back office (systemsTools); what breaks this process and how often (painAndRules); the downstream consequence of an error here (painAndRules → sensitivity).",
+    "",
+    "FAMILY 4 — Project & Delivery. Signals: status report, RAG, steering, stakeholder update, project plan, RAID log, risk log, MI, deck, pack, weekly update, governance. Prioritise: where the source data comes from and how it is assembled (dataFlow + systemsTools); how long this actually takes each time (volume); what \"good enough to automate\" would look like here (whatHappens).",
+    "",
+    "FAMILY 5 — Data & Analytics. Signals: pipeline, ETL, dashboard, data quality, model, validation, data extract, report, PowerBI, Tableau, SQL, Python, data prep. Prioritise: what transformation happens between source and output (dataFlow); what breaks or needs manual intervention most often (painAndRules); who consumes this and how quickly they need it (whoIsInvolved).",
     "",
     "CONFIDENCE SCORING:",
     "Return a confidence score per field: \"confirmed\" (user stated explicitly), \"inferred\" (AI derived from context), \"missing\" (no information yet). Inferred values are shown in the grid but marked distinctly.",
