@@ -6101,7 +6101,59 @@ function syncRecipeExportButton(btn) {
   btn.style.cursor = "pointer";
 }
 
+// === Phase 10a: data sensitivity confirmation guard ========================
+// Before any High-sensitivity workflow (or a large document) is sent to OpenAI,
+// the user must explicitly confirm. Inline hex only; no new CSS variables.
+function isSensitiveSession() {
+  const containsHigh = (text) => /high|restricted|confidential/i.test(String(text || ""));
+  // The classification baseline lives on the workflow grid (object .value);
+  // sessionMeta is also checked defensively in case a string is stored there.
+  const baselineGrid = state.workflowGrid?.dataSensitivityBaseline?.value || "";
+  const baselineMeta = state.sessionMeta?.dataSensitivityBaseline || "";
+  if (containsHigh(baselineGrid) || containsHigh(baselineMeta)) return true;
+  const steps = Array.isArray(state.workflowGrid?.steps) ? state.workflowGrid.steps : [];
+  return steps.some((step) => /^\s*high/i.test(String(step?.cells?.dataSensitivity?.value || "")));
+}
+
+// Centred confirm modal (mode-picker overlay style). Cancel / clicking the
+// backdrop closes it and does nothing; "Proceed anyway" closes and runs onConfirm.
+function showSensitivityConfirmModal(onConfirm, options = {}) {
+  document.getElementById("sensitivityModal")?.remove();
+  const heading = options.heading || "This workflow contains sensitive data";
+  const bodyText = options.body || "One or more steps are marked High sensitivity. This content will be sent to OpenAI for processing. Only proceed if this is permitted under your firm's data handling policy.";
+  const overlay = document.createElement("div");
+  overlay.id = "sensitivityModal";
+  overlay.style.cssText = "position:fixed;inset:0;background:#0a1525;display:flex;align-items:center;justify-content:center;z-index:1000;padding:24px;";
+  overlay.innerHTML = `
+    <div id="sensitivityPanel" style="background:#162438;border:1px solid #1e3350;border-radius:12px;padding:32px;max-width:480px;width:100%;box-sizing:border-box;text-align:center;">
+      <div style="font-size:32px;line-height:1;margin-bottom:14px;">⚠️</div>
+      <div style="color:#ffffff;font-size:16px;font-weight:700;margin-bottom:10px;">${heading}</div>
+      <div style="color:#8899aa;font-size:13px;line-height:1.55;margin-bottom:22px;">${bodyText}</div>
+      <div style="display:flex;gap:12px;justify-content:center;">
+        <button id="sensitivityCancel" type="button" style="background:#162438;color:#8899aa;border:1px solid #1e3350;border-radius:6px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
+        <button id="sensitivityProceed" type="button" style="background:#1e3350;color:#f59e0b;border:1px solid #f59e0b;border-radius:6px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;">Proceed anyway</button>
+      </div>
+    </div>`;
+  const close = () => overlay.remove();
+  document.body.appendChild(overlay);
+  overlay.addEventListener("click", (event) => { if (event.target === overlay) close(); }); // backdrop = Cancel
+  overlay.querySelector("#sensitivityCancel").addEventListener("click", close);
+  overlay.querySelector("#sensitivityProceed").addEventListener("click", () => {
+    close();
+    if (typeof onConfirm === "function") onConfirm();
+  });
+}
+
 async function generateRecipePrompt(stepId) {
+  // Phase 10a: confirm before sending a High-sensitivity workflow to OpenAI.
+  if (isSensitiveSession()) {
+    showSensitivityConfirmModal(() => runRecipeGeneration(stepId));
+    return;
+  }
+  return runRecipeGeneration(stepId);
+}
+
+async function runRecipeGeneration(stepId) {
   const step = analysisGridSteps().find((s) => s.id === stepId);
   if (!step) return;
   const body = document.querySelector(`[data-recipe-body="${stepId}"]`);
@@ -7464,6 +7516,19 @@ function wireDocUploadZone(el) {
 // and lands on the Analysis Studio grid tab; multiple workflows open the
 // selection panel. Soft-fails back to the upload zone.
 async function handleDocumentUpload(file, el) {
+  // Phase 10a: large documents are sent to OpenAI — confirm before uploading.
+  // (Sensitivity isn't known pre-analysis, so size is the available signal.)
+  if (file && file.size > 500 * 1024) {
+    showSensitivityConfirmModal(() => runDocumentUpload(file, el), {
+      heading: "Large document",
+      body: "This is a large document. It will be sent to OpenAI for analysis. Only proceed if this is permitted under your firm's data handling policy."
+    });
+    return;
+  }
+  return runDocumentUpload(file, el);
+}
+
+async function runDocumentUpload(file, el) {
   docUploadInProgress = true;
   toast("Analysing document…");
   renderDocUploadLoading(el);
