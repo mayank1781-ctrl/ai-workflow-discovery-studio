@@ -1079,6 +1079,11 @@ const server = http.createServer(async (req, res) => {
       return await handleUpdateSessionMetadata(req, res, sessionId);
     }
 
+    if (req.method === "PATCH" && requestUrl.pathname.startsWith("/api/sessions/") && requestUrl.pathname.endsWith("/outcome")) {
+      const sessionId = requestUrl.pathname.split("/").at(-2);
+      return await handleUpdateSessionOutcome(req, res, sessionId);
+    }
+
     if (requestUrl.pathname.startsWith("/api/sessions/")) {
       const sessionId = requestUrl.pathname.split("/").pop();
       if (req.method === "GET") return await handleGetSession(req, res, sessionId);
@@ -2353,6 +2358,10 @@ async function handleGetSession(req, res, sessionId) {
       });
     }
   }
+  // PR 16: surface the per-session outcome status, defaulting to "not_started".
+  // Falls back to the state mirror so a session saved before this field existed
+  // (or after a full save) still reports the right status.
+  payload.outcomeStatus = payload.outcomeStatus || payload.state?.sessionMeta?.outcomeStatus || "not_started";
   appendAudit(req, "session_loaded", { sessionId: safeId, content: payload.state });
   return sendJson(res, 200, payload);
 }
@@ -2403,6 +2412,45 @@ async function handleUpdateSessionMetadata(req, res, sessionId) {
   await fs.writeFile(filePath, JSON.stringify(payload, null, 2));
   appendAudit(req, "session_saved", { sessionId: safeId, detail: "metadata" });
   return sendJson(res, 200, { ok: true, workflowName: payload.workflowName, engagementContext: payload.engagementContext });
+}
+
+// PR 16: set the per-session outcome status (not_started | building | live).
+// Persists at the file top level and mirrors into state.sessionMeta so the
+// value survives a later full save. Same ownership scoping as the other
+// session endpoints.
+const OUTCOME_STATUSES = new Set(["not_started", "building", "live"]);
+async function handleUpdateSessionOutcome(req, res, sessionId) {
+  const safeId = safeIdentifier(sessionId);
+  if (!safeId) return sendJson(res, 400, { error: "Invalid session id" });
+  await ensureDataDirs();
+  const filePath = path.join(SESSIONS_DIR, `${safeId}.json`);
+  let payload;
+  try {
+    payload = JSON.parse(await fs.readFile(filePath, "utf8"));
+  } catch {
+    return sendJson(res, 404, { error: "Session not found" });
+  }
+  const userId = currentUserId(req);
+  if (userId) {
+    if (payload.userId && payload.userId !== userId) return sendJson(res, 404, { error: "Session not found" });
+    if (!payload.userId) payload.userId = userId; // claim-on-access
+  }
+  let body;
+  try {
+    body = await readJson(req);
+  } catch {
+    body = {};
+  }
+  const status = String(body.status || "");
+  if (!OUTCOME_STATUSES.has(status)) return sendJson(res, 400, { error: "Invalid status" });
+  payload.outcomeStatus = status;
+  payload.state = payload.state || {};
+  payload.state.sessionMeta = payload.state.sessionMeta || {};
+  payload.state.sessionMeta.outcomeStatus = status;
+  payload.savedAt = new Date().toISOString();
+  await fs.writeFile(filePath, JSON.stringify(payload, null, 2));
+  appendAudit(req, "session_saved", { sessionId: safeId, detail: "outcome" });
+  return sendJson(res, 200, { ok: true, outcomeStatus: status });
 }
 
 async function handleSaveSession(req, res) {
