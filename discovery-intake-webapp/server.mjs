@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import crypto from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import dotenv from "dotenv";
 import Busboy from "busboy";
 import mammoth from "mammoth";
@@ -123,6 +124,89 @@ const SESSIONS_DIR = path.join(DATA_DIR, "sessions");
 const AUDIT_DIR = path.join(DATA_DIR, "audit");
 const PACKAGES_DIR = path.join(DATA_DIR, "packages");
 const CONNECTIONS_DIR = path.join(DATA_DIR, "connections");
+
+// === Phase 9a: SQLite session storage =======================================
+// Sessions move from flat JSON files (SESSIONS_DIR) into a single SQLite file.
+// The connections directory (Jira/Confluence tokens) stays as flat JSON. Uses
+// the built-in node:sqlite synchronous API — no new npm dependency.
+const DB_PATH = path.join(DATA_DIR, "sessions.db");
+fsSync.mkdirSync(DATA_DIR, { recursive: true }); // DB is opened at module load
+const db = new DatabaseSync(DB_PATH);
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    data TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+`);
+
+// A falsy userId (auth disabled / no session — the current default) maps to a
+// shared "anon" owner so the NOT NULL column is satisfied and the no-auth case
+// still lists every session, mirroring the old file behaviour.
+function sessionOwnerKey(userId) {
+  return userId || "anon";
+}
+
+function loadSession(userId, sessionId) {
+  const row = db.prepare("SELECT data FROM sessions WHERE id = ? AND user_id = ?").get(sessionId, sessionOwnerKey(userId));
+  return row ? JSON.parse(row.data) : null;
+}
+
+// Raw owner lookup by id (ignores ownership) for the save/delete conflict checks.
+function sessionRowOwner(sessionId) {
+  const row = db.prepare("SELECT user_id FROM sessions WHERE id = ?").get(sessionId);
+  return row ? row.user_id : null;
+}
+
+function saveSession(userId, sessionId, data) {
+  const now = new Date().toISOString();
+  const existing = db.prepare("SELECT created_at FROM sessions WHERE id = ?").get(sessionId);
+  const createdAt = existing?.created_at || now;
+  db.prepare("INSERT OR REPLACE INTO sessions (id, user_id, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+    .run(sessionId, sessionOwnerKey(userId), JSON.stringify(data), createdAt, now);
+}
+
+function listSessions(userId) {
+  const rows = db.prepare("SELECT id, data FROM sessions WHERE user_id = ? ORDER BY updated_at DESC").all(sessionOwnerKey(userId));
+  return rows.map((row) => JSON.parse(row.data));
+}
+
+function deleteSession(userId, sessionId) {
+  db.prepare("DELETE FROM sessions WHERE id = ? AND user_id = ?").run(sessionId, sessionOwnerKey(userId));
+}
+
+// One-time migration: import any pre-existing flat JSON session files so an
+// upgrade doesn't lose data. Only inserts when no row already exists for that id.
+function migrateJsonSessionsToSqlite() {
+  let entries;
+  try {
+    entries = fsSync.readdirSync(SESSIONS_DIR, { withFileTypes: true });
+  } catch {
+    return; // no legacy sessions directory — nothing to migrate
+  }
+  const exists = db.prepare("SELECT 1 FROM sessions WHERE id = ?");
+  const insert = db.prepare("INSERT INTO sessions (id, user_id, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?)");
+  let migrated = 0;
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+    const id = entry.name.slice(0, -5); // strip ".json"
+    if (exists.get(id)) continue;
+    try {
+      const raw = fsSync.readFileSync(path.join(SESSIONS_DIR, entry.name), "utf8");
+      const payload = JSON.parse(raw);
+      const ts = payload.savedAt || new Date().toISOString();
+      insert.run(id, sessionOwnerKey(payload.userId), raw, ts, ts);
+      migrated += 1;
+    } catch (error) {
+      console.warn(`Could not migrate session file ${entry.name}:`, error.message);
+    }
+  }
+  if (migrated) console.log(`[sqlite] migrated ${migrated} JSON session(s) into ${DB_PATH}`);
+}
+migrateJsonSessionsToSqlite();
 
 // Phase 6a: Jira (Atlassian Cloud) connector — OAuth2 3LO, zero new deps.
 const JIRA_CLIENT_ID = process.env.JIRA_CLIENT_ID || "";
@@ -2357,23 +2441,11 @@ async function handleTextToSpeech(req, res) {
 }
 
 async function handleListSessions(req, res) {
-  await ensureDataDirs();
   const userId = currentUserId(req);
-  const entries = await fs.readdir(SESSIONS_DIR, { withFileTypes: true }).catch(() => []);
-  const summaries = [];
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
-    try {
-      const payload = JSON.parse(await fs.readFile(path.join(SESSIONS_DIR, entry.name), "utf8"));
-      // No user (auth off) → list everything, as before. With a user, show only
-      // their own sessions; legacy/unclaimed sessions (no userId) stay hidden
-      // until claimed via load/save (claim-on-access).
-      if (userId && payload.userId !== userId) continue;
-      summaries.push(payload.summary || summarizeSession(payload.state || {}));
-    } catch (error) {
-      console.warn(`Could not read session ${entry.name}:`, error.message);
-    }
-  }
+  // Auth off → everything is owned by "anon", so the user sees all sessions, as
+  // before. With a user, listSessions only returns rows owned by that user.
+  const payloads = listSessions(userId);
+  const summaries = payloads.map((payload) => payload.summary || summarizeSession(payload.state || {}));
   summaries.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
   return sendJson(res, 200, { sessions: summaries });
 }
@@ -2381,26 +2453,11 @@ async function handleListSessions(req, res) {
 async function handleGetSession(req, res, sessionId) {
   const safeId = safeIdentifier(sessionId);
   if (!safeId) return sendJson(res, 400, { error: "Invalid session id" });
-  await ensureDataDirs();
-  const filePath = path.join(SESSIONS_DIR, `${safeId}.json`);
-  let payload;
-  try {
-    payload = JSON.parse(await fs.readFile(filePath, "utf8"));
-  } catch {
-    return sendJson(res, 404, { error: "Session not found" });
-  }
   const userId = currentUserId(req);
-  if (userId) {
-    // Owned by someone else → 404 (don't leak existence).
-    if (payload.userId && payload.userId !== userId) return sendJson(res, 404, { error: "Session not found" });
-    // Legacy/unclaimed → claim-on-access: stamp this user and resave.
-    if (!payload.userId) {
-      payload.userId = userId;
-      await fs.writeFile(filePath, JSON.stringify(payload, null, 2)).catch((error) => {
-        console.warn(`Could not claim session ${safeId}:`, error.message);
-      });
-    }
-  }
+  // Owned by someone else (or missing) → 404, don't leak existence. The
+  // WHERE user_id filter in loadSession enforces ownership.
+  const payload = loadSession(userId, safeId);
+  if (!payload) return sendJson(res, 404, { error: "Session not found" });
   // PR 16: surface the per-session outcome status, defaulting to "not_started".
   // Falls back to the state mirror so a session saved before this field existed
   // (or after a full save) still reports the right status.
@@ -2416,19 +2473,9 @@ async function handleGetSession(req, res, sessionId) {
 async function handleUpdateSessionMetadata(req, res, sessionId) {
   const safeId = safeIdentifier(sessionId);
   if (!safeId) return sendJson(res, 400, { error: "Invalid session id" });
-  await ensureDataDirs();
-  const filePath = path.join(SESSIONS_DIR, `${safeId}.json`);
-  let payload;
-  try {
-    payload = JSON.parse(await fs.readFile(filePath, "utf8"));
-  } catch {
-    return sendJson(res, 404, { error: "Session not found" });
-  }
   const userId = currentUserId(req);
-  if (userId) {
-    if (payload.userId && payload.userId !== userId) return sendJson(res, 404, { error: "Session not found" });
-    if (!payload.userId) payload.userId = userId; // claim-on-access
-  }
+  const payload = loadSession(userId, safeId);
+  if (!payload) return sendJson(res, 404, { error: "Session not found" });
   let body;
   try {
     body = await readJson(req);
@@ -2452,7 +2499,7 @@ async function handleUpdateSessionMetadata(req, res, sessionId) {
   payload.summary = summarizeSession(payload.state);
   payload.workflowName = payload.summary.workflowName;
   payload.engagementContext = payload.summary.engagementContext;
-  await fs.writeFile(filePath, JSON.stringify(payload, null, 2));
+  saveSession(userId, safeId, payload);
   appendAudit(req, "session_saved", { sessionId: safeId, detail: "metadata" });
   return sendJson(res, 200, { ok: true, workflowName: payload.workflowName, engagementContext: payload.engagementContext });
 }
@@ -2465,19 +2512,9 @@ const OUTCOME_STATUSES = new Set(["not_started", "building", "live"]);
 async function handleUpdateSessionOutcome(req, res, sessionId) {
   const safeId = safeIdentifier(sessionId);
   if (!safeId) return sendJson(res, 400, { error: "Invalid session id" });
-  await ensureDataDirs();
-  const filePath = path.join(SESSIONS_DIR, `${safeId}.json`);
-  let payload;
-  try {
-    payload = JSON.parse(await fs.readFile(filePath, "utf8"));
-  } catch {
-    return sendJson(res, 404, { error: "Session not found" });
-  }
   const userId = currentUserId(req);
-  if (userId) {
-    if (payload.userId && payload.userId !== userId) return sendJson(res, 404, { error: "Session not found" });
-    if (!payload.userId) payload.userId = userId; // claim-on-access
-  }
+  const payload = loadSession(userId, safeId);
+  if (!payload) return sendJson(res, 404, { error: "Session not found" });
   let body;
   try {
     body = await readJson(req);
@@ -2491,7 +2528,7 @@ async function handleUpdateSessionOutcome(req, res, sessionId) {
   payload.state.sessionMeta = payload.state.sessionMeta || {};
   payload.state.sessionMeta.outcomeStatus = status;
   payload.savedAt = new Date().toISOString();
-  await fs.writeFile(filePath, JSON.stringify(payload, null, 2));
+  saveSession(userId, safeId, payload);
   appendAudit(req, "session_saved", { sessionId: safeId, detail: "outcome" });
   return sendJson(res, 200, { ok: true, outcomeStatus: status });
 }
@@ -2501,19 +2538,14 @@ async function handleSaveSession(req, res) {
   const state = body.state || {};
   const summary = summarizeSession(state);
   if (!summary.id) return sendJson(res, 400, { error: "Session id is required" });
-  await ensureDataDirs();
   const userId = currentUserId(req);
-  const filePath = path.join(SESSIONS_DIR, `${safeIdentifier(summary.id)}.json`);
-  let existed = false;
-  if (userId) {
-    // Block overwriting a session owned by a different user (404, no leak).
-    try {
-      const existing = JSON.parse(await fs.readFile(filePath, "utf8"));
-      existed = true;
-      if (existing.userId && existing.userId !== userId) return sendJson(res, 404, { error: "Session not found" });
-    } catch {
-      // no existing file — first save
-    }
+  const id = safeIdentifier(summary.id);
+  const existingOwner = sessionRowOwner(id);
+  const existed = existingOwner !== null;
+  // Block overwriting a session owned by a different (real) user (404, no leak).
+  // "anon" rows are treated as unclaimed and may be claimed on save.
+  if (userId && existingOwner && existingOwner !== "anon" && existingOwner !== sessionOwnerKey(userId)) {
+    return sendJson(res, 404, { error: "Session not found" });
   }
   const payload = {
     version: 1,
@@ -2525,27 +2557,22 @@ async function handleSaveSession(req, res) {
     engagementContext: summary.engagementContext
   };
   if (userId) payload.userId = userId; // stamp owner only when a user is present
-  await fs.writeFile(filePath, JSON.stringify(payload, null, 2));
-  appendAudit(req, existed ? "session_saved" : "session_created", { sessionId: safeIdentifier(summary.id), content: state });
+  saveSession(userId, id, payload);
+  appendAudit(req, existed ? "session_saved" : "session_created", { sessionId: id, content: state });
   return sendJson(res, 200, { ok: true, summary });
 }
 
 async function handleDeleteSession(req, res, sessionId) {
   const safeId = safeIdentifier(sessionId);
   if (!safeId) return sendJson(res, 400, { error: "Invalid session id" });
-  await ensureDataDirs();
-  const filePath = path.join(SESSIONS_DIR, `${safeId}.json`);
   const userId = currentUserId(req);
-  if (userId) {
-    // Same ownership check as get: another user's session → 404, don't delete.
-    try {
-      const existing = JSON.parse(await fs.readFile(filePath, "utf8"));
-      if (existing.userId && existing.userId !== userId) return sendJson(res, 404, { error: "Session not found" });
-    } catch {
-      // missing file → fall through to the idempotent rm below
-    }
+  // Another (real) user's session → 404, don't delete. "anon" rows are
+  // unclaimed and deletable.
+  const existingOwner = sessionRowOwner(safeId);
+  if (userId && existingOwner && existingOwner !== "anon" && existingOwner !== sessionOwnerKey(userId)) {
+    return sendJson(res, 404, { error: "Session not found" });
   }
-  await fs.rm(filePath, { force: true });
+  deleteSession(userId, safeId);
   appendAudit(req, "session_deleted", { sessionId: safeId });
   return sendJson(res, 200, { ok: true });
 }
