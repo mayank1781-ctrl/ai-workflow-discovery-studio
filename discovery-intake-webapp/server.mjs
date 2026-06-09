@@ -1229,7 +1229,46 @@ async function handleExtract(req, res) {
     });
   }
 
+  // Live confidence grid (PR 8): echo the latest extraction as a 9-field,
+  // 3-layer gridState alongside the AI message. The client renders its live
+  // grid from the accumulated workflowGrid (authoritative across turns); this
+  // is the per-response shape the live panel reacts to.
+  parsed.gridState = extractionGridState(parsed);
+
   return sendJson(res, 200, parsed);
+}
+
+// Maps the latest extraction output into the 9-field / 3-layer gridState shape
+// used by the Discovery live grid. Confidence is derived from the extraction's
+// overall confidence enum (low 0.4 / medium 0.6 / high 0.85); fields with no
+// value get { value: null, confidence: 0 }.
+function extractionGridState(parsed) {
+  const steps = parsed?.newRecords?.steps;
+  const step = Array.isArray(steps) && steps.length ? steps[steps.length - 1] : {};
+  const fields = parsed?.fields || {};
+  const base = parsed?.confidence === "high" ? 0.85 : parsed?.confidence === "medium" ? 0.6 : 0.4;
+  const join = (...vals) => vals.map((v) => (typeof v === "string" ? v.trim() : "")).filter(Boolean).join(" — ");
+  const cell = (raw) => {
+    const value = typeof raw === "string" ? raw.trim() : "";
+    return { value: value || null, confidence: value ? base : 0 };
+  };
+  return {
+    layer1: {
+      stepName: cell(step.name || fields.workflowName),
+      whatHappens: cell(step.action),
+      flowAndDependencies: cell(join(step.trigger, step.output, step.handoff)),
+      volume: cell(step.time),
+      systemsTools: cell(step.tool)
+    },
+    layer2: {
+      whoIsInvolved: cell(step.actor),
+      painAndRules: cell(join(step.pain, step.decision, step.exceptions))
+    },
+    layer3: {
+      dataFlow: cell(join(step.input, step.dataHandling)),
+      sensitivity: cell(step.dataSensitivity)
+    }
+  };
 }
 
 // Count distinct numbered sections in raw document text — list markers like
