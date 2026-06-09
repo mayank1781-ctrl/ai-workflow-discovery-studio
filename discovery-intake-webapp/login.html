@@ -85,10 +85,14 @@
         var params = new URLSearchParams(window.location.search);
         var error = params.get("error");
         if (!error) return;
+        var messages = {
+          config: "Auth is not configured — contact your administrator",
+          state: "Login session expired — please try again",
+          token: "Authentication failed — please try again",
+          cancelled: "Login was cancelled"
+        };
         var el = document.getElementById("loginError");
-        el.textContent = error === "config"
-          ? "Sign-in is not configured yet. Contact your administrator."
-          : "Sign-in could not be completed. Please try again.";
+        el.textContent = messages[error] || "Login failed — please try again";
         el.style.display = "block";
       })();
     </script>
