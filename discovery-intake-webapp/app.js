@@ -3404,6 +3404,7 @@ function render() {
   renderTextIntakeAssist();
   renderLiveSpeechDraft();
   renderWorkflowGridPanel();
+  renderLiveExtractionGrid();
   updateConfidenceCards();
   updateProcessFlowMapCompact();
   if (els.sectionTitle) els.sectionTitle.textContent = section.label;
@@ -3893,6 +3894,199 @@ function gridCellDisplay(cell) {
   }
   const text = typeof value === "string" ? value : value ? String(value) : "";
   return { text, state: cell.state || "empty" };
+}
+
+// === Live extraction grid (PR 8) ===========================================
+// A compact, real-time view of the 9 grid fields across 3 layers, shown in the
+// Discovery right rail. It renders from the accumulated workflowGrid (which
+// carries real per-cell confidence) and re-renders after each extraction, so
+// the user watches cells fill in as they talk. Confidence drives the cell
+// colour; updated cells flash the layer colour before settling.
+const LIVE_GRID_LAYERS = [
+  {
+    key: "layer1", name: "THE FLOW", color: "#00d4b4", fields: [
+      { key: "stepName", label: "Step name", cells: ["name"] },
+      { key: "whatHappens", label: "What happens", cells: ["description"] },
+      { key: "flowAndDependencies", label: "Flow & dependencies", cells: ["trigger", "output", "handoff"] },
+      { key: "volume", label: "Volume", cells: ["frequencyVolume", "timeTaken"] },
+      { key: "systemsTools", label: "Systems & tools", cells: ["systemsTools"] }
+    ]
+  },
+  {
+    key: "layer2", name: "PEOPLE & FRICTION", color: "#ff4fc8", fields: [
+      { key: "whoIsInvolved", label: "Who's involved", cells: ["personaActors"] },
+      { key: "painAndRules", label: "Pain & rules", cells: ["painFriction", "rulesDecisionLogic", "exceptionBranching"] }
+    ]
+  },
+  {
+    key: "layer3", name: "DATA & RISK", color: "#f59e0b", fields: [
+      { key: "dataFlow", label: "Data flow", cells: ["dataProcessing"] },
+      { key: "sensitivity", label: "Sensitivity", cells: ["dataSensitivity", "regulatoryContext"] }
+    ]
+  }
+];
+
+let liveGridCollapsed = false;
+let liveGridPrev = null;
+
+function hexToRgba(hex, alpha) {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+// Per-cell-state confidence fallback when a cell has a value but no numeric
+// confidence recorded.
+function liveGridStateConfidence(cellState) {
+  if (cellState === "confirmed") return 0.85;
+  if (cellState === "inferred") return 0.55;
+  if (cellState === "unknown") return 0.2;
+  return 0;
+}
+
+// Collapse a field's underlying cells into { value, confidence } for the step
+// currently in focus.
+function liveGridFieldValue(step, cellKeys) {
+  if (!step) return { value: null, confidence: 0 };
+  const parts = [];
+  let confidence = 0;
+  cellKeys.forEach((key) => {
+    const value = gridCellValue(step, key);
+    if (value) {
+      parts.push(value);
+      const raw = step.cells?.[key]?.confidence;
+      const conf = (typeof raw === "number" && Number.isFinite(raw)) ? raw : liveGridStateConfidence(gridCellState(step, key));
+      confidence = Math.max(confidence, conf);
+    }
+  });
+  const value = parts.join(" — ").trim();
+  return { value: value || null, confidence: value ? confidence : 0 };
+}
+
+function buildLiveGridState() {
+  const step = currentGridStep();
+  const out = {};
+  LIVE_GRID_LAYERS.forEach((layer) => {
+    out[layer.key] = {};
+    layer.fields.forEach((field) => {
+      out[layer.key][field.key] = liveGridFieldValue(step, field.cells);
+    });
+  });
+  return out;
+}
+
+// Confidence → cell background + left border (see PR brief).
+function liveGridCellStyle(color, confidence, hasValue) {
+  if (!hasValue) return "background:#0a1525;border-left:2px solid transparent;";
+  if (confidence >= 0.7) return `background:${hexToRgba(color, 0.15)};border-left:2px solid ${color};`;
+  if (confidence >= 0.4) return `background:${hexToRgba(color, 0.07)};border-left:1px dashed ${color};`;
+  return "background:#1e3350;border-left:1px dashed #445566;";
+}
+
+function renderLiveExtractionGrid() {
+  const host = document.getElementById("liveExtractionGrid");
+  if (!host) return;
+  const gridState = buildLiveGridState();
+
+  let captured = 0;
+  let totalFields = 0;
+  LIVE_GRID_LAYERS.forEach((layer) => layer.fields.forEach((field) => {
+    totalFields += 1;
+    if ((gridState[layer.key][field.key].confidence || 0) >= 0.4) captured += 1;
+  }));
+  const pct = totalFields ? Math.round((captured / totalFields) * 100) : 0;
+  const allCovered = captured === totalFields && totalFields > 0;
+  const barLabel = allCovered
+    ? `<span style="color:#00d4b4;font-weight:600;">All key areas covered — ready to analyse.</span>`
+    : `<span style="color:#5b7186;">${captured} of ${totalFields} fields captured</span>`;
+  const completeness = `
+    <div style="margin-bottom:14px;">
+      <div style="font-size:11px;margin-bottom:5px;">${barLabel}</div>
+      <div style="height:6px;border-radius:99px;background:#0a1525;overflow:hidden;">
+        <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#00d4b4,#a855f7);border-radius:99px;transition:width 300ms ease;"></div>
+      </div>
+    </div>`;
+
+  const layersHtml = LIVE_GRID_LAYERS.map((layer) => {
+    const filled = layer.fields.filter((field) => (gridState[layer.key][field.key].confidence || 0) >= 0.4).length;
+    const cellsHtml = layer.fields.map((field) => {
+      const cell = gridState[layer.key][field.key];
+      const hasValue = Boolean(cell.value);
+      const style = liveGridCellStyle(layer.color, cell.confidence, hasValue);
+      const valueHtml = hasValue
+        ? `<div style="font-size:12px;color:#c7d4e3;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${escapeHtml(cell.value)}</div>`
+        : `<div style="font-size:12px;color:#3f5878;">—</div>`;
+      return `
+        <div data-lg-cell="${layer.key}.${field.key}" style="${style}border-radius:6px;padding:7px 9px;margin-bottom:6px;transition:background-color 300ms ease;">
+          <div style="font-size:10px;color:#5b7186;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px;">${escapeHtml(field.label)}</div>
+          ${valueHtml}
+        </div>`;
+    }).join("");
+    return `
+      <div style="margin-bottom:14px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;">
+          <span style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:${layer.color};">${escapeHtml(layer.name)}</span>
+          <span style="font-size:10px;font-weight:700;color:${layer.color};background:${hexToRgba(layer.color, 0.15)};border:1px solid ${hexToRgba(layer.color, 0.4)};border-radius:99px;padding:1px 8px;">${filled}/${layer.fields.length}</span>
+        </div>
+        ${cellsHtml}
+      </div>`;
+  }).join("");
+
+  host.innerHTML = `
+    <div class="ds-card" style="padding:14px 16px;margin-top:14px;">
+      <div data-lg-toggle role="button" tabindex="0" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+        <strong style="font-size:13px;color:#e8f4ff;">Live extraction grid</strong>
+        <span data-lg-chevron style="color:#5b7186;font-size:12px;transition:transform 200ms ease;transform:rotate(${liveGridCollapsed ? "-90" : "0"}deg);">▾</span>
+      </div>
+      <div data-lg-body style="${liveGridCollapsed ? "display:none;" : ""}margin-top:12px;">
+        ${completeness}
+        ${layersHtml}
+      </div>
+    </div>`;
+
+  const toggle = host.querySelector("[data-lg-toggle]");
+  const body = host.querySelector("[data-lg-body]");
+  const chevron = host.querySelector("[data-lg-chevron]");
+  const doToggle = () => {
+    liveGridCollapsed = !liveGridCollapsed;
+    if (body) body.style.display = liveGridCollapsed ? "none" : "";
+    if (chevron) chevron.style.transform = `rotate(${liveGridCollapsed ? "-90" : "0"}deg)`;
+  };
+  toggle?.addEventListener("click", doToggle);
+  toggle?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); doToggle(); }
+  });
+
+  // Flash cells whose value/confidence changed since the last render, then
+  // settle to the confidence colour (300ms).
+  if (liveGridPrev) {
+    LIVE_GRID_LAYERS.forEach((layer) => layer.fields.forEach((field) => {
+      const cur = gridState[layer.key][field.key];
+      const prev = liveGridPrev[layer.key]?.[field.key];
+      const changed = !prev || prev.value !== cur.value || Math.abs((prev.confidence || 0) - (cur.confidence || 0)) > 0.001;
+      if (changed && cur.value) {
+        const el = host.querySelector(`[data-lg-cell="${layer.key}.${field.key}"]`);
+        if (el) {
+          const settle = el.style.background;
+          el.style.transition = "none";
+          el.style.background = hexToRgba(layer.color, 0.3);
+          requestAnimationFrame(() => {
+            el.style.transition = "background-color 300ms ease";
+            el.style.background = settle;
+          });
+        }
+      }
+    }));
+  }
+  liveGridPrev = gridState;
+}
+
+// Public hook called after a discovery extraction. The optional server gridState
+// echo is accepted, but the panel renders from the authoritative client grid.
+function updateLiveGrid(/* gridState */) {
+  renderLiveExtractionGrid();
 }
 
 function renderWorkflowGridPanel() {
@@ -9807,6 +10001,7 @@ async function aiExtractAnswer(options = {}) {
       return;
     }
     applyExtraction(result, { beforeStepCount, beforeActiveStepIndex, answer, askedQuestion });
+    updateLiveGrid(result.gridState);
     mergeStepAnchorsFromAnswer(answer, { beforeStepCount, beforeActiveStepIndex });
     mergeCurrentStepDetailHintsFromAnswer(answer, { beforeStepCount, beforeActiveStepIndex });
     const after = intakeSnapshot();
