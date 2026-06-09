@@ -1328,7 +1328,7 @@ function bindEvents() {
     toast("Session saved locally.");
   });
 
-  document.getElementById("topbarNewButton")?.addEventListener("click", () => createNewSession({ appMode: "interview", activeWorkbenchTab: "handoff" }));
+  document.getElementById("topbarNewButton")?.addEventListener("click", openDiscoveryModePicker);
   // Outside-click dismiss for the Open (saved sessions) dropdown — it can get
   // long, so unlike the Help menu it closes when you click anywhere outside it.
   document.addEventListener("click", (event) => {
@@ -1384,7 +1384,7 @@ function bindEvents() {
   els.sessionOwnerInput?.addEventListener("input", updateSessionMetadataFromControls);
   els.sessionDataClassificationSelect?.addEventListener("change", updateSessionMetadataFromControls);
   els.sessionStatusSelect?.addEventListener("change", updateSessionMetadataFromControls);
-  els.newSessionButton?.addEventListener("click", createNewSession);
+  els.newSessionButton?.addEventListener("click", openDiscoveryModePicker);
   els.duplicateSessionButton?.addEventListener("click", () => duplicateCurrentSession());
   els.saveSessionLibraryButton?.addEventListener("click", () => {
     persistState();
@@ -7341,6 +7341,7 @@ async function handleEngineeringPdfExport() {
 }
 
 function renderAppMode() {
+  const docMode = state.appMode === "document"; // PR 17: document mode is a placeholder until PR 18
   const active = state.appMode === "analysis" ? "analysis" : "interview";
   document.body.dataset.appMode = active;
   document.querySelectorAll(".mode-tab").forEach((button) => {
@@ -7349,8 +7350,31 @@ function renderAppMode() {
     button.setAttribute("aria-selected", selected ? "true" : "false");
   });
   document.querySelectorAll("[data-app-panel]").forEach((panel) => {
-    panel.hidden = panel.dataset.appPanel !== active;
+    // In document mode every built-in panel is hidden; the placeholder shows instead.
+    panel.hidden = docMode ? true : panel.dataset.appPanel !== active;
   });
+  renderDocumentModePlaceholder(docMode);
+}
+
+// PR 17: lazily-created placeholder shown in document mode (the upload UI lands
+// in PR 18). Inserted as a sibling of the app panels so it occupies the same
+// space; toggled rather than rebuilt.
+function renderDocumentModePlaceholder(show) {
+  let el = document.getElementById("documentModePlaceholder");
+  if (!show) {
+    if (el) el.hidden = true;
+    return;
+  }
+  if (!el) {
+    const anchor = document.querySelector('[data-app-panel="interview"]')
+      || document.querySelector('[data-app-panel="analysis"]');
+    if (!anchor || !anchor.parentElement) return;
+    el = document.createElement("div");
+    el.id = "documentModePlaceholder";
+    el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:320px;padding:48px 24px;text-align:center;color:#8899aa;font-size:15px;line-height:1.6;">Document analysis coming in the next update — use Interview mode for now</div>`;
+    anchor.parentElement.appendChild(el);
+  }
+  el.hidden = false;
 }
 
 function renderHeaderContext() {
@@ -27979,11 +28003,60 @@ function sessionSummaryMeta(sessionState = state) {
   };
 }
 
+// PR 17: full-screen mode picker shown when the user clicks "New". Replaces the
+// old confirm() guard inside createNewSession — the modal carries the save
+// warning instead. Built entirely in JS (no index.html / CSS changes); inline
+// hex only, hover handled via JS so no new CSS variables are introduced.
+function openDiscoveryModePicker() {
+  closeDiscoveryModePicker(); // idempotent — never stack overlays
+  const hasContent = sessionHasContent();
+  const warning = hasContent
+    ? `<div style="color:#8899aa;font-size:13px;margin-bottom:16px;">Your current session will be saved before starting.</div>`
+    : "";
+  const card = (mode, icon, title, subtitle) => `
+    <div data-mode-card="${mode}" role="button" tabindex="0" style="flex:1;min-width:240px;background:#0d1b2e;border:1px solid #1e3350;border-radius:8px;padding:24px;cursor:pointer;transition:border-color 0.15s ease;">
+      <div style="font-size:30px;line-height:1;margin-bottom:12px;">${icon}</div>
+      <div style="color:#e8f4ff;font-size:16px;font-weight:600;margin-bottom:6px;">${title}</div>
+      <div style="color:#8899aa;font-size:13px;line-height:1.5;">${subtitle}</div>
+    </div>`;
+  const overlay = document.createElement("div");
+  overlay.id = "discoveryModePicker";
+  overlay.style.cssText = "position:fixed;inset:0;background:#0a1525;display:flex;align-items:center;justify-content:center;z-index:1000;padding:24px;";
+  overlay.innerHTML = `
+    <div style="background:#162438;border:1px solid #1e3350;border-radius:12px;padding:32px;max-width:760px;width:100%;box-sizing:border-box;">
+      <div style="color:#ffffff;font-size:20px;font-weight:600;margin-bottom:16px;">Start a new discovery</div>
+      ${warning}
+      <div style="display:flex;gap:16px;flex-wrap:wrap;">
+        ${card("interview", "🎙️", "Run an interview", "Answer structured questions and let AI map your workflow step by step")}
+        ${card("document", "📄", "Analyse a document", "Upload a SOP, process doc, or screenshot and let AI extract the workflow automatically")}
+      </div>
+      <div style="text-align:center;margin-top:20px;">
+        <span data-mode-cancel role="button" tabindex="0" style="color:#8899aa;font-size:13px;cursor:pointer;">Cancel</span>
+      </div>
+    </div>`;
+  overlay.querySelectorAll("[data-mode-card]").forEach((el) => {
+    el.addEventListener("mouseenter", () => { el.style.borderColor = "#00d4b4"; });
+    el.addEventListener("mouseleave", () => { el.style.borderColor = "#1e3350"; });
+    el.addEventListener("click", () => startDiscoveryInMode(el.dataset.modeCard));
+  });
+  overlay.querySelector("[data-mode-cancel]")?.addEventListener("click", closeDiscoveryModePicker);
+  document.body.appendChild(overlay);
+}
+
+function closeDiscoveryModePicker() {
+  document.getElementById("discoveryModePicker")?.remove();
+}
+
+// Picks a mode card: close the overlay, save the current session if it has
+// content, then start a fresh session in the chosen appMode.
+function startDiscoveryInMode(mode) {
+  closeDiscoveryModePicker();
+  if (sessionHasContent()) persistState();
+  createNewSession({ appMode: mode === "document" ? "document" : "interview" });
+}
+
 function createNewSession(options = {}) {
-  if (sessionHasContent()) {
-    persistState();
-    if (!confirm("Start a new blank discovery session? Your current session has been saved locally.")) return;
-  }
+  if (sessionHasContent()) persistState();
   state = structuredClone(defaultState);
   ensureSessionMeta(state, { forceNew: true });
   state.appMode = options.appMode || "analysis";
