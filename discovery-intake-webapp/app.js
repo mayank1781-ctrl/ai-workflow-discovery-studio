@@ -5379,6 +5379,175 @@ function businessCaseBlockForCurrentWorkflow() {
   return businessCaseBlockHtml(computeBusinessCase(steps, businessCaseConversationText()));
 }
 
+// === Scoring transparency card (PR 9) ======================================
+// A collapsible breakdown of the 10-principle AI opportunity score (from
+// getStepOpportunityMeta) shown below the business case on the Recipe and
+// Engineering views. The user can override individual scores; the tier and
+// total recalculate live, client-side only — no API call. Originals are read
+// back from a data attribute so "Reset to AI scores" always works.
+const SCORING_PRINCIPLES = [
+  { key: "repetitiveness", n: 1, name: "Repetitiveness" },
+  { key: "ruleDensity", n: 2, name: "Rule density" },
+  { key: "dataStructure", n: 3, name: "Data structure" },
+  { key: "volumeFrequency", n: 4, name: "Volume / frequency" },
+  { key: "timeCostPerInstance", n: 5, name: "Time per instance" },
+  { key: "errorRateAndConsequence", n: 6, name: "Error rate & consequence" },
+  { key: "humanJudgmentRequired", n: 7, name: "Human judgment" },
+  { key: "integrationComplexity", n: 8, name: "Integration complexity" },
+  { key: "dataSensitivity", n: 9, name: "Data sensitivity" },
+  { key: "outputClarity", n: 10, name: "Output clarity" }
+];
+
+// Local override state for the (single) representative step. Keyed by step id so
+// it survives tab re-renders but resets if the underlying step changes.
+let scoringOverrides = {};
+let scoringOverridesStepId = null;
+
+// Mirror of the tier rules in getStepOpportunityMeta, operating on a flat score
+// map for the live what-if recalculation.
+function scoringTierFromScores(scores) {
+  const total = SCORING_PRINCIPLES.reduce((sum, p) => sum + (Number(scores[p.key]) || 0), 0);
+  let tier;
+  if (total >= 24) tier = "quick-win";
+  else if (total >= 16) tier = "strategic";
+  else tier = "speculative";
+  if (Number(scores.humanJudgmentRequired) === 1 && tier === "quick-win") tier = "strategic";
+  if (Number(scores.dataSensitivity) === 1) tier = "compliance";
+  return { total, tier };
+}
+
+function scoringTierBadge(tier) {
+  if (tier === "quick-win") return { cls: "ds-badge-teal", label: "Quick Win" };
+  if (tier === "compliance") return { cls: "ds-badge-pink", label: "Compliance" };
+  if (tier === "speculative") return { cls: "ds-badge-amber", label: "Speculative" };
+  return { cls: "ds-badge-purple", label: "Strategic" };
+}
+
+function scoringTransparencyBlockHtml(step) {
+  const meta = getStepOpportunityMeta(step);
+  const ps = meta.principleScores || {};
+  const originals = {};
+  SCORING_PRINCIPLES.forEach((p) => { originals[p.key] = ps[p.key]?.score ?? 2; });
+  const stepId = step.id || "step";
+
+  const rows = SCORING_PRINCIPLES.map((p) => {
+    const reason = ps[p.key]?.reason || "";
+    const buttons = [1, 2, 3].map((v) =>
+      `<button type="button" data-sc-btn="${p.key}" data-sc-val="${v}" style="width:26px;height:26px;border-radius:6px;border:1px solid #1e3350;background:#0d1b2e;color:#8899aa;font-size:12px;font-weight:700;cursor:pointer;">${v}</button>`
+    ).join("");
+    return `
+      <div data-sc-row="${p.key}" style="display:flex;align-items:flex-start;gap:12px;padding:8px 0;border-top:1px solid #1e3350;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;color:#e8f4ff;">P${p.n} ${escapeHtml(p.name)}</div>
+          <div data-sc-reason title="Click to expand" style="font-size:12px;color:#8899aa;line-height:1.4;margin-top:2px;cursor:pointer;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;">${escapeHtml(reason)}</div>
+        </div>
+        <div style="display:flex;gap:4px;flex-shrink:0;">${buttons}</div>
+      </div>`;
+  }).join("");
+
+  return `
+    <div class="ds-card" data-scoring-card data-step-id="${escapeHtml(String(stepId))}" data-originals='${escapeHtml(JSON.stringify(originals))}' style="padding:14px 16px;margin-top:16px;">
+      <div data-sc-toggle role="button" tabindex="0" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+        <strong style="font-size:13px;color:#e8f4ff;">Scoring breakdown (10 principles)</strong>
+        <span data-sc-chevron style="color:#5b7186;font-size:12px;transition:transform 200ms ease;transform:rotate(-90deg);">▾</span>
+      </div>
+      <div data-sc-body style="display:none;margin-top:12px;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
+          <span><span class="ds-num-teal" data-sc-total style="font-size:1.6rem;font-weight:800;">0</span><span style="color:#5b7186;font-size:1rem;font-weight:700;"> / 30</span></span>
+          <span class="ds-badge" data-sc-badge>—</span>
+          <span class="ds-badge ds-badge-amber" data-sc-modified style="display:none;">Modified</span>
+          <span style="font-size:11px;color:#8899aa;text-transform:uppercase;letter-spacing:0.06em;">AI opportunity score</span>
+          <a href="#" data-sc-reset style="display:none;margin-left:auto;font-size:11px;color:#00d4b4;text-decoration:none;">Reset to AI scores</a>
+        </div>
+        <div data-sc-rows>${rows}</div>
+      </div>
+    </div>`;
+}
+
+function scoringTransparencyBlockForCurrentWorkflow() {
+  const steps = analysisGridSteps();
+  if (!steps.length) return "";
+  return scoringTransparencyBlockHtml(steps[0]);
+}
+
+// Repaints a scoring card's live state (button highlights, total, tier badge,
+// Modified badge, reset link) from originals + current overrides.
+function paintScoringCard(root) {
+  if (!root) return;
+  let originals = {};
+  try { originals = JSON.parse(root.dataset.originals || "{}"); } catch { originals = {}; }
+  const stepId = root.dataset.stepId || "";
+  const overrides = (scoringOverridesStepId === stepId) ? scoringOverrides : {};
+
+  const current = {};
+  let modified = false;
+  SCORING_PRINCIPLES.forEach((p) => {
+    const ov = overrides[p.key];
+    current[p.key] = (ov != null) ? ov : (originals[p.key] ?? 2);
+    if (ov != null && ov !== originals[p.key]) modified = true;
+    root.querySelectorAll(`[data-sc-btn="${p.key}"]`).forEach((btn) => {
+      const on = Number(btn.dataset.scVal) === Number(current[p.key]);
+      btn.style.background = on ? "#00d4b4" : "#0d1b2e";
+      btn.style.color = on ? "#0d1b2e" : "#8899aa";
+      btn.style.borderColor = on ? "#00d4b4" : "#1e3350";
+    });
+  });
+
+  const { total, tier } = scoringTierFromScores(current);
+  const badge = scoringTierBadge(tier);
+  const totalEl = root.querySelector("[data-sc-total]");
+  if (totalEl) totalEl.textContent = String(total);
+  const badgeEl = root.querySelector("[data-sc-badge]");
+  if (badgeEl) { badgeEl.className = `ds-badge ${badge.cls}`; badgeEl.textContent = badge.label; }
+  const modEl = root.querySelector("[data-sc-modified]");
+  if (modEl) modEl.style.display = modified ? "" : "none";
+  const resetEl = root.querySelector("[data-sc-reset]");
+  if (resetEl) resetEl.style.display = modified ? "" : "none";
+}
+
+// Wires collapse + override interactions for every scoring card in a container.
+function wireScoringCards(container) {
+  if (!container) return;
+  container.querySelectorAll("[data-scoring-card]").forEach((root) => {
+    const toggle = root.querySelector("[data-sc-toggle]");
+    const body = root.querySelector("[data-sc-body]");
+    const chevron = root.querySelector("[data-sc-chevron]");
+    const doToggle = () => {
+      const open = body.style.display !== "none";
+      body.style.display = open ? "none" : "";
+      chevron.style.transform = `rotate(${open ? "-90" : "0"}deg)`;
+    };
+    toggle?.addEventListener("click", doToggle);
+    toggle?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); doToggle(); }
+    });
+
+    root.addEventListener("click", (event) => {
+      const btn = event.target.closest("[data-sc-btn]");
+      if (btn && root.contains(btn)) {
+        if (scoringOverridesStepId !== root.dataset.stepId) { scoringOverrides = {}; scoringOverridesStepId = root.dataset.stepId; }
+        scoringOverrides[btn.dataset.scBtn] = Number(btn.dataset.scVal);
+        paintScoringCard(root);
+        return;
+      }
+      const reset = event.target.closest("[data-sc-reset]");
+      if (reset && root.contains(reset)) {
+        event.preventDefault();
+        scoringOverrides = {};
+        scoringOverridesStepId = root.dataset.stepId;
+        paintScoringCard(root);
+        return;
+      }
+      const reason = event.target.closest("[data-sc-reason]");
+      if (reason && root.contains(reason)) {
+        reason.style.webkitLineClamp = reason.style.webkitLineClamp === "unset" ? "1" : "unset";
+      }
+    });
+
+    paintScoringCard(root);
+  });
+}
+
 // Fills the prompt-template body with the code block and wires the copy button.
 function renderRecipeBody(body, prompt) {
   body.innerHTML = recipePromptBlockHtml(prompt);
@@ -5478,6 +5647,7 @@ function renderAnalysisTabRecipe() {
   container.innerHTML =
     cards +
     businessCaseBlockForCurrentWorkflow() +
+    scoringTransparencyBlockForCurrentWorkflow() +
     `<div style="margin-top:16px;"><button class="secondary-button compact" type="button" id="downloadRecipeBookBtn">Download Recipe Book</button><button type="button" id="recipe-export-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download DOCX</button><button type="button" id="recipe-pdf-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download PDF</button></div>`;
 
   // Fill the prompt-template body for any step that already has a cached prompt.
@@ -5500,6 +5670,7 @@ function renderAnalysisTabRecipe() {
   recipeExportBtn?.addEventListener("click", handleRecipeExport);
   container.querySelector("#recipe-pdf-btn")?.addEventListener("click", handleRecipePdfExport);
   syncRecipeExportButton(recipeExportBtn);
+  wireScoringCards(container);
 }
 
 // Keep the export button clickable whenever the Recipe Book is shown (it only
@@ -6085,7 +6256,7 @@ async function renderAnalysisTabEngineering() {
       ${cards}
     </div>`;
 
-  container.innerHTML = jiraBar + confluenceBar + section1 + toolbar + section2 + section3 + section4 + businessCaseBlockForCurrentWorkflow();
+  container.innerHTML = jiraBar + confluenceBar + section1 + toolbar + section2 + section3 + section4 + businessCaseBlockForCurrentWorkflow() + scoringTransparencyBlockForCurrentWorkflow();
   if (jiraStatus.connected) populateJiraProjects();
 
   container.querySelector("#exportEngineeringDocBtn")?.addEventListener("click", exportEngineeringDoc);
@@ -6093,6 +6264,7 @@ async function renderAnalysisTabEngineering() {
   engineeringExportBtn?.addEventListener("click", handleEngineeringExport);
   container.querySelector("#engineering-pdf-btn")?.addEventListener("click", handleEngineeringPdfExport);
   syncEngineeringExportButton(engineeringExportBtn);
+  wireScoringCards(container);
 
   // Expandable cards: toggle the body div between display none/block.
   container.querySelectorAll("[data-eng-card-header]").forEach((header) => {
