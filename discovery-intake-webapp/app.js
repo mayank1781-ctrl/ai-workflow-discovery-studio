@@ -883,6 +883,7 @@ const defaultState = {
     lastPackagePath: "",
     workflowName: "",
     engagementContext: "",
+    userRole: "",
     namingPromptDone: false
   },
   pilotControls: {
@@ -5229,13 +5230,20 @@ function recipePromptBlockHtml(prompt) {
   return `<div style="position:relative;background:#0a1422;border:1px solid #1a2a3a;border-radius:8px;padding:16px 16px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.6;color:#cfe0f0;white-space:pre-wrap;word-break:break-word;"><button type="button" data-recipe-copy style="position:absolute;top:8px;right:8px;background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:4px 11px;font-size:11px;font-weight:700;cursor:pointer;">Copy prompt</button>${escapeHtml(prompt)}</div>`;
 }
 
-// === Business case estimate (PR 7) =========================================
+// === Business case estimate (PR 7, rate personalised PR 12a) ===============
 // Auto-calculated hours + value shown below the Recipe Book and Engineering Doc.
 // Role mode = recurring "part of my job" work valued annually; project mode =
-// engagement-bounded work valued for the engagement. Blended rate £75/hr. The
-// numeric/mode logic mirrors computeBusinessCase in server.mjs — keep in sync.
-const BC_BLENDED_RATE = 75;
+// engagement-bounded work valued for the engagement. Blended rate is driven by
+// the user's self-identified level (USD); $100/hr (consultant) is the default.
+// The numeric/mode logic mirrors computeBusinessCase in server.mjs — keep in sync.
+const BC_BLENDED_RATE = 100; // USD default when no level is selected
 const BC_WORKING_WEEKS = 48;
+const BC_ROLE_RATES = { analyst: 75, consultant: 100, manager: 150, principal: 200 };
+const BC_ROLE_LABELS = { analyst: "Analyst", consultant: "Consultant", manager: "Manager", principal: "Principal" };
+
+function blendedRateForRole(role) {
+  return BC_ROLE_RATES[String(role || "").toLowerCase()] || BC_BLENDED_RATE;
+}
 
 function bcDetectWorkflowMode(text) {
   const t = String(text || "").toLowerCase();
@@ -5313,38 +5321,46 @@ function computeBusinessCase(steps, conversationText) {
   const mins_per_instance = minsParsed ? mins : 30;
   const project_duration_weeks = workflowMode === "project" ? bcParseDurationWeeks(conversationText).value : null;
 
+  const userRole = String(state.sessionMeta?.userRole || "").toLowerCase();
+  const blendedRate = blendedRateForRole(userRole);
   const results = {
     hoursPerWeek: null, annualHours: null, annualValue: null,
     totalHours: null, projectValue: null,
-    blendedRate: BC_BLENDED_RATE, currency: "GBP"
+    blendedRate, currency: "USD"
   };
   if (workflowMode === "role") {
     results.hoursPerWeek = (instances_per_week * mins_per_instance) / 60;
     results.annualHours = results.hoursPerWeek * BC_WORKING_WEEKS;
-    results.annualValue = results.annualHours * BC_BLENDED_RATE;
+    results.annualValue = results.annualHours * blendedRate;
   } else {
     results.totalHours = (instances_per_week * project_duration_weeks * mins_per_instance) / 60;
-    results.projectValue = results.totalHours * BC_BLENDED_RATE;
+    results.projectValue = results.totalHours * blendedRate;
   }
   return {
     workflowMode,
     inputs: { instances_per_week, mins_per_instance, project_duration_weeks },
     results,
     reusabilityFlag: workflowMode === "project",
-    defaulted: !instParsed || !minsParsed
+    defaulted: !instParsed || !minsParsed,
+    userRole,
+    blendedRate
   };
 }
 
 // Renders the "Business Case Estimate" ds-card from a computed businessCase.
 function businessCaseBlockHtml(bc) {
-  const gbp = (n) => "£" + Math.round(n).toLocaleString("en-GB");
-  const hrs = (n) => n.toLocaleString("en-GB", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const usd = (n) => "$" + Math.round(n).toLocaleString("en-US");
+  const hrs = (n) => n.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const count = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
   const numCss = "font-size:2rem;font-weight:800;line-height:1.1;";
   const subCss = "font-size:0.7rem;color:#5b7186;text-transform:uppercase;letter-spacing:0.08em;margin-top:4px;";
   const estBadge = bc.defaulted
     ? `<span class="ds-badge ds-badge-amber" style="margin-left:8px;">Estimates — refine in conversation</span>`
     : "";
+  // Rate suffix: "$Z/hr (Level)" when a level is set, else "$100/hr default".
+  const rateSuffix = bc.userRole
+    ? `$${bc.blendedRate}/hr (${BC_ROLE_LABELS[bc.userRole] || "Consultant"})`
+    : `$${bc.blendedRate}/hr default`;
 
   let callouts;
   let basis;
@@ -5353,14 +5369,14 @@ function businessCaseBlockHtml(bc) {
     const r = bc.results;
     callouts =
       `<div><div class="ds-num-teal" style="${numCss}">${hrs(r.hoursPerWeek)} hrs/week</div><div style="${subCss}">Time spent</div></div>` +
-      `<div><div class="ds-num-amber" style="${numCss}">${gbp(r.annualValue)} / year</div><div style="${subCss}">Annual value</div></div>`;
-    basis = `Based on: ${count(bc.inputs.instances_per_week)} instances/week × ${Math.round(bc.inputs.mins_per_instance)} min each × ${BC_WORKING_WEEKS} weeks`;
+      `<div><div class="ds-num-amber" style="${numCss}">${usd(r.annualValue)} / year</div><div style="${subCss}">Annual value</div></div>`;
+    basis = `Based on ${count(bc.inputs.instances_per_week)} instances/week × ${Math.round(bc.inputs.mins_per_instance)} min each · ${rateSuffix}`;
   } else {
     const r = bc.results;
     callouts =
       `<div><div class="ds-num-teal" style="${numCss}">${hrs(r.totalHours)} total hrs</div><div style="${subCss}">Engagement effort</div></div>` +
-      `<div><div class="ds-num-amber" style="${numCss}">${gbp(r.projectValue)} project value</div><div style="${subCss}">Bounded value</div></div>`;
-    basis = `Based on: ${count(bc.inputs.instances_per_week)} instances/week × ${Math.round(bc.inputs.mins_per_instance)} min each × ${bc.inputs.project_duration_weeks}-week engagement`;
+      `<div><div class="ds-num-amber" style="${numCss}">${usd(r.projectValue)} project value</div><div style="${subCss}">Bounded value</div></div>`;
+    basis = `Based on ${count(bc.inputs.instances_per_week)} instances/week × ${Math.round(bc.inputs.mins_per_instance)} min each × ${bc.inputs.project_duration_weeks}-week engagement · ${rateSuffix}`;
     note = `<div style="margin-top:10px;color:#00d4b4;font-style:italic;font-size:0.78rem;">Value bounded to this engagement. Can this agent be reused across future engagements?</div>`;
   }
 
@@ -5740,7 +5756,8 @@ async function exportWorkflowWord(mode = "recipe") {
 
     // --- Time savings estimate ----------------------------------------------
     const bc = computeBusinessCase(steps, businessCaseConversationText());
-    const RATE_PER_HOUR = 100;
+    const rate = bc.blendedRate;
+    const roleLabel = bc.userRole ? (BC_ROLE_LABELS[bc.userRole] || "Consultant") : "";
     const usd = (n) => "$" + Math.round(n).toLocaleString("en-US");
     const hrs = (n) => n.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
     children.push(h1("Time savings estimate"));
@@ -5751,16 +5768,14 @@ async function exportWorkflowWord(mode = "recipe") {
     const hoursText = bc.workflowMode === "role"
       ? `${hrs(bc.results.hoursPerWeek)} hrs/week, ${hrs(bc.results.annualHours)} hrs/year`
       : `${hrs(bc.results.totalHours)} total hrs`;
-    const annualValue = bc.results.annualHours != null ? bc.results.annualHours * RATE_PER_HOUR : 0;
-    const projectValue = bc.results.totalHours != null ? bc.results.totalHours * RATE_PER_HOUR : 0;
-    const valueText = bc.workflowMode === "role" ? `${usd(annualValue)} / year` : `${usd(projectValue)} (engagement)`;
+    const valueText = bc.workflowMode === "role" ? `${usd(bc.results.annualValue)} / year` : `${usd(bc.results.projectValue)} (engagement)`;
     children.push(table([
       new TableRow({ children: [cell("Metric", { bold: true, width: 35 }), cell("Value", { bold: true, width: 65 })] }),
       new TableRow({ children: [cell("Inputs"), cell(inputsText)] }),
       new TableRow({ children: [cell("Estimated hours"), cell(hoursText)] }),
       new TableRow({ children: [cell("Estimated value"), cell(valueText)] })
     ]));
-    children.push(para("Based on $100/hr blended rate.", { italic: true, color: "595959" }));
+    children.push(para(`Based on $${rate}/hr blended rate${roleLabel ? ` (${roleLabel})` : " (default)"}.`, { italic: true, color: "595959" }));
     if (bc.workflowMode === "project") children.push(para("Value bounded to this engagement.", { italic: true, color: "595959" }));
     if (bc.defaulted) children.push(para("Figures are estimates — refine in a follow-up session.", { italic: true, color: "595959" }));
 
@@ -5975,7 +5990,8 @@ async function generateRecipePrompt(stepId) {
         step,
         workflowName: analysisWorkflowName(),
         steps: analysisGridSteps(),
-        conversationText: businessCaseConversationText()
+        conversationText: businessCaseConversationText(),
+        userRole: state.sessionMeta?.userRole || ""
       })
     });
     const data = await response.json();
@@ -12295,11 +12311,22 @@ function setWorkflowMetadata(patch = {}) {
   if (typeof patch.engagementContext === "string") {
     state.sessionMeta.engagementContext = patch.engagementContext.trim();
   }
+  if (typeof patch.userRole === "string") {
+    state.sessionMeta.userRole = patch.userRole.trim().toLowerCase();
+  }
   state.sessionMeta.updatedAt = new Date().toISOString();
   persistState();
   patchSessionMetadata();
   renderWorkflowHeaderName();
   renderSavedSessionsPanel();
+}
+
+// Sets the user's self-identified level, persists it, and re-renders so the new
+// blended rate shows immediately in the business case (PR 12a). The naming-
+// prompt chips are restyled in place by the click handler, not here.
+function setUserRole(role) {
+  setWorkflowMetadata({ userRole: role });
+  render();
 }
 
 // Best-effort server sync. If the session isn't saved server-side yet, the
@@ -12311,7 +12338,8 @@ function patchSessionMetadata() {
     method: "PATCH",
     body: {
       workflowName: state.sessionMeta.workflowName || "",
-      engagementContext: state.sessionMeta.engagementContext || ""
+      engagementContext: state.sessionMeta.engagementContext || "",
+      userRole: state.sessionMeta.userRole || ""
     }
   }).catch(() => {});
 }
@@ -12356,8 +12384,17 @@ function renderWorkflowNamingPrompt() {
     if (host.innerHTML) host.innerHTML = "";
     return;
   }
-  if (host.querySelector("#namingWorkflowInput") && host.contains(document.activeElement)) return;
+  // Only skip a rebuild while a text field is being typed in — not when a chip
+  // holds focus (chips need their highlight refreshed).
+  const active = document.activeElement;
+  if (active && (active.id === "namingWorkflowInput" || active.id === "namingEngagementInput")) return;
   const inputStyle = "display:block;width:100%;margin-top:3px;background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;color:#e8f4ff;font-size:13px;padding:6px 8px;outline:none;box-sizing:border-box;";
+  const currentRole = (state.sessionMeta?.userRole || "").toLowerCase();
+  const roleChip = ([key, label]) => {
+    const on = currentRole ? currentRole === key : key === "consultant";
+    return `<button type="button" data-role-chip="${key}" style="border:1px solid ${on ? "#00d4b4" : "#1e3350"};background:${on ? "rgba(0,212,180,0.15)" : "#0d1b2e"};color:${on ? "#00d4b4" : "#8899aa"};border-radius:99px;font-size:12px;font-weight:600;padding:5px 12px;cursor:pointer;">${label}</button>`;
+  };
+  const chips = [["analyst", "Analyst"], ["consultant", "Consultant"], ["manager", "Manager"], ["principal", "Principal+"]].map(roleChip).join("");
   host.innerHTML = `
     <div class="ds-panel" style="padding:10px 14px;margin-bottom:10px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
       <label style="flex:1;min-width:170px;font-size:11px;color:#8899aa;">Workflow name
@@ -12367,7 +12404,23 @@ function renderWorkflowNamingPrompt() {
         <input id="namingEngagementInput" type="text" placeholder="e.g. Q3 finance transformation" value="${escapeHtml(state.sessionMeta?.engagementContext || "")}" style="${inputStyle}" />
       </label>
       <button class="primary-button compact" id="namingSaveBtn" type="button">Save &amp; start</button>
+      <div style="flex-basis:100%;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px;">
+        <span style="font-size:11px;color:#8899aa;">Your level</span>
+        ${chips}
+      </div>
     </div>`;
+  host.querySelectorAll("[data-role-chip]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.roleChip;
+      host.querySelectorAll("[data-role-chip]").forEach((b) => {
+        const on = b.dataset.roleChip === key;
+        b.style.borderColor = on ? "#00d4b4" : "#1e3350";
+        b.style.background = on ? "rgba(0,212,180,0.15)" : "#0d1b2e";
+        b.style.color = on ? "#00d4b4" : "#8899aa";
+      });
+      setUserRole(key);
+    });
+  });
   host.querySelector("#namingSaveBtn")?.addEventListener("click", () => {
     const workflowName = host.querySelector("#namingWorkflowInput")?.value || "";
     const engagementContext = host.querySelector("#namingEngagementInput")?.value || "";

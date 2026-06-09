@@ -1968,13 +1968,19 @@ function recipeUserPayload(step, workflowName) {
   return lines.join("\n");
 }
 
-// === Business case estimate (PR 7) =========================================
+// === Business case estimate (PR 7, rate personalised PR 12a) ===============
 // Auto-calculated hours + value attached to the recipe response. Role mode =
 // recurring work valued annually; project mode = engagement-bounded work valued
-// for the engagement. Blended rate £75/hr. Mirrors computeBusinessCase in
-// app.js — keep the two in sync.
-const BC_BLENDED_RATE = 75;
+// for the engagement. The blended rate (USD) is driven by the user's
+// self-identified level; $100/hr (consultant) is the default. Mirrors
+// computeBusinessCase in app.js — keep the two in sync.
+const BC_BLENDED_RATE = 100; // USD default when no level is provided
 const BC_WORKING_WEEKS = 48;
+const BC_ROLE_RATES = { analyst: 75, consultant: 100, manager: 150, principal: 200 };
+
+function blendedRateForRole(role) {
+  return BC_ROLE_RATES[String(role || "").toLowerCase()] || BC_BLENDED_RATE;
+}
 
 function bcDetectWorkflowMode(text) {
   const t = String(text || "").toLowerCase();
@@ -2031,7 +2037,7 @@ function bcStepCellValue(step, key) {
   return typeof value === "string" ? value : "";
 }
 
-function computeBusinessCase(steps, conversationText) {
+function computeBusinessCase(steps, conversationText, userRole = "") {
   const workflowMode = bcDetectWorkflowMode(conversationText);
   let instances = 0;
   let mins = 0;
@@ -2047,24 +2053,28 @@ function computeBusinessCase(steps, conversationText) {
   const mins_per_instance = minsParsed ? mins : 30;
   const project_duration_weeks = workflowMode === "project" ? bcParseDurationWeeks(conversationText).value : null;
 
+  const role = String(userRole || "").toLowerCase();
+  const blendedRate = blendedRateForRole(role);
   const results = {
     hoursPerWeek: null, annualHours: null, annualValue: null,
     totalHours: null, projectValue: null,
-    blendedRate: BC_BLENDED_RATE, currency: "GBP"
+    blendedRate, currency: "USD"
   };
   if (workflowMode === "role") {
     results.hoursPerWeek = (instances_per_week * mins_per_instance) / 60;
     results.annualHours = results.hoursPerWeek * BC_WORKING_WEEKS;
-    results.annualValue = results.annualHours * BC_BLENDED_RATE;
+    results.annualValue = results.annualHours * blendedRate;
   } else {
     results.totalHours = (instances_per_week * project_duration_weeks * mins_per_instance) / 60;
-    results.projectValue = results.totalHours * BC_BLENDED_RATE;
+    results.projectValue = results.totalHours * blendedRate;
   }
   return {
     workflowMode,
     inputs: { instances_per_week, mins_per_instance, project_duration_weeks },
     results,
-    reusabilityFlag: workflowMode === "project"
+    reusabilityFlag: workflowMode === "project",
+    userRole: role,
+    blendedRate
   };
 }
 
@@ -2119,7 +2129,7 @@ async function handleRecipe(req, res) {
     // engineering doc). Use the full step list when the client sends it so the
     // estimate is workflow-level; otherwise fall back to the single step.
     const bcSteps = Array.isArray(body.steps) && body.steps.length ? body.steps : [step];
-    const businessCase = computeBusinessCase(bcSteps, typeof body.conversationText === "string" ? body.conversationText : "");
+    const businessCase = computeBusinessCase(bcSteps, typeof body.conversationText === "string" ? body.conversationText : "", typeof body.userRole === "string" ? body.userRole : "");
     return sendJson(res, 200, { prompt, businessCase });
   } catch (error) {
     return sendJson(res, 500, { error: error.message || "Recipe generation failed" });
@@ -2379,6 +2389,9 @@ async function handleUpdateSessionMetadata(req, res, sessionId) {
   }
   if (typeof body.engagementContext === "string") {
     payload.state.sessionMeta.engagementContext = body.engagementContext.trim();
+  }
+  if (typeof body.userRole === "string") {
+    payload.state.sessionMeta.userRole = body.userRole.trim().toLowerCase();
   }
   payload.savedAt = new Date().toISOString();
   payload.summary = summarizeSession(payload.state);
