@@ -693,3 +693,32 @@ Not every step produces an engineering opportunity.
 ### Open Question (decision needed before Recipe PR)
 Single platform recommendation with reasoning, 
 or show both when both apply?
+
+### Business case — project vs role mode
+
+workflowMode field: "role" or "project"
+Detected from Volume field language:
+- "project", "engagement", "client", "this quarter", 
+  "for the next X months" → project mode
+- "every week", "monthly", "part of my job", 
+  "regularly", "always" → role mode
+- Unclear → add to next-best-question queue after 
+  flowAndDependencies
+
+Role-based calculation:
+  hoursPerWeek = instances/week × mins/instance ÷ 60
+  annualHours = hoursPerWeek × 48 working weeks
+  annualValue = annualHours × blendedRate
+
+Project-based calculation:
+  projectDuration = X months (from conversation)
+  totalInstances = instances/week × (duration in weeks)
+  totalHours = totalInstances × mins/instance ÷ 60
+  projectValue = totalHours × blendedRate
+  Note: "Value bounded to this engagement"
+
+Consulting firm defaults:
+  blendedRate default = £75/hr (override in Settings Phase 9)
+  Always include reusability flag on project-mode recipes:
+  "Can this agent be reused across future engagements?"
+  If yes → business case multiplies across firm, note this.
