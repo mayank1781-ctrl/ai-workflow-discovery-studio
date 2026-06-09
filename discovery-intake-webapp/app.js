@@ -5305,7 +5305,7 @@ function businessCaseConversationText() {
 // cadence (max parsed across steps); mins/instance = total hands-on minutes for
 // one full run (sum of parsed step times). `defaulted` is true when either input
 // fell back to its default (drives the "Estimates — refine" badge).
-function computeBusinessCase(steps, conversationText) {
+function computeBusinessCase(steps, conversationText, userRoleOverride) {
   const workflowMode = bcDetectWorkflowMode(conversationText);
   let instances = 0;
   let mins = 0;
@@ -5321,7 +5321,9 @@ function computeBusinessCase(steps, conversationText) {
   const mins_per_instance = minsParsed ? mins : 30;
   const project_duration_weeks = workflowMode === "project" ? bcParseDurationWeeks(conversationText).value : null;
 
-  const userRole = String(state.sessionMeta?.userRole || "").toLowerCase();
+  // userRoleOverride lets the Recipe Book compute each saved session's value at
+  // that session's own level; live views omit it and use the current session.
+  const userRole = String((userRoleOverride !== undefined ? userRoleOverride : state.sessionMeta?.userRole) || "").toLowerCase();
   const blendedRate = blendedRateForRole(userRole);
   const results = {
     hoursPerWeek: null, annualHours: null, annualValue: null,
@@ -12433,10 +12435,30 @@ function renderWorkflowNamingPrompt() {
   });
 }
 
+// Tier + business-case metrics for a saved-session library entry. Local entries
+// carry full state (grid with opportunity, conversation, level); remote-only
+// summaries don't — those return null bc and "" tier, rendered as "—".
+function sessionCardMetrics(entry) {
+  const sessionState = entry?.state;
+  const steps = sessionState?.workflowGrid?.steps;
+  if (!Array.isArray(steps) || !steps.length) return { tier: "", bc: null };
+  let tier = "";
+  try { tier = getStepOpportunityMeta(steps[0]).tier || ""; } catch { tier = ""; }
+  const convText = [
+    (sessionState.conversation || []).map((m) => m?.text || "").join("\n"),
+    sessionState.transcript || ""
+  ].filter(Boolean).join("\n");
+  let bc = null;
+  try { bc = computeBusinessCase(steps, convText, sessionState.sessionMeta?.userRole || ""); } catch { bc = null; }
+  return { tier, bc };
+}
+
+const SESSION_TIER_ORDER = { "quick-win": 0, strategic: 1, compliance: 2, speculative: 3 };
+
 function renderSavedSessionsPanel() {
   const container = document.getElementById("savedSessionsPanel");
   if (!container) return;
-  const sessions = getCombinedSessionLibrary();
+  const sessions = getCombinedSessionLibrary().map((entry) => ({ entry, ...sessionCardMetrics(entry) }));
   const countBadge = document.getElementById("openSessionsCount");
   if (countBadge) {
     countBadge.textContent = String(sessions.length);
@@ -12454,23 +12476,80 @@ function renderSavedSessionsPanel() {
     refreshIcons();
     return;
   }
-  const rows = sessions.map((entry) => {
+
+  // Sort: Quick Win → Strategic → Compliance → Speculative (then untiered);
+  // most recent first within a tier.
+  sessions.sort((a, b) => {
+    const ta = a.tier in SESSION_TIER_ORDER ? SESSION_TIER_ORDER[a.tier] : 4;
+    const tb = b.tier in SESSION_TIER_ORDER ? SESSION_TIER_ORDER[b.tier] : 4;
+    if (ta !== tb) return ta - tb;
+    return String(b.entry.updatedAt || b.entry.savedAt || "").localeCompare(String(a.entry.updatedAt || a.entry.savedAt || ""));
+  });
+
+  // Portfolio summary across all sessions.
+  const num = (n) => Math.round(n).toLocaleString("en-US");
+  let quickWins = 0;
+  let totalAnnualHours = 0;
+  let totalValue = 0;
+  sessions.forEach(({ tier, bc }) => {
+    if (tier === "quick-win") quickWins += 1;
+    if (bc) {
+      totalAnnualHours += bc.results.annualHours || 0;
+      totalValue += (bc.results.annualValue || 0) + (bc.results.projectValue || 0);
+    }
+  });
+  const summaryCell = (value, label, color) =>
+    `<div style="flex:1;text-align:center;"><div class="${color}" style="font-size:1.1rem;font-weight:800;">${value}</div><div style="font-size:10px;color:#5b7186;text-transform:uppercase;letter-spacing:0.05em;margin-top:2px;">${label}</div></div>`;
+  const summaryStrip = `
+    <div class="ds-panel" style="display:flex;gap:8px;padding:10px 12px;margin-bottom:8px;">
+      ${summaryCell(num(quickWins), "Quick Wins", "ds-num-teal")}
+      ${summaryCell(`${num(totalAnnualHours)} hrs/yr`, "Total time", "ds-num-teal")}
+      ${summaryCell(`$${num(totalValue)}`, "Total value", "ds-num-amber")}
+    </div>
+    <div style="font-size:10px;color:#5b7186;margin-bottom:6px;">Sorted by opportunity tier</div>`;
+
+  const rows = sessions.map(({ entry, tier, bc }) => {
     const id = entry.sessionId || entry.id;
     const when = formatSavedSessionDate(entry.savedAt || entry.updatedAt);
-    // workflowName is the primary label; fall back to the existing timestamp.
     const name = entry.workflowName || entry.name || when || "Untitled workflow";
     const engagement = (entry.engagementContext || "").trim();
-    const steps = Number.isFinite(entry.stepCount) ? entry.stepCount : 0;
+    const stepCount = Number.isFinite(entry.stepCount) ? entry.stepCount : 0;
     const active = id === currentId;
-    const meta = `${steps} step${steps === 1 ? "" : "s"}${when ? ` · ${escapeHtml(when)}` : ""}${entry.remoteOnly ? " · on disk" : ""}`;
+    const meta = `${stepCount} step${stepCount === 1 ? "" : "s"}${when ? ` · ${escapeHtml(when)}` : ""}${entry.remoteOnly ? " · on disk" : ""}`;
+    const badge = tier && tier in SESSION_TIER_ORDER ? scoringTierBadge(tier) : null;
+
+    // Value footer: hours (teal) on the left, dollars (amber) on the right.
+    let hoursHtml = `<span style="color:#445566;">—</span>`;
+    let valueHtml = `<span style="color:#445566;">—</span>`;
+    if (bc) {
+      const hrs = (n) => n.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+      const tealNum = (n) => `<span class="ds-num-teal" style="font-size:13px;font-weight:700;">${n}</span>`;
+      const amberNum = (n) => `<span class="ds-num-amber" style="font-size:13px;font-weight:700;">$${num(n)}</span>`;
+      if (bc.workflowMode === "role") {
+        hoursHtml = `${tealNum(hrs(bc.results.hoursPerWeek))} hrs/wk · ${tealNum(num(bc.results.annualHours))} hrs/yr saved`;
+        valueHtml = `${amberNum(bc.results.annualValue)}/year`;
+      } else {
+        hoursHtml = `${tealNum(hrs(bc.results.totalHours))} total hrs saved`;
+        valueHtml = `${amberNum(bc.results.projectValue)} project value`;
+      }
+    }
+
     return `
-      <button type="button" data-load-session="${escapeHtml(id)}" ${active ? 'aria-current="true"' : ""} style="display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;background:${active ? "#102338" : "#0d1b2a"};border:1px solid ${active ? "#00d4b4" : "#1a2a3a"};border-radius:8px;padding:8px 10px;color:#dde8f5;cursor:pointer;">
-        <strong style="font-size:13px;">${escapeHtml(name)}</strong>
+      <button type="button" data-load-session="${escapeHtml(id)}" ${active ? 'aria-current="true"' : ""} style="display:flex;flex-direction:column;align-items:stretch;gap:2px;width:100%;text-align:left;background:${active ? "#102338" : "#0d1b2a"};border:1px solid ${active ? "#00d4b4" : "#1a2a3a"};border-radius:8px;padding:8px 10px;color:#dde8f5;cursor:pointer;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+          <strong style="font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(name)}</strong>
+          ${badge ? `<span class="ds-badge ${badge.cls}" style="flex-shrink:0;">${badge.label}</span>` : ""}
+        </div>
         ${engagement ? `<span style="font-size:11px;color:#5b7186;">${escapeHtml(engagement)}</span>` : ""}
         <span style="font-size:11px;color:#7a93b4;">${meta}</span>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-top:8px;padding-top:8px;border-top:1px solid #1a2a3a;font-size:11px;color:#7a93b4;">
+          <span>${hoursHtml}</span>
+          <span style="text-align:right;">${valueHtml}</span>
+        </div>
       </button>`;
   }).join("");
-  container.innerHTML = head + `<div style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow:auto;">${rows}</div>`;
+
+  container.innerHTML = head + summaryStrip + `<div style="display:flex;flex-direction:column;gap:6px;max-height:320px;overflow:auto;">${rows}</div>`;
   container.querySelectorAll("[data-load-session]").forEach((button) => {
     button.addEventListener("click", () => {
       button.closest("details")?.removeAttribute("open");
