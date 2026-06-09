@@ -3487,6 +3487,12 @@ function buildWorkflowGridFromExtraction(extracted = {}) {
   const grid = newWorkflowGrid();
   if (typeof extracted.workflowName === "string") {
     grid.workflowName = extracted.workflowName.trim();
+    // PR 19: seed the session's workflow name from the extraction when the user
+    // hasn't named it yet, so a detected/selected workflow carries its own name.
+    if (grid.workflowName && state.sessionMeta && !state.sessionMeta.workflowName) {
+      state.sessionMeta.workflowName = grid.workflowName;
+      state.sessionMeta.name = grid.workflowName;
+    }
   }
   const baseline = String(extracted.dataSensitivityBaseline || "").trim();
   if (baseline) {
@@ -7377,7 +7383,15 @@ function renderDocumentModePlaceholder(show) {
     el.id = "documentModePlaceholder";
     anchor.parentElement.appendChild(el);
   }
-  if (!docUploadInProgress) renderDocUploadDefault(el);
+  // Order matters: a live upload keeps the loading state; pending multi-workflow
+  // detection shows the selection panel; otherwise the default upload zone.
+  if (docUploadInProgress) {
+    // leave the loading state in place
+  } else if (Array.isArray(state.pendingWorkflows) && state.pendingWorkflows.length > 1) {
+    renderWorkflowSelectionPanel(el);
+  } else {
+    renderDocUploadDefault(el);
+  }
   el.hidden = false;
 }
 
@@ -7436,10 +7450,11 @@ function wireDocUploadZone(el) {
   });
 }
 
-// Uploads the chosen file to the existing /api/extract-document endpoint, maps
-// the returned grid into state.workflowGrid via buildWorkflowGridFromExtraction
-// (the shared EXTRACTION_CELL_KEY_MAP mapper), then drops the user into the
-// interview view to review their grid. Soft-fails back to the upload zone.
+// Uploads the chosen file to the existing /api/extract-document endpoint. A
+// single detected workflow is mapped into state.workflowGrid via
+// buildWorkflowGridFromExtraction (the shared EXTRACTION_CELL_KEY_MAP mapper)
+// and lands on the Analysis Studio grid tab; multiple workflows open the
+// selection panel. Soft-fails back to the upload zone.
 async function handleDocumentUpload(file, el) {
   docUploadInProgress = true;
   toast("Analysing document…");
@@ -7462,7 +7477,20 @@ async function handleDocumentUpload(file, el) {
     return;
   }
 
-  state.workflowGrid = buildWorkflowGridFromExtraction(payload.grid);
+  // PR 19: the endpoint now returns a workflows[] array. More than one means the
+  // document describes several distinct processes — let the user pick which to map.
+  const workflows = Array.isArray(payload.workflows) ? payload.workflows : [];
+  if (workflows.length > 1) {
+    docUploadInProgress = false;
+    state.pendingWorkflows = workflows;
+    state.extractionWarning = typeof payload.extractionWarning === "string" ? payload.extractionWarning : "";
+    renderWorkflowSelectionPanel(el);
+    return;
+  }
+
+  // Single workflow (or a legacy single-shape response) → map and land directly.
+  const single = workflows[0] || payload.grid;
+  state.workflowGrid = buildWorkflowGridFromExtraction(single);
   state.extractionWarning = typeof payload.extractionWarning === "string" ? payload.extractionWarning : "";
   if (payload.extractionWarning) toast(payload.extractionWarning);
   toast("Workflow extracted — review your grid");
@@ -7473,6 +7501,62 @@ async function handleDocumentUpload(file, el) {
   docUploadInProgress = false;
   persistState();
   render();
+}
+
+// PR 19: tier colours for the 5 Finance/MC workflow families (inline hex only).
+const WORKFLOW_FAMILY_COLOR = {
+  "Regulatory & Compliance": "#ff4fc8",
+  "Finance & Reporting": "#00d4b4",
+  "Capital Markets & Trading Ops": "#f59e0b",
+  "Project & Delivery": "#a855f7",
+  "Data & Analytics": "#00d4b4"
+};
+
+// Replaces the upload zone with a one-card-per-workflow selection panel when a
+// document yields more than one workflow. Rendered inside #documentModePlaceholder
+// so an incidental re-render keeps it (see renderDocumentModePlaceholder).
+function renderWorkflowSelectionPanel(el) {
+  el = el || document.getElementById("documentModePlaceholder");
+  if (!el) return;
+  const workflows = Array.isArray(state.pendingWorkflows) ? state.pendingWorkflows : [];
+  const cards = workflows.map((wf, index) => {
+    const family = String(wf?.workflowFamily || "").trim();
+    const color = WORKFLOW_FAMILY_COLOR[family] || "#8899aa";
+    const stepCount = Array.isArray(wf?.steps) ? wf.steps.length : 0;
+    const name = wf?.workflowName || "Untitled workflow";
+    return `
+      <div data-workflow-card="${index}" role="button" tabindex="0" style="background:#162438;border:1px solid #1e3350;border-radius:8px;padding:16px;cursor:pointer;transition:border-color 0.15s ease;margin-bottom:12px;">
+        <div style="color:${color};font-size:12px;font-weight:600;letter-spacing:0.04em;margin-bottom:6px;">${escapeHtml(family || "Workflow")}</div>
+        <div style="color:#ffffff;font-size:14px;font-weight:700;">${escapeHtml(name)}</div>
+        <div style="color:#8899aa;font-size:12px;margin-top:4px;">${stepCount} step${stepCount === 1 ? "" : "s"}</div>
+      </div>`;
+  }).join("");
+  el.innerHTML = `
+    <div style="width:100%;min-height:400px;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;">
+      <div style="max-width:520px;width:100%;">
+        <div style="color:#ffffff;font-size:16px;font-weight:600;margin-bottom:6px;">Multiple workflows detected</div>
+        <div style="color:#8899aa;font-size:13px;margin-bottom:16px;">This document contains ${workflows.length} workflows. Select one to map.</div>
+        ${cards}
+      </div>
+    </div>`;
+  el.querySelectorAll("[data-workflow-card]").forEach((card) => {
+    card.addEventListener("mouseenter", () => { card.style.borderColor = "#00d4b4"; });
+    card.addEventListener("mouseleave", () => { card.style.borderColor = "#1e3350"; });
+    card.addEventListener("click", () => selectPendingWorkflow(Number(card.dataset.workflowCard)));
+  });
+}
+
+function selectPendingWorkflow(index) {
+  const workflows = Array.isArray(state.pendingWorkflows) ? state.pendingWorkflows : [];
+  const wf = workflows[index];
+  if (!wf) return;
+  state.workflowGrid = buildWorkflowGridFromExtraction(wf);
+  state.pendingWorkflows = null;
+  state.appMode = "analysis";
+  state.analysisActiveTab = "grid";
+  persistState();
+  render();
+  toast("Workflow loaded — review your grid");
 }
 
 function renderHeaderContext() {

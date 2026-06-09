@@ -1425,33 +1425,40 @@ const DOCUMENT_EXTRACTION_SYSTEM_PROMPT = `You are a workflow analysis expert. E
 
 Return this exact schema:
 {
-  workflowName: string,
-  dataSensitivityBaseline: string,
-  steps: [
+  workflows: [
     {
-      id: 'step-1',
-      nextStepId: 'step-2' (null for last step),
-      cells: {
-        workflowStep: { value: string, confidence: number },
-        description: { value: string, confidence: number },
-        personaActors: { value: string, confidence: number },
-        systemsTools: { value: string, confidence: number },
-        dataProcessing: { value: string, confidence: number },
-        rulesDecisionLogic: { value: string, confidence: number },
-        output: { value: string, confidence: number },
-        trigger: { value: string, confidence: number },
-        handoff: { value: string, confidence: number },
-        humanCheckpoint: { value: string, confidence: number },
-        timeTaken: { value: string, confidence: number },
-        frequencyVolume: { value: string, confidence: number },
-        painFriction: { value: '', confidence: 0 },
-        dataSensitivity: { value: string, confidence: number },
-        exceptionBranching: { value: string, confidence: number },
-        regulatoryContext: { value: string, confidence: number }
-      }
+      workflowName: string,
+      workflowFamily: string,  // one of: "Regulatory & Compliance" | "Finance & Reporting" | "Capital Markets & Trading Ops" | "Project & Delivery" | "Data & Analytics"
+      dataSensitivityBaseline: string,
+      steps: [
+        {
+          id: 'step-1',
+          nextStepId: 'step-2' (null for last step),
+          cells: {
+            workflowStep: { value: string, confidence: number },
+            description: { value: string, confidence: number },
+            personaActors: { value: string, confidence: number },
+            systemsTools: { value: string, confidence: number },
+            dataProcessing: { value: string, confidence: number },
+            rulesDecisionLogic: { value: string, confidence: number },
+            output: { value: string, confidence: number },
+            trigger: { value: string, confidence: number },
+            handoff: { value: string, confidence: number },
+            humanCheckpoint: { value: string, confidence: number },
+            timeTaken: { value: string, confidence: number },
+            frequencyVolume: { value: string, confidence: number },
+            painFriction: { value: '', confidence: 0 },
+            dataSensitivity: { value: string, confidence: number },
+            exceptionBranching: { value: string, confidence: number },
+            regulatoryContext: { value: string, confidence: number }
+          }
+        }
+      ]
     }
   ]
 }
+
+Detect ALL distinct workflows present in the document. A workflow is a distinct end-to-end process with its own trigger, steps, and output. Most documents contain 1 workflow. Some contain 2–4. Maximum 5. Never split one workflow into multiple — only split if the document genuinely describes separate processes. For each workflow, assign the closest workflowFamily from the 5 Finance/MC domain families. Return every workflow in the workflows array.
 
 Confidence rules: 0.9+ = explicitly stated in the document, 0.7 = clearly implied, 0.5 = reasonably inferred, below 0.5 = leave value as empty string.
 State rule: if the document explicitly states a field is unclear, not specified, unknown, TBD, or unavailable, include that cell as { "value": "", "confidence": 0, "state": "unknown" }. If a topic is simply not mentioned at all, leave it empty (do not include a state). Only use state:"unknown" for explicitly-flagged-as-unknown information.
@@ -1550,32 +1557,45 @@ async function handleExtractDocument(req, res) {
   }
 
   const outputText = data.choices?.[0]?.message?.content || "";
-  let grid;
+  let parsed;
   try {
     const jsonMatch = outputText.match(/\{[\s\S]*\}/);
-    grid = JSON.parse(jsonMatch[0]);
+    parsed = JSON.parse(jsonMatch[0]);
   } catch {
     console.error('Raw model response:', outputText);
     return sendJson(res, 200, { success: false, error: "The model returned an unreadable result. Try again or start with conversation." });
   }
 
+  // PR 19: the model now returns a workflows[] array. Wrap a legacy single-
+  // workflow response for backwards compatibility (defaulting the family).
+  const workflows = Array.isArray(parsed?.workflows) && parsed.workflows.length
+    ? parsed.workflows
+    : [{
+        workflowName: parsed?.workflowName,
+        workflowFamily: "Project & Delivery",
+        dataSensitivityBaseline: parsed?.dataSensitivityBaseline,
+        steps: parsed?.steps
+      }];
+
   // Normalise each step's dataSensitivity cell so the reviewer UI grades it
   // correctly: map the document classification label (FIX 1) and infer from
-  // step content when no label is present (FIX 2).
-  normalizeStepSensitivity(grid);
+  // step content when no label is present (FIX 2). Runs per workflow.
+  workflows.forEach((wf) => normalizeStepSensitivity(wf));
 
   // Completeness check: if the document clearly contains more numbered sections
-  // than the model returned steps, the extraction may have been truncated. Flag
-  // it so the UI can prompt the user to add the missing steps manually instead
-  // of silently losing them. Skipped for images (no raw text to count).
-  const stepCount = Array.isArray(grid?.steps) ? grid.steps.length : 0;
+  // than the model returned steps (summed across all workflows), the extraction
+  // may have been truncated. Flag it so the UI can prompt the user to add the
+  // missing steps manually. Skipped for images (no raw text to count).
+  const stepCount = workflows.reduce((n, wf) => n + (Array.isArray(wf?.steps) ? wf.steps.length : 0), 0);
   const detectedSections = countNumberedSections(rawDocumentText);
   let extractionWarning;
   if (rawDocumentText && stepCount > 0 && detectedSections > stepCount) {
     extractionWarning = "Some steps may not have been captured. The document appears to contain more sections than were extracted. You can continue the interview and add missing steps manually.";
   }
 
-  return sendJson(res, 200, { success: true, grid, extractionWarning });
+  // `grid` (first workflow) is kept for the mid-interview attachment flow, which
+  // still posts to this endpoint and reads payload.grid.
+  return sendJson(res, 200, { success: true, workflows, grid: workflows[0] || null, extractionWarning });
 }
 
 // Parse a single multipart/form-data file field ("file") fully into memory.
