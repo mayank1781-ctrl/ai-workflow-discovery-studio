@@ -1053,6 +1053,13 @@ const server = http.createServer(async (req, res) => {
   try {
     const requestUrl = new URL(req.url, `http://localhost:${PORT}`);
 
+    // Lightweight liveness probe for Railway / container healthchecks. Placed
+    // before the auth gate so it works even when AUTH_ENABLED=true; exposes
+    // nothing sensitive.
+    if (req.method === "GET" && requestUrl.pathname === "/health") {
+      return sendJson(res, 200, { ok: true, uptime: process.uptime() });
+    }
+
     // Auth gate (no-op unless AUTH_ENABLED=true): unauthenticated API calls get
     // 401; unauthenticated page/asset loads are redirected to the login page.
     if (AUTH_ENABLED && !isPublicPath(requestUrl.pathname) && !readSession(req)) {
