@@ -1329,6 +1329,10 @@ function bindEvents() {
   });
 
   document.getElementById("topbarNewButton")?.addEventListener("click", openDiscoveryModePicker);
+  // Phase 9c: inject the Settings button into the top-bar trio (next to Help)
+  // and load the current settings so the business case uses any rate override.
+  injectSettingsButton();
+  loadSettings();
   // Outside-click dismiss for the Open (saved sessions) dropdown — it can get
   // long, so unlike the Help menu it closes when you click anywhere outside it.
   document.addEventListener("click", (event) => {
@@ -5385,7 +5389,11 @@ function computeBusinessCase(steps, conversationText, userRoleOverride) {
   // userRoleOverride lets the Recipe Book compute each saved session's value at
   // that session's own level; live views omit it and use the current session.
   const userRole = String((userRoleOverride !== undefined ? userRoleOverride : state.sessionMeta?.userRole) || "").toLowerCase();
-  const blendedRate = blendedRateForRole(userRole);
+  // Phase 9c: a Settings rate override (USD/hr) wins over the role-based table.
+  const rateOverride = state.settings?.rateOverride;
+  const blendedRate = (typeof rateOverride === "number" && rateOverride > 0)
+    ? rateOverride
+    : blendedRateForRole(userRole);
   const results = {
     hoursPerWeek: null, annualHours: null, annualValue: null,
     totalHours: null, projectValue: null,
@@ -28183,6 +28191,132 @@ function sessionSummaryMeta(sessionState = state) {
     systemCount: sessionState.systems?.length || 0,
     decisionCount: sessionState.decisions?.length || 0
   };
+}
+
+// === Phase 9c: Settings panel ==============================================
+// Injects a ⚙ Settings button into the top-bar trio and opens a modal (same
+// overlay style as the mode picker). Lets the user set a runtime OpenAI key
+// and a blended-rate override. Built entirely in JS; inline hex only.
+function injectSettingsButton() {
+  const trio = document.querySelector(".topbar-trio");
+  if (!trio || document.getElementById("settingsButton")) return;
+  const btn = document.createElement("button");
+  btn.id = "settingsButton";
+  btn.type = "button";
+  btn.className = "topbar-trio-button";
+  btn.title = "Settings";
+  btn.innerHTML = `<i data-lucide="settings"></i>Settings`;
+  trio.appendChild(btn);
+  btn.addEventListener("click", openSettingsModal);
+  refreshIcons();
+}
+
+// Fetch the current settings on load so the business case picks up any rate
+// override. Best-effort — falls back to role-based rates if it fails.
+async function loadSettings() {
+  try {
+    const data = await requestJson("/api/settings");
+    state.settings = { rateOverride: data?.rateOverride ?? null };
+    render();
+  } catch {
+    /* leave state.settings unset — computeBusinessCase falls back to role rates */
+  }
+}
+
+function closeSettingsModal() {
+  document.getElementById("settingsModal")?.remove();
+}
+
+function openSettingsModal() {
+  closeSettingsModal();
+  const inputBase = "box-sizing:border-box;background:#0d1b2e;border:1px solid #1e3350;color:#ffffff;border-radius:6px;padding:10px;font-size:13px;";
+  const saveBtn = "background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;";
+  const overlay = document.createElement("div");
+  overlay.id = "settingsModal";
+  overlay.style.cssText = "position:fixed;inset:0;background:#0a1525;display:flex;align-items:center;justify-content:center;z-index:1000;padding:24px;";
+  overlay.innerHTML = `
+    <div style="background:#162438;border:1px solid #1e3350;border-radius:12px;padding:32px;max-width:480px;width:100%;box-sizing:border-box;">
+      <div style="color:#ffffff;font-size:18px;font-weight:700;margin-bottom:20px;">Settings</div>
+      <div style="margin-bottom:24px;">
+        <label style="color:#8899aa;font-size:12px;display:block;margin-bottom:6px;">OpenAI API Key</label>
+        <input id="settingsApiKeyInput" type="password" placeholder="sk-..." style="${inputBase}width:100%;" />
+        <div style="display:flex;align-items:center;gap:12px;margin-top:10px;">
+          <button id="settingsSaveKeyBtn" type="button" style="${saveBtn}">Save key</button>
+          <span id="settingsAiStatus" style="font-size:12px;color:#8899aa;">Checking…</span>
+        </div>
+      </div>
+      <div style="margin-bottom:24px;">
+        <label style="color:#8899aa;font-size:12px;display:block;margin-bottom:2px;">Blended rate override (USD/hr)</label>
+        <div style="color:#445566;font-size:11px;margin-bottom:6px;">Leave blank to use role-based rates ($75–$200/hr)</div>
+        <input id="settingsRateInput" type="number" min="1" max="999" placeholder="—" style="${inputBase}width:120px;" />
+        <div style="margin-top:10px;">
+          <button id="settingsSaveRateBtn" type="button" style="${saveBtn}">Save rate</button>
+        </div>
+      </div>
+      <div style="text-align:center;">
+        <span id="settingsCloseLink" role="button" tabindex="0" style="color:#8899aa;font-size:13px;cursor:pointer;">Close</span>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector("#settingsSaveKeyBtn").addEventListener("click", saveSettingsApiKey);
+  overlay.querySelector("#settingsSaveRateBtn").addEventListener("click", saveSettingsRate);
+  overlay.querySelector("#settingsCloseLink").addEventListener("click", closeSettingsModal);
+  refreshSettingsModal();
+}
+
+// Prefill the AI status line and rate field from GET /api/settings.
+async function refreshSettingsModal() {
+  let data = null;
+  try { data = await requestJson("/api/settings"); } catch { data = null; }
+  const aiEnabled = Boolean(data && data.aiEnabled);
+  const status = document.getElementById("settingsAiStatus");
+  if (status) {
+    status.textContent = aiEnabled ? "AI enabled" : "AI not configured";
+    status.style.color = aiEnabled ? "#00d4b4" : "#8899aa";
+  }
+  if (data) {
+    state.settings = { rateOverride: data.rateOverride ?? null };
+    const rateInput = document.getElementById("settingsRateInput");
+    if (rateInput) rateInput.value = data.rateOverride != null ? String(data.rateOverride) : "";
+  }
+}
+
+async function saveSettingsApiKey() {
+  const input = document.getElementById("settingsApiKeyInput");
+  const apiKey = (input?.value || "").trim();
+  if (!apiKey) { toast("Enter an API key first"); return; }
+  try {
+    await requestJson("/api/settings/apikey", { method: "POST", body: { apiKey } });
+    toast("API key updated");
+    refreshSettingsModal();
+  } catch (error) {
+    toast(error.message || "Could not update API key");
+  }
+}
+
+async function saveSettingsRate() {
+  const input = document.getElementById("settingsRateInput");
+  const raw = (input?.value || "").trim();
+  let rateOverride;
+  if (raw === "") {
+    rateOverride = null;
+  } else {
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 1 || n > 999) {
+      toast("Enter a whole number between 1 and 999, or leave blank");
+      return;
+    }
+    rateOverride = n;
+  }
+  try {
+    const data = await requestJson("/api/settings/rate", { method: "PATCH", body: { rateOverride } });
+    state.settings = { rateOverride: data.rateOverride ?? null };
+    if (data.rateOverride != null) toast(`Rate updated to $${data.rateOverride}/hr`);
+    else toast("Rate cleared — using role-based rates");
+    render();
+  } catch (error) {
+    toast(error.message || "Could not update rate");
+  }
 }
 
 // PR 17: full-screen mode picker shown when the user clicks "New". Replaces the

@@ -46,7 +46,10 @@ loadLocalEnv();
 dotenv.config({ path: path.join(__dirname, ".env") });
 
 const PORT = Number(process.env.PORT || 5173);
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+// Phase 9c: the OpenAI key can be overridden at runtime via the Settings panel
+// (process-memory only — never written to disk). Read through getOpenAiKey().
+let runtimeOpenAiKey = process.env.OPENAI_API_KEY || "";
+function getOpenAiKey() { return runtimeOpenAiKey; }
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 const PATTERN_HANDOFF_MODEL = process.env.PATTERN_HANDOFF_MODEL || "claude-sonnet-4-6";
 const AI_MIRROR_MODEL = process.env.AI_MIRROR_MODEL || "claude-sonnet-4-6";
@@ -207,6 +210,63 @@ function migrateJsonSessionsToSqlite() {
   if (migrated) console.log(`[sqlite] migrated ${migrated} JSON session(s) into ${DB_PATH}`);
 }
 migrateJsonSessionsToSqlite();
+
+// === Phase 9c: runtime settings (rate override) =============================
+// The API key override lives in process memory only (runtimeOpenAiKey above).
+// The blended-rate override persists to data/settings.json so it survives
+// restarts. Kept tiny and read on demand.
+const SETTINGS_PATH = path.join(DATA_DIR, "settings.json");
+
+function readSettings() {
+  try { return JSON.parse(fsSync.readFileSync(SETTINGS_PATH, "utf8")); }
+  catch { return {}; }
+}
+
+function writeSettings(settings) {
+  fsSync.mkdirSync(DATA_DIR, { recursive: true });
+  fsSync.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
+}
+
+// A valid override is a whole number 1–999; anything else reads as "no override".
+function settingsRateOverride() {
+  const r = readSettings().rateOverride;
+  return (typeof r === "number" && Number.isInteger(r) && r >= 1 && r <= 999) ? r : null;
+}
+
+// GET /api/settings — current AI/runtime config for the Settings panel.
+function handleGetSettings(req, res) {
+  return sendJson(res, 200, { aiEnabled: Boolean(getOpenAiKey()), rateOverride: settingsRateOverride() });
+}
+
+// POST /api/settings/apikey — set the OpenAI key for the running process only
+// (not written to disk; lost on restart, where it falls back to the env var).
+async function handleSetApiKey(req, res) {
+  let body;
+  try { body = await readJson(req); } catch { body = {}; }
+  const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
+  if (!apiKey || !apiKey.startsWith("sk-")) {
+    return sendJson(res, 400, { error: "Invalid API key format" });
+  }
+  runtimeOpenAiKey = apiKey;
+  return sendJson(res, 200, { ok: true });
+}
+
+// PATCH /api/settings/rate — set or clear the blended-rate override.
+async function handleSetRate(req, res) {
+  let body;
+  try { body = await readJson(req); } catch { body = {}; }
+  const raw = body.rateOverride;
+  let rateOverride;
+  if (raw === null) {
+    rateOverride = null;
+  } else if (typeof raw === "number" && Number.isInteger(raw) && raw >= 1 && raw <= 999) {
+    rateOverride = raw;
+  } else {
+    return sendJson(res, 400, { error: "Rate must be a whole number between 1 and 999, or null" });
+  }
+  writeSettings({ rateOverride });
+  return sendJson(res, 200, { ok: true, rateOverride });
+}
 
 // Phase 6a: Jira (Atlassian Cloud) connector — OAuth2 3LO, zero new deps.
 const JIRA_CLIENT_ID = process.env.JIRA_CLIENT_ID || "";
@@ -507,7 +567,7 @@ function addOnProviderTestPlans() {
       safeLiveCheck: true,
       run: () => addonHttpCheck({
         url: "https://api.openai.com/v1/models",
-        headers: { Authorization: `Bearer ${OPENAI_API_KEY}` }
+        headers: { Authorization: `Bearer ${getOpenAiKey()}` }
       })
     },
     "openai-realtime": {
@@ -516,7 +576,7 @@ function addOnProviderTestPlans() {
       safeLiveCheck: true,
       run: () => addonHttpCheck({
         url: "https://api.openai.com/v1/models",
-        headers: { Authorization: `Bearer ${OPENAI_API_KEY}` }
+        headers: { Authorization: `Bearer ${getOpenAiKey()}` }
       })
     },
     "openai-transcription": {
@@ -525,7 +585,7 @@ function addOnProviderTestPlans() {
       safeLiveCheck: true,
       run: () => addonHttpCheck({
         url: "https://api.openai.com/v1/models",
-        headers: { Authorization: `Bearer ${OPENAI_API_KEY}` }
+        headers: { Authorization: `Bearer ${getOpenAiKey()}` }
       })
     },
     "elevenlabs-voice": {
@@ -808,9 +868,9 @@ function buildAddOnProviderStatus() {
     generatedAt: new Date().toISOString(),
     mode: CONNECTOR_MODE,
     summary: {
-      openAiCoreConfigured: Boolean(OPENAI_API_KEY),
-      realtimeConfigured: Boolean(OPENAI_API_KEY),
-      transcriptionConfigured: Boolean(OPENAI_API_KEY),
+      openAiCoreConfigured: Boolean(getOpenAiKey()),
+      realtimeConfigured: Boolean(getOpenAiKey()),
+      transcriptionConfigured: Boolean(getOpenAiKey()),
       optionalProvidersConfigured: [
         ELEVENLABS_API_KEY,
         FISH_AUDIO_API_KEY,
@@ -832,7 +892,7 @@ function buildAddOnProviderStatus() {
         category: "Core reasoning",
         provider: "OpenAI",
         purpose: "Structured workflow analysis, native tool planning, multimodal reasoning, and agent-ready recipe generation.",
-        configured: Boolean(OPENAI_API_KEY),
+        configured: Boolean(getOpenAiKey()),
         defaultUse: "native",
         envVars: ["OPENAI_API_KEY", "EXTRACTION_MODEL", "EXTRACTION_REASONING_EFFORT"],
         surfaces: ["Analyze Answer", "Analyze attachments", "Solution Build Recipe", "Agent Build Pack"],
@@ -844,7 +904,7 @@ function buildAddOnProviderStatus() {
         category: "Voice capture",
         provider: "OpenAI",
         purpose: "Low-latency spoken workflow intake and spoken clarifying questions.",
-        configured: Boolean(OPENAI_API_KEY),
+        configured: Boolean(getOpenAiKey()),
         defaultUse: "native",
         envVars: ["OPENAI_API_KEY", "REALTIME_MODEL", "REALTIME_VOICE"],
         surfaces: ["AI Voice On", "AI speaks back", "Discovery interview"],
@@ -856,7 +916,7 @@ function buildAddOnProviderStatus() {
         category: "Voice capture",
         provider: "OpenAI",
         purpose: "Post-turn audio transcription for dictated workflow notes.",
-        configured: Boolean(OPENAI_API_KEY),
+        configured: Boolean(getOpenAiKey()),
         defaultUse: "native",
         envVars: ["OPENAI_API_KEY", "TRANSCRIPTION_MODEL"],
         surfaces: ["Dictate", "Stop", "Text Intake"],
@@ -1072,16 +1132,16 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && requestUrl.pathname === "/api/health") {
       return sendJson(res, 200, {
         ok: true,
-        aiConfigured: Boolean(OPENAI_API_KEY),
+        aiConfigured: Boolean(getOpenAiKey()),
         model: REALTIME_MODEL,
         extractionModel: EXTRACTION_MODEL,
         primaryModel: REALTIME_MODEL,
-        realtimeConfigured: Boolean(OPENAI_API_KEY),
+        realtimeConfigured: Boolean(getOpenAiKey()),
         realtimeModel: REALTIME_MODEL,
         realtimeVoice: REALTIME_VOICE,
-        transcriptionConfigured: Boolean(OPENAI_API_KEY),
+        transcriptionConfigured: Boolean(getOpenAiKey()),
         transcriptionModel: TRANSCRIPTION_MODEL,
-        ttsConfigured: Boolean(OPENAI_API_KEY),
+        ttsConfigured: Boolean(getOpenAiKey()),
         ttsModel: TTS_MODEL,
         ttsVoice: TTS_VOICE,
         extractionReasoningEffort: EXTRACTION_REASONING_EFFORT,
@@ -1163,6 +1223,17 @@ const server = http.createServer(async (req, res) => {
     if (requestUrl.pathname === "/api/sessions") {
       if (req.method === "GET") return await handleListSessions(req, res);
       if (req.method === "POST") return await handleSaveSession(req, res);
+    }
+
+    // Phase 9c: Settings panel — runtime API key + persisted rate override.
+    if (req.method === "GET" && requestUrl.pathname === "/api/settings") {
+      return await handleGetSettings(req, res);
+    }
+    if (req.method === "POST" && requestUrl.pathname === "/api/settings/apikey") {
+      return await handleSetApiKey(req, res);
+    }
+    if (req.method === "PATCH" && requestUrl.pathname === "/api/settings/rate") {
+      return await handleSetRate(req, res);
     }
 
     if (req.method === "PATCH" && requestUrl.pathname.startsWith("/api/sessions/") && requestUrl.pathname.endsWith("/metadata")) {
@@ -1267,7 +1338,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 async function handleExtract(req, res) {
-  if (!OPENAI_API_KEY) {
+  if (!getOpenAiKey()) {
     return sendJson(res, 400, {
       error: "OPENAI_API_KEY is not configured. Set it in your terminal and restart the server."
     });
@@ -1290,7 +1361,7 @@ async function handleExtract(req, res) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${OPENAI_API_KEY}`
+      Authorization: `Bearer ${getOpenAiKey()}`
     },
     body: JSON.stringify({
       model: EXTRACTION_MODEL,
@@ -1567,7 +1638,7 @@ Extract ALL steps from the document. Do not stop early. A document may have up t
 // { success: false, error } (HTTP 200) so the frontend can offer a
 // conversation fallback rather than treating it as a hard error.
 async function handleExtractDocument(req, res) {
-  if (!OPENAI_API_KEY) {
+  if (!getOpenAiKey()) {
     return sendJson(res, 200, {
       success: false,
       error: "OPENAI_API_KEY is not configured. Set it in your terminal and restart the server, or start with conversation instead."
@@ -1629,7 +1700,7 @@ async function handleExtractDocument(req, res) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENAI_API_KEY}`
+        Authorization: `Bearer ${getOpenAiKey()}`
       },
       body: JSON.stringify({
         model: DOCUMENT_EXTRACTION_MODEL,
@@ -1819,7 +1890,7 @@ Return ONLY valid JSON — no markdown, no explanation:
 // never interrupt the interview.
 async function handleHarvestGrid(req, res) {
   const empty = { stepUpdates: [], newSteps: [] };
-  if (!OPENAI_API_KEY) {
+  if (!getOpenAiKey()) {
     return sendJson(res, 200, empty);
   }
 
@@ -1842,7 +1913,7 @@ async function handleHarvestGrid(req, res) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENAI_API_KEY}`
+        Authorization: `Bearer ${getOpenAiKey()}`
       },
       body: JSON.stringify({
         model: HARVEST_MODEL,
@@ -1876,7 +1947,7 @@ async function handleHarvestGrid(req, res) {
 }
 
 async function handleEvidenceAnalyze(req, res) {
-  if (!OPENAI_API_KEY) {
+  if (!getOpenAiKey()) {
     return sendJson(res, 400, {
       error: "OPENAI_API_KEY is not configured. Set it in your terminal and restart the server."
     });
@@ -1919,7 +1990,7 @@ async function handleEvidenceAnalyze(req, res) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${OPENAI_API_KEY}`
+      Authorization: `Bearer ${getOpenAiKey()}`
     },
     body: JSON.stringify({
       model: EXTRACTION_MODEL,
@@ -1968,7 +2039,7 @@ async function handleEvidenceAnalyze(req, res) {
 }
 
 async function handleChat(req, res) {
-  if (!OPENAI_API_KEY) {
+  if (!getOpenAiKey()) {
     return sendJson(res, 400, {
       error: "OPENAI_API_KEY is not configured. Set it in your terminal and restart the server."
     });
@@ -1985,7 +2056,7 @@ async function handleChat(req, res) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${OPENAI_API_KEY}`
+      Authorization: `Bearer ${getOpenAiKey()}`
     },
     body: JSON.stringify({
       model: EXTRACTION_MODEL,
@@ -2196,7 +2267,9 @@ function computeBusinessCase(steps, conversationText, userRole = "") {
   const project_duration_weeks = workflowMode === "project" ? bcParseDurationWeeks(conversationText).value : null;
 
   const role = String(userRole || "").toLowerCase();
-  const blendedRate = blendedRateForRole(role);
+  // Phase 9c: a Settings rate override wins over the role-based table.
+  const rateOverride = settingsRateOverride();
+  const blendedRate = rateOverride != null ? rateOverride : blendedRateForRole(role);
   const results = {
     hoursPerWeek: null, annualHours: null, annualValue: null,
     totalHours: null, projectValue: null,
@@ -2221,7 +2294,7 @@ function computeBusinessCase(steps, conversationText, userRole = "") {
 }
 
 async function handleRecipe(req, res) {
-  if (!OPENAI_API_KEY) {
+  if (!getOpenAiKey()) {
     return sendJson(res, 400, {
       error: "OPENAI_API_KEY is not configured. Set it in your terminal and restart the server."
     });
@@ -2245,7 +2318,7 @@ async function handleRecipe(req, res) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENAI_API_KEY}`
+        Authorization: `Bearer ${getOpenAiKey()}`
       },
       body: JSON.stringify({
         model: RECIPE_MODEL,
@@ -2279,7 +2352,7 @@ async function handleRecipe(req, res) {
 }
 
 async function handleRealtimeSession(req, res) {
-  if (!OPENAI_API_KEY) {
+  if (!getOpenAiKey()) {
     return sendJson(res, 400, {
       error: "OPENAI_API_KEY is not configured. Set it in your terminal and restart the server."
     });
@@ -2319,7 +2392,7 @@ async function handleRealtimeSession(req, res) {
   const response = await fetch("https://api.openai.com/v1/realtime/calls", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      Authorization: `Bearer ${getOpenAiKey()}`,
       "OpenAI-Safety-Identifier": "local-discovery-intake"
     },
     body: formData
@@ -2343,7 +2416,7 @@ async function handleRealtimeSession(req, res) {
 }
 
 async function handleTranscribeAudio(req, res) {
-  if (!OPENAI_API_KEY) {
+  if (!getOpenAiKey()) {
     return sendJson(res, 400, {
       error: "OPENAI_API_KEY is not configured. Set it in your terminal and restart the server."
     });
@@ -2368,7 +2441,7 @@ async function handleTranscribeAudio(req, res) {
   const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`
+      Authorization: `Bearer ${getOpenAiKey()}`
     },
     body: formData
   });
@@ -2395,7 +2468,7 @@ async function handleTranscribeAudio(req, res) {
 }
 
 async function handleTextToSpeech(req, res) {
-  if (!OPENAI_API_KEY) {
+  if (!getOpenAiKey()) {
     return sendJson(res, 400, {
       error: "OPENAI_API_KEY is not configured. Set it in your terminal and restart the server."
     });
@@ -2413,7 +2486,7 @@ async function handleTextToSpeech(req, res) {
   const response = await fetch("https://api.openai.com/v1/audio/speech", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      Authorization: `Bearer ${getOpenAiKey()}`,
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
@@ -4889,6 +4962,6 @@ async function handleDumpExtract(req, res) {
 
 server.listen(PORT, () => {
   console.log(`Discovery Intake Studio running at http://localhost:${PORT}`);
-  console.log(OPENAI_API_KEY ? `Primary live voice enabled with model ${REALTIME_MODEL}` : "Realtime voice disabled: OPENAI_API_KEY is not set");
-  console.log(OPENAI_API_KEY ? `Structured extraction enabled with model ${EXTRACTION_MODEL} at ${EXTRACTION_REASONING_EFFORT} reasoning` : "AI extraction disabled: OPENAI_API_KEY is not set");
+  console.log(getOpenAiKey() ? `Primary live voice enabled with model ${REALTIME_MODEL}` : "Realtime voice disabled: OPENAI_API_KEY is not set");
+  console.log(getOpenAiKey() ? `Structured extraction enabled with model ${EXTRACTION_MODEL} at ${EXTRACTION_REASONING_EFFORT} reasoning` : "AI extraction disabled: OPENAI_API_KEY is not set");
 });
