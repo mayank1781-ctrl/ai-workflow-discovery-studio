@@ -1934,13 +1934,14 @@ const BC_WORKING_WEEKS = 48;
 
 function bcDetectWorkflowMode(text) {
   const t = String(text || "").toLowerCase();
-  const project = /\bproject\b|\bengagement\b|\bclient\b|this quarter|this month'?s|for this work/.test(t);
+  const project = /\bproject\b|\bengagement\b|\bclient\b|this quarter|this month'?s|for this work|we'?re doing this for|the bank|at the firm/.test(t);
   const role = /every week|monthly|part of my job|recurring|always do|routine/.test(t);
-  // Role wins ties: recurring language is the stronger signal, and "client"
-  // appears in nearly every consulting transcript. Unclear → role default.
-  if (role) return "role";
+  // Project wins ties and is the default: the primary users are Finance/Tech
+  // consultants almost always describing client-side engagement work, not their
+  // own recurring internal role. Role only when it is the only signal present.
   if (project) return "project";
-  return "role";
+  if (role) return "role";
+  return "project";
 }
 
 function bcParseInstancesPerWeek(text) {
