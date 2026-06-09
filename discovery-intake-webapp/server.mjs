@@ -1503,7 +1503,7 @@ async function handleExtractDocument(req, res) {
   if (isImageUpload(upload)) {
     const dataUrl = `data:${upload.mimeType || "image/png"};base64,${upload.buffer.toString("base64")}`;
     userMessageContent = [
-      { type: "text", text: "Extract the workflow grid from this image or screenshot." },
+      { type: "text", text: "This is a screenshot or process diagram. Identify any workflow, process flow, swim lane, or step sequence visible. Map each distinct step or stage to a workflow step." },
       { type: "image_url", image_url: { url: dataUrl, detail: "high" } }
     ];
   } else {
@@ -1523,7 +1523,13 @@ async function handleExtractDocument(req, res) {
     // only the first handful of steps). The bound below only guards against a
     // pathologically large file overflowing the model context window — a
     // 9-page PDF is far below it and is sent in full.
-    userMessageContent = text.length > 300_000 ? text.slice(0, 300_000) : text;
+    let docText = text.length > 300_000 ? text.slice(0, 300_000) : text;
+    // Excel workbooks read very differently from prose — give the model a hint
+    // about the row/column/tab structure so trackers map cleanly to steps.
+    if (isExcelUpload(upload)) {
+      docText = "Note: this is an Excel workbook. Rows likely represent workflow instances or process steps. Columns likely represent fields, stages, or data points. Treat each tab as a potential workflow segment.\n\n" + docText;
+    }
+    userMessageContent = docText;
   }
 
   let data;
@@ -1652,8 +1658,18 @@ async function extractDocumentText({ buffer, filename = "", mimeType = "" }) {
   }
   if (probe.includes("sheet") || probe.includes("excel") || /\.xlsx?(\s|$)/.test(probe)) {
     const workbook = XLSX.read(buffer, { type: "buffer" });
-    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-    return firstSheet ? XLSX.utils.sheet_to_csv(firstSheet) : "";
+    // Read EVERY tab: multi-sheet trackers are the common Finance/MC case, and
+    // reading only the first sheet silently dropped all the others. Each sheet
+    // is labelled so the model can keep them distinct.
+    const sheets = [];
+    for (const name of workbook.SheetNames) {
+      const sheet = workbook.Sheets[name];
+      if (!sheet) continue;
+      const csv = XLSX.utils.sheet_to_csv(sheet);
+      if (!csv || !csv.trim()) continue;
+      sheets.push(`--- Sheet: ${name} ---\n${csv}`);
+    }
+    return sheets.join("\n\n");
   }
   throw new Error("Unsupported document type.");
 }
@@ -1662,6 +1678,13 @@ async function extractDocumentText({ buffer, filename = "", mimeType = "" }) {
 function isImageUpload({ filename = "", mimeType = "" }) {
   const probe = `${filename} ${mimeType}`.toLowerCase();
   return mimeType.toLowerCase().startsWith("image/") || /\.(png|jpe?g|webp)(\s|$)/.test(probe);
+}
+
+// Excel workbooks get an extra structural hint in the user message (see
+// handleExtractDocument). Same probe the parser uses to route to XLSX.
+function isExcelUpload({ filename = "", mimeType = "" }) {
+  const probe = `${filename} ${mimeType}`.toLowerCase();
+  return probe.includes("sheet") || probe.includes("excel") || /\.xlsx?(\s|$)/.test(probe);
 }
 
 const HARVEST_GRID_SYSTEM_PROMPT = `You are a workflow data extraction specialist. Extract structured workflow field values from a conversation transcript and return updates to a workflow grid.
