@@ -5642,7 +5642,8 @@ function recipeWorkflowHeaderHtml() {
       <button type="button" id="exportWordRecipeBtn" class="ds-btn-ghost" style="flex-shrink:0;display:inline-flex;align-items:center;gap:6px;">
         <i data-lucide="download" style="width:14px;height:14px;"></i>Export to Word
       </button>
-    </div>`;
+    </div>
+    ${outcomeTrackerHtml(currentOutcomeStatus())}`;
 }
 
 // Parses the platform + specific tool out of a recipe response and returns a
@@ -5905,6 +5906,57 @@ function renderRecipeBody(body, prompt) {
   });
 }
 
+// PR 16: per-session outcome tracking. One status per workflow, shown on each
+// recipe card and changed inline (no modal). Persisted to disk via
+// PATCH /api/sessions/:id/outcome and mirrored on state.sessionMeta so it
+// survives reloads and full saves. Inline hex only; buttons never hard-disabled.
+const OUTCOME_STATUS_ORDER = ["not_started", "building", "live"];
+const OUTCOME_STATUS_META = {
+  not_started: { label: "Not started", text: "#8899aa" },
+  building:    { label: "Building",    text: "#f59e0b" },
+  live:        { label: "Live",        text: "#00d4b4" }
+};
+
+function currentOutcomeStatus() {
+  const s = state.sessionMeta?.outcomeStatus;
+  return OUTCOME_STATUS_ORDER.includes(s) ? s : "not_started";
+}
+
+// Status pill + inline 3-button toggle. Background is always #1e3350; only the
+// text/border colour changes per status. The active button is highlighted, not
+// disabled, so every option stays clickable.
+function outcomeTrackerHtml(status) {
+  const pillMeta = OUTCOME_STATUS_META[status];
+  const pill = `<span style="background:#1e3350;color:${pillMeta.text};font-size:11px;font-weight:600;padding:3px 10px;border-radius:99px;">${pillMeta.label}</span>`;
+  const toggle = OUTCOME_STATUS_ORDER.map((s) => {
+    const meta = OUTCOME_STATUS_META[s];
+    const active = s === status;
+    return `<button type="button" data-outcome-set="${s}" style="background:${active ? "#1e3350" : "transparent"};color:${active ? meta.text : "#5b7186"};border:1px solid ${active ? meta.text : "#1e3350"};border-radius:6px;padding:2px 9px;font-size:11px;font-weight:600;cursor:pointer;">${meta.label}</button>`;
+  }).join("");
+  return `<div style="margin-top:10px;padding-top:10px;border-top:1px solid #16263a;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <span style="color:#5b7186;font-size:11px;">Outcome:</span>
+    ${pill}
+    <span style="display:inline-flex;gap:5px;margin-left:4px;">${toggle}</span>
+  </div>`;
+}
+
+async function setOutcomeStatus(status) {
+  if (!OUTCOME_STATUS_ORDER.includes(status)) return;
+  if (currentOutcomeStatus() === status) return;
+  ensureSessionMeta();
+  state.sessionMeta.outcomeStatus = status;
+  state.sessionMeta.updatedAt = new Date().toISOString();
+  persistState();
+  renderAnalysisTabRecipe();
+  toast(`Status updated to ${OUTCOME_STATUS_META[status].label}`);
+  const id = state.sessionMeta?.id;
+  if (!id) return; // not saved server-side yet — travels with the next full save
+  requestJson(`/api/sessions/${encodeURIComponent(id)}/outcome`, {
+    method: "PATCH",
+    body: { status }
+  }).catch(() => {});
+}
+
 function renderAnalysisTabRecipe() {
   const container = document.getElementById("analysis-tab-recipe");
   if (!container) return;
@@ -6005,6 +6057,12 @@ function renderAnalysisTabRecipe() {
     btn.addEventListener("click", (event) => {
       event.stopPropagation();
       generateRecipePrompt(btn.dataset.recipeGenerate);
+    });
+  });
+  container.querySelectorAll("[data-outcome-set]").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setOutcomeStatus(btn.dataset.outcomeSet);
     });
   });
   container.querySelector("#downloadRecipeBookBtn")?.addEventListener("click", downloadRecipeBook);
@@ -28026,6 +28084,12 @@ async function getSessionStateById(id) {
     const payload = await requestJson(`/api/sessions/${encodeURIComponent(id)}`);
     if (payload.state) {
       const normalized = normalizeLoadedState(payload.state);
+      // PR 16: carry the disk-persisted outcome status onto sessionMeta so the
+      // Recipe Book pill reflects it after a load.
+      if (payload.outcomeStatus) {
+        normalized.sessionMeta = normalized.sessionMeta || {};
+        normalized.sessionMeta.outcomeStatus = payload.outcomeStatus;
+      }
       saveSessionToLibrary(normalized);
       return normalized;
     }
