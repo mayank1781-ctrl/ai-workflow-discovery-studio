@@ -4060,6 +4060,10 @@ function liveGridCellStyle(color, confidence, hasValue) {
 function renderLiveExtractionGrid() {
   const host = document.getElementById("liveExtractionGrid");
   if (!host) return;
+  // PR 28a: keep the extraction grid in the right rail, directly below the
+  // composer (Accept & Analyze) and above the Live transcript.
+  const composer = document.querySelector(".embedded-transcript-card .transcript-composer");
+  if (composer && composer.nextElementSibling !== host) composer.insertAdjacentElement("afterend", host);
   const gridState = buildLiveGridState();
 
   let captured = 0;
@@ -4168,6 +4172,11 @@ function renderWorkflowGridPanel() {
   if (!panel) return;
   panel.hidden = false;
 
+  // PR 28a: the step cards live inside the left question column (a 2-up grid
+  // that fills its vertical space) rather than full-width below the hero.
+  const questionArea = document.querySelector(".discovery-question-area");
+  if (questionArea && panel.parentElement !== questionArea) questionArea.appendChild(panel);
+
   const grid = state.workflowGrid || {};
   const steps = Array.isArray(grid.steps) ? grid.steps : [];
   const workflowName = (grid.workflowName || "").trim();
@@ -4228,7 +4237,7 @@ function renderWorkflowGridPanel() {
 
   panel.innerHTML = `
     ${header}
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-top:6px;">${cards}</div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:6px;">${cards}</div>
   `;
   refreshIcons();
 }
