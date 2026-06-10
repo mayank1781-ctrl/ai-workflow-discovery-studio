@@ -1070,10 +1070,6 @@ const defaultState = {
   activeWorkbenchTab: "handoff",
   analysisActiveTab: "grid",
   recipeCache: {},
-  handoffAnswers: {},
-  handoffQuestions: [],
-  handoffPatterns: [],
-  handoffOverrides: {},
   // PR 30 Slice 2: per-session asked-question memory. Entries are deduped on
   // intent (target cell keys), never exact text. See recordAskedQuestion().
   questionHistory: [],
@@ -5554,7 +5550,11 @@ function recipeConfidencePct(step) {
 function recipeWhatAiDoes(step, index) {
   const prompt = (state.recipeCache?.[step.id] || "").trim();
   if (prompt) {
-    const firstLine = prompt.split("\n").map((line) => line.trim()).find(Boolean);
+    // Skip leading "Key: value" metadata lines (e.g. "Tier: Compliance") so
+    // the blurb is the first real sentence of the prompt, not its header.
+    const firstLine = prompt.split("\n")
+      .map((line) => line.trim())
+      .find((line) => line && !/^[A-Za-z ]{2,24}:\s/.test(line));
     if (firstLine) return firstLine;
   }
   const pattern = stepPrimaryPattern(step);
@@ -6392,6 +6392,21 @@ function renderAnalysisTabRecipe() {
     const pattern = stepPrimaryPattern(step);
     const confidence = recipeConfidencePct(step);
     const whatAi = recipeWhatAiDoes(step, index);
+    // Slice 2: section-level low-confidence markers from the generation-time
+    // snapshot. fieldLabels resolves the friendly names for a section's gaps.
+    const snap = state.recipeGateSnapshots?.[step.id];
+    const snapGaps = Array.isArray(snap?.gaps) ? snap.gaps : [];
+    const fieldLabels = (fields) => fields
+      .map((key) => RECIPE_CRITICAL_FIELDS.find((entry) => entry.field === key)?.label || key)
+      .join(", ");
+    const sectionMarker = (fields) => {
+      const hits = snapGaps.filter((key) => fields.includes(key));
+      if (!hits.length) return "";
+      return `<span style="display:inline-flex;align-items:center;gap:6px;background:#1a1500;border:1px solid #f59e0b55;border-radius:99px;padding:2px 10px;font-size:10px;font-weight:700;color:#f5c451;text-transform:uppercase;letter-spacing:0.04em;" title="Generated before ${escapeHtml(fieldLabels(hits))} was confirmed — regenerate to refresh">⚠ Low confidence — ${escapeHtml(fieldLabels(hits))}</span>`;
+    };
+    const p9Note = snap?.p9Unconfirmed
+      ? `<div style="margin-top:10px;background:#160d24;border:1px solid #a78bfa55;border-left:3px solid #a78bfa;border-radius:6px;padding:9px 12px;color:#c4b5fd;font-size:12px;line-height:1.5;">Provenance note: data sensitivity was unconfirmed (AI-inferred or below threshold) when this recipe was generated — verify data handling before sharing outputs.</div>`
+      : "";
     const howTo = recipeHowToUse(step);
     const meta = getStepOpportunityMeta(step);
     const source = gridCellValue(step, "trigger") || "doc-extracted";
@@ -6422,26 +6437,28 @@ function renderAnalysisTabRecipe() {
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Sensitivity:</span> <span style="width:8px;height:8px;border-radius:50%;background:${dot};display:inline-block;"></span> ${escapeHtml(sensitivity)}</span>
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Pattern:</span> ${patternBadge}</span>
           <span><span style="color:#5b7186;">Confidence:</span> ${confidence}%</span>
+          ${sectionMarker(["volume", "sensitivity"])}
         </div>
 
         <div style="margin-top:16px;">
-          <div style="color:#00d4b4;${labelCss}margin-bottom:6px;">What AI Does Here</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><div style="color:#00d4b4;${labelCss}">What AI Does Here</div>${sectionMarker(["systemsTools", "dataFlow"])}</div>
           <p style="margin:0;color:#c7d4e3;font-size:13px;line-height:1.55;">${escapeHtml(whatAi)}</p>
         </div>
 
         <div style="margin-top:16px;">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;">
-            <div style="color:#7a93b4;${labelCss}">Prompt Template</div>
+            <div style="display:flex;align-items:center;gap:10px;"><div style="color:#7a93b4;${labelCss}">Prompt Template</div>${cached ? sectionMarker(["systemsTools", "volume", "dataFlow", "sensitivity", "painAndRules"]) : ""}</div>
             <button class="primary-button compact" type="button" data-recipe-generate="${escapeHtml(step.id)}">${cached ? "Regenerate" : "Generate prompt"}</button>
           </div>
           <div data-recipe-body="${escapeHtml(step.id)}">${cached ? "" : `<div style="background:#0a1422;border:1px dashed #1a2a3a;border-radius:8px;padding:14px 16px;color:#5b7186;font-size:12px;">No prompt yet — click "Generate prompt" to build one for this step.</div>`}</div>
         </div>
 
         <div style="margin-top:16px;">
-          <div style="color:#a78bda;${labelCss}margin-bottom:6px;">How To Use</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><div style="color:#a78bda;${labelCss}">How To Use</div>${sectionMarker(["painAndRules"])}</div>
           <ol style="margin:0;padding-left:18px;color:#c7d4e3;font-size:13px;line-height:1.5;">${howToHtml}</ol>
         </div>
 
+        ${p9Note}
         <div style="margin-top:16px;background:#3a2a0a;border:1px solid #f59e0b55;border-left:3px solid #f59e0b;border-radius:6px;padding:9px 12px;color:#f5c97a;font-size:12px;line-height:1.5;">⚠ Human oversight required — AI output must be reviewed and confirmed before any action is taken.</div>
 
         <div style="margin-top:14px;padding-top:12px;border-top:1px solid #16263a;display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:#5b7186;font-size:11px;">
@@ -6544,7 +6561,105 @@ function showSensitivityConfirmModal(onConfirm, options = {}) {
   });
 }
 
-async function generateRecipePrompt(stepId) {
+// --- Confidence-gated recipe generation (PR 30b) -----------------------------
+// "Confirmed enough" uses provenance, not raw confidence alone: user-stated /
+// user-edited always count; doc-extracted counts at or above the threshold;
+// ai-inferred never auto-counts. The threshold deliberately matches the PR 30
+// question-retirement boundary (one mental model across the tool).
+const RECIPE_CONFIDENCE_THRESHOLD = 0.7;
+
+// The five recipe-critical fields, mapped to their grid cells (same layout as
+// the live extraction grid). A field passes when ANY of its cells is confirmed
+// enough. `q` mirrors KEY_QUESTION_FIELDS wording where a single-cell question
+// exists, so the asked-question intents line up across surfaces.
+const RECIPE_CRITICAL_FIELDS = [
+  { field: "systemsTools", label: "Systems & tools", cells: ["systemsTools"], q: "What systems or tools are used across these steps?" },
+  { field: "volume", label: "Volume", cells: ["frequencyVolume", "timeTaken"], q: "How often does this run, and roughly how long does each instance take?" },
+  { field: "dataFlow", label: "Data flow", cells: ["dataProcessing"], q: "What happens to the data as it moves through these steps?" },
+  { field: "sensitivity", label: "Sensitivity", cells: ["dataSensitivity", "regulatoryContext"], q: "What data sensitivity applies here — internal, client-confidential, regulated, or personal?" },
+  { field: "painAndRules", label: "Pain & rules", cells: ["painFriction", "rulesDecisionLogic", "exceptionBranching"], q: "What's the biggest pain or friction in this workflow today?" }
+];
+
+function cellConfirmedEnough(cell) {
+  if (!cell || !cell.value || cell.state === "empty" || cell.state === "unknown") return false;
+  const source = cell.source || deriveLegacyCellSource(cell.state);
+  if (source === "user-stated" || source === "user-edited") return true;
+  if (source === "doc-extracted") {
+    return typeof cell.confidence === "number" && cell.confidence >= RECIPE_CONFIDENCE_THRESHOLD;
+  }
+  return false; // ai-inferred (or unsourced) never auto-counts
+}
+
+// Pure gate check: which recipe-critical fields sit below the confidence bar
+// on this step, plus whether P9 (sensitivity) is unconfirmed. Reads cells via
+// getField only. There is deliberately NO "block" state — gaps only ever feed
+// a soft panel with "Generate anyway" always available.
+function recipeGateCheck(step) {
+  const gaps = [];
+  RECIPE_CRITICAL_FIELDS.forEach((entry) => {
+    const confirmed = entry.cells.some((key) => cellConfirmedEnough(getField(step, null, key)));
+    if (confirmed) return;
+    // Never resurface a retired intent: skip when the field intent or any of
+    // its member cells' single-key intents (the inline key questions) retired.
+    const retired = questionStatusForIntent(entry.cells) === "retired"
+      || entry.cells.some((key) => questionStatusForIntent([key]) === "retired");
+    gaps.push({ ...entry, retired });
+  });
+  const sensitivityGap = gaps.find((gap) => gap.field === "sensitivity");
+  return {
+    gaps,
+    askable: gaps.filter((gap) => !gap.retired).slice(0, 3),
+    p9Unconfirmed: Boolean(sensitivityGap)
+  };
+}
+
+// Inline gap panel rendered into the step's recipe-body slot INSTEAD of calling
+// the model. "Generate anyway" is always present and never disabled — the gate
+// is a soft detour, not governance (that happens outside the tool).
+function renderRecipeGatePanel(stepId, gate) {
+  const body = document.querySelector(`[data-recipe-body="${stepId}"]`);
+  if (!body) return;
+  const questions = gate.askable.map((gap) => `
+    <div data-gate-question="${escapeHtml(gap.q)}" data-gate-cells="${escapeHtml(gap.cells.join("+"))}" role="button" tabindex="0" style="background:#0d1b2a;border:1px solid #1e3350;border-radius:8px;padding:9px 12px;margin-bottom:6px;cursor:pointer;font-size:12px;color:#cfe0f0;line-height:1.4;">
+      <span style="color:#f59e0b;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-right:8px;">${escapeHtml(gap.label)}</span>${escapeHtml(gap.q)}
+    </div>`).join("");
+  body.innerHTML = `
+    <div style="background:#1a1500;border:1px solid #f59e0b55;border-radius:8px;padding:12px 14px;">
+      <div style="font-size:12px;color:#f5c451;line-height:1.5;margin-bottom:10px;">${gate.gaps.length} recipe-critical field${gate.gaps.length === 1 ? " is" : "s are"} unconfirmed — answering these makes a sharper prompt:</div>
+      ${questions || `<div style="font-size:12px;color:#8aa0b8;margin-bottom:6px;">The open questions for these fields were already asked and answered — regenerate after the grid updates, or generate now.</div>`}
+      <div style="display:flex;align-items:center;gap:10px;margin-top:10px;">
+        <button type="button" data-gate-generate-anyway style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Generate anyway</button>
+        <span data-gate-dismiss role="button" tabindex="0" style="color:#8aa0b8;font-size:12px;cursor:pointer;">Keep gaps for now</span>
+      </div>
+    </div>`;
+  body.querySelectorAll("[data-gate-question]").forEach((el) => {
+    el.addEventListener("click", () => {
+      // Same intent machinery as the inline key questions: tapping IS asking.
+      recordAskedQuestion(el.dataset.gateCells.split("+"), el.dataset.gateQuestion);
+      persistState();
+      setAppMode("interview"); // full render; composer is in the Discovery view
+      setActiveGapQuestion(el.dataset.gateQuestion);
+      toast("Answer in the composer, then regenerate the recipe.");
+    });
+  });
+  body.querySelector("[data-gate-generate-anyway]")?.addEventListener("click", () => {
+    generateRecipePrompt(stepId, { force: true });
+  });
+  body.querySelector("[data-gate-dismiss]")?.addEventListener("click", () => renderAnalysisTabRecipe());
+}
+
+async function generateRecipePrompt(stepId, options = {}) {
+  // PR 30b: the gate intercepts the generate action itself — with unconfirmed
+  // recipe-critical fields the panel shows and the model is NOT called until
+  // "Generate anyway" (options.force) is explicitly tapped.
+  if (!options.force) {
+    const step = analysisGridSteps().find((s) => s.id === stepId);
+    const gate = step ? recipeGateCheck(step) : { gaps: [] };
+    if (gate.gaps.length) {
+      renderRecipeGatePanel(stepId, gate);
+      return;
+    }
+  }
   // Phase 10a: confirm before sending a High-sensitivity workflow to OpenAI.
   if (isSensitiveSession()) {
     showSensitivityConfirmModal(() => runRecipeGeneration(stepId));
@@ -6581,6 +6696,21 @@ async function runRecipeGeneration(stepId) {
     }
     state.recipeCache = state.recipeCache || {};
     state.recipeCache[stepId] = data.prompt;
+    // PR 30b Slice 2: snapshot which recipe-critical fields were unconfirmed
+    // when THIS prompt was built. Markers render from the snapshot (not live
+    // state) so a prompt generated from unconfirmed data stays marked until
+    // regenerated; a clean generation clears the snapshot.
+    state.recipeGateSnapshots = state.recipeGateSnapshots || {};
+    const gateAtGeneration = recipeGateCheck(step);
+    if (gateAtGeneration.gaps.length) {
+      state.recipeGateSnapshots[stepId] = {
+        gaps: gateAtGeneration.gaps.map((gap) => gap.field),
+        p9Unconfirmed: gateAtGeneration.p9Unconfirmed,
+        at: new Date().toISOString()
+      };
+    } else {
+      delete state.recipeGateSnapshots[stepId];
+    }
     persistState();
     // Re-render the whole tab so the "What AI Does Here" blurb, footer, and
     // button label all pick up the freshly generated prompt.
@@ -6589,7 +6719,9 @@ async function runRecipeGeneration(stepId) {
     body.innerHTML = `<div style="color:#ef9a9a;font-size:13px;display:flex;align-items:center;gap:10px;">Failed to generate — <button class="primary-button compact" type="button" data-recipe-retry style="position:static;">retry</button></div>`;
     body.querySelector("[data-recipe-retry]")?.addEventListener("click", (event) => {
       event.stopPropagation();
-      generateRecipePrompt(stepId);
+      // Retry preserves the explicit generate choice — never bounce a failed
+      // attempt back to the gate panel.
+      generateRecipePrompt(stepId, { force: true });
     });
   }
 }
@@ -6606,6 +6738,13 @@ function downloadRecipeBook() {
     any = true;
     parts.push(`=== STEP ${index + 1}: ${stepDisplayName(step, index)} ===`);
     parts.push(`AI Pattern: ${stepPrimaryPattern(step) || "n/a"}`);
+    const snap = state.recipeGateSnapshots?.[step.id];
+    if (snap?.p9Unconfirmed) {
+      parts.push("PROVENANCE NOTE: data sensitivity was unconfirmed (AI-inferred or below threshold) when this recipe was generated — verify data handling before sharing outputs.");
+    }
+    if (Array.isArray(snap?.gaps) && snap.gaps.length) {
+      parts.push(`LOW-CONFIDENCE FIELDS AT GENERATION: ${snap.gaps.join(", ")}`);
+    }
     parts.push("---");
     parts.push(prompt);
     parts.push("");
@@ -7268,8 +7407,6 @@ function exportEngineeringDoc() {
 
 // --- TAB 5: Pattern Handoff ---------------------------------------------------
 
-const HANDOFF_TEAL_BUTTON =
-  "background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;cursor:pointer;transition:opacity 0.2s;";
 
 // First comma/newline/semicolon-separated value from a cell — the "primary".
 function handoffPrimaryValue(step, key) {
@@ -7482,10 +7619,6 @@ async function handleAiMirrorRefresh() {
 // Pattern interview, hosted on the Discovery page as three stacked blocks.
 function renderPatternInterview(container) {
   if (!container) return;
-  state.handoffAnswers = state.handoffAnswers || {};
-  state.handoffQuestions = Array.isArray(state.handoffQuestions) ? state.handoffQuestions : [];
-  state.handoffPatterns = Array.isArray(state.handoffPatterns) ? state.handoffPatterns : [];
-  state.handoffOverrides = state.handoffOverrides || {};
 
   const steps = analysisGridSteps();
   if (!steps.length) {
@@ -7520,36 +7653,16 @@ function renderPatternInterview(container) {
       </div>`;
   }).join("");
 
-  // BLOCK 2 — AI-generated questions with answer textareas.
-  const questionCards = state.handoffQuestions.length
-    ? state.handoffQuestions.map((q) => `
-        <div style="background:#0d1b2a;border:1px solid #1a2a3a;border-radius:8px;padding:12px;margin-bottom:8px;">
-          <div style="font-size:10px;color:#5b7186;letter-spacing:0.06em;margin-bottom:4px;">${escapeHtml(q.stepName || "Workflow")}</div>
-          <p style="font-size:13px;color:#dde8f5;margin:0 0 8px;">${escapeHtml(q.text || "")}</p>
-          <textarea data-handoff-answer="${escapeHtml(q.id)}" rows="2" placeholder="Answer in plain operational language..." style="width:100%;box-sizing:border-box;background:#06101d;border:1px solid #1a2a3a;border-radius:6px;color:#dde8f5;font-size:13px;padding:8px;resize:vertical;">${escapeHtml(state.handoffAnswers[q.id] || "")}</textarea>
-        </div>`).join("")
-    : `<p style="font-size:12px;color:#7a93b4;">No questions yet. Click "Surface Key Questions" to generate them.</p>`;
-
-  // PR 27: the standalone "AI Pattern Analysis" block (with the per-step
-  // override inputs) is removed — pattern info now shows inline on step cards.
+  // PR 27 removed the "AI Pattern Analysis" block; PR 30b Slice 4 removed the
+  // "Key Questions" block — its textarea answers had no consumer since PR 27
+  // (a dead path: state.handoffAnswers was written but never read), and gap
+  // questions now live in the unified intent machinery (inline cards + the
+  // recipe gate). Only the read-only Step Pattern Overview remains.
   container.innerHTML = `
-    <section style="${blockStyle}">
+    <section style="${blockStyle}margin-bottom:0;">
       <h3 style="${sectionTitleStyle}">Step Pattern Overview</h3>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;">${zone1Cards}</div>
-    </section>
-    <section style="${blockStyle}margin-bottom:0;">
-      <h3 style="${sectionTitleStyle}">Key Questions</h3>
-      <button type="button" id="handoffQuestionsBtn" style="${HANDOFF_TEAL_BUTTON}margin-bottom:12px;">Surface Key Questions</button>
-      <div>${questionCards}</div>
     </section>`;
-
-  container.querySelector("#handoffQuestionsBtn")?.addEventListener("click", handleHandoffQuestions);
-  container.querySelectorAll("[data-handoff-answer]").forEach((textarea) => {
-    textarea.addEventListener("input", () => {
-      state.handoffAnswers[textarea.dataset.handoffAnswer] = textarea.value;
-    });
-    textarea.addEventListener("change", persistState);
-  });
   refreshIcons();
 }
 
@@ -7567,113 +7680,9 @@ function renderDiscoveryPatternInterview() {
   renderPatternInterview(container);
 }
 
-// Force a refresh (used by the handlers after questions/analysis/confirm change).
-function rerenderPatternInterview() {
-  renderPatternInterview(patternInterviewContainer());
-}
 
-async function handleHandoffQuestions() {
-  const btn = document.getElementById("handoffQuestionsBtn");
-  const steps = analysisGridSteps();
-  if (!steps.length) {
-    toast("Capture a workflow before surfacing questions.");
-    return;
-  }
-  if (btn) {
-    btn.textContent = "Working…";
-    btn.style.opacity = "0.4";
-    btn.style.cursor = "not-allowed";
-  }
-  try {
-    const response = await fetch("/api/pattern-handoff", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "questions", workflowName: analysisWorkflowName() || "Workflow", steps })
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data?.error || `Request failed (${response.status}).`);
-    state.handoffQuestions = Array.isArray(data.questions) ? data.questions : [];
-    persistState();
-    rerenderPatternInterview();
-  } catch (error) {
-    toast(error?.message || "Could not surface questions.");
-  } finally {
-    if (btn) {
-      btn.textContent = "Surface Key Questions";
-      btn.style.opacity = "1";
-      btn.style.cursor = "pointer";
-    }
-  }
-}
 
-async function handleHandoffAnalyse() {
-  const btn = document.getElementById("handoffAnalyseBtn");
-  const steps = analysisGridSteps();
-  if (!steps.length) {
-    toast("Capture a workflow before generating analysis.");
-    return;
-  }
-  if (btn) {
-    btn.textContent = "Working…";
-    btn.style.opacity = "0.4";
-    btn.style.cursor = "not-allowed";
-  }
-  try {
-    const response = await fetch("/api/pattern-handoff", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        mode: "analyse",
-        workflowName: analysisWorkflowName() || "Workflow",
-        steps,
-        answers: state.handoffAnswers || {}
-      })
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data?.error || `Request failed (${response.status}).`);
-    state.handoffPatterns = Array.isArray(data.patterns) ? data.patterns : [];
-    persistState();
-    rerenderPatternInterview();
-  } catch (error) {
-    toast(error?.message || "Could not generate analysis.");
-  } finally {
-    if (btn) {
-      btn.textContent = "Generate AI Analysis";
-      btn.style.opacity = "1";
-      btn.style.cursor = "pointer";
-    }
-  }
-}
 
-// Write confirmed patterns back into the workflow grid. For each analysed
-// pattern, the user's override (state.handoffOverrides[stepId]) wins over the
-// AI suggestion. The aiPattern cell stores an ARRAY of { pattern, confidence }
-// entries (see newAiPatternEntry / GRID_CELL_KEYS) — writing a bare string
-// would break stepPatternList/handoffStepConfidence and leave Zone 1 grey — so
-// we set value to a single confirmed entry at confidence 1.
-function handleHandoffConfirm() {
-  const patterns = Array.isArray(state.handoffPatterns) ? state.handoffPatterns : [];
-  if (!patterns.length) {
-    toast("Generate AI analysis before confirming patterns.");
-    return;
-  }
-  state.handoffOverrides = state.handoffOverrides || {};
-  const steps = Array.isArray(state.workflowGrid?.steps) ? state.workflowGrid.steps : [];
-  patterns.forEach((entry) => {
-    const stepId = entry.stepId;
-    const step = steps.find((item) => item.id === stepId);
-    if (!step?.cells?.aiPattern) return;
-    const override = (state.handoffOverrides[stepId] || "").trim();
-    const patternValue = override || (entry.pattern || "").trim();
-    if (!patternValue) return;
-    // User confirmed (or overrode) the pattern — user-stated provenance.
-    patchField(step, "meta", "aiPattern", [{ pattern: patternValue, confidence: 1 }], "user-stated", 1);
-  });
-  persistState();
-  // Re-render the blocks so Block 1's confidence dots flip to teal immediately.
-  rerenderPatternInterview();
-  toast("Patterns confirmed and saved to grid");
-}
 
 // --- PDF export (Recipe Book + Engineering Doc) -------------------------------
 // Mirrors the DOCX export handlers: post the same { workflowName, steps } data
