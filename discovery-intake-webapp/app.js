@@ -6406,7 +6406,7 @@ function renderAnalysisTabRecipe() {
     const sectionMarker = (fields) => {
       const hits = snapGaps.filter((key) => fields.includes(key));
       if (!hits.length) return "";
-      return `<div style="display:inline-flex;align-items:center;gap:6px;background:#1a1500;border:1px solid #f59e0b55;border-radius:99px;padding:2px 10px;margin-top:6px;font-size:10px;font-weight:700;color:#f5c451;text-transform:uppercase;letter-spacing:0.04em;" title="Generated before ${escapeHtml(fieldLabels(hits))} was confirmed — regenerate to refresh">⚠ Low confidence — ${escapeHtml(fieldLabels(hits))}</div>`;
+      return `<span style="display:inline-flex;align-items:center;gap:6px;background:#1a1500;border:1px solid #f59e0b55;border-radius:99px;padding:2px 10px;font-size:10px;font-weight:700;color:#f5c451;text-transform:uppercase;letter-spacing:0.04em;" title="Generated before ${escapeHtml(fieldLabels(hits))} was confirmed — regenerate to refresh">⚠ Low confidence — ${escapeHtml(fieldLabels(hits))}</span>`;
     };
     const p9Note = snap?.p9Unconfirmed
       ? `<div style="margin-top:10px;background:#160d24;border:1px solid #a78bfa55;border-left:3px solid #a78bfa;border-radius:6px;padding:9px 12px;color:#c4b5fd;font-size:12px;line-height:1.5;">Provenance note: data sensitivity was unconfirmed (AI-inferred or below threshold) when this recipe was generated — verify data handling before sharing outputs.</div>`
@@ -6445,24 +6445,21 @@ function renderAnalysisTabRecipe() {
         </div>
 
         <div style="margin-top:16px;">
-          <div style="color:#00d4b4;${labelCss}margin-bottom:6px;">What AI Does Here</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><div style="color:#00d4b4;${labelCss}">What AI Does Here</div>${sectionMarker(["systemsTools", "dataFlow"])}</div>
           <p style="margin:0;color:#c7d4e3;font-size:13px;line-height:1.55;">${escapeHtml(whatAi)}</p>
-          ${sectionMarker(["systemsTools", "dataFlow"])}
         </div>
 
         <div style="margin-top:16px;">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;">
-            <div style="color:#7a93b4;${labelCss}">Prompt Template</div>
+            <div style="display:flex;align-items:center;gap:10px;"><div style="color:#7a93b4;${labelCss}">Prompt Template</div>${cached ? sectionMarker(["systemsTools", "volume", "dataFlow", "sensitivity", "painAndRules"]) : ""}</div>
             <button class="primary-button compact" type="button" data-recipe-generate="${escapeHtml(step.id)}">${cached ? "Regenerate" : "Generate prompt"}</button>
           </div>
           <div data-recipe-body="${escapeHtml(step.id)}">${cached ? "" : `<div style="background:#0a1422;border:1px dashed #1a2a3a;border-radius:8px;padding:14px 16px;color:#5b7186;font-size:12px;">No prompt yet — click "Generate prompt" to build one for this step.</div>`}</div>
-          ${cached ? sectionMarker(["systemsTools", "volume", "dataFlow", "sensitivity", "painAndRules"]) : ""}
         </div>
 
         <div style="margin-top:16px;">
-          <div style="color:#a78bda;${labelCss}margin-bottom:6px;">How To Use</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><div style="color:#a78bda;${labelCss}">How To Use</div>${sectionMarker(["painAndRules"])}</div>
           <ol style="margin:0;padding-left:18px;color:#c7d4e3;font-size:13px;line-height:1.5;">${howToHtml}</ol>
-          ${sectionMarker(["painAndRules"])}
         </div>
 
         ${p9Note}
