@@ -1070,10 +1070,6 @@ const defaultState = {
   activeWorkbenchTab: "handoff",
   analysisActiveTab: "grid",
   recipeCache: {},
-  handoffAnswers: {},
-  handoffQuestions: [],
-  handoffPatterns: [],
-  handoffOverrides: {},
   // PR 30 Slice 2: per-session asked-question memory. Entries are deduped on
   // intent (target cell keys), never exact text. See recordAskedQuestion().
   questionHistory: [],
@@ -7411,8 +7407,6 @@ function exportEngineeringDoc() {
 
 // --- TAB 5: Pattern Handoff ---------------------------------------------------
 
-const HANDOFF_TEAL_BUTTON =
-  "background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;cursor:pointer;transition:opacity 0.2s;";
 
 // First comma/newline/semicolon-separated value from a cell — the "primary".
 function handoffPrimaryValue(step, key) {
@@ -7625,10 +7619,6 @@ async function handleAiMirrorRefresh() {
 // Pattern interview, hosted on the Discovery page as three stacked blocks.
 function renderPatternInterview(container) {
   if (!container) return;
-  state.handoffAnswers = state.handoffAnswers || {};
-  state.handoffQuestions = Array.isArray(state.handoffQuestions) ? state.handoffQuestions : [];
-  state.handoffPatterns = Array.isArray(state.handoffPatterns) ? state.handoffPatterns : [];
-  state.handoffOverrides = state.handoffOverrides || {};
 
   const steps = analysisGridSteps();
   if (!steps.length) {
@@ -7663,36 +7653,16 @@ function renderPatternInterview(container) {
       </div>`;
   }).join("");
 
-  // BLOCK 2 — AI-generated questions with answer textareas.
-  const questionCards = state.handoffQuestions.length
-    ? state.handoffQuestions.map((q) => `
-        <div style="background:#0d1b2a;border:1px solid #1a2a3a;border-radius:8px;padding:12px;margin-bottom:8px;">
-          <div style="font-size:10px;color:#5b7186;letter-spacing:0.06em;margin-bottom:4px;">${escapeHtml(q.stepName || "Workflow")}</div>
-          <p style="font-size:13px;color:#dde8f5;margin:0 0 8px;">${escapeHtml(q.text || "")}</p>
-          <textarea data-handoff-answer="${escapeHtml(q.id)}" rows="2" placeholder="Answer in plain operational language..." style="width:100%;box-sizing:border-box;background:#06101d;border:1px solid #1a2a3a;border-radius:6px;color:#dde8f5;font-size:13px;padding:8px;resize:vertical;">${escapeHtml(state.handoffAnswers[q.id] || "")}</textarea>
-        </div>`).join("")
-    : `<p style="font-size:12px;color:#7a93b4;">No questions yet. Click "Surface Key Questions" to generate them.</p>`;
-
-  // PR 27: the standalone "AI Pattern Analysis" block (with the per-step
-  // override inputs) is removed — pattern info now shows inline on step cards.
+  // PR 27 removed the "AI Pattern Analysis" block; PR 30b Slice 4 removed the
+  // "Key Questions" block — its textarea answers had no consumer since PR 27
+  // (a dead path: state.handoffAnswers was written but never read), and gap
+  // questions now live in the unified intent machinery (inline cards + the
+  // recipe gate). Only the read-only Step Pattern Overview remains.
   container.innerHTML = `
-    <section style="${blockStyle}">
+    <section style="${blockStyle}margin-bottom:0;">
       <h3 style="${sectionTitleStyle}">Step Pattern Overview</h3>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;">${zone1Cards}</div>
-    </section>
-    <section style="${blockStyle}margin-bottom:0;">
-      <h3 style="${sectionTitleStyle}">Key Questions</h3>
-      <button type="button" id="handoffQuestionsBtn" style="${HANDOFF_TEAL_BUTTON}margin-bottom:12px;">Surface Key Questions</button>
-      <div>${questionCards}</div>
     </section>`;
-
-  container.querySelector("#handoffQuestionsBtn")?.addEventListener("click", handleHandoffQuestions);
-  container.querySelectorAll("[data-handoff-answer]").forEach((textarea) => {
-    textarea.addEventListener("input", () => {
-      state.handoffAnswers[textarea.dataset.handoffAnswer] = textarea.value;
-    });
-    textarea.addEventListener("change", persistState);
-  });
   refreshIcons();
 }
 
@@ -7710,113 +7680,9 @@ function renderDiscoveryPatternInterview() {
   renderPatternInterview(container);
 }
 
-// Force a refresh (used by the handlers after questions/analysis/confirm change).
-function rerenderPatternInterview() {
-  renderPatternInterview(patternInterviewContainer());
-}
 
-async function handleHandoffQuestions() {
-  const btn = document.getElementById("handoffQuestionsBtn");
-  const steps = analysisGridSteps();
-  if (!steps.length) {
-    toast("Capture a workflow before surfacing questions.");
-    return;
-  }
-  if (btn) {
-    btn.textContent = "Working…";
-    btn.style.opacity = "0.4";
-    btn.style.cursor = "not-allowed";
-  }
-  try {
-    const response = await fetch("/api/pattern-handoff", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "questions", workflowName: analysisWorkflowName() || "Workflow", steps })
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data?.error || `Request failed (${response.status}).`);
-    state.handoffQuestions = Array.isArray(data.questions) ? data.questions : [];
-    persistState();
-    rerenderPatternInterview();
-  } catch (error) {
-    toast(error?.message || "Could not surface questions.");
-  } finally {
-    if (btn) {
-      btn.textContent = "Surface Key Questions";
-      btn.style.opacity = "1";
-      btn.style.cursor = "pointer";
-    }
-  }
-}
 
-async function handleHandoffAnalyse() {
-  const btn = document.getElementById("handoffAnalyseBtn");
-  const steps = analysisGridSteps();
-  if (!steps.length) {
-    toast("Capture a workflow before generating analysis.");
-    return;
-  }
-  if (btn) {
-    btn.textContent = "Working…";
-    btn.style.opacity = "0.4";
-    btn.style.cursor = "not-allowed";
-  }
-  try {
-    const response = await fetch("/api/pattern-handoff", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        mode: "analyse",
-        workflowName: analysisWorkflowName() || "Workflow",
-        steps,
-        answers: state.handoffAnswers || {}
-      })
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data?.error || `Request failed (${response.status}).`);
-    state.handoffPatterns = Array.isArray(data.patterns) ? data.patterns : [];
-    persistState();
-    rerenderPatternInterview();
-  } catch (error) {
-    toast(error?.message || "Could not generate analysis.");
-  } finally {
-    if (btn) {
-      btn.textContent = "Generate AI Analysis";
-      btn.style.opacity = "1";
-      btn.style.cursor = "pointer";
-    }
-  }
-}
 
-// Write confirmed patterns back into the workflow grid. For each analysed
-// pattern, the user's override (state.handoffOverrides[stepId]) wins over the
-// AI suggestion. The aiPattern cell stores an ARRAY of { pattern, confidence }
-// entries (see newAiPatternEntry / GRID_CELL_KEYS) — writing a bare string
-// would break stepPatternList/handoffStepConfidence and leave Zone 1 grey — so
-// we set value to a single confirmed entry at confidence 1.
-function handleHandoffConfirm() {
-  const patterns = Array.isArray(state.handoffPatterns) ? state.handoffPatterns : [];
-  if (!patterns.length) {
-    toast("Generate AI analysis before confirming patterns.");
-    return;
-  }
-  state.handoffOverrides = state.handoffOverrides || {};
-  const steps = Array.isArray(state.workflowGrid?.steps) ? state.workflowGrid.steps : [];
-  patterns.forEach((entry) => {
-    const stepId = entry.stepId;
-    const step = steps.find((item) => item.id === stepId);
-    if (!step?.cells?.aiPattern) return;
-    const override = (state.handoffOverrides[stepId] || "").trim();
-    const patternValue = override || (entry.pattern || "").trim();
-    if (!patternValue) return;
-    // User confirmed (or overrode) the pattern — user-stated provenance.
-    patchField(step, "meta", "aiPattern", [{ pattern: patternValue, confidence: 1 }], "user-stated", 1);
-  });
-  persistState();
-  // Re-render the blocks so Block 1's confidence dots flip to teal immediately.
-  rerenderPatternInterview();
-  toast("Patterns confirmed and saved to grid");
-}
 
 // --- PDF export (Recipe Book + Engineering Doc) -------------------------------
 // Mirrors the DOCX export handlers: post the same { workflowName, steps } data
