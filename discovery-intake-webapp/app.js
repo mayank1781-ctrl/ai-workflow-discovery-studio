@@ -5220,10 +5220,48 @@ function getStepOpportunityMeta(step) {
     "repetitiveness", "ruleDensity", "dataStructure", "volumeFrequency", "timeCostPerInstance",
     "errorRateAndConsequence", "humanJudgmentRequired", "integrationComplexity", "dataSensitivity", "outputClarity"
   ];
+
+  // PR 30 Slice 4: per-principle evidence — which grid cells fed the score,
+  // with excerpt + provenance. Mirrors each principle's text(...) inputs above.
+  // offset is a scaffold: transcript/doc offsets land once the harvest returns
+  // them (deliberate deviation, noted in the PR); excerpts are stored alongside
+  // the field reference, never as the only record.
+  const EVIDENCE_KEYS = {
+    repetitiveness: ["frequencyVolume", "trigger", "output", "handoff"],
+    ruleDensity: ["painFriction", "rulesDecisionLogic", "exceptionBranching"],
+    dataStructure: ["dataProcessing", "systemsTools"],
+    volumeFrequency: ["frequencyVolume"],
+    timeCostPerInstance: ["timeTaken", "frequencyVolume"],
+    errorRateAndConsequence: ["painFriction", "rulesDecisionLogic", "exceptionBranching"],
+    humanJudgmentRequired: ["painFriction", "rulesDecisionLogic", "exceptionBranching", "personaActors"],
+    integrationComplexity: ["systemsTools"],
+    dataSensitivity: ["regulatoryContext", "dataSensitivity", "dataProcessing"],
+    outputClarity: ["output", "trigger", "handoff", "description"]
+  };
+  const evidenceFor = (keys) => keys
+    .map((key) => {
+      const cell = cells[key];
+      const raw = cell?.value;
+      const value = Array.isArray(raw)
+        ? raw.map((entry) => entry?.pattern || "").filter(Boolean).join(", ")
+        : (typeof raw === "string" ? raw.trim() : "");
+      if (!value) return null;
+      const source = cell.source
+        || (cell.state === "confirmed" ? "user-stated" : cell.state === "inferred" ? "ai-inferred" : "");
+      return {
+        field: key,
+        excerpt: value.length > 140 ? `${value.slice(0, 140)}…` : value,
+        source,
+        confidence: typeof cell.confidence === "number" ? cell.confidence : null,
+        offset: null
+      };
+    })
+    .filter(Boolean);
+
   const principleScores = {};
   let total = 0;
   for (const name of order) {
-    principleScores[name] = P[name];
+    principleScores[name] = { ...P[name], evidence: evidenceFor(EVIDENCE_KEYS[name]) };
     total += P[name].score;
   }
 
@@ -5839,6 +5877,19 @@ function tierSensitivity(meta) {
   return null;
 }
 
+// Provenance badge (PR 30 Slice 4): the badge is the primary visual; the
+// confidence number appears only in the hover tooltip. Inline hex per source.
+function provenanceBadgeHtml(source, confidence) {
+  const meta = {
+    "user-stated": { label: "User", color: "#00d4b4" },
+    "user-edited": { label: "Edited", color: "#06b6d4" },
+    "doc-extracted": { label: "Doc", color: "#f59e0b" },
+    "ai-inferred": { label: "AI", color: "#5b7186" }
+  }[source] || { label: "—", color: "#3f5878" };
+  const tip = typeof confidence === "number" ? `confidence ${Math.round(confidence * 100)}%` : "no confidence recorded";
+  return `<span title="${escapeHtml(tip)}" style="flex-shrink:0;display:inline-block;background:${meta.color}22;color:${meta.color};border:1px solid ${meta.color}55;border-radius:99px;padding:1px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;cursor:default;">${meta.label}</span>`;
+}
+
 function scoringTransparencyBlockHtml(step) {
   const meta = getStepOpportunityMeta(step);
   const ps = meta.principleScores || {};
@@ -5851,11 +5902,25 @@ function scoringTransparencyBlockHtml(step) {
     const buttons = [1, 2, 3].map((v) =>
       `<button type="button" data-sc-btn="${p.key}" data-sc-val="${v}" style="width:26px;height:26px;border-radius:6px;border:1px solid #1e3350;background:#0d1b2e;color:#8899aa;font-size:12px;font-weight:700;cursor:pointer;">${v}</button>`
     ).join("");
+    // Slice 4: per-principle evidence — provenance badge is the primary visual;
+    // the confidence number lives in the badge tooltip only (hover).
+    const evidence = Array.isArray(ps[p.key]?.evidence) ? ps[p.key].evidence : [];
+    const evidenceHtml = evidence.length
+      ? `<div style="display:flex;flex-direction:column;gap:4px;margin-top:6px;">
+          ${evidence.map((item) => `
+            <div style="display:flex;align-items:baseline;gap:8px;min-width:0;">
+              ${provenanceBadgeHtml(item.source, item.confidence)}
+              <span style="font-size:11px;color:#5b7186;flex-shrink:0;">${escapeHtml(CELL_PLAIN_NAMES[item.field] || item.field)}</span>
+              <span style="font-size:11px;color:#8aa0b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">“${escapeHtml(item.excerpt)}”</span>
+            </div>`).join("")}
+        </div>`
+      : "";
     return `
       <div data-sc-row="${p.key}" style="display:flex;align-items:flex-start;gap:12px;padding:8px 0;border-top:1px solid #1e3350;">
         <div style="flex:1;min-width:0;">
           <div style="font-size:13px;color:#e8f4ff;">P${p.n} ${escapeHtml(p.name)}</div>
           <div data-sc-reason title="Click to expand" style="font-size:12px;color:#8899aa;line-height:1.4;margin-top:2px;cursor:pointer;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;">${escapeHtml(reason)}</div>
+          ${evidenceHtml}
         </div>
         <div style="display:flex;gap:4px;flex-shrink:0;">${buttons}</div>
       </div>`;
