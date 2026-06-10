@@ -18,6 +18,10 @@ export function readAppSource() {
   return readFileSync(path.join(__dirname, "..", "..", "app.js"), "utf8");
 }
 
+export function readServerSource() {
+  return readFileSync(path.join(__dirname, "..", "..", "server.mjs"), "utf8");
+}
+
 // Extract a top-level `function <name>(...) { ... }` block by brace-matching.
 // The parameter list is skipped first (paren-matched) so default parameters
 // like `(payload = {})` can't terminate the body match early.

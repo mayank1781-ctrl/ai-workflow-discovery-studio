@@ -1,31 +1,28 @@
-// Executed tests for computeBusinessCase() — the role/project business-case
-// math in app.js. The real shipped source is extracted and evaluated (see
-// test/helpers/extract.mjs); no DOM, no network. The math is asserted exactly
-// from the function's own echoed inputs, so the assertions hold whether the
-// instance/minute parsers matched the cell text or fell back to defaults.
+// Executed tests for computeBusinessCase() — PR 32 moved the formula to
+// server.mjs as the single source (the app.js twin was deleted); the math
+// assertions below are UNCHANGED from the PR 29c suite, only the extraction
+// source moved. Also pins the PR 32 snapshot shape and rateSource semantics.
+// Real shipped source extracted and evaluated (see test/helpers/extract.mjs).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readAppSource, buildSandbox } from "./helpers/extract.mjs";
+import { readServerSource, buildSandbox } from "./helpers/extract.mjs";
 
-const source = readAppSource();
+const source = readServerSource();
 
-function sandbox() {
+function sandbox({ rateOverride = null } = {}) {
   return buildSandbox(source, {
-    // PR 30: gridCellValue reads through the accessor layer (getField).
-    consts: ["BC_BLENDED_RATE", "BC_WORKING_WEEKS", "BC_ROLE_RATES", "GRID_CELL_KEYS", "GRID_CELL_LAYER"],
+    consts: ["BC_CONFIG"],
     functions: [
       "computeBusinessCase",
       "bcDetectWorkflowMode",
       "bcParseInstancesPerWeek",
       "bcParseMinutes",
       "bcParseDurationWeeks",
-      "blendedRateForRole",
-      "gridCellValue",
-      "getField",
-      "stepPatternList"
+      "bcStepCellValue",
+      "blendedRateForRole"
     ],
-    globals: { state: { sessionMeta: {}, settings: {} }, currentGridStep: () => null }
+    globals: { settingsRateOverride: () => rateOverride }
   });
 }
 
@@ -47,7 +44,7 @@ test("business case math: role mode at two role rates", () => {
 
   const analyst = computeBusinessCase(steps, ROLE_TEXT, "analyst");
   assert.equal(analyst.workflowMode, "role");
-  assert.equal(analyst.blendedRate, 75, "analyst rate from BC_ROLE_RATES");
+  assert.equal(analyst.blendedRate, 75, "analyst rate from the config table");
   const { instances_per_week, mins_per_instance } = analyst.inputs;
   const expectedHours = (instances_per_week * mins_per_instance) / 60;
   assert.equal(analyst.results.hoursPerWeek, expectedHours);
@@ -56,7 +53,7 @@ test("business case math: role mode at two role rates", () => {
   assert.equal(analyst.results.totalHours, null, "project-mode outputs stay null in role mode");
 
   const principal = computeBusinessCase(steps, ROLE_TEXT, "principal");
-  assert.equal(principal.blendedRate, 200, "principal rate from BC_ROLE_RATES");
+  assert.equal(principal.blendedRate, 200, "principal rate from the config table");
   assert.equal(principal.results.annualValue, expectedHours * 48 * 200);
   assert.ok(principal.results.annualValue > analyst.results.annualValue, "higher role rate must raise annual value");
 });
@@ -67,7 +64,7 @@ test("business case math: project mode at two role rates", () => {
 
   const consultant = computeBusinessCase(steps, PROJECT_TEXT, "consultant");
   assert.equal(consultant.workflowMode, "project");
-  assert.equal(consultant.blendedRate, 100, "consultant rate from BC_ROLE_RATES");
+  assert.equal(consultant.blendedRate, 100, "consultant rate from the config table");
   assert.equal(consultant.reusabilityFlag, true, "project mode flags reusability");
   const { instances_per_week, mins_per_instance, project_duration_weeks } = consultant.inputs;
   assert.ok(project_duration_weeks > 0, "project mode must resolve a duration");
@@ -77,6 +74,30 @@ test("business case math: project mode at two role rates", () => {
   assert.equal(consultant.results.annualValue, null, "role-mode outputs stay null in project mode");
 
   const manager = computeBusinessCase(steps, PROJECT_TEXT, "manager");
-  assert.equal(manager.blendedRate, 150, "manager rate from BC_ROLE_RATES");
+  assert.equal(manager.blendedRate, 150, "manager rate from the config table");
   assert.equal(manager.results.projectValue, expectedTotal * 150);
+});
+
+test("PR 32 snapshot shape: full computation context is present", () => {
+  const { computeBusinessCase } = sandbox();
+  const snapshot = computeBusinessCase([step("10 times per week", "30 minutes")], ROLE_TEXT, "consultant");
+  assert.equal(snapshot.rate, 100);
+  assert.equal(snapshot.rateSource, "role");
+  assert.equal(typeof snapshot.instancesPerWeek, "number");
+  assert.equal(typeof snapshot.minsPerInstance, "number");
+  assert.equal(snapshot.durationWeeks, null, "role mode has no duration");
+  assert.equal(snapshot.mode, "role");
+  assert.equal(snapshot.formulaVersion, 1, "formulaVersion stamps the snapshot");
+  assert.equal(snapshot.defaulted, false, "parsed inputs are not defaulted");
+  // computedAt is stamped by the ENDPOINT (a snapshot exists only on explicit
+  // user action), not by the pure formula.
+  assert.ok(!("computedAt" in snapshot), "pure formula does not stamp computedAt");
+});
+
+test("rateSource: a Settings override wins and is labeled 'override'", () => {
+  const { computeBusinessCase } = sandbox({ rateOverride: 145 });
+  const snapshot = computeBusinessCase([step("10 times per week", "30 minutes")], ROLE_TEXT, "principal");
+  assert.equal(snapshot.rate, 145, "override wins over the principal role rate");
+  assert.equal(snapshot.rateSource, "override");
+  assert.equal(snapshot.results.blendedRate, 145, "results use the override rate");
 });
