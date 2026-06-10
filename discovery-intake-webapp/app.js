@@ -1352,7 +1352,6 @@ function bindEvents() {
   els.stopRealtimeButton.addEventListener("click", stopRealtimeVoice);
   els.sendChatButton.addEventListener("click", sendChatMessage);
   els.processChatButton.addEventListener("click", processChatIntoIntake);
-  renderIntakeModeToggle(); // PR 27: Answer question / Paste context toggle
   els.evidenceFileInput?.addEventListener("change", handleEvidenceUpload);
   els.evidenceNoteInput?.addEventListener("input", updateEvidenceWorkbenchDraft);
   els.analyzeEvidenceNoteButton?.addEventListener("click", analyzeEvidenceWorkbenchNote);
@@ -1900,9 +1899,20 @@ function transcriptionDomainTerms() {
   ].filter(isCapturedValue)).slice(0, 32);
 }
 
-// PR 27: the chat composer has two modes — "answer" (normal) and "paste"
-// (the merged "Extract and Fill" context dump). Same box, same submit button.
-let intakeMode = "answer";
+// PR 29d: ONE input for everything — the toggle is gone and submissions are
+// auto-routed. ALL routing decisions live in routeComposerSubmission(); PR 31
+// extends it with correction-routing and PR 36 makes it the ledger front door.
+// Heuristic: structured lines (numbered/bulleted/Step N) or a long multi-line
+// block read as pasted workflow content; everything else is an interview answer.
+function routeComposerSubmission(text) {
+  const trimmed = String(text || "").trim();
+  const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const structuredLines = lines.filter((line) => /^(\d+[.)]\s|[-*•]\s|step\s+\d+\b)/i.test(line)).length;
+  if (structuredLines >= 2) return { path: "paste", reason: "numbered or bulleted workflow lines" };
+  if (lines.length >= 4) return { path: "paste", reason: "multi-line pasted block" };
+  if (trimmed.length >= 400) return { path: "paste", reason: "long pasted text" };
+  return { path: "answer", reason: "conversational answer" };
+}
 
 async function sendChatMessage() {
   const text = els.aiChatInput.value.trim();
@@ -1918,9 +1928,11 @@ async function sendChatMessage() {
   // PR 29 fix: submitting an answer resolves the active key question.
   if (activeGapQuestion) { activeGapQuestion = ""; renderActiveQuestionLabel(); }
 
-  // "Paste context" routes the same box/button through document-style
-  // extraction (merged from the old standalone "Extract and Fill" box).
-  if (intakeMode === "paste") {
+  // PR 29d: auto-route — pasted workflow content goes through document-style
+  // extraction (/api/dump-extract); short conversational text is an answer turn.
+  const route = routeComposerSubmission(text);
+  showRouteIndicator(route.path);
+  if (route.path === "paste") {
     els.aiChatInput.value = "";
     await runPasteContext(text);
     return;
@@ -1985,42 +1997,26 @@ async function runPasteContext(text) {
   if (dumpExtractResult) handleDumpApply();
 }
 
-// Injects the "Answer question" / "Paste context" toggle above the chat input.
-// Built in JS so index.html stays minimal; inline hex only.
-function renderIntakeModeToggle() {
-  const input = els.aiChatInput;
-  const composer = input?.closest(".chat-composer");
-  if (!composer || document.getElementById("intakeModeToggle")) return;
-  const wrap = document.createElement("div");
-  wrap.id = "intakeModeToggle";
-  wrap.style.cssText = "display:flex;gap:6px;margin-bottom:8px;";
-  wrap.innerHTML = `
-    <button type="button" data-intake-mode="answer" style="border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;cursor:pointer;">Answer question</button>
-    <button type="button" data-intake-mode="paste" style="border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;cursor:pointer;">Paste context</button>`;
-  composer.insertBefore(wrap, input);
-  wrap.querySelectorAll("[data-intake-mode]").forEach((btn) => {
-    btn.addEventListener("click", () => setIntakeMode(btn.dataset.intakeMode));
-  });
-  updateIntakeModeToggle();
-}
+// PR 29d: subtle post-submit indicator of which path the auto-router chose, so
+// the one-input behavior is legible. Injected under the composer buttons;
+// clears itself after a few seconds.
+let routeIndicatorTimer = null;
 
-function setIntakeMode(mode) {
-  intakeMode = mode === "paste" ? "paste" : "answer";
-  if (els.aiChatInput) {
-    els.aiChatInput.placeholder = intakeMode === "paste"
-      ? "Paste notes, an email, or a rough description — I'll extract the workflow."
-      : "Type an answer, rough notes, or a numbered workflow...";
+function showRouteIndicator(path) {
+  const composer = els.aiChatInput?.closest(".chat-composer");
+  if (!composer) return;
+  let el = document.getElementById("composerRouteIndicator");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "composerRouteIndicator";
+    el.setAttribute("aria-live", "polite");
+    el.style.cssText = "font-size:11px;color:#5b7186;margin-top:6px;transition:opacity 0.3s ease;";
+    composer.appendChild(el);
   }
-  updateIntakeModeToggle();
-}
-
-function updateIntakeModeToggle() {
-  document.querySelectorAll("#intakeModeToggle [data-intake-mode]").forEach((btn) => {
-    const active = btn.dataset.intakeMode === intakeMode;
-    btn.style.background = active ? "#1e3350" : "transparent";
-    btn.style.color = active ? "#00d4b4" : "#8899aa";
-    btn.style.border = `1px solid ${active ? "#00d4b4" : "#1e3350"}`;
-  });
+  el.textContent = path === "paste" ? "Analyzed as pasted workflow" : "Analyzed as interview answer";
+  el.style.opacity = "1";
+  window.clearTimeout(routeIndicatorTimer);
+  routeIndicatorTimer = window.setTimeout(() => { el.style.opacity = "0"; }, 6000);
 }
 
 function processChatIntoIntake() {
@@ -4092,10 +4088,11 @@ function liveGridCellStyle(color, confidence, hasValue) {
 function renderLiveExtractionGrid() {
   const host = document.getElementById("liveExtractionGrid");
   if (!host) return;
-  // PR 28a: keep the extraction grid in the right rail, directly below the
-  // composer (Accept & Analyze) and above the Live transcript.
-  const composer = document.querySelector(".embedded-transcript-card .transcript-composer");
-  if (composer && composer.nextElementSibling !== host) composer.insertAdjacentElement("afterend", host);
+  // PR 29d: no relocation — index.html's natural order already gives the right
+  // rail composer → Live transcript → extraction grid (the PR 28a move that
+  // pulled the grid above the transcript buried the transcript at the bottom).
+  const card = document.querySelector(".embedded-transcript-card .conversation-card");
+  if (card && card.nextElementSibling !== host) card.insertAdjacentElement("afterend", host);
   const gridState = buildLiveGridState();
 
   let captured = 0;
