@@ -28607,7 +28607,29 @@ async function duplicateSavedSession(id) {
 async function loadSessionFromLibrary(id) {
   const entry = getCombinedSessionLibrary().find((item) => item.id === id);
   const savedState = await getSessionStateById(id);
-  if (!entry || !savedState) return;
+  // PR 29 Bug A diagnostic (temporary): log the requested id vs what actually
+  // resolved, so we can tell a wrong-fetch from a stale-render. Remove once the
+  // root cause is confirmed.
+  console.info("[session-load]", {
+    requestedId: id,
+    clickedName: entry?.name,
+    resolved: savedState
+      ? {
+          sessionId: savedState.sessionMeta?.id,
+          idMatchesRequest: savedState.sessionMeta?.id === id,
+          metaWorkflowName: savedState.sessionMeta?.workflowName || "",
+          gridWorkflowName: savedState.workflowGrid?.workflowName || "",
+          gridSteps: savedState.workflowGrid?.steps?.length || 0,
+          legacySteps: savedState.steps?.length || 0
+        }
+      : null
+  });
+  if (!entry || !savedState) {
+    // #4: surface the previously-silent failure instead of leaving the prior
+    // session on screen with no feedback.
+    toast("Couldn't load that session — its saved data wasn't found.");
+    return;
+  }
   persistState();
   state = normalizeLoadedState(savedState);
   state.appMode = "analysis";
