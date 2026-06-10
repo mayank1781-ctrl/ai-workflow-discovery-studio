@@ -1070,6 +1070,10 @@ const defaultState = {
   activeWorkbenchTab: "handoff",
   analysisActiveTab: "grid",
   recipeCache: {},
+  // PR 33: prior recipes preserved on regeneration (Invariant 2) + the labels
+  // each cached prompt was generated under (family/pattern/generatedAt).
+  recipeCachePrior: {},
+  recipeMeta: {},
   // PR 32: session schema version (distinct from workflowGrid.schemaVersion).
   // v2 = snapshot-only business case. Migration hook: migrateSessionState().
   schemaVersion: 2,
@@ -6019,11 +6023,23 @@ function recipeWorkflowHeaderHtml() {
   const engagement = (state.sessionMeta?.engagementContext || "").trim();
   const when = formatSavedSessionDate(state.sessionMeta?.updatedAt) || "";
   const label = name || when || "Untitled workflow";
+  // PR 33: editable workflow-family chip (workflow-level classification).
+  const family = String(state.workflowGrid?.workflowFamily || "").trim();
+  const familyColor = WORKFLOW_FAMILY_COLOR[family] || "#8899aa";
+  const familyOptions = Object.keys(WORKFLOW_FAMILY_COLOR).map((name) =>
+    `<div data-family-option="${escapeHtml(name)}" role="button" tabindex="0" style="padding:7px 12px;font-size:12px;color:${WORKFLOW_FAMILY_COLOR[name]};cursor:pointer;white-space:nowrap;">${escapeHtml(name)}</div>`
+  ).join("");
+  const familyChip = `
+    <div style="position:relative;display:inline-block;margin-top:6px;">
+      <button type="button" data-family-chip title="Click to change the workflow family" style="background:${familyColor}22;color:${familyColor};border:1px solid ${familyColor}55;border-radius:99px;padding:3px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;cursor:pointer;">${escapeHtml(family || "Set family")} ▾</button>
+      <div data-family-menu style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:40;background:#0d1b2e;border:1px solid #1e3350;border-radius:8px;padding:4px 0;box-shadow:0 8px 24px rgba(0,0,0,0.45);">${familyOptions}</div>
+    </div>`;
   return `
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px;">
       <div>
         <div style="font-size:16px;font-weight:700;color:#e8f4ff;">${escapeHtml(label)}</div>
         ${engagement ? `<div style="font-size:12px;color:#8899aa;margin-top:2px;">${escapeHtml(engagement)}</div>` : ""}
+        ${familyChip}
       </div>
       <button type="button" id="exportWordRecipeBtn" class="ds-btn-ghost" style="flex-shrink:0;display:inline-flex;align-items:center;gap:6px;">
         <i data-lucide="download" style="width:14px;height:14px;"></i>Export to Word
@@ -6392,9 +6408,17 @@ function renderAnalysisTabRecipe() {
     const source = gridCellValue(step, "trigger") || "doc-extracted";
     const cached = state.recipeCache[step.id];
 
-    const patternBadge = pattern
-      ? `<span style="background:#00d4b4;color:#0d1b2e;font-weight:700;font-size:11px;padding:2px 9px;border-radius:99px;">${escapeHtml(pattern)}</span>`
-      : `<span style="color:#5b7186;">—</span>`;
+    // PR 33: the pattern badge is an editable chip — click to reclassify; the
+    // change writes via patchField (user-edited) and routes into the NORMAL
+    // gated generation flow (prior rotated only when a new prompt lands).
+    const patternOptions = Object.keys(AI_PATTERNS).map((name) =>
+      `<div data-pattern-option="${escapeHtml(name)}" data-pattern-step="${escapeHtml(step.id)}" role="button" tabindex="0" style="padding:7px 12px;font-size:12px;color:${AI_PATTERNS[name]};cursor:pointer;white-space:nowrap;">${escapeHtml(name)}</div>`
+    ).join("");
+    const patternBadge = `
+      <span style="position:relative;display:inline-block;">
+        <button type="button" data-pattern-chip="${escapeHtml(step.id)}" title="Click to change the AI pattern" style="background:${pattern ? "#00d4b4" : "#1e3350"};color:${pattern ? "#0d1b2e" : "#8899aa"};font-weight:700;font-size:11px;padding:2px 9px;border-radius:99px;border:none;cursor:pointer;">${escapeHtml(pattern || "Set pattern")} ▾</button>
+        <span data-pattern-menu="${escapeHtml(step.id)}" style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:40;background:#0d1b2e;border:1px solid #1e3350;border-radius:8px;padding:4px 0;box-shadow:0 8px 24px rgba(0,0,0,0.45);">${patternOptions}</span>
+      </span>`;
 
     const timeSavedHtml = timeSaved != null
       ? `<span style="color:#00d4b4;font-size:13px;font-weight:600;white-space:nowrap;">~${timeSaved} min/day saved</span>`
@@ -6416,6 +6440,7 @@ function renderAnalysisTabRecipe() {
           <span><span style="color:#5b7186;">Frequency:</span> ${escapeHtml(frequency)}</span>
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Sensitivity:</span> <span style="width:8px;height:8px;border-radius:50%;background:${dot};display:inline-block;"></span> ${escapeHtml(sensitivity)}</span>
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Pattern:</span> ${patternBadge}</span>
+          ${state.workflowGrid?.workflowFamily ? `<span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Family:</span> <span style="color:${WORKFLOW_FAMILY_COLOR[state.workflowGrid.workflowFamily] || "#8899aa"};font-weight:600;">${escapeHtml(state.workflowGrid.workflowFamily)}</span></span>` : ""}
           <span><span style="color:#5b7186;">Confidence:</span> ${confidence}%</span>
           ${sectionMarker(["volume", "sensitivity"])}
         </div>
@@ -6431,6 +6456,13 @@ function renderAnalysisTabRecipe() {
             <button class="primary-button compact" type="button" data-recipe-generate="${escapeHtml(step.id)}">${cached ? "Regenerate" : "Generate prompt"}</button>
           </div>
           <div data-recipe-body="${escapeHtml(step.id)}">${cached ? "" : `<div style="background:#0a1422;border:1px dashed #1a2a3a;border-radius:8px;padding:14px 16px;color:#5b7186;font-size:12px;">No prompt yet — click "Generate prompt" to build one for this step.</div>`}</div>
+          ${(() => {
+            const prior = state.recipeCachePrior?.[step.id];
+            if (!prior?.prompt) return "";
+            const was = [prior.pattern, prior.family].filter(Boolean).join(" / ");
+            const when = Number.isNaN(Date.parse(prior.preservedAt || "")) ? "" : new Date(Date.parse(prior.preservedAt)).toLocaleString("en-US");
+            return `<details style="margin-top:8px;"><summary style="font-size:11px;color:#8aa0b8;cursor:pointer;">Previous recipe — preserved ${escapeHtml(when || "earlier")}${was ? ` (was ${escapeHtml(was)})` : ""}</summary><div style="margin-top:6px;background:#0a1422;border:1px solid #1a2a3a;border-radius:8px;padding:12px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.55;color:#8aa0b8;white-space:pre-wrap;word-break:break-word;">${escapeHtml(prior.prompt)}</div></details>`;
+          })()}
         </div>
 
         <div style="margin-top:16px;">
@@ -6484,6 +6516,7 @@ function renderAnalysisTabRecipe() {
   syncRecipeExportButton(recipeExportBtn);
   wireScoringCards(container);
   wireBusinessCaseBlock(container);
+  wireClassificationChips(container);
   container.querySelector("#exportWordRecipeBtn")?.addEventListener("click", () => exportWorkflowWord("recipe"));
 }
 
@@ -6539,6 +6572,106 @@ function showSensitivityConfirmModal(onConfirm, options = {}) {
   overlay.querySelector("#sensitivityProceed").addEventListener("click", () => {
     close();
     if (typeof onConfirm === "function") onConfirm();
+  });
+}
+
+// --- Classification correction (PR 33) ----------------------------------------
+// The ONLY place a prior recipe is rotated — called exclusively from
+// runRecipeGeneration's success path, i.e. when a new prompt actually LANDS.
+// A gate-panel detour with no generation never touches the cache or the prior.
+function rotateRecipeOnLanding(stepId, newPrompt, labels = {}) {
+  state.recipeCache = state.recipeCache || {};
+  state.recipeCachePrior = state.recipeCachePrior || {};
+  state.recipeMeta = state.recipeMeta || {};
+  const previous = state.recipeCache[stepId];
+  if (previous) {
+    state.recipeCachePrior[stepId] = {
+      prompt: previous,
+      preservedAt: new Date().toISOString(),
+      pattern: state.recipeMeta[stepId]?.pattern || "",
+      family: state.recipeMeta[stepId]?.family || "",
+      generatedAt: state.recipeMeta[stepId]?.generatedAt || ""
+    };
+  }
+  state.recipeCache[stepId] = newPrompt;
+  state.recipeMeta[stepId] = {
+    pattern: labels.pattern || "",
+    family: labels.family || "",
+    generatedAt: new Date().toISOString()
+  };
+  return Boolean(previous);
+}
+
+// Pattern edit (per step): user-edited provenance via patchField — the highest
+// authority, applied with refresh so an explicit edit always lands. Returns
+// true when the cell changed (the caller then routes into the NORMAL gated
+// generation flow; rotation only happens if a prompt actually lands).
+function applyPatternEdit(step, pattern) {
+  const clean = String(pattern || "").trim();
+  if (!step || !clean) return false;
+  return patchField(step, "meta", "aiPattern", [{ pattern: clean, confidence: 1 }], "user-edited", 1, { refresh: true });
+}
+
+// Family edit (workflow-level — sessions are single-workflow; the family is
+// metadata on the grid, not a step cell, so patchField does not apply).
+function applyFamilyEdit(family) {
+  const clean = String(family || "").trim();
+  if (!clean || !state.workflowGrid) return false;
+  if (state.workflowGrid.workflowFamily === clean) return false;
+  state.workflowGrid.workflowFamily = clean;
+  return true;
+}
+
+// Chip wiring for the Recipe Book (family on the header, pattern per card).
+// Menus are simple show/hide popovers; a chosen pattern routes into the normal
+// gated generation flow — if the gate panel intercepts and no prompt lands,
+// the existing recipe and its prior stay untouched.
+function wireClassificationChips(container) {
+  if (!container) return;
+  const closeMenus = () => container.querySelectorAll("[data-family-menu],[data-pattern-menu]").forEach((el) => { el.style.display = "none"; });
+  container.querySelector("[data-family-chip]")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const menu = container.querySelector("[data-family-menu]");
+    if (menu) menu.style.display = menu.style.display === "none" ? "block" : "none";
+  });
+  container.querySelectorAll("[data-family-option]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const family = el.dataset.familyOption;
+      if (applyFamilyEdit(family)) {
+        persistState();
+        toast(`Family set to ${family} — regenerate recipes to reflect it.`);
+        renderAnalysisTabRecipe();
+      } else {
+        closeMenus();
+      }
+    });
+  });
+  container.querySelectorAll("[data-pattern-chip]").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const menu = container.querySelector(`[data-pattern-menu="${btn.dataset.patternChip}"]`);
+      const open = menu && menu.style.display !== "none";
+      closeMenus();
+      if (menu && !open) menu.style.display = "block";
+    });
+  });
+  container.querySelectorAll("[data-pattern-option]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const stepId = el.dataset.patternStep;
+      const pattern = el.dataset.patternOption;
+      const step = analysisGridSteps().find((item) => item.id === stepId);
+      if (!step) return;
+      if (applyPatternEdit(step, pattern)) {
+        persistState();
+        toast(`Pattern set to ${pattern} — regenerating recipe.`);
+        renderAnalysisTabRecipe();
+        // Normal flow: the PR 30b gate may intercept; rotation only on landing.
+        generateRecipePrompt(stepId);
+      } else {
+        toast("Pattern unchanged.");
+        closeMenus();
+      }
+    });
   });
 }
 
@@ -6675,8 +6808,12 @@ async function runRecipeGeneration(stepId) {
     if (!response.ok || !data.prompt) {
       throw new Error(data.error || "No prompt returned");
     }
-    state.recipeCache = state.recipeCache || {};
-    state.recipeCache[stepId] = data.prompt;
+    // PR 33: the landing point — rotate the prior ONLY now that a new prompt
+    // actually exists (steer: gate detours without generation rotate nothing).
+    rotateRecipeOnLanding(stepId, data.prompt, {
+      pattern: stepPrimaryPattern(step),
+      family: String(state.workflowGrid?.workflowFamily || "")
+    });
     // PR 30b Slice 2: snapshot which recipe-critical fields were unconfirmed
     // when THIS prompt was built. Markers render from the snapshot (not live
     // state) so a prompt generated from unconfirmed data stays marked until
