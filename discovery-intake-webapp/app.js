@@ -12847,13 +12847,23 @@ function patchSessionMetadata() {
 // Editable inline workflow title in the Discovery header. Always shows an input
 // (styled as a label); blur / Enter saves. Skips re-render while focused so it
 // never disrupts typing.
+let lastHeaderSessionId = null;
+
 function renderWorkflowHeaderName() {
   const host = document.getElementById("workflowHeaderName");
   if (!host) return;
-  const name = (state.sessionMeta?.workflowName || "").trim();
+  // Prefer the explicit workflow name, but fall back to the grid's name so a
+  // loaded session shows its title even when sessionMeta.workflowName is unset.
+  const name = (state.sessionMeta?.workflowName || state.workflowGrid?.workflowName || "").trim();
+  // Detect a session switch (e.g. opening a saved session from the Open menu) so
+  // we refresh the field even if it still holds focus from the previous session.
+  const sessionId = state.sessionMeta?.id || "";
+  const sessionChanged = sessionId !== lastHeaderSessionId;
+  lastHeaderSessionId = sessionId;
   const existing = host.querySelector("#workflowNameInput");
   if (existing) {
-    if (document.activeElement === existing) return;
+    // Don't clobber the field mid-edit — unless the session itself just changed.
+    if (document.activeElement === existing && !sessionChanged) return;
     existing.value = name;
     existing.style.color = name ? "#e8f4ff" : "#8899aa";
     return;
