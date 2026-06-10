@@ -4090,8 +4090,10 @@ function renderLiveExtractionGrid() {
       const valueHtml = hasValue
         ? `<div style="font-size:12px;color:#c7d4e3;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${escapeHtml(cell.value)}</div>`
         : `<div style="font-size:12px;color:#3f5878;">—</div>`;
+      // PR 28: cells lay out horizontally within the layer (flex row, wrapping
+      // when the rail is narrow) rather than stacking vertically.
       return `
-        <div data-lg-cell="${layer.key}.${field.key}" style="${style}border-radius:6px;padding:7px 9px;margin-bottom:6px;transition:background-color 300ms ease;">
+        <div data-lg-cell="${layer.key}.${field.key}" style="${style}flex:1 1 96px;min-width:0;box-sizing:border-box;border-radius:6px;padding:7px 9px;transition:background-color 300ms ease;">
           <div style="font-size:10px;color:#5b7186;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px;">${escapeHtml(field.label)}</div>
           ${valueHtml}
         </div>`;
@@ -4102,7 +4104,7 @@ function renderLiveExtractionGrid() {
           <span style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:${layer.color};">${escapeHtml(layer.name)}</span>
           <span style="font-size:10px;font-weight:700;color:${layer.color};background:${hexToRgba(layer.color, 0.15)};border:1px solid ${hexToRgba(layer.color, 0.4)};border-radius:99px;padding:1px 8px;">${filled}/${layer.fields.length}</span>
         </div>
-        ${cellsHtml}
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">${cellsHtml}</div>
       </div>`;
   }).join("");
 
@@ -4170,52 +4172,63 @@ function renderWorkflowGridPanel() {
   const steps = Array.isArray(grid.steps) ? grid.steps : [];
   const workflowName = (grid.workflowName || "").trim();
 
-  // Only rebuild when the displayed data actually changes — avoids flicker and
-  // keeps cell fade-ins from re-triggering on unrelated renders.
+  // PR 28: the Discovery steps view is a card grid (the horizontal spreadsheet
+  // now lives only in Analysis Studio → Workflow Grid). Rebuild only when the
+  // displayed card data changes — avoids flicker on unrelated renders.
   const signature = JSON.stringify({
     workflowName,
-    steps: steps.map((step) => ({
-      n: step.cells?.name?.value || "",
-      c: LIVE_GRID_ROWS.map((row) => {
-        const cell = step.cells?.[row.key];
-        return [gridCellDisplay(cell).text, cell?.state || "empty"];
-      })
+    steps: steps.map((step, index) => ({
+      n: stepDisplayName(step, index),
+      p: handoffPrimaryValue(step, "personaActors"),
+      s: handoffPrimaryValue(step, "systemsTools"),
+      a: stepPrimaryPattern(step),
+      c: handoffStepConfidence(step),
+      u: gridCellValue(step, "description")
     }))
   });
   if (signature === lastWorkflowGridSignature) return;
   lastWorkflowGridSignature = signature;
 
   // Workflow name header only when set — otherwise omit it entirely.
-  const header = `<div class="live-grid-head"><span class="eyebrow">Live workflow grid</span>${workflowName ? `<h3>${escapeHtml(workflowName)}</h3>` : ""}</div>`;
+  const header = `<div class="live-grid-head"><span class="eyebrow">Workflow steps</span>${workflowName ? `<h3>${escapeHtml(workflowName)}</h3>` : ""}</div>`;
 
   if (!steps.length) {
-    panel.innerHTML = `${header}<p class="live-grid-placeholder">Grid filling in as you talk...</p>`;
+    panel.innerHTML = `${header}<p class="live-grid-placeholder">Steps appear here as cards while you talk...</p>`;
     return;
   }
 
-  const headerCells = steps.map((step, index) => {
-    const name = step.cells?.name?.value?.trim() || `Step ${index + 1}`;
-    return `<th scope="col" title="${escapeHtml(name)}">${escapeHtml(truncateUi(name, 40))}</th>`;
-  }).join("");
-
-  const rowsHtml = LIVE_GRID_ROWS.map((row) => {
-    const cells = steps.map((step) => {
-      const { text, state: cellState } = gridCellDisplay(step.cells?.[row.key]);
-      // unknown cells carry no text but must still show slate styling, not muted.
-      const emptyClass = (text || cellState === "unknown") ? "" : " is-empty";
-      return `<td class="live-grid-cell${emptyClass}" data-cell-state="${escapeHtml(cellState)}" title="${escapeHtml(text)}">${escapeHtml(truncateUi(text, 80))}</td>`;
-    }).join("");
-    return `<tr><th scope="row" class="live-grid-row-label">${escapeHtml(row.label)}</th>${cells}</tr>`;
+  const cards = steps.map((step, index) => {
+    const num = String(index + 1).padStart(2, "0");
+    const name = stepDisplayName(step, index);
+    const persona = handoffPrimaryValue(step, "personaActors") || "—";
+    const system = handoffPrimaryValue(step, "systemsTools") || "—";
+    const pattern = stepPrimaryPattern(step);
+    const layerColor = pattern ? patternLayerColor(pattern) : "#5b7186";
+    const confidence = handoffStepConfidence(step);
+    const confColor = handoffConfidenceColor(confidence);
+    const confLabel = confidence === null ? "No score" : `${Math.round(confidence * 100)}%`;
+    const patternHtml = pattern
+      ? `<span style="display:inline-block;background:${layerColor}22;color:${layerColor};border:1px solid ${layerColor}55;border-radius:99px;padding:2px 9px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.03em;">${escapeHtml(pattern)}</span>`
+      : `<span style="font-size:11px;color:#3f5878;">No AI pattern yet</span>`;
+    return `
+      <div style="background:#0d1b2a;border:1px solid #1a2a3a;border-left:3px solid ${layerColor};border-radius:8px;padding:12px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <span style="font-size:10px;color:#5b7186;letter-spacing:0.06em;">${num}</span>
+          <strong style="font-size:14px;color:#dde8f5;flex:1;min-width:0;">${escapeHtml(name)}</strong>
+          <span class="sensitivity-badge" style="background:${confColor}22;color:${confColor};">${escapeHtml(confLabel)}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:12px;margin-bottom:8px;">
+          <span style="color:#5b7186;">Persona</span><span style="color:#9fb3c8;">${escapeHtml(persona)}</span>
+          <span style="color:#5b7186;">System</span><span style="color:#9fb3c8;">${escapeHtml(system)}</span>
+        </div>
+        <div style="margin-bottom:8px;">${patternHtml}</div>
+        <div style="font-size:12px;color:#8aa0b8;line-height:1.4;border-top:1px solid #16263a;padding-top:7px;">${escapeHtml(stepUnderstandingLine(step))}</div>
+      </div>`;
   }).join("");
 
   panel.innerHTML = `
     ${header}
-    <div class="live-grid-scroll">
-      <table class="live-grid-table">
-        <thead><tr><th scope="col" class="live-grid-corner">Field</th>${headerCells}</tr></thead>
-        <tbody>${rowsHtml}</tbody>
-      </table>
-    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-top:6px;">${cards}</div>
   `;
   refreshIcons();
 }
@@ -4435,6 +4448,20 @@ const AI_PATTERNS = {
   Classify: "#6366f1"
 };
 
+// PR 28: AI pattern -> layer colour for the Discovery step cards. Patterns are
+// grouped onto the 3 extraction layers + Strategic, matching the layer palette:
+// teal (THE FLOW), pink (PEOPLE & FRICTION), amber (DATA & RISK), purple (Strategic).
+const PATTERN_LAYER_COLOR = {
+  Retrieve: "#00d4b4", Search: "#00d4b4", Extract: "#00d4b4",      // Layer 1 — THE FLOW
+  Summarise: "#ff4fc8", Generate: "#ff4fc8", Classify: "#ff4fc8",  // Layer 2 — PEOPLE & FRICTION
+  Match: "#f59e0b", Route: "#f59e0b",                              // Layer 3 — DATA & RISK
+  Optimise: "#a855f7"                                              // Strategic
+};
+
+function patternLayerColor(pattern) {
+  return PATTERN_LAYER_COLOR[pattern] || "#5b7186";
+}
+
 const ANALYSIS_TABS = ["grid", "opportunities", "recipe", "engineering"];
 
 // Implementation-complexity bucket per pattern. Low ends Phase 2, Medium ends
@@ -4522,6 +4549,21 @@ function patternColor(pattern) {
 
 function stepDisplayName(step, index) {
   return gridCellValue(step, "name") || `Step ${index + 1}`;
+}
+
+// PR 28: one-line plain-English "what AI understands" for a step card. Prefer the
+// captured description; otherwise synthesise from the pattern/persona/system.
+function stepUnderstandingLine(step) {
+  const desc = gridCellValue(step, "description");
+  if (desc) return truncateUi(desc, 110);
+  const pattern = stepPrimaryPattern(step);
+  const persona = handoffPrimaryValue(step, "personaActors");
+  const system = handoffPrimaryValue(step, "systemsTools");
+  const bits = [];
+  if (pattern) bits.push(`a ${pattern} pattern`);
+  if (persona) bits.push(`run by ${persona}`);
+  if (system) bits.push(`in ${system}`);
+  return bits.length ? `AI sees ${bits.join(" ")}.` : "Still gathering detail for this step.";
 }
 
 function stepCoverage(step) {
