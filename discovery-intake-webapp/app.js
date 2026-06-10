@@ -3471,7 +3471,6 @@ function render() {
   renderLiveSpeechDraft();
   renderWorkflowGridPanel();
   renderLiveExtractionGrid();
-  updateConfidenceCards();
   updateProcessFlowMapCompact();
   if (els.sectionTitle) els.sectionTitle.textContent = section.label;
   renderConversation();
