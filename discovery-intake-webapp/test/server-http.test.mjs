@@ -129,6 +129,32 @@ test("loading session A then B returns B's data only (PR 29 regression)", async 
   assert.ok(!JSON.stringify(loadB).includes("Workshop Use Case Deep Dive"), "B's payload must not leak A's data");
 });
 
+test("/api/business-case computes a snapshot with computedAt on explicit request", async () => {
+  const res = await fetch(`${server.base}/api/business-case`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      steps: [{ cells: { frequencyVolume: { value: "10 times per week" }, timeTaken: { value: "30 minutes" } } }],
+      conversationText: "part of my job, every week",
+      userRole: "analyst"
+    })
+  });
+  assert.equal(res.status, 200);
+  const { snapshot } = await res.json();
+  assert.equal(snapshot.rateSource, "role");
+  assert.equal(snapshot.rate, 75);
+  assert.equal(snapshot.formulaVersion, 1);
+  assert.ok(snapshot.computedAt, "endpoint stamps computedAt");
+  assert.ok(!Number.isNaN(Date.parse(snapshot.computedAt)), "computedAt is a valid timestamp");
+  // No steps → 400, never a silent default figure.
+  const bad = await fetch(`${server.base}/api/business-case`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ steps: [] })
+  });
+  assert.equal(bad.status, 400);
+});
+
 test("/health returns ok and bypasses the auth gate", async () => {
   const authServer = await bootServer({
     PORT: String(AUTH_PORT),
@@ -150,6 +176,15 @@ test("/health returns ok and bypasses the auth gate", async () => {
     assert.equal(gated.status, 401);
     const gatedBody = await gated.json();
     assert.equal(gatedBody.error, "auth_required");
+
+    // PR 32: the business-case engine sits behind the same gate — not a
+    // /health-style bypass.
+    const gatedBc = await fetch(`${authServer.base}/api/business-case`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ steps: [{ cells: {} }] })
+    });
+    assert.equal(gatedBc.status, 401, "/api/business-case requires auth when the gate is armed");
   } finally {
     await stopServer(authServer);
   }

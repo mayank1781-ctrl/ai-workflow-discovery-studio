@@ -1287,6 +1287,10 @@ const server = http.createServer(async (req, res) => {
       return await handleChat(req, res);
     }
 
+    if (req.method === "POST" && requestUrl.pathname === "/api/business-case") {
+      return await handleBusinessCase(req, res);
+    }
+
     if (req.method === "POST" && requestUrl.pathname === "/api/recipe") {
       return await handleRecipe(req, res);
     }
@@ -2191,17 +2195,24 @@ function recipeUserPayload(step, workflowName) {
 }
 
 // === Business case estimate (PR 7, rate personalised PR 12a) ===============
-// Auto-calculated hours + value attached to the recipe response. Role mode =
+// The single source of the business-case formula (PR 32): serves the explicit
+// /api/business-case compute and the /api/recipe response echo. Role mode =
 // recurring work valued annually; project mode = engagement-bounded work valued
 // for the engagement. The blended rate (USD) is driven by the user's
 // self-identified level; $100/hr (consultant) is the default. Mirrors
 // computeBusinessCase in app.js — keep the two in sync.
-const BC_BLENDED_RATE = 100; // USD default when no level is provided
-const BC_WORKING_WEEKS = 48;
-const BC_ROLE_RATES = { analyst: 75, consultant: 100, manager: 150, principal: 200 };
+// PR 32: server config is the single source of the business-case formula
+// inputs. formulaVersion stamps every snapshot so a future formula change can
+// be told apart from a data change.
+const BC_CONFIG = {
+  workingWeeks: 48,
+  defaultRate: 100, // USD when no level is provided
+  roleRates: { analyst: 75, consultant: 100, manager: 150, principal: 200 },
+  formulaVersion: 1
+};
 
 function blendedRateForRole(role) {
-  return BC_ROLE_RATES[String(role || "").toLowerCase()] || BC_BLENDED_RATE;
+  return BC_CONFIG.roleRates[String(role || "").toLowerCase()] || BC_CONFIG.defaultRate;
 }
 
 function bcDetectWorkflowMode(text) {
@@ -2286,13 +2297,23 @@ function computeBusinessCase(steps, conversationText, userRole = "") {
   };
   if (workflowMode === "role") {
     results.hoursPerWeek = (instances_per_week * mins_per_instance) / 60;
-    results.annualHours = results.hoursPerWeek * BC_WORKING_WEEKS;
+    results.annualHours = results.hoursPerWeek * BC_CONFIG.workingWeeks;
     results.annualValue = results.annualHours * blendedRate;
   } else {
     results.totalHours = (instances_per_week * project_duration_weeks * mins_per_instance) / 60;
     results.projectValue = results.totalHours * blendedRate;
   }
   return {
+    // PR 32 snapshot fields — the full context the figure was computed from.
+    rate: blendedRate,
+    rateSource: rateOverride != null ? "override" : "role",
+    instancesPerWeek: instances_per_week,
+    minsPerInstance: mins_per_instance,
+    durationWeeks: project_duration_weeks,
+    mode: workflowMode,
+    formulaVersion: BC_CONFIG.formulaVersion,
+    defaulted: !instParsed || !minsParsed,
+    // Back-compat fields (the /api/recipe consumer and the client block).
     workflowMode,
     inputs: { instances_per_week, mins_per_instance, project_duration_weeks },
     results,
@@ -2300,6 +2321,30 @@ function computeBusinessCase(steps, conversationText, userRole = "") {
     userRole: role,
     blendedRate
   };
+}
+
+// PR 32: the business-case engine endpoint — pure math, no AI key required.
+// Sits behind the standard auth gate like every other /api route (NOT a
+// /health-style bypass). computedAt is stamped here: a snapshot exists only
+// because a user explicitly asked for one.
+async function handleBusinessCase(req, res) {
+  let body;
+  try {
+    body = await readJson(req);
+  } catch (error) {
+    return sendJson(res, 400, { error: error.message || "Invalid request body" });
+  }
+  const steps = Array.isArray(body.steps) ? body.steps : [];
+  if (!steps.length) {
+    return sendJson(res, 400, { error: "At least one workflow step is required." });
+  }
+  const snapshot = computeBusinessCase(
+    steps,
+    typeof body.conversationText === "string" ? body.conversationText : "",
+    typeof body.userRole === "string" ? body.userRole : ""
+  );
+  snapshot.computedAt = new Date().toISOString();
+  return sendJson(res, 200, { snapshot });
 }
 
 async function handleRecipe(req, res) {
