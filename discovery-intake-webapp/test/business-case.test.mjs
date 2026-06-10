@@ -12,7 +12,8 @@ const source = readAppSource();
 
 function sandbox() {
   return buildSandbox(source, {
-    consts: ["BC_BLENDED_RATE", "BC_WORKING_WEEKS", "BC_ROLE_RATES"],
+    // PR 30: gridCellValue reads through the accessor layer (getField).
+    consts: ["BC_BLENDED_RATE", "BC_WORKING_WEEKS", "BC_ROLE_RATES", "GRID_CELL_KEYS", "GRID_CELL_LAYER"],
     functions: [
       "computeBusinessCase",
       "bcDetectWorkflowMode",
@@ -21,9 +22,10 @@ function sandbox() {
       "bcParseDurationWeeks",
       "blendedRateForRole",
       "gridCellValue",
+      "getField",
       "stepPatternList"
     ],
-    globals: { state: { sessionMeta: {}, settings: {} } }
+    globals: { state: { sessionMeta: {}, settings: {} }, currentGridStep: () => null }
   });
 }
 
