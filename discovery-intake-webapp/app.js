@@ -4190,7 +4190,7 @@ function renderWorkflowGridPanel() {
       p: handoffPrimaryValue(step, "personaActors"),
       s: handoffPrimaryValue(step, "systemsTools"),
       a: stepPrimaryPattern(step),
-      c: handoffStepConfidence(step),
+      c: stepCoverage(step),
       u: gridCellValue(step, "description")
     }))
   });
@@ -4212,9 +4212,11 @@ function renderWorkflowGridPanel() {
     const system = handoffPrimaryValue(step, "systemsTools") || "—";
     const pattern = stepPrimaryPattern(step);
     const layerColor = pattern ? patternLayerColor(pattern) : "#5b7186";
-    const confidence = handoffStepConfidence(step);
-    const confColor = handoffConfidenceColor(confidence);
-    const confLabel = confidence === null ? "No score" : `${Math.round(confidence * 100)}%`;
+    // PR 28a: badge shows live field coverage (set during Discovery), not the
+    // AI pattern confidence (which is only assigned later in Analysis).
+    const coverage = stepCoverage(step);
+    const confColor = handoffConfidenceColor(coverage);
+    const confLabel = `${Math.round(coverage * 100)}%`;
     const patternHtml = pattern
       ? `<span style="display:inline-block;background:${layerColor}22;color:${layerColor};border:1px solid ${layerColor}55;border-radius:99px;padding:2px 9px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.03em;">${escapeHtml(pattern)}</span>`
       : `<span style="font-size:11px;color:#3f5878;">No AI pattern yet</span>`;
