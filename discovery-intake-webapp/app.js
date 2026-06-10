@@ -1914,6 +1914,9 @@ async function sendChatMessage() {
     return;
   }
 
+  // PR 29 fix: submitting an answer resolves the active key question.
+  if (activeGapQuestion) { activeGapQuestion = ""; renderActiveQuestionLabel(); }
+
   // "Paste context" routes the same box/button through document-style
   // extraction (merged from the old standalone "Extract and Fill" box).
   if (intakeMode === "paste") {
@@ -4189,6 +4192,49 @@ function workflowGapFields(steps) {
   );
 }
 
+// PR 29 fix: a tapped key question becomes the "Answering:" context above the
+// composer; the answer box itself stays empty + focused for the user's reply,
+// and the composer scrolls into view (the box is otherwise off-screen when many
+// step cards push the questions down the left column).
+let activeGapQuestion = "";
+
+function setActiveGapQuestion(question) {
+  activeGapQuestion = question || "";
+  renderActiveQuestionLabel();
+  const input = els.aiChatInput;
+  if (!input) return;
+  (input.closest(".chat-composer") || input).scrollIntoView({ behavior: "smooth", block: "center" });
+  input.focus();
+}
+
+function clearActiveGapQuestion() {
+  activeGapQuestion = "";
+  if (els.aiChatInput) els.aiChatInput.value = "";
+  renderActiveQuestionLabel();
+  els.aiChatInput?.focus();
+}
+
+// Injects/updates (or removes) the "Answering: …" label directly above the
+// composer textarea, with a × to clear.
+function renderActiveQuestionLabel() {
+  const input = els.aiChatInput;
+  const composer = input?.closest(".chat-composer");
+  if (!composer) return;
+  let label = document.getElementById("activeQuestionLabel");
+  if (!activeGapQuestion) {
+    label?.remove();
+    return;
+  }
+  if (!label) {
+    label = document.createElement("div");
+    label.id = "activeQuestionLabel";
+    label.style.cssText = "display:flex;align-items:flex-start;gap:8px;background:#0d1b2a;border:1px solid #1e3350;border-radius:6px;padding:6px 10px;margin-bottom:8px;";
+    composer.insertBefore(label, input);
+  }
+  label.innerHTML = `<span style="flex:1;min-width:0;font-size:12px;color:#8aa0b8;line-height:1.4;">Answering: <span style="color:#cfe0f0;">${escapeHtml(activeGapQuestion)}</span></span><span data-clear-question role="button" tabindex="0" title="Clear" style="color:#5b7186;font-size:16px;line-height:1;cursor:pointer;flex-shrink:0;">×</span>`;
+  label.querySelector("[data-clear-question]")?.addEventListener("click", clearActiveGapQuestion);
+}
+
 function renderWorkflowGridPanel() {
   const panel = document.getElementById("liveWorkflowGridPanel");
   if (!panel) return;
@@ -4289,14 +4335,10 @@ function renderWorkflowGridPanel() {
 
   // Tapping a key question pre-fills the composer with the question text.
   panel.querySelectorAll("[data-gap-question]").forEach((el) => {
-    const prefill = () => {
-      if (!els.aiChatInput) return;
-      els.aiChatInput.value = el.dataset.gapQuestion;
-      els.aiChatInput.focus();
-    };
-    el.addEventListener("click", prefill);
+    const choose = () => setActiveGapQuestion(el.dataset.gapQuestion);
+    el.addEventListener("click", choose);
     el.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); prefill(); }
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); choose(); }
     });
   });
   panel.querySelector("[data-start-interview]")?.addEventListener("click", () => {
