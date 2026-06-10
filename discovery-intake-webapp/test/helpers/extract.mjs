@@ -22,7 +22,7 @@ export function readAppSource() {
 // The parameter list is skipped first (paren-matched) so default parameters
 // like `(payload = {})` can't terminate the body match early.
 export function extractFunction(source, name) {
-  const match = source.match(new RegExp(`^function ${name}\\b`, "m"));
+  const match = source.match(new RegExp(`^(?:async )?function ${name}\\b`, "m"));
   assert.notEqual(match, null, `function ${name} not found in app.js`);
   const start = match.index;
   const parenOpen = source.indexOf("(", start);
