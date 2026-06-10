@@ -3825,6 +3825,9 @@ function normalizeGridFieldKey(rawKey) {
   if (typeof rawKey !== "string") return null;
   if (GRID_CELL_KEYS.includes(rawKey)) return rawKey;
   if (EXTRACTION_CELL_KEY_MAP[rawKey]) return EXTRACTION_CELL_KEY_MAP[rawKey];
+  // Surface dropped keys: a model emitting non-canonical keys silently losing
+  // data is exactly the failure mode behind the empty-live-grid bug.
+  console.info("[grid-harvest] dropped unrecognized field key:", rawKey);
   return null;
 }
 
@@ -3859,6 +3862,13 @@ function applyHarvestUpdates(payload = {}) {
   if (!grid || !Array.isArray(grid.steps)) return false;
   let changed = false;
 
+  // The step-list lock keeps the step COUNT stable after the skeleton is
+  // confirmed — but a lock on an EMPTY grid is meaningless (there is no
+  // skeleton to protect) and used to drop every harvested step silently:
+  // legacy state.steps from /api/extract locked the grid before the harvest
+  // could seed it. Only honor the lock once the grid actually has steps.
+  const lockActive = grid.stepListLocked && grid.steps.length > 0;
+
   const stepUpdates = Array.isArray(payload.stepUpdates) ? payload.stepUpdates : [];
   stepUpdates.forEach((update) => {
     if (!update || typeof update !== "object") return;
@@ -3868,8 +3878,11 @@ function applyHarvestUpdates(payload = {}) {
       return;
     }
     // No match (e.g. stepId "new") — treat as a newly mentioned step, unless the
-    // step list is frozen after Q3, in which case no new steps may be created.
-    if (grid.stepListLocked) return;
+    // step list is frozen, in which case no new steps may be created.
+    if (lockActive) {
+      console.info("[grid-harvest] discarded stepUpdate (unmatched id, step list locked):", update.stepName || update.stepId || "?");
+      return;
+    }
     const created = createGridStepFromHarvest(update);
     if (created) {
       grid.steps.push(created);
@@ -3877,11 +3890,14 @@ function applyHarvestUpdates(payload = {}) {
     }
   });
 
-  // Once the step list is frozen after Q3, drilling can only enrich existing
-  // steps — silently drop any harvested new steps to keep the count stable.
-  const newSteps = grid.stepListLocked
+  // Once the step list is frozen, drilling can only enrich existing steps —
+  // drop any harvested new steps to keep the count stable (logged, not silent).
+  const newSteps = lockActive
     ? []
     : (Array.isArray(payload.newSteps) ? payload.newSteps : []);
+  if (lockActive && Array.isArray(payload.newSteps) && payload.newSteps.length) {
+    console.info("[grid-harvest] discarded newSteps (step list locked):", payload.newSteps.length);
+  }
   newSteps.forEach((raw) => {
     const created = createGridStepFromHarvest(raw);
     if (created) {
