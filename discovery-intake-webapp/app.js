@@ -5597,7 +5597,8 @@ function recipePromptBlockHtml(prompt) {
 }
 
 // === Business case estimate (PR 7, rate personalised PR 12a) ===============
-// Auto-calculated hours + value shown below the Recipe Book and Engineering Doc.
+// Business-case card shown below the Recipe Book and Engineering Doc. Renders
+// the explicit-compute snapshot only (PR 32) — never a live calculation.
 // Role mode = recurring "part of my job" work valued annually; project mode =
 // engagement-bounded work valued for the engagement. Blended rate is driven by
 // the user's self-identified level (USD); $100/hr (consultant) is the default.
@@ -5648,7 +5649,7 @@ function businessCaseBlockHtml(bc) {
     <div class="ds-card" style="padding:20px;margin-top:16px;">
       <div style="display:flex;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
         <strong style="font-size:1rem;color:#e8f4ff;">Business Case Estimate</strong>
-        <span class="ds-badge ds-badge-amber" style="margin-left:8px;">Auto-calculated</span>
+        <span class="ds-badge ds-badge-teal" style="margin-left:8px;">Computed on request</span>
         ${estBadge}
       </div>
       <div style="display:flex;gap:40px;flex-wrap:wrap;">${callouts}</div>

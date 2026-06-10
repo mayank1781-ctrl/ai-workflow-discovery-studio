@@ -2195,7 +2195,8 @@ function recipeUserPayload(step, workflowName) {
 }
 
 // === Business case estimate (PR 7, rate personalised PR 12a) ===============
-// Auto-calculated hours + value attached to the recipe response. Role mode =
+// The single source of the business-case formula (PR 32): serves the explicit
+// /api/business-case compute and the /api/recipe response echo. Role mode =
 // recurring work valued annually; project mode = engagement-bounded work valued
 // for the engagement. The blended rate (USD) is driven by the user's
 // self-identified level; $100/hr (consultant) is the default. Mirrors
