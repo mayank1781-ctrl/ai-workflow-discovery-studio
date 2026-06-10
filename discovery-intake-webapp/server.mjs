@@ -122,7 +122,9 @@ const AUTH_ADMIN_SUBS = new Set(
   String(process.env.AUTH_ADMIN_SUBS || "").split(",").map((s) => s.trim()).filter(Boolean)
 );
 
-const DATA_DIR = path.join(__dirname, "data");
+// DATA_DIR is env-overridable so the executed test suite can point the server
+// (and its sessions.db) at a throwaway temp dir; unset = unchanged behavior.
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const SESSIONS_DIR = path.join(DATA_DIR, "sessions");
 const AUDIT_DIR = path.join(DATA_DIR, "audit");
 const PACKAGES_DIR = path.join(DATA_DIR, "packages");
