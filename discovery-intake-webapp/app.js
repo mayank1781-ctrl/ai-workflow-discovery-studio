@@ -1484,8 +1484,9 @@ function handleAnswerInputKeydown(event) {
 function setAppMode(mode) {
   state.appMode = mode === "analysis" ? "analysis" : "interview";
   persistState();
-  renderAppMode();
-  refreshIcons();
+  // #3: full re-render (not just renderAppMode) so switching modes fully
+  // rehydrates every surface from current state, never showing a stale panel.
+  render();
 }
 
 async function checkAiStatus() {
@@ -3459,64 +3460,76 @@ function render() {
   document.body.dataset.captureStage = state.captureStage || "idle";
   const section = getActiveSection();
   if (state.activeSection !== section.id) state.activeSection = section.id;
-  renderHeaderContext();
-  renderWorkflowHeaderName();
-  renderWorkflowNamingPrompt();
-  renderCurrentStepPanel();
-  renderCurrentQuestion(section);
-  renderTurnSignalPanel();
-  renderDiscoveryDumpMode();
-  renderAiMirror();
-  renderDiscoveryPatternInterview();
-  renderInterviewGuide(section);
-  renderCaptureCoach();
-  renderTextIntakeAssist();
-  renderLiveSpeechDraft();
-  renderWorkflowGridPanel();
-  renderInlineKeyQuestions();
-  renderLiveExtractionGrid();
-  updateProcessFlowMapCompact();
-  if (els.sectionTitle) els.sectionTitle.textContent = section.label;
-  renderConversation();
-  renderAiChat();
-  renderValidationFlow();
-  renderBlueprintInspector();
-  renderNav();
-  renderSectionForm(section);
-  renderLiveIntakeLedger();
-  renderHandoffBridge();
-  renderSummary();
-  renderIdeas();
-  renderPdrPreview();
-  renderSolutionBlueprint();
-  renderWorkflowMapStudio();
-  renderTemplateHandoffStudio();
-  renderLiveTestCommandCenter();
-  renderGuidedPilotPanel();
-  renderHandoffSnapshot();
-  renderReviewGate();
-  renderPilotInsights();
-  renderPilotFeedback();
-  renderRecapPanel();
-  renderEvidenceReviewPanel();
-  renderEvidenceWorkbench();
-  renderOperatorAddOnsPanel();
-  renderDemoConsole();
-  renderAnalysisMatrixMap();
-  renderCaseComparison();
-  renderLifecyclePanel();
-  renderSessionLibrary();
-  renderSavedSessionsPanel();
-  renderPilotControls();
-  renderTestLab();
-  renderMap();
-  renderMapStepEditor();
-  renderWorkbenchTabs();
-  renderAppMode();
-  if (state.appMode === "analysis") renderAnalysisStudio();
-  updateAiTurnStatus(state.captureStage || "idle");
-  updateProgressUi();
-  refreshIcons();
+  // #3: run each renderer in isolation so one throw can't strand every surface
+  // after it on the previous session's DOM (the Bug A "Analysis Studio stuck"
+  // facet). Order is preserved exactly.
+  const steps = [
+    renderHeaderContext,
+    renderWorkflowHeaderName,
+    renderWorkflowNamingPrompt,
+    renderCurrentStepPanel,
+    () => renderCurrentQuestion(section),
+    renderTurnSignalPanel,
+    renderDiscoveryDumpMode,
+    renderAiMirror,
+    renderDiscoveryPatternInterview,
+    () => renderInterviewGuide(section),
+    renderCaptureCoach,
+    renderTextIntakeAssist,
+    renderLiveSpeechDraft,
+    renderWorkflowGridPanel,
+    renderInlineKeyQuestions,
+    renderLiveExtractionGrid,
+    updateProcessFlowMapCompact,
+    () => { if (els.sectionTitle) els.sectionTitle.textContent = section.label; },
+    renderConversation,
+    renderAiChat,
+    renderValidationFlow,
+    renderBlueprintInspector,
+    renderNav,
+    () => renderSectionForm(section),
+    renderLiveIntakeLedger,
+    renderHandoffBridge,
+    renderSummary,
+    renderIdeas,
+    renderPdrPreview,
+    renderSolutionBlueprint,
+    renderWorkflowMapStudio,
+    renderTemplateHandoffStudio,
+    renderLiveTestCommandCenter,
+    renderGuidedPilotPanel,
+    renderHandoffSnapshot,
+    renderReviewGate,
+    renderPilotInsights,
+    renderPilotFeedback,
+    renderRecapPanel,
+    renderEvidenceReviewPanel,
+    renderEvidenceWorkbench,
+    renderOperatorAddOnsPanel,
+    renderDemoConsole,
+    renderAnalysisMatrixMap,
+    renderCaseComparison,
+    renderLifecyclePanel,
+    renderSessionLibrary,
+    renderSavedSessionsPanel,
+    renderPilotControls,
+    renderTestLab,
+    renderMap,
+    renderMapStepEditor,
+    renderWorkbenchTabs,
+    renderAppMode,
+    () => { if (state.appMode === "analysis") renderAnalysisStudio(); },
+    () => updateAiTurnStatus(state.captureStage || "idle"),
+    updateProgressUi,
+    refreshIcons
+  ];
+  for (const step of steps) {
+    try {
+      step();
+    } catch (error) {
+      console.error("[render] renderer failed:", error);
+    }
+  }
 }
 
 // Maps the server document-extraction payload (POST /api/extract-document) into
@@ -4363,8 +4376,7 @@ function renderWorkflowGridPanel() {
   `;
 
   panel.querySelector("[data-start-interview]")?.addEventListener("click", () => {
-    setAppMode("interview");
-    render();
+    setAppMode("interview"); // setAppMode now does a full render()
     toast("Switched to interview — let's fill the gaps.");
   });
 
@@ -12797,7 +12809,10 @@ function caseScore(label, score, color) {
 function discoveryHasStarted() {
   const conversation = state.conversation || [];
   const aiChat = state.aiChat || [];
+  // #1 (interim canonical rule — revisit PR 30): treat a populated workflowGrid
+  // as "started" too, so a loaded grid session doesn't re-show the naming prompt.
   return (state.steps?.length || 0) > 0
+    || (state.workflowGrid?.steps?.length || 0) > 0
     || conversation.some((message) => message.role === "user")
     || aiChat.some((message) => message.role === "user");
 }
@@ -12852,8 +12867,9 @@ let lastHeaderSessionId = null;
 function renderWorkflowHeaderName() {
   const host = document.getElementById("workflowHeaderName");
   if (!host) return;
-  // Prefer the explicit workflow name, but fall back to the grid's name so a
-  // loaded session shows its title even when sessionMeta.workflowName is unset.
+  // #1 (interim canonical rule — revisit PR 30): prefer the explicit workflow
+  // name, but fall back to the grid's name so a loaded session shows its title
+  // even when sessionMeta.workflowName is unset.
   const name = (state.sessionMeta?.workflowName || state.workflowGrid?.workflowName || "").trim();
   // Detect a session switch (e.g. opening a saved session from the Open menu) so
   // we refresh the field even if it still holds focus from the previous session.
@@ -28230,6 +28246,15 @@ function normalizeLoadedState(parsed = {}) {
     merged.currentQuestionOverride = "";
     merged.currentQuestionSource = "Step-by-step interview";
   }
+  // #2 (interim — revisit PR 30): when a loaded session carried its name only on
+  // the grid, backfill it onto sessionMeta/fields so the metadata surfaces that
+  // still read the legacy model rehydrate. Runs before ensureSessionMeta so the
+  // derived session name picks it up too.
+  const loadedGridName = (merged.workflowGrid?.workflowName || "").trim();
+  if (loadedGridName) {
+    if (!merged.sessionMeta.workflowName) merged.sessionMeta.workflowName = loadedGridName;
+    if (!merged.fields.workflowName) merged.fields.workflowName = loadedGridName;
+  }
   ensureSessionMeta(merged, { preserveUpdatedAt: true });
   return merged;
 }
@@ -28362,12 +28387,14 @@ function sessionSummaryMeta(sessionState = state) {
     lastPackagePath: meta.lastPackagePath || "",
     createdAt: meta.createdAt || "",
     updatedAt: meta.updatedAt || "",
-    workflowName: meta.workflowName || fields.workflowName || fields.submittedWorkflowTask || "",
+    // #1 (interim canonical rule — revisit PR 30): fall back to the grid name so
+    // an unnamed grid session lists its workflow title instead of "Untitled".
+    workflowName: meta.workflowName || sessionState.workflowGrid?.workflowName || fields.workflowName || fields.submittedWorkflowTask || "",
     engagementContext: meta.engagementContext || "",
     category: fields.workflowCategory && fields.workflowCategory !== "unknown" ? fields.workflowCategory : "Category TBD",
     domain: fields.domain || "",
     readiness: fields.buildReadiness || "unknown",
-    stepCount: sessionState.steps?.length || 0,
+    stepCount: sessionState.workflowGrid?.steps?.length || sessionState.steps?.length || 0,
     dataCount: sessionState.data?.length || 0,
     systemCount: sessionState.systems?.length || 0,
     decisionCount: sessionState.decisions?.length || 0
