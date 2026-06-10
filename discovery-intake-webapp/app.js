@@ -1263,7 +1263,6 @@ const els = {
   answerNudges: document.getElementById("answerNudges"),
   sendChatButton: document.getElementById("sendChatButton"),
   processChatButton: document.getElementById("processChatButton"),
-  captureFeedbackQuickButton: document.getElementById("captureFeedbackQuickButton"),
   sessionNameInput: document.getElementById("sessionNameInput"),
   sessionOwnerInput: document.getElementById("sessionOwnerInput"),
   sessionDataClassificationSelect: document.getElementById("sessionDataClassificationSelect"),
@@ -1354,7 +1353,6 @@ function bindEvents() {
   els.sendChatButton.addEventListener("click", sendChatMessage);
   els.processChatButton.addEventListener("click", processChatIntoIntake);
   renderIntakeModeToggle(); // PR 27: Answer question / Paste context toggle
-  els.captureFeedbackQuickButton?.addEventListener("click", () => openPilotSettingsDrawer("feedback"));
   els.evidenceFileInput?.addEventListener("change", handleEvidenceUpload);
   els.evidenceNoteInput?.addEventListener("input", updateEvidenceWorkbenchDraft);
   els.analyzeEvidenceNoteButton?.addEventListener("click", analyzeEvidenceWorkbenchNote);

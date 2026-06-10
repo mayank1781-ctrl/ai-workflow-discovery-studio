@@ -97,8 +97,8 @@
 
         <section class="interview-room discovery-cockpit" data-app-panel="interview">
           <section class="interview-stage" aria-label="Voice interview">
-            <div class="question-stage-card discovery-hero-card">
-              <div class="discovery-hero-grid">
+            <div class="question-stage-card discovery-hero-card" style="min-height:0;">
+              <div class="discovery-hero-grid" style="min-height:0;align-items:start;">
                 <div class="discovery-question-area">
                   <div class="stage-topline">
                     <label class="voice-toggle" title="Read AI responses aloud">
@@ -169,8 +169,11 @@
                   </div>
                 </div>
 
-                <aside class="embedded-transcript-card" aria-label="Live transcript" data-help="This rail shows the running conversation and gives users a typing fallback when they do not want to use voice.">
-                  <div class="conversation-card">
+                <aside class="embedded-transcript-card" aria-label="Live transcript" data-help="This rail shows the running conversation and gives users a typing fallback when they do not want to use voice." style="min-height:0;">
+                  <!-- PR 27a: flex-column (not grid) so the composer honors its
+                       DOM position and sits at the top; min-height:0 collapses
+                       the reserved void left by the removed PR 27 sections. -->
+                  <div class="conversation-card" style="display:flex;flex-direction:column;gap:12px;min-height:0;height:auto;">
                     <!-- PR 27: composer moved above the transcript log so the
                          text input + Accept & Analyze are above the fold. -->
                     <div class="transcript-composer">
@@ -195,10 +198,6 @@
                           <button class="secondary-button compact" id="processChatButton" type="button">
                             <i data-lucide="scan-text"></i>
                             Analyze
-                          </button>
-                          <button class="secondary-button compact" id="captureFeedbackQuickButton" type="button">
-                            <i data-lucide="message-square-text"></i>
-                            Capture Feedback
                           </button>
                         </div>
                       </div>
