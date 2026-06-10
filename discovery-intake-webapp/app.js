@@ -1070,6 +1070,13 @@ const defaultState = {
   activeWorkbenchTab: "handoff",
   analysisActiveTab: "grid",
   recipeCache: {},
+  // PR 32: session schema version (distinct from workflowGrid.schemaVersion).
+  // v2 = snapshot-only business case. Migration hook: migrateSessionState().
+  schemaVersion: 2,
+  // PR 32: the business case renders ONLY from this snapshot; prior is kept on
+  // recompute so a changed figure is visibly a change (Invariant 2).
+  businessCaseSnapshot: null,
+  businessCaseSnapshotPrior: null,
   // PR 30 Slice 2: per-session asked-question memory. Entries are deduped on
   // intent (target cell keys), never exact text. See recordAskedQuestion().
   questionHistory: [],
@@ -5594,125 +5601,17 @@ function recipePromptBlockHtml(prompt) {
 // Role mode = recurring "part of my job" work valued annually; project mode =
 // engagement-bounded work valued for the engagement. Blended rate is driven by
 // the user's self-identified level (USD); $100/hr (consultant) is the default.
-// The numeric/mode logic mirrors computeBusinessCase in server.mjs — keep in sync.
-const BC_BLENDED_RATE = 100; // USD default when no level is selected
-const BC_WORKING_WEEKS = 48;
-const BC_ROLE_RATES = { analyst: 75, consultant: 100, manager: 150, principal: 200 };
+// PR 32: the business-case formula lives ONLY in server.mjs (BC_CONFIG +
+// computeBusinessCase). The client renders from state.businessCaseSnapshot and
+// recomputes solely via the explicit Compute/Recompute action (Invariant 2:
+// the business case is a user-relied output — never recomputed automatically).
 const BC_ROLE_LABELS = { analyst: "Analyst", consultant: "Consultant", manager: "Manager", principal: "Principal" };
-
-function blendedRateForRole(role) {
-  return BC_ROLE_RATES[String(role || "").toLowerCase()] || BC_BLENDED_RATE;
-}
-
-function bcDetectWorkflowMode(text) {
-  const t = String(text || "").toLowerCase();
-  const project = /\bproject\b|\bengagement\b|\bclient\b|this quarter|this month'?s|for this work|we'?re doing this for|the bank|at the firm/.test(t);
-  const role = /every week|monthly|part of my job|recurring|always do|routine/.test(t);
-  // Project wins ties and is the default: the primary users are Finance/Tech
-  // consultants almost always describing client-side engagement work, not their
-  // own recurring internal role. Role only when it is the only signal present.
-  if (project) return "project";
-  if (role) return "role";
-  return "project";
-}
-
-function bcParseInstancesPerWeek(text) {
-  const t = String(text || "").toLowerCase();
-  let m = t.match(/(\d+(?:\.\d+)?)\s*(?:times?|x)?\s*(?:per|a|\/)\s*day/);
-  if (m) return { value: parseFloat(m[1]) * 5, parsed: true };
-  m = t.match(/(\d+(?:\.\d+)?)\s*(?:times?|x)?\s*(?:per|a|\/)\s*week/);
-  if (m) return { value: parseFloat(m[1]), parsed: true };
-  if (/daily|every day|each day/.test(t)) return { value: 5, parsed: true };
-  if (/fortnight|bi-?weekly|every two weeks/.test(t)) return { value: 0.5, parsed: true };
-  if (/weekly|every week|once a week/.test(t)) return { value: 1, parsed: true };
-  if (/monthly|every month|per month/.test(t)) return { value: 0.25, parsed: true };
-  if (/quarter/.test(t)) return { value: 1 / 13, parsed: true };
-  m = t.match(/(\d+(?:\.\d+)?)/);
-  if (m) return { value: parseFloat(m[1]), parsed: true };
-  return { value: 5, parsed: false };
-}
-
-function bcParseMinutes(text) {
-  const t = String(text || "").toLowerCase();
-  let m = t.match(/(\d+(?:\.\d+)?)\s*(hours?|hrs?|h)\b/);
-  if (m) return { value: parseFloat(m[1]) * 60, parsed: true };
-  m = t.match(/(\d+(?:\.\d+)?)\s*(days?)\b/);
-  if (m) return { value: parseFloat(m[1]) * 480, parsed: true };
-  m = t.match(/(\d+(?:\.\d+)?)\s*(mins?|minutes?|m)\b/);
-  if (m) return { value: parseFloat(m[1]), parsed: true };
-  m = t.match(/(\d+(?:\.\d+)?)/);
-  if (m) return { value: parseFloat(m[1]), parsed: true };
-  return { value: 30, parsed: false };
-}
-
-function bcParseDurationWeeks(text) {
-  const t = String(text || "").toLowerCase();
-  let m = t.match(/(\d+(?:\.\d+)?)\s*month/);
-  if (m) return { value: Math.round(parseFloat(m[1]) * 4.3), parsed: true };
-  m = t.match(/(\d+(?:\.\d+)?)\s*week/);
-  if (m) return { value: parseFloat(m[1]), parsed: true };
-  return { value: 12, parsed: false };
-}
-
 // Conversation text used for workflowMode + project-duration detection.
 function businessCaseConversationText() {
   const convo = (state.conversation || []).map((msg) => msg?.text || "").join("\n");
   return [convo, state.transcript || ""].filter(Boolean).join("\n");
 }
 
-// Workflow-level estimate across all grid steps. instances/week = the workflow
-// cadence (max parsed across steps); mins/instance = total hands-on minutes for
-// one full run (sum of parsed step times). `defaulted` is true when either input
-// fell back to its default (drives the "Estimates — refine" badge).
-function computeBusinessCase(steps, conversationText, userRoleOverride) {
-  const workflowMode = bcDetectWorkflowMode(conversationText);
-  let instances = 0;
-  let mins = 0;
-  let instParsed = false;
-  let minsParsed = false;
-  (steps || []).forEach((step) => {
-    const i = bcParseInstancesPerWeek(gridCellValue(step, "frequencyVolume"));
-    const mm = bcParseMinutes(gridCellValue(step, "timeTaken") || gridCellValue(step, "frequencyVolume"));
-    if (i.parsed) { instParsed = true; instances = Math.max(instances, i.value); }
-    if (mm.parsed) { minsParsed = true; mins += mm.value; }
-  });
-  const instances_per_week = instParsed ? instances : 5;
-  const mins_per_instance = minsParsed ? mins : 30;
-  const project_duration_weeks = workflowMode === "project" ? bcParseDurationWeeks(conversationText).value : null;
-
-  // userRoleOverride lets the Recipe Book compute each saved session's value at
-  // that session's own level; live views omit it and use the current session.
-  const userRole = String((userRoleOverride !== undefined ? userRoleOverride : state.sessionMeta?.userRole) || "").toLowerCase();
-  // Phase 9c: a Settings rate override (USD/hr) wins over the role-based table.
-  const rateOverride = state.settings?.rateOverride;
-  const blendedRate = (typeof rateOverride === "number" && rateOverride > 0)
-    ? rateOverride
-    : blendedRateForRole(userRole);
-  const results = {
-    hoursPerWeek: null, annualHours: null, annualValue: null,
-    totalHours: null, projectValue: null,
-    blendedRate, currency: "USD"
-  };
-  if (workflowMode === "role") {
-    results.hoursPerWeek = (instances_per_week * mins_per_instance) / 60;
-    results.annualHours = results.hoursPerWeek * BC_WORKING_WEEKS;
-    results.annualValue = results.annualHours * blendedRate;
-  } else {
-    results.totalHours = (instances_per_week * project_duration_weeks * mins_per_instance) / 60;
-    results.projectValue = results.totalHours * blendedRate;
-  }
-  return {
-    workflowMode,
-    inputs: { instances_per_week, mins_per_instance, project_duration_weeks },
-    results,
-    reusabilityFlag: workflowMode === "project",
-    defaulted: !instParsed || !minsParsed,
-    userRole,
-    blendedRate
-  };
-}
-
-// Renders the "Business Case Estimate" ds-card from a computed businessCase.
 function businessCaseBlockHtml(bc) {
   const usd = (n) => "$" + Math.round(n).toLocaleString("en-US");
   const hrs = (n) => n.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -5762,7 +5661,79 @@ function businessCaseBlockHtml(bc) {
 function businessCaseBlockForCurrentWorkflow() {
   const steps = analysisGridSteps();
   if (!steps.length) return "";
-  return businessCaseBlockHtml(computeBusinessCase(steps, businessCaseConversationText()));
+  const snapshot = state.businessCaseSnapshot || null;
+  if (!snapshot) {
+    // No figure until explicitly computed — covers fresh v2 sessions AND
+    // migrated legacy sessions (settled conservative policy).
+    return `
+      <div class="ds-card" style="padding:14px 16px;margin-top:16px;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <strong style="font-size:13px;color:#e8f4ff;">Business Case Estimate</strong>
+          <span style="font-size:12px;color:#8aa0b8;">Not computed yet — figures appear only when you ask for them.</span>
+          <button type="button" data-bc-compute style="margin-left:auto;background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Compute business case</button>
+        </div>
+      </div>`;
+  }
+  const prior = state.businessCaseSnapshotPrior || null;
+  const usd = (n) => "$" + Math.round(n).toLocaleString("en-US");
+  const priorFigure = prior
+    ? (prior.mode === "role" ? `${usd(prior.results?.annualValue || 0)}/year` : `${usd(prior.results?.projectValue || 0)} project`)
+    : "";
+  const when = (iso) => {
+    const t = Date.parse(iso || "");
+    return Number.isNaN(t) ? "unknown time" : new Date(t).toLocaleString("en-US");
+  };
+  // Invariant 2 footer: when computed, with what rate source, and the prior
+  // figure preserved on recompute so a changed number is visibly a change.
+  const footer = `
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid #16263a;font-size:11px;color:#5b7186;">
+      <span>Computed ${escapeHtml(when(snapshot.computedAt))}</span>
+      <span>·</span>
+      <span>Rate source: ${snapshot.rateSource === "override" ? "Settings override" : "role table"}</span>
+      ${prior ? `<span>·</span><span>Previous: ${escapeHtml(priorFigure)} (computed ${escapeHtml(when(prior.computedAt))})</span>` : ""}
+      <button type="button" data-bc-compute style="margin-left:auto;background:#0d1b2e;color:#00d4b4;border:1px solid #1e4a44;border-radius:6px;padding:6px 14px;font-weight:600;font-size:12px;cursor:pointer;">Recompute</button>
+    </div>`;
+  return businessCaseBlockHtml(snapshot).replace(/<\/div>\s*$/, footer + "</div>");
+}
+
+// The Compute/Recompute button is the ONLY path that calls the server engine.
+function wireBusinessCaseBlock(container) {
+  container?.querySelectorAll("[data-bc-compute]").forEach((btn) => {
+    btn.addEventListener("click", computeBusinessCaseNow);
+  });
+}
+
+// Invariant 2: applying a new snapshot preserves the prior one — a recompute
+// never silently overwrites the figure the user may have relied on.
+function applyBusinessCaseSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return false;
+  if (state.businessCaseSnapshot) state.businessCaseSnapshotPrior = state.businessCaseSnapshot;
+  state.businessCaseSnapshot = snapshot;
+  return true;
+}
+
+async function computeBusinessCaseNow() {
+  const steps = analysisGridSteps();
+  if (!steps.length) {
+    toast("Capture workflow steps before computing the business case.");
+    return;
+  }
+  try {
+    const result = await requestJson("/api/business-case", {
+      method: "POST",
+      body: {
+        steps,
+        conversationText: businessCaseConversationText(),
+        userRole: state.sessionMeta?.userRole || ""
+      }
+    });
+    if (!applyBusinessCaseSnapshot(result.snapshot)) throw new Error("No snapshot returned.");
+    persistState();
+    render();
+    toast("Business case computed.");
+  } catch (error) {
+    toast(String(error.message || error));
+  }
 }
 
 // === Scoring transparency card (PR 9) ======================================
@@ -6227,7 +6198,13 @@ async function exportWorkflowWord(mode = "recipe") {
     children.push(para("Estimated build time: 1–3 hours for a Custom GPT, 1–2 days for an API integration.", { italic: true, color: "595959" }));
 
     // --- Time savings estimate ----------------------------------------------
-    const bc = computeBusinessCase(steps, businessCaseConversationText());
+    // PR 32 / Invariant 2: exports carry the SNAPSHOT the user computed, never
+    // a silent fresh computation. No snapshot -> no figure in the document.
+    const bc = state.businessCaseSnapshot;
+    if (!bc) {
+      children.push(h1("Time savings estimate"));
+      children.push(para("Business case not yet computed — open the Recipe Book and click Compute business case.", { italic: true, color: "595959" }));
+    } else {
     const rate = bc.blendedRate;
     const roleLabel = bc.userRole ? (BC_ROLE_LABELS[bc.userRole] || "Consultant") : "";
     const usd = (n) => "$" + Math.round(n).toLocaleString("en-US");
@@ -6250,6 +6227,8 @@ async function exportWorkflowWord(mode = "recipe") {
     children.push(para(`Based on $${rate}/hr blended rate${roleLabel ? ` (${roleLabel})` : " (default)"}.`, { italic: true, color: "595959" }));
     if (bc.workflowMode === "project") children.push(para("Value bounded to this engagement.", { italic: true, color: "595959" }));
     if (bc.defaulted) children.push(para("Figures are estimates — refine in a follow-up session.", { italic: true, color: "595959" }));
+    children.push(para(`Computed ${new Date(Date.parse(bc.computedAt || "") || Date.now()).toLocaleString("en-US")} (rate source: ${bc.rateSource === "override" ? "Settings override" : "role table"}).`, { italic: true, color: "595959" }));
+    }
 
     // --- Scoring breakdown ---------------------------------------------------
     children.push(h1("AI opportunity score"));
@@ -6503,6 +6482,7 @@ function renderAnalysisTabRecipe() {
   container.querySelector("#recipe-pdf-btn")?.addEventListener("click", handleRecipePdfExport);
   syncRecipeExportButton(recipeExportBtn);
   wireScoringCards(container);
+  wireBusinessCaseBlock(container);
   container.querySelector("#exportWordRecipeBtn")?.addEventListener("click", () => exportWorkflowWord("recipe"));
 }
 
@@ -7277,6 +7257,7 @@ async function renderAnalysisTabEngineering() {
   container.querySelector("#engineering-pdf-btn")?.addEventListener("click", handleEngineeringPdfExport);
   syncEngineeringExportButton(engineeringExportBtn);
   wireScoringCards(container);
+  wireBusinessCaseBlock(container);
 
   // Expandable cards: toggle the body div between display none/block.
   container.querySelectorAll("[data-eng-card-header]").forEach((header) => {
@@ -13238,7 +13219,8 @@ function sessionCardMetrics(entry) {
     sessionState.transcript || ""
   ].filter(Boolean).join("\n");
   let bc = null;
-  try { bc = computeBusinessCase(steps, convText, sessionState.sessionMeta?.userRole || ""); } catch { bc = null; }
+  // PR 32: portfolio reads each session's stored snapshot — never recomputes.
+  bc = sessionState.businessCaseSnapshot || null;
   return { tier, bc };
 }
 
@@ -28655,7 +28637,26 @@ function normalizeLoadedState(parsed = {}) {
     if (!merged.sessionMeta.workflowName) merged.sessionMeta.workflowName = loadedGridName;
     if (!merged.fields.workflowName) merged.fields.workflowName = loadedGridName;
   }
+  migrateSessionState(merged);
   ensureSessionMeta(merged, { preserveUpdatedAt: true });
+  return merged;
+}
+
+// PR 32: minimal session-schema migration hook. PR 33's migration framework
+// will own a registered step list; until then this single idempotent function
+// IS the v1->v2 step it will wrap — keep it side-effect-free beyond `merged`.
+function migrateSessionState(merged) {
+  const version = Number(merged.schemaVersion) || 1;
+  if (version < 2) {
+    // v1 -> v2: the business case becomes snapshot-only. Settled conservative
+    // policy: pre-v2 sessions show NO figure until explicitly computed —
+    // never auto-compute at migration.
+    merged.businessCaseSnapshot = null;
+    merged.businessCaseSnapshotPrior = null;
+  }
+  merged.businessCaseSnapshot = merged.businessCaseSnapshot || null;
+  merged.businessCaseSnapshotPrior = merged.businessCaseSnapshotPrior || null;
+  merged.schemaVersion = 2;
   return merged;
 }
 
