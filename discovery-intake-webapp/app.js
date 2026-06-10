@@ -5771,6 +5771,74 @@ function scoringTierBadge(tier) {
   return { cls: "ds-badge-purple", label: "Strategic" };
 }
 
+// --- Low-data warning (PR 30, Slice 3) ---------------------------------------
+// Threshold sensitivity FIRST: find the single principle whose ±1 correction
+// would flip the tier, and surface it as a specific prompt. A candidate counts
+// when (a) the flip is numeric — the total sits exactly on a tier boundary —
+// regardless of how certain the principle is, or (b) the flip comes from the
+// P7/P9 override rules AND that principle is still uncertain (insufficient
+// data) — a P7/P9 scored 2 from real evidence is an assessment, not a knife
+// edge, and would otherwise warn constantly. Fallback when nothing flips:
+// more than 4 principles neutral, with P7 and P9 each counting double.
+// Returns { kind: "flip"|"low-data", message, ... } or null.
+function tierSensitivity(meta) {
+  const ps = meta?.principleScores || {};
+  const scores = {};
+  SCORING_PRINCIPLES.forEach((p) => { scores[p.key] = Number(ps[p.key]?.score) || 2; });
+  const { tier } = scoringTierFromScores(scores);
+  const tierLabel = (t) =>
+    t === "quick-win" ? "Quick Win"
+      : t === "compliance" ? "Compliance review"
+        : t === "speculative" ? "Speculative" : "Strategic";
+  const uncertain = (key) => /insufficient data/i.test(ps[key]?.reason || "");
+
+  const flips = [];
+  SCORING_PRINCIPLES.forEach((p) => {
+    [-1, 1].forEach((delta) => {
+      const v = scores[p.key] + delta;
+      if (v < 1 || v > 3) return;
+      const flipped = scoringTierFromScores({ ...scores, [p.key]: v });
+      if (flipped.tier === tier) return;
+      // Override-driven flips (P7 cap / P9 compliance at score 1) only count
+      // while that principle is uncertain.
+      const overrideFlip = v === 1 && (p.key === "dataSensitivity" || p.key === "humanJudgmentRequired");
+      if (overrideFlip && !uncertain(p.key)) return;
+      flips.push({ principle: p, delta, to: flipped.tier, uncertain: uncertain(p.key) });
+    });
+  });
+
+  if (flips.length) {
+    // Most actionable first: uncertain principles, then the P9/P7 risk
+    // specials, then lowest principle number.
+    flips.sort((a, b) =>
+      (Number(b.uncertain) - Number(a.uncertain))
+      || (Number(b.principle.n === 9 || b.principle.n === 7) - Number(a.principle.n === 9 || a.principle.n === 7))
+      || (a.principle.n - b.principle.n));
+    const top = flips[0];
+    const direction = top.delta < 0 ? "lower" : "higher";
+    return {
+      kind: "flip",
+      principle: top.principle.key,
+      n: top.principle.n,
+      to: top.to,
+      message: `${tierLabel(tier)}, but confirm P${top.principle.n} (${top.principle.name}) — if it scores ${direction} this becomes ${tierLabel(top.to)}.`
+    };
+  }
+
+  let neutralWeight = 0;
+  SCORING_PRINCIPLES.forEach((p) => {
+    if (scores[p.key] === 2) neutralWeight += (p.n === 7 || p.n === 9) ? 2 : 1;
+  });
+  if (neutralWeight > 4) {
+    return {
+      kind: "low-data",
+      neutralWeight,
+      message: `${tierLabel(tier)} is provisional — too many principles are still neutral (weight ${neutralWeight}; human judgment and data sensitivity count double). Confirm those before trusting the tier.`
+    };
+  }
+  return null;
+}
+
 function scoringTransparencyBlockHtml(step) {
   const meta = getStepOpportunityMeta(step);
   const ps = meta.principleScores || {};
@@ -5793,12 +5861,23 @@ function scoringTransparencyBlockHtml(step) {
       </div>`;
   }).join("");
 
+  // Slice 3: low-data warning — computed from the AI scores (the live what-if
+  // repaint deliberately does not recompute it; it reflects the AI baseline).
+  const sensitivity = tierSensitivity(meta);
+  const sensitivityHtml = sensitivity
+    ? `<div style="display:flex;gap:8px;align-items:flex-start;background:#1a1500;border:1px solid #f59e0b55;border-radius:8px;padding:9px 12px;margin-top:10px;">
+        <span style="color:#f59e0b;font-size:13px;line-height:1;flex-shrink:0;margin-top:1px;">⚠</span>
+        <span style="font-size:12px;color:#f5c451;line-height:1.45;">${escapeHtml(sensitivity.message)}</span>
+      </div>`
+    : "";
+
   return `
     <div class="ds-card" data-scoring-card data-step-id="${escapeHtml(String(stepId))}" data-originals='${escapeHtml(JSON.stringify(originals))}' style="padding:14px 16px;margin-top:16px;">
       <div data-sc-toggle role="button" tabindex="0" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
         <strong style="font-size:13px;color:#e8f4ff;">Scoring breakdown (10 principles)</strong>
         <span data-sc-chevron style="color:#5b7186;font-size:12px;transition:transform 200ms ease;transform:rotate(-90deg);">▾</span>
       </div>
+      ${sensitivityHtml}
       <div data-sc-body style="display:none;margin-top:12px;">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
           <span><span class="ds-num-teal" data-sc-total style="font-size:1.6rem;font-weight:800;">0</span><span style="color:#5b7186;font-size:1rem;font-weight:700;"> / 30</span></span>
