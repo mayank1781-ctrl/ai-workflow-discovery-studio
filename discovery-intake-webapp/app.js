@@ -5554,7 +5554,11 @@ function recipeConfidencePct(step) {
 function recipeWhatAiDoes(step, index) {
   const prompt = (state.recipeCache?.[step.id] || "").trim();
   if (prompt) {
-    const firstLine = prompt.split("\n").map((line) => line.trim()).find(Boolean);
+    // Skip leading "Key: value" metadata lines (e.g. "Tier: Compliance") so
+    // the blurb is the first real sentence of the prompt, not its header.
+    const firstLine = prompt.split("\n")
+      .map((line) => line.trim())
+      .find((line) => line && !/^[A-Za-z ]{2,24}:\s/.test(line));
     if (firstLine) return firstLine;
   }
   const pattern = stepPrimaryPattern(step);
@@ -6392,6 +6396,21 @@ function renderAnalysisTabRecipe() {
     const pattern = stepPrimaryPattern(step);
     const confidence = recipeConfidencePct(step);
     const whatAi = recipeWhatAiDoes(step, index);
+    // Slice 2: section-level low-confidence markers from the generation-time
+    // snapshot. fieldLabels resolves the friendly names for a section's gaps.
+    const snap = state.recipeGateSnapshots?.[step.id];
+    const snapGaps = Array.isArray(snap?.gaps) ? snap.gaps : [];
+    const fieldLabels = (fields) => fields
+      .map((key) => RECIPE_CRITICAL_FIELDS.find((entry) => entry.field === key)?.label || key)
+      .join(", ");
+    const sectionMarker = (fields) => {
+      const hits = snapGaps.filter((key) => fields.includes(key));
+      if (!hits.length) return "";
+      return `<div style="display:inline-flex;align-items:center;gap:6px;background:#1a1500;border:1px solid #f59e0b55;border-radius:99px;padding:2px 10px;margin-top:6px;font-size:10px;font-weight:700;color:#f5c451;text-transform:uppercase;letter-spacing:0.04em;" title="Generated before ${escapeHtml(fieldLabels(hits))} was confirmed — regenerate to refresh">⚠ Low confidence — ${escapeHtml(fieldLabels(hits))}</div>`;
+    };
+    const p9Note = snap?.p9Unconfirmed
+      ? `<div style="margin-top:10px;background:#160d24;border:1px solid #a78bfa55;border-left:3px solid #a78bfa;border-radius:6px;padding:9px 12px;color:#c4b5fd;font-size:12px;line-height:1.5;">Provenance note: data sensitivity was unconfirmed (AI-inferred or below threshold) when this recipe was generated — verify data handling before sharing outputs.</div>`
+      : "";
     const howTo = recipeHowToUse(step);
     const meta = getStepOpportunityMeta(step);
     const source = gridCellValue(step, "trigger") || "doc-extracted";
@@ -6422,11 +6441,13 @@ function renderAnalysisTabRecipe() {
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Sensitivity:</span> <span style="width:8px;height:8px;border-radius:50%;background:${dot};display:inline-block;"></span> ${escapeHtml(sensitivity)}</span>
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Pattern:</span> ${patternBadge}</span>
           <span><span style="color:#5b7186;">Confidence:</span> ${confidence}%</span>
+          ${sectionMarker(["volume", "sensitivity"])}
         </div>
 
         <div style="margin-top:16px;">
           <div style="color:#00d4b4;${labelCss}margin-bottom:6px;">What AI Does Here</div>
           <p style="margin:0;color:#c7d4e3;font-size:13px;line-height:1.55;">${escapeHtml(whatAi)}</p>
+          ${sectionMarker(["systemsTools", "dataFlow"])}
         </div>
 
         <div style="margin-top:16px;">
@@ -6435,13 +6456,16 @@ function renderAnalysisTabRecipe() {
             <button class="primary-button compact" type="button" data-recipe-generate="${escapeHtml(step.id)}">${cached ? "Regenerate" : "Generate prompt"}</button>
           </div>
           <div data-recipe-body="${escapeHtml(step.id)}">${cached ? "" : `<div style="background:#0a1422;border:1px dashed #1a2a3a;border-radius:8px;padding:14px 16px;color:#5b7186;font-size:12px;">No prompt yet — click "Generate prompt" to build one for this step.</div>`}</div>
+          ${cached ? sectionMarker(["systemsTools", "volume", "dataFlow", "sensitivity", "painAndRules"]) : ""}
         </div>
 
         <div style="margin-top:16px;">
           <div style="color:#a78bda;${labelCss}margin-bottom:6px;">How To Use</div>
           <ol style="margin:0;padding-left:18px;color:#c7d4e3;font-size:13px;line-height:1.5;">${howToHtml}</ol>
+          ${sectionMarker(["painAndRules"])}
         </div>
 
+        ${p9Note}
         <div style="margin-top:16px;background:#3a2a0a;border:1px solid #f59e0b55;border-left:3px solid #f59e0b;border-radius:6px;padding:9px 12px;color:#f5c97a;font-size:12px;line-height:1.5;">⚠ Human oversight required — AI output must be reviewed and confirmed before any action is taken.</div>
 
         <div style="margin-top:14px;padding-top:12px;border-top:1px solid #16263a;display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:#5b7186;font-size:11px;">
@@ -6679,6 +6703,21 @@ async function runRecipeGeneration(stepId) {
     }
     state.recipeCache = state.recipeCache || {};
     state.recipeCache[stepId] = data.prompt;
+    // PR 30b Slice 2: snapshot which recipe-critical fields were unconfirmed
+    // when THIS prompt was built. Markers render from the snapshot (not live
+    // state) so a prompt generated from unconfirmed data stays marked until
+    // regenerated; a clean generation clears the snapshot.
+    state.recipeGateSnapshots = state.recipeGateSnapshots || {};
+    const gateAtGeneration = recipeGateCheck(step);
+    if (gateAtGeneration.gaps.length) {
+      state.recipeGateSnapshots[stepId] = {
+        gaps: gateAtGeneration.gaps.map((gap) => gap.field),
+        p9Unconfirmed: gateAtGeneration.p9Unconfirmed,
+        at: new Date().toISOString()
+      };
+    } else {
+      delete state.recipeGateSnapshots[stepId];
+    }
     persistState();
     // Re-render the whole tab so the "What AI Does Here" blurb, footer, and
     // button label all pick up the freshly generated prompt.
@@ -6706,6 +6745,13 @@ function downloadRecipeBook() {
     any = true;
     parts.push(`=== STEP ${index + 1}: ${stepDisplayName(step, index)} ===`);
     parts.push(`AI Pattern: ${stepPrimaryPattern(step) || "n/a"}`);
+    const snap = state.recipeGateSnapshots?.[step.id];
+    if (snap?.p9Unconfirmed) {
+      parts.push("PROVENANCE NOTE: data sensitivity was unconfirmed (AI-inferred or below threshold) when this recipe was generated — verify data handling before sharing outputs.");
+    }
+    if (Array.isArray(snap?.gaps) && snap.gaps.length) {
+      parts.push(`LOW-CONFIDENCE FIELDS AT GENERATION: ${snap.gaps.join(", ")}`);
+    }
     parts.push("---");
     parts.push(prompt);
     parts.push("");
