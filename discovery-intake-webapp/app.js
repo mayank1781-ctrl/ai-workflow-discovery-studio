@@ -3825,6 +3825,9 @@ function normalizeGridFieldKey(rawKey) {
   if (typeof rawKey !== "string") return null;
   if (GRID_CELL_KEYS.includes(rawKey)) return rawKey;
   if (EXTRACTION_CELL_KEY_MAP[rawKey]) return EXTRACTION_CELL_KEY_MAP[rawKey];
+  // Surface dropped keys: a model emitting non-canonical keys silently losing
+  // data is exactly the failure mode behind the empty-live-grid bug.
+  console.info("[grid-harvest] dropped unrecognized field key:", rawKey);
   return null;
 }
 

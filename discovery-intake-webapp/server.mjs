@@ -1401,14 +1401,6 @@ async function handleExtract(req, res) {
     });
   }
 
-  // TEMP diagnostic (pr29b-fix): what the extraction actually emitted, to diff
-  // against the AI reply's "I captured ..." claim. Remove with the harvest log.
-  console.info("[extract] summary:", JSON.stringify({
-    confidence: parsed?.confidence,
-    fieldKeys: Object.keys(parsed?.fields || {}),
-    newSteps: (parsed?.newRecords?.steps || []).map((s) => ({ name: s?.name, keys: Object.keys(s || {}).filter((k) => s[k]) }))
-  }));
-
   // Live confidence grid (PR 8): echo the latest extraction as a 9-field,
   // 3-layer gridState alongside the AI message. The client renders its live
   // grid from the accumulated workflowGrid (authoritative across turns); this
@@ -1867,29 +1859,30 @@ Confidence rules (apply universally to all input types):
 0.5  = reasonably inferred
 <0.5 = do not include
 
+Valid fieldUpdates keys — use ONLY these exact key names, never invent others (a value under any other key is discarded):
+name, description, personaActors, systemsTools, dataProcessing, rulesDecisionLogic, output, trigger, handoff, humanCheckpoint, timeTaken, frequencyVolume, painFriction, dataSensitivity, exceptionBranching, regulatoryContext
+
 Special rules:
+- Extract ONLY from what the interviewee (user) said about THEIR workflow. Ignore the interviewer/AI assistant's questions, coaching, and meta-commentary about the interview itself — never form a step or field value from them.
 - painFriction: only include if the person explicitly expressed frustration, difficulty, or pain. Never infer this field.
 - aiPattern: never include — it is generated separately.
 - state "unknown": if the person was asked about a field and said they don't know, can't answer, or it is genuinely unclear/TBD/unavailable, set that field to { "value": "", "confidence": 0, "state": "unknown" }. If a topic was simply never raised in the conversation, do not include it (leave it empty). Never use "unknown" to overwrite a field that already has a real answer.
 - Only update a cell if the new confidence exceeds the existing confidence, or the existing state is 'empty'.
 - Match updates to existing steps by name or position. If a genuinely new step is mentioned, add it to newSteps.
 
-Return ONLY valid JSON — no markdown, no explanation:
+Return ONLY valid JSON — no markdown, no explanation. Example shape (keys in fieldUpdates MUST come from the valid list above):
 {
-  stepUpdates: [
+  "stepUpdates": [
     {
-      stepId: 'existing-step-id or new',
-      stepName: string,
-      fieldUpdates: {
-        fieldKey: {
-          value: string,
-          confidence: number,
-          state: 'confirmed', 'inferred', or 'unknown'
-        }
+      "stepId": "existing-step-id or new",
+      "stepName": "Reconcile exceptions",
+      "fieldUpdates": {
+        "personaActors": { "value": "Ops analyst", "confidence": 0.9, "state": "confirmed" },
+        "systemsTools": { "value": "Excel, SAP", "confidence": 0.7, "state": "inferred" }
       }
     }
   ],
-  newSteps: []
+  "newSteps": []
 }`;
 
 // Stage 1b: harvest structured grid updates from the live conversation. Called
@@ -1938,10 +1931,6 @@ async function handleHarvestGrid(req, res) {
       return sendJson(res, 200, empty);
     }
     const outputText = data.choices?.[0]?.message?.content || "";
-    // TEMP diagnostic (pr29b-fix): raw harvest response + what survives parsing,
-    // to diff the model's actual shape against what the client mapper expects.
-    // Remove once the partial-extraction root cause is confirmed.
-    console.info("[harvest-grid] raw response:", outputText);
     let parsed;
     try {
       parsed = JSON.parse(outputText);
@@ -1951,6 +1940,8 @@ async function handleHarvestGrid(req, res) {
     }
     const stepUpdates = Array.isArray(parsed.stepUpdates) ? parsed.stepUpdates : [];
     const newSteps = Array.isArray(parsed.newSteps) ? parsed.newSteps : [];
+    // One-line shape summary per harvest: which steps and field keys came back.
+    // Kept (post pr29b-fix) so non-canonical keys are visible in server logs.
     console.info("[harvest-grid] parsed:", JSON.stringify({
       stepUpdates: stepUpdates.map((u) => ({ stepId: u?.stepId, stepName: u?.stepName, fieldKeys: Object.keys(u?.fieldUpdates || {}) })),
       newSteps: newSteps.map((s) => ({ stepName: s?.stepName || s?.name, fieldKeys: Object.keys(s?.fieldUpdates || s?.cells || {}) }))
