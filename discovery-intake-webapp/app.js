@@ -5938,9 +5938,9 @@ function scoringTransparencyBlockHtml(step) {
 
   return `
     <div class="ds-card" data-scoring-card data-step-id="${escapeHtml(String(stepId))}" data-originals='${escapeHtml(JSON.stringify(originals))}' style="padding:14px 16px;margin-top:16px;">
-      <div data-sc-toggle role="button" tabindex="0" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+      <div data-sc-toggle role="button" tabindex="0" title="Click to expand or collapse the scoring breakdown" style="display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;">
         <strong style="font-size:13px;color:#e8f4ff;">Scoring breakdown (10 principles)</strong>
-        <span data-sc-chevron style="color:#5b7186;font-size:12px;transition:transform 200ms ease;transform:rotate(-90deg);">▾</span>
+        <span data-sc-chevron style="flex-shrink:0;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;color:#00d4b4;font-size:15px;line-height:1;border:1px solid #1e4a44;border-radius:6px;background:#0c2a26;transition:transform 200ms ease;transform:rotate(-90deg);">▾</span>
       </div>
       ${sensitivityHtml}
       <div data-sc-body style="display:none;margin-top:12px;">
