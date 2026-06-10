@@ -1484,8 +1484,9 @@ function handleAnswerInputKeydown(event) {
 function setAppMode(mode) {
   state.appMode = mode === "analysis" ? "analysis" : "interview";
   persistState();
-  renderAppMode();
-  refreshIcons();
+  // #3: full re-render (not just renderAppMode) so switching modes fully
+  // rehydrates every surface from current state, never showing a stale panel.
+  render();
 }
 
 async function checkAiStatus() {
@@ -1913,6 +1914,9 @@ async function sendChatMessage() {
     toast("Typed answers need server.mjs running with OPENAI_API_KEY.");
     return;
   }
+
+  // PR 29 fix: submitting an answer resolves the active key question.
+  if (activeGapQuestion) { activeGapQuestion = ""; renderActiveQuestionLabel(); }
 
   // "Paste context" routes the same box/button through document-style
   // extraction (merged from the old standalone "Extract and Fill" box).
@@ -3456,63 +3460,76 @@ function render() {
   document.body.dataset.captureStage = state.captureStage || "idle";
   const section = getActiveSection();
   if (state.activeSection !== section.id) state.activeSection = section.id;
-  renderHeaderContext();
-  renderWorkflowHeaderName();
-  renderWorkflowNamingPrompt();
-  renderCurrentStepPanel();
-  renderCurrentQuestion(section);
-  renderTurnSignalPanel();
-  renderDiscoveryDumpMode();
-  renderAiMirror();
-  renderDiscoveryPatternInterview();
-  renderInterviewGuide(section);
-  renderCaptureCoach();
-  renderTextIntakeAssist();
-  renderLiveSpeechDraft();
-  renderWorkflowGridPanel();
-  renderLiveExtractionGrid();
-  updateProcessFlowMapCompact();
-  if (els.sectionTitle) els.sectionTitle.textContent = section.label;
-  renderConversation();
-  renderAiChat();
-  renderValidationFlow();
-  renderBlueprintInspector();
-  renderNav();
-  renderSectionForm(section);
-  renderLiveIntakeLedger();
-  renderHandoffBridge();
-  renderSummary();
-  renderIdeas();
-  renderPdrPreview();
-  renderSolutionBlueprint();
-  renderWorkflowMapStudio();
-  renderTemplateHandoffStudio();
-  renderLiveTestCommandCenter();
-  renderGuidedPilotPanel();
-  renderHandoffSnapshot();
-  renderReviewGate();
-  renderPilotInsights();
-  renderPilotFeedback();
-  renderRecapPanel();
-  renderEvidenceReviewPanel();
-  renderEvidenceWorkbench();
-  renderOperatorAddOnsPanel();
-  renderDemoConsole();
-  renderAnalysisMatrixMap();
-  renderCaseComparison();
-  renderLifecyclePanel();
-  renderSessionLibrary();
-  renderSavedSessionsPanel();
-  renderPilotControls();
-  renderTestLab();
-  renderMap();
-  renderMapStepEditor();
-  renderWorkbenchTabs();
-  renderAppMode();
-  if (state.appMode === "analysis") renderAnalysisStudio();
-  updateAiTurnStatus(state.captureStage || "idle");
-  updateProgressUi();
-  refreshIcons();
+  // #3: run each renderer in isolation so one throw can't strand every surface
+  // after it on the previous session's DOM (the Bug A "Analysis Studio stuck"
+  // facet). Order is preserved exactly.
+  const steps = [
+    renderHeaderContext,
+    renderWorkflowHeaderName,
+    renderWorkflowNamingPrompt,
+    renderCurrentStepPanel,
+    () => renderCurrentQuestion(section),
+    renderTurnSignalPanel,
+    renderDiscoveryDumpMode,
+    renderAiMirror,
+    renderDiscoveryPatternInterview,
+    () => renderInterviewGuide(section),
+    renderCaptureCoach,
+    renderTextIntakeAssist,
+    renderLiveSpeechDraft,
+    renderWorkflowGridPanel,
+    renderInlineKeyQuestions,
+    renderLiveExtractionGrid,
+    updateProcessFlowMapCompact,
+    () => { if (els.sectionTitle) els.sectionTitle.textContent = section.label; },
+    renderConversation,
+    renderAiChat,
+    renderValidationFlow,
+    renderBlueprintInspector,
+    renderNav,
+    () => renderSectionForm(section),
+    renderLiveIntakeLedger,
+    renderHandoffBridge,
+    renderSummary,
+    renderIdeas,
+    renderPdrPreview,
+    renderSolutionBlueprint,
+    renderWorkflowMapStudio,
+    renderTemplateHandoffStudio,
+    renderLiveTestCommandCenter,
+    renderGuidedPilotPanel,
+    renderHandoffSnapshot,
+    renderReviewGate,
+    renderPilotInsights,
+    renderPilotFeedback,
+    renderRecapPanel,
+    renderEvidenceReviewPanel,
+    renderEvidenceWorkbench,
+    renderOperatorAddOnsPanel,
+    renderDemoConsole,
+    renderAnalysisMatrixMap,
+    renderCaseComparison,
+    renderLifecyclePanel,
+    renderSessionLibrary,
+    renderSavedSessionsPanel,
+    renderPilotControls,
+    renderTestLab,
+    renderMap,
+    renderMapStepEditor,
+    renderWorkbenchTabs,
+    renderAppMode,
+    () => { if (state.appMode === "analysis") renderAnalysisStudio(); },
+    () => updateAiTurnStatus(state.captureStage || "idle"),
+    updateProgressUi,
+    refreshIcons
+  ];
+  for (const step of steps) {
+    try {
+      step();
+    } catch (error) {
+      console.error("[render] renderer failed:", error);
+    }
+  }
 }
 
 // Maps the server document-extraction payload (POST /api/extract-document) into
@@ -3590,8 +3607,8 @@ function buildWorkflowGridFromExtraction(extracted = {}) {
   return grid;
 }
 
-// --- "Add Attachment" (mid-interview) --------------------------------------
-// The interview-view "Add Attachment" button opens a hidden file picker (PDF,
+// --- "Add supporting doc" (mid-interview) ----------------------------------
+// The interview-view "Add supporting doc" button opens a hidden file picker (PDF,
 // image, or document) and runs the selection through the same GPT-4o document
 // extraction endpoint as the pre-interview upload. The difference: an
 // attachment arrives while the interview is already in progress, so its
@@ -4166,6 +4183,109 @@ function updateLiveGrid(/* gridState */) {
   renderLiveExtractionGrid();
 }
 
+// PR 29: highest-priority gap fields for the inline "key questions" surfaced
+// below the step cards. Ordered P9 (data sensitivity/risk) → P7 (human
+// judgment) → neutral, mirroring the opportunity-scoring overrides.
+const KEY_QUESTION_FIELDS = [
+  { key: "dataSensitivity", q: "What data sensitivity applies here — internal, client-confidential, regulated, or personal?" },
+  { key: "regulatoryContext", q: "Does any regulatory or compliance rule govern this workflow?" },
+  { key: "dataProcessing", q: "What happens to the data as it moves through these steps?" },
+  { key: "personaActors", q: "Who performs these steps — which roles or people?" },
+  { key: "painFriction", q: "What's the biggest pain or friction in this workflow today?" },
+  { key: "rulesDecisionLogic", q: "What rules or decision logic drive the key steps?" },
+  { key: "exceptionBranching", q: "What exceptions or edge cases can come up?" },
+  { key: "systemsTools", q: "What systems or tools are used across these steps?" },
+  { key: "output", q: "What output or deliverable does this workflow produce?" },
+  { key: "timeTaken", q: "Roughly how long does the whole workflow take end to end?" }
+];
+
+// A key field is a workflow-level gap when no step has captured a value for it.
+function workflowGapFields(steps) {
+  return KEY_QUESTION_FIELDS.filter(
+    (field) => !steps.some((step) => isCapturedValue(gridCellValue(step, field.key)))
+  );
+}
+
+// PR 29 fix: a tapped key question becomes the "Answering:" context above the
+// composer; the answer box itself stays empty + focused for the user's reply,
+// and the composer scrolls into view (the box is otherwise off-screen when many
+// step cards push the questions down the left column).
+let activeGapQuestion = "";
+
+function setActiveGapQuestion(question) {
+  activeGapQuestion = question || "";
+  renderActiveQuestionLabel();
+  // No scroll: the questions live at the top of the left column, so the composer
+  // in the right panel is already in view. preventScroll keeps the page put.
+  els.aiChatInput?.focus({ preventScroll: true });
+}
+
+function clearActiveGapQuestion() {
+  activeGapQuestion = "";
+  if (els.aiChatInput) els.aiChatInput.value = "";
+  renderActiveQuestionLabel();
+  els.aiChatInput?.focus();
+}
+
+// Injects/updates (or removes) the "Answering: …" label directly above the
+// composer textarea, with a × to clear.
+function renderActiveQuestionLabel() {
+  const input = els.aiChatInput;
+  const composer = input?.closest(".chat-composer");
+  if (!composer) return;
+  let label = document.getElementById("activeQuestionLabel");
+  if (!activeGapQuestion) {
+    label?.remove();
+    return;
+  }
+  if (!label) {
+    label = document.createElement("div");
+    label.id = "activeQuestionLabel";
+    label.style.cssText = "display:flex;align-items:flex-start;gap:8px;background:#0d1b2a;border:1px solid #1e3350;border-radius:6px;padding:6px 10px;margin-bottom:8px;";
+    composer.insertBefore(label, input);
+  }
+  label.innerHTML = `<span style="flex:1;min-width:0;font-size:12px;color:#8aa0b8;line-height:1.4;">Answering: <span style="color:#cfe0f0;">${escapeHtml(activeGapQuestion)}</span></span><span data-clear-question role="button" tabindex="0" title="Clear" style="color:#5b7186;font-size:16px;line-height:1;cursor:pointer;flex-shrink:0;">×</span>`;
+  label.querySelector("[data-clear-question]")?.addEventListener("click", clearActiveGapQuestion);
+}
+
+// PR 29: the "key questions to fill gaps" cards live at the top of the left
+// column — directly below the SUGGESTED NEXT QUESTION block and above the
+// Dictate row (the primary interaction zone). Tapping one sets the Answering
+// context on the composer.
+function renderInlineKeyQuestions() {
+  const anchor = document.querySelector(".discovery-question-area .current-question-card");
+  if (!anchor) return;
+  let container = document.getElementById("inlineKeyQuestions");
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "inlineKeyQuestions";
+    container.style.marginBottom = "14px";
+  }
+  // Keep it pinned directly below the current-question / suggested-next block.
+  if (container.previousElementSibling !== anchor) anchor.insertAdjacentElement("afterend", container);
+
+  const steps = Array.isArray(state.workflowGrid?.steps) ? state.workflowGrid.steps : [];
+  const top3 = steps.length ? workflowGapFields(steps).slice(0, 3) : [];
+  const sig = top3.map((field) => field.key).join(",");
+  if (container.dataset.sig === sig) return; // avoid rebuild/flicker when unchanged
+  container.dataset.sig = sig;
+
+  if (!top3.length) {
+    container.innerHTML = "";
+    return;
+  }
+  container.innerHTML = `
+    <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:#5b7186;text-transform:uppercase;margin-bottom:8px;">Key questions to fill gaps</div>
+    ${top3.map((field) => `<div data-gap-question="${escapeHtml(field.q)}" role="button" tabindex="0" style="background:#0d1b2a;border:1px solid #1e3350;border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;font-size:13px;color:#cfe0f0;line-height:1.4;transition:border-color 0.15s ease;">${escapeHtml(field.q)}</div>`).join("")}`;
+  container.querySelectorAll("[data-gap-question]").forEach((el) => {
+    const choose = () => setActiveGapQuestion(el.dataset.gapQuestion);
+    el.addEventListener("click", choose);
+    el.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); choose(); }
+    });
+  });
+}
+
 function renderWorkflowGridPanel() {
   const panel = document.getElementById("liveWorkflowGridPanel");
   if (!panel) return;
@@ -4183,8 +4303,11 @@ function renderWorkflowGridPanel() {
   // PR 28: the Discovery steps view is a card grid (the horizontal spreadsheet
   // now lives only in Analysis Studio → Workflow Grid). Rebuild only when the
   // displayed card data changes — avoids flicker on unrelated renders.
+  const gaps = workflowGapFields(steps);
   const signature = JSON.stringify({
     workflowName,
+    mode: state.appMode,
+    gaps: gaps.map((field) => field.key),
     steps: steps.map((step, index) => ({
       n: stepDisplayName(step, index),
       p: handoffPrimaryValue(step, "personaActors"),
@@ -4236,10 +4359,27 @@ function renderWorkflowGridPanel() {
       </div>`;
   }).join("");
 
+  // PR 29 item 4: after a document extraction (document mode), nudge toward an
+  // interview to fill the fields the document didn't cover. (The "key questions"
+  // themselves render at the top of the left column via renderInlineKeyQuestions.)
+  const nudgeHtml = (state.appMode === "document" && gaps.length)
+    ? `<div style="margin-top:16px;background:#10243a;border:1px solid #1e4060;border-radius:8px;padding:12px 14px;">
+        <div style="font-size:13px;color:#dde8f5;line-height:1.45;margin-bottom:10px;">${gaps.length} field${gaps.length === 1 ? "" : "s"} still need input — continue with an interview?</div>
+        <button type="button" data-start-interview style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Start interview</button>
+      </div>`
+    : "";
+
   panel.innerHTML = `
     ${header}
     <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:6px;">${cards}</div>
+    ${nudgeHtml}
   `;
+
+  panel.querySelector("[data-start-interview]")?.addEventListener("click", () => {
+    setAppMode("interview"); // setAppMode now does a full render()
+    toast("Switched to interview — let's fill the gaps.");
+  });
+
   refreshIcons();
 }
 
@@ -12669,7 +12809,10 @@ function caseScore(label, score, color) {
 function discoveryHasStarted() {
   const conversation = state.conversation || [];
   const aiChat = state.aiChat || [];
+  // #1 (interim canonical rule — revisit PR 30): treat a populated workflowGrid
+  // as "started" too, so a loaded grid session doesn't re-show the naming prompt.
   return (state.steps?.length || 0) > 0
+    || (state.workflowGrid?.steps?.length || 0) > 0
     || conversation.some((message) => message.role === "user")
     || aiChat.some((message) => message.role === "user");
 }
@@ -12719,13 +12862,24 @@ function patchSessionMetadata() {
 // Editable inline workflow title in the Discovery header. Always shows an input
 // (styled as a label); blur / Enter saves. Skips re-render while focused so it
 // never disrupts typing.
+let lastHeaderSessionId = null;
+
 function renderWorkflowHeaderName() {
   const host = document.getElementById("workflowHeaderName");
   if (!host) return;
-  const name = (state.sessionMeta?.workflowName || "").trim();
+  // #1 (interim canonical rule — revisit PR 30): prefer the explicit workflow
+  // name, but fall back to the grid's name so a loaded session shows its title
+  // even when sessionMeta.workflowName is unset.
+  const name = (state.sessionMeta?.workflowName || state.workflowGrid?.workflowName || "").trim();
+  // Detect a session switch (e.g. opening a saved session from the Open menu) so
+  // we refresh the field even if it still holds focus from the previous session.
+  const sessionId = state.sessionMeta?.id || "";
+  const sessionChanged = sessionId !== lastHeaderSessionId;
+  lastHeaderSessionId = sessionId;
   const existing = host.querySelector("#workflowNameInput");
   if (existing) {
-    if (document.activeElement === existing) return;
+    // Don't clobber the field mid-edit — unless the session itself just changed.
+    if (document.activeElement === existing && !sessionChanged) return;
     existing.value = name;
     existing.style.color = name ? "#e8f4ff" : "#8899aa";
     return;
@@ -28092,6 +28246,15 @@ function normalizeLoadedState(parsed = {}) {
     merged.currentQuestionOverride = "";
     merged.currentQuestionSource = "Step-by-step interview";
   }
+  // #2 (interim — revisit PR 30): when a loaded session carried its name only on
+  // the grid, backfill it onto sessionMeta/fields so the metadata surfaces that
+  // still read the legacy model rehydrate. Runs before ensureSessionMeta so the
+  // derived session name picks it up too.
+  const loadedGridName = (merged.workflowGrid?.workflowName || "").trim();
+  if (loadedGridName) {
+    if (!merged.sessionMeta.workflowName) merged.sessionMeta.workflowName = loadedGridName;
+    if (!merged.fields.workflowName) merged.fields.workflowName = loadedGridName;
+  }
   ensureSessionMeta(merged, { preserveUpdatedAt: true });
   return merged;
 }
@@ -28224,12 +28387,14 @@ function sessionSummaryMeta(sessionState = state) {
     lastPackagePath: meta.lastPackagePath || "",
     createdAt: meta.createdAt || "",
     updatedAt: meta.updatedAt || "",
-    workflowName: meta.workflowName || fields.workflowName || fields.submittedWorkflowTask || "",
+    // #1 (interim canonical rule — revisit PR 30): fall back to the grid name so
+    // an unnamed grid session lists its workflow title instead of "Untitled".
+    workflowName: meta.workflowName || sessionState.workflowGrid?.workflowName || fields.workflowName || fields.submittedWorkflowTask || "",
     engagementContext: meta.engagementContext || "",
     category: fields.workflowCategory && fields.workflowCategory !== "unknown" ? fields.workflowCategory : "Category TBD",
     domain: fields.domain || "",
     readiness: fields.buildReadiness || "unknown",
-    stepCount: sessionState.steps?.length || 0,
+    stepCount: sessionState.workflowGrid?.steps?.length || sessionState.steps?.length || 0,
     dataCount: sessionState.data?.length || 0,
     systemCount: sessionState.systems?.length || 0,
     decisionCount: sessionState.decisions?.length || 0
@@ -28386,8 +28551,8 @@ function openDiscoveryModePicker() {
       <div style="color:#ffffff;font-size:20px;font-weight:600;margin-bottom:16px;">Start a new discovery</div>
       ${warning}
       <div style="display:flex;gap:16px;flex-wrap:wrap;">
-        ${card("interview", "🎙️", "Run an interview", "Answer structured questions and let AI map your workflow step by step")}
-        ${card("document", "📄", "Analyse a document", "Upload a SOP, process doc, or screenshot and let AI extract the workflow automatically")}
+        ${card("interview", "🎙️", "Run an interview", "Ask me questions one at a time")}
+        ${card("document", "📄", "Analyse a document", "Upload a file and I'll extract the workflow")}
       </div>
       <div style="text-align:center;margin-top:20px;">
         <span data-mode-cancel role="button" tabindex="0" style="color:#8899aa;font-size:13px;cursor:pointer;">Cancel</span>
@@ -28469,7 +28634,29 @@ async function duplicateSavedSession(id) {
 async function loadSessionFromLibrary(id) {
   const entry = getCombinedSessionLibrary().find((item) => item.id === id);
   const savedState = await getSessionStateById(id);
-  if (!entry || !savedState) return;
+  // PR 29 Bug A diagnostic (temporary): log the requested id vs what actually
+  // resolved, so we can tell a wrong-fetch from a stale-render. Remove once the
+  // root cause is confirmed.
+  console.info("[session-load]", {
+    requestedId: id,
+    clickedName: entry?.name,
+    resolved: savedState
+      ? {
+          sessionId: savedState.sessionMeta?.id,
+          idMatchesRequest: savedState.sessionMeta?.id === id,
+          metaWorkflowName: savedState.sessionMeta?.workflowName || "",
+          gridWorkflowName: savedState.workflowGrid?.workflowName || "",
+          gridSteps: savedState.workflowGrid?.steps?.length || 0,
+          legacySteps: savedState.steps?.length || 0
+        }
+      : null
+  });
+  if (!entry || !savedState) {
+    // #4: surface the previously-silent failure instead of leaving the prior
+    // session on screen with no feedback.
+    toast("Couldn't load that session — its saved data wasn't found.");
+    return;
+  }
   persistState();
   state = normalizeLoadedState(savedState);
   state.appMode = "analysis";
