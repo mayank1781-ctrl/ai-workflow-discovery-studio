@@ -3471,7 +3471,6 @@ function render() {
   renderLiveSpeechDraft();
   renderWorkflowGridPanel();
   renderLiveExtractionGrid();
-  updateConfidenceCards();
   updateProcessFlowMapCompact();
   if (els.sectionTitle) els.sectionTitle.textContent = section.label;
   renderConversation();
@@ -4060,6 +4059,10 @@ function liveGridCellStyle(color, confidence, hasValue) {
 function renderLiveExtractionGrid() {
   const host = document.getElementById("liveExtractionGrid");
   if (!host) return;
+  // PR 28a: keep the extraction grid in the right rail, directly below the
+  // composer (Accept & Analyze) and above the Live transcript.
+  const composer = document.querySelector(".embedded-transcript-card .transcript-composer");
+  if (composer && composer.nextElementSibling !== host) composer.insertAdjacentElement("afterend", host);
   const gridState = buildLiveGridState();
 
   let captured = 0;
@@ -4168,6 +4171,11 @@ function renderWorkflowGridPanel() {
   if (!panel) return;
   panel.hidden = false;
 
+  // PR 28a: the step cards live inside the left question column (a 2-up grid
+  // that fills its vertical space) rather than full-width below the hero.
+  const questionArea = document.querySelector(".discovery-question-area");
+  if (questionArea && panel.parentElement !== questionArea) questionArea.appendChild(panel);
+
   const grid = state.workflowGrid || {};
   const steps = Array.isArray(grid.steps) ? grid.steps : [];
   const workflowName = (grid.workflowName || "").trim();
@@ -4182,7 +4190,7 @@ function renderWorkflowGridPanel() {
       p: handoffPrimaryValue(step, "personaActors"),
       s: handoffPrimaryValue(step, "systemsTools"),
       a: stepPrimaryPattern(step),
-      c: handoffStepConfidence(step),
+      c: stepCoverage(step),
       u: gridCellValue(step, "description")
     }))
   });
@@ -4204,9 +4212,11 @@ function renderWorkflowGridPanel() {
     const system = handoffPrimaryValue(step, "systemsTools") || "—";
     const pattern = stepPrimaryPattern(step);
     const layerColor = pattern ? patternLayerColor(pattern) : "#5b7186";
-    const confidence = handoffStepConfidence(step);
-    const confColor = handoffConfidenceColor(confidence);
-    const confLabel = confidence === null ? "No score" : `${Math.round(confidence * 100)}%`;
+    // PR 28a: badge shows live field coverage (set during Discovery), not the
+    // AI pattern confidence (which is only assigned later in Analysis).
+    const coverage = stepCoverage(step);
+    const confColor = handoffConfidenceColor(coverage);
+    const confLabel = `${Math.round(coverage * 100)}%`;
     const patternHtml = pattern
       ? `<span style="display:inline-block;background:${layerColor}22;color:${layerColor};border:1px solid ${layerColor}55;border-radius:99px;padding:2px 9px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.03em;">${escapeHtml(pattern)}</span>`
       : `<span style="font-size:11px;color:#3f5878;">No AI pattern yet</span>`;
@@ -4228,124 +4238,17 @@ function renderWorkflowGridPanel() {
 
   panel.innerHTML = `
     ${header}
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-top:6px;">${cards}</div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:6px;">${cards}</div>
   `;
   refreshIcons();
-}
-
-// --- Live step confidence cards (read-only left-panel display) --------------
-// Glowing cards below the Dictate/Stop/Add Attachment row. One card per step in
-// state.workflowGrid.steps, coloured by how many of the step's 17 cells are
-// captured (confirmed/inferred). Rewrites only its own container — never calls
-// render(), so it is safe to invoke from inside render() on every update.
-function updateConfidenceCards() {
-  const container = document.getElementById("step-confidence-cards");
-  if (!container) return;
-
-  const steps = Array.isArray(state.workflowGrid?.steps) ? state.workflowGrid.steps : [];
-  if (!steps.length) {
-    // Empty grid -> render nothing. Blank space is fine, no placeholder.
-    container.innerHTML = "";
-    return;
-  }
-
-  // The grid has no current-step marker of its own; the live interview tracks
-  // the active step via state.activeStepIndex (over legacy state.steps). Only
-  // surface a "NOW" badge when the interview is actually in step mode.
-  const hasActiveStep = Array.isArray(state.steps) && state.steps.length > 0;
-  const currentIndex = hasActiveStep
-    ? Math.max(0, Math.min(Number(state.activeStepIndex) || 0, steps.length - 1))
-    : -1;
-
-  const cardsHtml = steps.map((step, index) => {
-    const cells = Object.values(step.cells || {});
-    const filled = cells.filter((c) => c && (c.state === "confirmed" || c.state === "inferred")).length;
-    const coverage = cells.length ? filled / cells.length : 0;
-    const isCurrentStep = index === currentIndex;
-
-    // Glow state -> background, border, animation, and the accent colour reused
-    // by the coverage bar fill and the percentage label.
-    let background;
-    let border;
-    let accent;
-    let animation = "";
-    if (isCurrentStep) {
-      background = "#1a0020";
-      border = "#ff4fc8";
-      accent = "#ff4fc8";
-      animation = "pulsePink 1.5s infinite";
-    } else if (coverage === 0) {
-      background = "#0d1a26";
-      border = "#1a2a3a";
-      accent = "#1a2a3a";
-    } else if (coverage < 0.25) {
-      background = "#1a1500";
-      border = "#f59e0b55";
-      accent = "#f59e0b";
-      animation = "pulseAmber 2s infinite";
-    } else if (coverage < 0.5) {
-      background = "#001a18";
-      border = "#00d4b4aa";
-      accent = "#00d4b4";
-    } else {
-      background = "#002520";
-      border = "#00d4b4";
-      accent = "#00d4b4";
-    }
-
-    const stepNumber = String(index + 1).padStart(2, "0");
-    const rawName = step.cells?.name?.value?.trim() || `Step ${index + 1}`;
-    const label = truncateUi(rawName, 20);
-    const percent = Math.round(coverage * 100);
-    const nowBadge = isCurrentStep
-      ? `<span style="font-size:8px;font-weight:700;letter-spacing:0.08em;color:#ff4fc8;margin-left:auto;">NOW</span>`
-      : "";
-
-    const cardStyle = [
-      `background:${background}`,
-      `border:1px solid ${border}`,
-      animation ? `animation:${animation}` : ""
-    ].filter(Boolean).join(";");
-
-    return `
-      <div class="step-conf-card" style="${cardStyle};display:flex;flex-direction:column;" title="${escapeHtml(rawName)}">
-        <div style="display:flex;align-items:center;font-size:9px;color:#5b7186;letter-spacing:0.06em;">
-          <span>${stepNumber}</span>${nowBadge}
-        </div>
-        <div style="font-size:12px;font-weight:700;color:#fff;line-height:1.2;margin:4px 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${escapeHtml(label)}</div>
-        <div style="margin-top:auto;display:flex;align-items:center;gap:6px;">
-          <div style="flex:1;height:3px;background:#1a2a3a;border-radius:99px;overflow:hidden;">
-            <div style="width:${percent}%;height:100%;background:${accent};border-radius:99px;transition:width 0.4s ease;"></div>
-          </div>
-          <span style="font-size:10px;color:${accent};">${percent}%</span>
-        </div>
-      </div>`;
-  }).join("");
-
-  // Amber completeness banner, shown directly below the step cards only when
-  // the server flagged a potentially truncated extraction (more numbered
-  // sections in the document than steps that came back).
-  const warning = (state.extractionWarning || "").trim();
-  const warningHtml = warning
-    ? `<div class="extraction-warning-banner" role="status" style="margin-top:10px;padding:10px 12px;border:1px solid #f59e0b;background:#1a1500;border-radius:8px;color:#f5c451;font-size:12px;line-height:1.45;display:flex;gap:8px;align-items:flex-start;">
-        <i data-lucide="triangle-alert" style="width:14px;height:14px;flex-shrink:0;margin-top:1px;"></i>
-        <span>${escapeHtml(warning)}</span>
-      </div>`
-    : "";
-
-  container.innerHTML = `
-    <div class="step-conf-label">Steps</div>
-    <div class="step-conf-row">${cardsHtml}</div>
-    ${warningHtml}`;
-  if (warning) refreshIcons();
 }
 
 // --- Process Flow Map (compact + full) -------------------------------------
 // A horizontal pipeline of the workflowGrid steps: one node per step, arrows
 // between them, each node bordered/barred by its 17-cell coverage. Two density
-// modes share the same node builder. Like updateConfidenceCards(), these read
-// state.workflowGrid.steps and rewrite only their own container — never call
-// render(), so they are safe to invoke from inside render().
+// modes share the same node builder. These read state.workflowGrid.steps and
+// rewrite only their own container — never call render(), so they are safe to
+// invoke from inside render().
 
 // Coverage -> accent colour. Mirrors the confidence-card glow scale. The
 // current-step pink override is applied by the caller, not here.
