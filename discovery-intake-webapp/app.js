@@ -3473,6 +3473,7 @@ function render() {
   renderTextIntakeAssist();
   renderLiveSpeechDraft();
   renderWorkflowGridPanel();
+  renderInlineKeyQuestions();
   renderLiveExtractionGrid();
   updateProcessFlowMapCompact();
   if (els.sectionTitle) els.sectionTitle.textContent = section.label;
@@ -4201,10 +4202,9 @@ let activeGapQuestion = "";
 function setActiveGapQuestion(question) {
   activeGapQuestion = question || "";
   renderActiveQuestionLabel();
-  const input = els.aiChatInput;
-  if (!input) return;
-  (input.closest(".chat-composer") || input).scrollIntoView({ behavior: "smooth", block: "center" });
-  input.focus();
+  // No scroll: the questions live at the top of the left column, so the composer
+  // in the right panel is already in view. preventScroll keeps the page put.
+  els.aiChatInput?.focus({ preventScroll: true });
 }
 
 function clearActiveGapQuestion() {
@@ -4233,6 +4233,44 @@ function renderActiveQuestionLabel() {
   }
   label.innerHTML = `<span style="flex:1;min-width:0;font-size:12px;color:#8aa0b8;line-height:1.4;">Answering: <span style="color:#cfe0f0;">${escapeHtml(activeGapQuestion)}</span></span><span data-clear-question role="button" tabindex="0" title="Clear" style="color:#5b7186;font-size:16px;line-height:1;cursor:pointer;flex-shrink:0;">×</span>`;
   label.querySelector("[data-clear-question]")?.addEventListener("click", clearActiveGapQuestion);
+}
+
+// PR 29: the "key questions to fill gaps" cards live at the top of the left
+// column — directly below the SUGGESTED NEXT QUESTION block and above the
+// Dictate row (the primary interaction zone). Tapping one sets the Answering
+// context on the composer.
+function renderInlineKeyQuestions() {
+  const anchor = document.querySelector(".discovery-question-area .current-question-card");
+  if (!anchor) return;
+  let container = document.getElementById("inlineKeyQuestions");
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "inlineKeyQuestions";
+    container.style.marginBottom = "14px";
+  }
+  // Keep it pinned directly below the current-question / suggested-next block.
+  if (container.previousElementSibling !== anchor) anchor.insertAdjacentElement("afterend", container);
+
+  const steps = Array.isArray(state.workflowGrid?.steps) ? state.workflowGrid.steps : [];
+  const top3 = steps.length ? workflowGapFields(steps).slice(0, 3) : [];
+  const sig = top3.map((field) => field.key).join(",");
+  if (container.dataset.sig === sig) return; // avoid rebuild/flicker when unchanged
+  container.dataset.sig = sig;
+
+  if (!top3.length) {
+    container.innerHTML = "";
+    return;
+  }
+  container.innerHTML = `
+    <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:#5b7186;text-transform:uppercase;margin-bottom:8px;">Key questions to fill gaps</div>
+    ${top3.map((field) => `<div data-gap-question="${escapeHtml(field.q)}" role="button" tabindex="0" style="background:#0d1b2a;border:1px solid #1e3350;border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;font-size:13px;color:#cfe0f0;line-height:1.4;transition:border-color 0.15s ease;">${escapeHtml(field.q)}</div>`).join("")}`;
+  container.querySelectorAll("[data-gap-question]").forEach((el) => {
+    const choose = () => setActiveGapQuestion(el.dataset.gapQuestion);
+    el.addEventListener("click", choose);
+    el.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); choose(); }
+    });
+  });
 }
 
 function renderWorkflowGridPanel() {
@@ -4308,17 +4346,9 @@ function renderWorkflowGridPanel() {
       </div>`;
   }).join("");
 
-  // PR 29 item 1: auto-surface the top gap questions (max 3) below the cards.
-  const top3 = gaps.slice(0, 3);
-  const questionsHtml = top3.length
-    ? `<div style="margin-top:16px;">
-        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:#5b7186;text-transform:uppercase;margin-bottom:8px;">Key questions to fill gaps</div>
-        ${top3.map((field) => `<div data-gap-question="${escapeHtml(field.q)}" role="button" tabindex="0" style="background:#0d1b2a;border:1px solid #1e3350;border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;font-size:13px;color:#cfe0f0;line-height:1.4;transition:border-color 0.15s ease;">${escapeHtml(field.q)}</div>`).join("")}
-      </div>`
-    : "";
-
   // PR 29 item 4: after a document extraction (document mode), nudge toward an
-  // interview to fill the fields the document didn't cover.
+  // interview to fill the fields the document didn't cover. (The "key questions"
+  // themselves render at the top of the left column via renderInlineKeyQuestions.)
   const nudgeHtml = (state.appMode === "document" && gaps.length)
     ? `<div style="margin-top:16px;background:#10243a;border:1px solid #1e4060;border-radius:8px;padding:12px 14px;">
         <div style="font-size:13px;color:#dde8f5;line-height:1.45;margin-bottom:10px;">${gaps.length} field${gaps.length === 1 ? "" : "s"} still need input — continue with an interview?</div>
@@ -4329,18 +4359,9 @@ function renderWorkflowGridPanel() {
   panel.innerHTML = `
     ${header}
     <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:6px;">${cards}</div>
-    ${questionsHtml}
     ${nudgeHtml}
   `;
 
-  // Tapping a key question pre-fills the composer with the question text.
-  panel.querySelectorAll("[data-gap-question]").forEach((el) => {
-    const choose = () => setActiveGapQuestion(el.dataset.gapQuestion);
-    el.addEventListener("click", choose);
-    el.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); choose(); }
-    });
-  });
   panel.querySelector("[data-start-interview]")?.addEventListener("click", () => {
     setAppMode("interview");
     render();
