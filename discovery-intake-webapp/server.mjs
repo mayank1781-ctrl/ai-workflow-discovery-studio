@@ -213,6 +213,116 @@ function migrateJsonSessionsToSqlite() {
 }
 migrateJsonSessionsToSqlite();
 
+// --- Session schema migrations (PR 33) ---------------------------------------
+// Sequential, registered steps. Each entry migrates a session STATE object from
+// any version below `to` up to `to`; migrateSessionRecord applies every step
+// above the record's current version, in order, stamping as it goes. PR 34+
+// append entries here — never reorder or edit shipped steps.
+const SESSION_SCHEMA_VERSION = 2;
+
+// v1 -> v2: the business case became snapshot-only (PR 32). This is the SERVER
+// copy of migrateSessionState() in app.js (the client hook still migrates
+// localStorage sessions on open) — the two MUST stay in lockstep; an executed
+// test (test/migrations.test.mjs "lockstep") runs both against the same v1
+// fixture and fails the suite on drift.
+function migrateSessionStateV2(state) {
+  const version = Number(state.schemaVersion) || 1;
+  if (version < 2) {
+    // Settled conservative policy: pre-v2 sessions show NO business-case
+    // figure until explicitly computed — never auto-compute at migration.
+    state.businessCaseSnapshot = null;
+    state.businessCaseSnapshotPrior = null;
+  }
+  state.businessCaseSnapshot = state.businessCaseSnapshot || null;
+  state.businessCaseSnapshotPrior = state.businessCaseSnapshotPrior || null;
+  state.schemaVersion = 2;
+  return state;
+}
+
+const SESSION_MIGRATIONS = [
+  { to: 2, name: "v1->v2 business-case snapshot", migrate: migrateSessionStateV2 }
+];
+
+// Applies every registered step above the state's current version, in order.
+// `migrations` is injectable for tests; production always uses the registry.
+function migrateSessionRecord(state, migrations = SESSION_MIGRATIONS) {
+  let version = Number(state?.schemaVersion) || 1;
+  let changed = false;
+  for (const step of migrations) {
+    if (step.to <= version) continue;
+    step.migrate(state);
+    state.schemaVersion = step.to;
+    version = step.to;
+    changed = true;
+  }
+  return { state, changed };
+}
+
+// One-time batch migration at startup (settled design: batch with a .bak, not
+// migrate-on-open). Refuses to start on any failure — the server must never
+// run against a partially-migrated database.
+function runStartupSchemaMigrations() {
+  const rows = db.prepare("SELECT id, data FROM sessions").all();
+  const pending = [];
+  const broken = [];
+  for (const row of rows) {
+    try {
+      const payload = JSON.parse(row.data);
+      // Rows without a state object aren't loadable sessions; skip them.
+      if (!payload || typeof payload.state !== "object" || !payload.state) continue;
+      if ((Number(payload.state.schemaVersion) || 1) < SESSION_SCHEMA_VERSION) {
+        pending.push({ id: row.id, payload });
+      }
+    } catch (error) {
+      broken.push({ id: row.id, error: error.message });
+    }
+  }
+  if (!pending.length && !broken.length) return; // nothing to do — normal start
+
+  // Backup BEFORE touching anything.
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const bakPath = `${DB_PATH}.${stamp}.bak`;
+  fsSync.copyFileSync(DB_PATH, bakPath);
+
+  const refuse = (detail) => {
+    console.error(
+      `[migrate] REFUSING TO START — session schema migration failed.\n` +
+      `[migrate] ${detail}\n` +
+      `[migrate] The database was backed up BEFORE migration to: ${bakPath}\n` +
+      `[migrate] To restore: cp "${bakPath}" "${DB_PATH}" — then investigate the named record and restart.`
+    );
+    process.exit(1);
+  };
+
+  if (broken.length) {
+    refuse(`Could not parse session row "${broken[0].id}" to determine its schema version: ${broken[0].error}` +
+      (broken.length > 1 ? ` (and ${broken.length - 1} more unparseable row(s))` : ""));
+  }
+
+  const update = db.prepare("UPDATE sessions SET data = ?, updated_at = ? WHERE id = ?");
+  db.exec("BEGIN");
+  let current = null;
+  let currentStep = "";
+  try {
+    for (const item of pending) {
+      current = item;
+      for (const step of SESSION_MIGRATIONS) {
+        currentStep = step.name;
+        if (step.to <= (Number(item.payload.state.schemaVersion) || 1)) continue;
+        step.migrate(item.payload.state);
+        item.payload.state.schemaVersion = step.to;
+      }
+      update.run(JSON.stringify(item.payload), new Date().toISOString(), item.id);
+    }
+    db.exec("COMMIT");
+    console.log(`[migrate] migrated ${pending.length} session(s) to schema v${SESSION_SCHEMA_VERSION} (backup: ${bakPath})`);
+  } catch (error) {
+    db.exec("ROLLBACK");
+    refuse(`Session row "${current?.id}" failed in migration step "${currentStep}": ${error.message}`);
+  }
+}
+runStartupSchemaMigrations();
+
 // === Phase 9c: runtime settings (rate override) =============================
 // The API key override lives in process memory only (runtimeOpenAiKey above).
 // The blended-rate override persists to data/settings.json so it survives

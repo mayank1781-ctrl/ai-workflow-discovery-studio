@@ -28643,9 +28643,11 @@ function normalizeLoadedState(parsed = {}) {
   return merged;
 }
 
-// PR 32: minimal session-schema migration hook. PR 33's migration framework
-// will own a registered step list; until then this single idempotent function
-// IS the v1->v2 step it will wrap — keep it side-effect-free beyond `merged`.
+// PR 32/33: the CLIENT v1->v2 migration hook, applied to localStorage-loaded
+// sessions on open. The server batch framework registers its own copy of this
+// exact transform (migrateSessionStateV2 in server.mjs, SESSION_MIGRATIONS) —
+// the two MUST stay in lockstep; test/migrations.test.mjs "lockstep" runs both
+// against the same v1 fixture and fails the suite on drift.
 function migrateSessionState(merged) {
   const version = Number(merged.schemaVersion) || 1;
   if (version < 2) {
