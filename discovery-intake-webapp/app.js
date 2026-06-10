@@ -3590,8 +3590,8 @@ function buildWorkflowGridFromExtraction(extracted = {}) {
   return grid;
 }
 
-// --- "Add Attachment" (mid-interview) --------------------------------------
-// The interview-view "Add Attachment" button opens a hidden file picker (PDF,
+// --- "Add supporting doc" (mid-interview) ----------------------------------
+// The interview-view "Add supporting doc" button opens a hidden file picker (PDF,
 // image, or document) and runs the selection through the same GPT-4o document
 // extraction endpoint as the pre-interview upload. The difference: an
 // attachment arrives while the interview is already in progress, so its
@@ -4166,6 +4166,29 @@ function updateLiveGrid(/* gridState */) {
   renderLiveExtractionGrid();
 }
 
+// PR 29: highest-priority gap fields for the inline "key questions" surfaced
+// below the step cards. Ordered P9 (data sensitivity/risk) → P7 (human
+// judgment) → neutral, mirroring the opportunity-scoring overrides.
+const KEY_QUESTION_FIELDS = [
+  { key: "dataSensitivity", q: "What data sensitivity applies here — internal, client-confidential, regulated, or personal?" },
+  { key: "regulatoryContext", q: "Does any regulatory or compliance rule govern this workflow?" },
+  { key: "dataProcessing", q: "What happens to the data as it moves through these steps?" },
+  { key: "personaActors", q: "Who performs these steps — which roles or people?" },
+  { key: "painFriction", q: "What's the biggest pain or friction in this workflow today?" },
+  { key: "rulesDecisionLogic", q: "What rules or decision logic drive the key steps?" },
+  { key: "exceptionBranching", q: "What exceptions or edge cases can come up?" },
+  { key: "systemsTools", q: "What systems or tools are used across these steps?" },
+  { key: "output", q: "What output or deliverable does this workflow produce?" },
+  { key: "timeTaken", q: "Roughly how long does the whole workflow take end to end?" }
+];
+
+// A key field is a workflow-level gap when no step has captured a value for it.
+function workflowGapFields(steps) {
+  return KEY_QUESTION_FIELDS.filter(
+    (field) => !steps.some((step) => isCapturedValue(gridCellValue(step, field.key)))
+  );
+}
+
 function renderWorkflowGridPanel() {
   const panel = document.getElementById("liveWorkflowGridPanel");
   if (!panel) return;
@@ -4183,8 +4206,11 @@ function renderWorkflowGridPanel() {
   // PR 28: the Discovery steps view is a card grid (the horizontal spreadsheet
   // now lives only in Analysis Studio → Workflow Grid). Rebuild only when the
   // displayed card data changes — avoids flicker on unrelated renders.
+  const gaps = workflowGapFields(steps);
   const signature = JSON.stringify({
     workflowName,
+    mode: state.appMode,
+    gaps: gaps.map((field) => field.key),
     steps: steps.map((step, index) => ({
       n: stepDisplayName(step, index),
       p: handoffPrimaryValue(step, "personaActors"),
@@ -4236,10 +4262,49 @@ function renderWorkflowGridPanel() {
       </div>`;
   }).join("");
 
+  // PR 29 item 1: auto-surface the top gap questions (max 3) below the cards.
+  const top3 = gaps.slice(0, 3);
+  const questionsHtml = top3.length
+    ? `<div style="margin-top:16px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:#5b7186;text-transform:uppercase;margin-bottom:8px;">Key questions to fill gaps</div>
+        ${top3.map((field) => `<div data-gap-question="${escapeHtml(field.q)}" role="button" tabindex="0" style="background:#0d1b2a;border:1px solid #1e3350;border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;font-size:13px;color:#cfe0f0;line-height:1.4;transition:border-color 0.15s ease;">${escapeHtml(field.q)}</div>`).join("")}
+      </div>`
+    : "";
+
+  // PR 29 item 4: after a document extraction (document mode), nudge toward an
+  // interview to fill the fields the document didn't cover.
+  const nudgeHtml = (state.appMode === "document" && gaps.length)
+    ? `<div style="margin-top:16px;background:#10243a;border:1px solid #1e4060;border-radius:8px;padding:12px 14px;">
+        <div style="font-size:13px;color:#dde8f5;line-height:1.45;margin-bottom:10px;">${gaps.length} field${gaps.length === 1 ? "" : "s"} still need input — continue with an interview?</div>
+        <button type="button" data-start-interview style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Start interview</button>
+      </div>`
+    : "";
+
   panel.innerHTML = `
     ${header}
     <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:6px;">${cards}</div>
+    ${questionsHtml}
+    ${nudgeHtml}
   `;
+
+  // Tapping a key question pre-fills the composer with the question text.
+  panel.querySelectorAll("[data-gap-question]").forEach((el) => {
+    const prefill = () => {
+      if (!els.aiChatInput) return;
+      els.aiChatInput.value = el.dataset.gapQuestion;
+      els.aiChatInput.focus();
+    };
+    el.addEventListener("click", prefill);
+    el.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); prefill(); }
+    });
+  });
+  panel.querySelector("[data-start-interview]")?.addEventListener("click", () => {
+    setAppMode("interview");
+    render();
+    toast("Switched to interview — let's fill the gaps.");
+  });
+
   refreshIcons();
 }
 
@@ -28386,8 +28451,8 @@ function openDiscoveryModePicker() {
       <div style="color:#ffffff;font-size:20px;font-weight:600;margin-bottom:16px;">Start a new discovery</div>
       ${warning}
       <div style="display:flex;gap:16px;flex-wrap:wrap;">
-        ${card("interview", "🎙️", "Run an interview", "Answer structured questions and let AI map your workflow step by step")}
-        ${card("document", "📄", "Analyse a document", "Upload a SOP, process doc, or screenshot and let AI extract the workflow automatically")}
+        ${card("interview", "🎙️", "Run an interview", "Ask me questions one at a time")}
+        ${card("document", "📄", "Analyse a document", "Upload a file and I'll extract the workflow")}
       </div>
       <div style="text-align:center;margin-top:20px;">
         <span data-mode-cancel role="button" tabindex="0" style="color:#8899aa;font-size:13px;cursor:pointer;">Cancel</span>
