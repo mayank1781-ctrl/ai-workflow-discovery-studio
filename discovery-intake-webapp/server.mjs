@@ -51,9 +51,9 @@ const PORT = Number(process.env.PORT || 5173);
 let runtimeOpenAiKey = process.env.OPENAI_API_KEY || "";
 function getOpenAiKey() { return runtimeOpenAiKey; }
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
-const PATTERN_HANDOFF_MODEL = process.env.PATTERN_HANDOFF_MODEL || "claude-sonnet-4-6";
-const AI_MIRROR_MODEL = process.env.AI_MIRROR_MODEL || "claude-sonnet-4-6";
-const DUMP_EXTRACT_MODEL = process.env.DUMP_EXTRACT_MODEL || "claude-sonnet-4-6";
+const PATTERN_HANDOFF_MODEL = process.env.PATTERN_HANDOFF_MODEL || "claude-fable-5";
+const AI_MIRROR_MODEL = process.env.AI_MIRROR_MODEL || "claude-fable-5";
+const DUMP_EXTRACT_MODEL = process.env.DUMP_EXTRACT_MODEL || "claude-fable-5";
 const REALTIME_MODEL = process.env.REALTIME_MODEL || "gpt-realtime-2";
 const REALTIME_VOICE = process.env.REALTIME_VOICE || "marin";
 const REALTIME_REASONING_EFFORT = process.env.REALTIME_REASONING_EFFORT || "low";
