@@ -1401,6 +1401,14 @@ async function handleExtract(req, res) {
     });
   }
 
+  // TEMP diagnostic (pr29b-fix): what the extraction actually emitted, to diff
+  // against the AI reply's "I captured ..." claim. Remove with the harvest log.
+  console.info("[extract] summary:", JSON.stringify({
+    confidence: parsed?.confidence,
+    fieldKeys: Object.keys(parsed?.fields || {}),
+    newSteps: (parsed?.newRecords?.steps || []).map((s) => ({ name: s?.name, keys: Object.keys(s || {}).filter((k) => s[k]) }))
+  }));
+
   // Live confidence grid (PR 8): echo the latest extraction as a 9-field,
   // 3-layer gridState alongside the AI message. The client renders its live
   // grid from the accumulated workflowGrid (authoritative across turns); this
@@ -1930,16 +1938,24 @@ async function handleHarvestGrid(req, res) {
       return sendJson(res, 200, empty);
     }
     const outputText = data.choices?.[0]?.message?.content || "";
+    // TEMP diagnostic (pr29b-fix): raw harvest response + what survives parsing,
+    // to diff the model's actual shape against what the client mapper expects.
+    // Remove once the partial-extraction root cause is confirmed.
+    console.info("[harvest-grid] raw response:", outputText);
     let parsed;
     try {
       parsed = JSON.parse(outputText);
-    } catch {
+    } catch (error) {
+      console.warn("[harvest-grid] JSON.parse failed — returning empty:", error.message);
       return sendJson(res, 200, empty);
     }
-    return sendJson(res, 200, {
-      stepUpdates: Array.isArray(parsed.stepUpdates) ? parsed.stepUpdates : [],
-      newSteps: Array.isArray(parsed.newSteps) ? parsed.newSteps : []
-    });
+    const stepUpdates = Array.isArray(parsed.stepUpdates) ? parsed.stepUpdates : [];
+    const newSteps = Array.isArray(parsed.newSteps) ? parsed.newSteps : [];
+    console.info("[harvest-grid] parsed:", JSON.stringify({
+      stepUpdates: stepUpdates.map((u) => ({ stepId: u?.stepId, stepName: u?.stepName, fieldKeys: Object.keys(u?.fieldUpdates || {}) })),
+      newSteps: newSteps.map((s) => ({ stepName: s?.stepName || s?.name, fieldKeys: Object.keys(s?.fieldUpdates || s?.cells || {}) }))
+    }));
+    return sendJson(res, 200, { stepUpdates, newSteps });
   } catch (error) {
     console.warn("Grid harvest unavailable", error.message);
     return sendJson(res, 200, empty);
