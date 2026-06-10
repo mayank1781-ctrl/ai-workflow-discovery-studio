@@ -1074,6 +1074,9 @@ const defaultState = {
   handoffQuestions: [],
   handoffPatterns: [],
   handoffOverrides: {},
+  // PR 30 Slice 2: per-session asked-question memory. Entries are deduped on
+  // intent (target cell keys), never exact text. See recordAskedQuestion().
+  questionHistory: [],
   questionFocus: "auto",
   currentQuestionOverride: "",
   currentQuestionSource: "Intake guide",
@@ -4207,6 +4210,100 @@ function workflowGapFields(steps) {
   );
 }
 
+// --- Question memory (PR 30, Slice 2) ----------------------------------------
+// state.questionHistory remembers what has been asked, keyed by INTENT (the
+// target cell keys), never exact text — so a reworded question is still the
+// same question. Retirement is driven from patchField (the single capture
+// point): user-stated/user-edited retire immediately; doc-extracted retires
+// above confidence 0.70; ai-inferred only deprioritizes — never fully retires,
+// so the field can resurface as a low-priority "confirm" question.
+
+function questionIntentId(intentKeys) {
+  const keys = (Array.isArray(intentKeys) ? intentKeys : [intentKeys])
+    .map((key) => String(key || "").trim())
+    .filter(Boolean)
+    .sort();
+  return keys.join("+");
+}
+
+// Record that a question with this intent was asked. Dedupe: an existing entry
+// is updated in place (askCount, latest wording); a retired intent is never
+// reopened. Returns the entry, or null for an empty intent.
+function recordAskedQuestion(intentKeys, text) {
+  const intent = questionIntentId(intentKeys);
+  if (!intent) return null;
+  state.questionHistory = Array.isArray(state.questionHistory) ? state.questionHistory : [];
+  const now = new Date().toISOString();
+  const existing = state.questionHistory.find((entry) => entry.intent === intent);
+  if (existing) {
+    if (existing.status !== "retired") {
+      existing.askCount = (existing.askCount || 1) + 1;
+      existing.text = String(text || existing.text || "");
+      existing.lastAskedAt = now;
+    }
+    return existing;
+  }
+  const entry = {
+    id: `q-${intent}`,
+    intent,
+    text: String(text || ""),
+    status: "open", // open | deprioritized | retired
+    askCount: 1,
+    askedAt: now,
+    lastAskedAt: now,
+    retiredBy: "",
+    retiredAt: ""
+  };
+  state.questionHistory.push(entry);
+  return entry;
+}
+
+function questionStatusForIntent(intentKeys) {
+  const intent = questionIntentId(intentKeys);
+  if (!intent) return "";
+  const entry = (state.questionHistory || []).find((item) => item.intent === intent);
+  return entry?.status || "";
+}
+
+// Retirement hook, called from patchField on every accepted value capture.
+// Multi-key intents retire when ANY of their keys is captured (today's wired
+// consumers are all single-key; documented simplification).
+function retireQuestionsForCell(cellKey, source, confidence) {
+  const history = Array.isArray(state.questionHistory) ? state.questionHistory : [];
+  const now = new Date().toISOString();
+  let changed = false;
+  history.forEach((entry) => {
+    if (!entry || entry.status === "retired") return;
+    if (!String(entry.intent || "").split("+").includes(cellKey)) return;
+    if (source === "user-stated" || source === "user-edited") {
+      entry.status = "retired";
+      entry.retiredBy = source;
+      entry.retiredAt = now;
+      changed = true;
+    } else if (source === "doc-extracted" && Number(confidence) > 0.7) {
+      entry.status = "retired";
+      entry.retiredBy = source;
+      entry.retiredAt = now;
+      changed = true;
+    } else if (source === "ai-inferred" && entry.status !== "deprioritized") {
+      entry.status = "deprioritized"; // never fully retired
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+// Key-question fields whose value exists but rests only on ai-inferred
+// provenance — the low-priority "confirm" lane (deprioritized, never retired).
+function aiInferredConfirmFields(steps) {
+  return KEY_QUESTION_FIELDS.filter((field) => {
+    if (questionStatusForIntent([field.key]) === "retired") return false;
+    const capturing = steps.filter((step) => isCapturedValue(gridCellValue(step, field.key)));
+    if (!capturing.length) return false;
+    return capturing.every((step) => getField(step, null, field.key)?.source === "ai-inferred");
+  });
+}
+
 // PR 29 fix: a tapped key question becomes the "Answering:" context above the
 // composer; the answer box itself stays empty + focused for the user's reply,
 // and the composer scrolls into view (the box is otherwise off-screen when many
@@ -4266,8 +4363,17 @@ function renderInlineKeyQuestions() {
   if (container.previousElementSibling !== anchor) anchor.insertAdjacentElement("afterend", container);
 
   const steps = Array.isArray(state.workflowGrid?.steps) ? state.workflowGrid.steps : [];
-  const top3 = steps.length ? workflowGapFields(steps).slice(0, 3) : [];
-  const sig = top3.map((field) => field.key).join(",");
+  // Slice 2: true gaps first (minus retired intents), then the deprioritized
+  // "confirm" lane — ai-inferred-only fields that were never retired.
+  const gaps = steps.length
+    ? workflowGapFields(steps).filter((field) => questionStatusForIntent([field.key]) !== "retired")
+    : [];
+  const confirms = steps.length ? aiInferredConfirmFields(steps) : [];
+  const top3 = [
+    ...gaps.map((field) => ({ ...field, confirm: false })),
+    ...confirms.map((field) => ({ ...field, confirm: true, q: `Confirm: ${field.q}` }))
+  ].slice(0, 3);
+  const sig = top3.map((field) => `${field.key}${field.confirm ? "*" : ""}`).join(",");
   if (container.dataset.sig === sig) return; // avoid rebuild/flicker when unchanged
   container.dataset.sig = sig;
 
@@ -4277,9 +4383,14 @@ function renderInlineKeyQuestions() {
   }
   container.innerHTML = `
     <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:#5b7186;text-transform:uppercase;margin-bottom:8px;">Key questions to fill gaps</div>
-    ${top3.map((field) => `<div data-gap-question="${escapeHtml(field.q)}" role="button" tabindex="0" style="background:#0d1b2a;border:1px solid #1e3350;border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;font-size:13px;color:#cfe0f0;line-height:1.4;transition:border-color 0.15s ease;">${escapeHtml(field.q)}</div>`).join("")}`;
+    ${top3.map((field) => `<div data-gap-question="${escapeHtml(field.q)}" data-gap-key="${escapeHtml(field.key)}" role="button" tabindex="0" style="background:#0d1b2a;border:1px solid #1e3350;border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;font-size:13px;color:${field.confirm ? "#8aa0b8" : "#cfe0f0"};line-height:1.4;transition:border-color 0.15s ease;">${escapeHtml(field.q)}</div>`).join("")}`;
   container.querySelectorAll("[data-gap-question]").forEach((el) => {
-    const choose = () => setActiveGapQuestion(el.dataset.gapQuestion);
+    const choose = () => {
+      // Asked-question memory: tapping IS asking. Dedupe lives on intent.
+      recordAskedQuestion([el.dataset.gapKey], el.dataset.gapQuestion);
+      persistState();
+      setActiveGapQuestion(el.dataset.gapQuestion);
+    };
     el.addEventListener("click", choose);
     el.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") { event.preventDefault(); choose(); }
@@ -28120,6 +28231,11 @@ function patchField(step, layer, cellKey, value, source, confidence, options = {
 
   const cellState = options.state || (incomingRank >= 3 ? "confirmed" : "inferred");
   target.cells[cellKey] = { value: clean, state: cellState, confidence: conf, source };
+  // Slice 2: every accepted capture is the one place questions retire. The
+  // typeof guard keeps extraction-test sandboxes (which evaluate patchField in
+  // isolation) working. "unknown" recordings deliberately do NOT retire — the
+  // question may legitimately be re-asked later.
+  if (typeof retireQuestionsForCell === "function") retireQuestionsForCell(cellKey, source, conf);
   return true;
 }
 
@@ -28275,6 +28391,9 @@ function normalizeLoadedState(parsed = {}) {
       ...(parsed.pilotFeedback || {})
     },
     pilotFeedbackLog: Array.isArray(parsed.pilotFeedbackLog) ? parsed.pilotFeedbackLog : [],
+    questionHistory: Array.isArray(parsed.questionHistory)
+      ? parsed.questionHistory.filter((entry) => entry && typeof entry === "object" && entry.intent)
+      : [],
     pilotGuide: {
       ...structuredClone(defaultState.pilotGuide),
       ...(parsed.pilotGuide || {}),
