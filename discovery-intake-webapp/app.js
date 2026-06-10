@@ -6544,7 +6544,105 @@ function showSensitivityConfirmModal(onConfirm, options = {}) {
   });
 }
 
-async function generateRecipePrompt(stepId) {
+// --- Confidence-gated recipe generation (PR 30b) -----------------------------
+// "Confirmed enough" uses provenance, not raw confidence alone: user-stated /
+// user-edited always count; doc-extracted counts at or above the threshold;
+// ai-inferred never auto-counts. The threshold deliberately matches the PR 30
+// question-retirement boundary (one mental model across the tool).
+const RECIPE_CONFIDENCE_THRESHOLD = 0.7;
+
+// The five recipe-critical fields, mapped to their grid cells (same layout as
+// the live extraction grid). A field passes when ANY of its cells is confirmed
+// enough. `q` mirrors KEY_QUESTION_FIELDS wording where a single-cell question
+// exists, so the asked-question intents line up across surfaces.
+const RECIPE_CRITICAL_FIELDS = [
+  { field: "systemsTools", label: "Systems & tools", cells: ["systemsTools"], q: "What systems or tools are used across these steps?" },
+  { field: "volume", label: "Volume", cells: ["frequencyVolume", "timeTaken"], q: "How often does this run, and roughly how long does each instance take?" },
+  { field: "dataFlow", label: "Data flow", cells: ["dataProcessing"], q: "What happens to the data as it moves through these steps?" },
+  { field: "sensitivity", label: "Sensitivity", cells: ["dataSensitivity", "regulatoryContext"], q: "What data sensitivity applies here — internal, client-confidential, regulated, or personal?" },
+  { field: "painAndRules", label: "Pain & rules", cells: ["painFriction", "rulesDecisionLogic", "exceptionBranching"], q: "What's the biggest pain or friction in this workflow today?" }
+];
+
+function cellConfirmedEnough(cell) {
+  if (!cell || !cell.value || cell.state === "empty" || cell.state === "unknown") return false;
+  const source = cell.source || deriveLegacyCellSource(cell.state);
+  if (source === "user-stated" || source === "user-edited") return true;
+  if (source === "doc-extracted") {
+    return typeof cell.confidence === "number" && cell.confidence >= RECIPE_CONFIDENCE_THRESHOLD;
+  }
+  return false; // ai-inferred (or unsourced) never auto-counts
+}
+
+// Pure gate check: which recipe-critical fields sit below the confidence bar
+// on this step, plus whether P9 (sensitivity) is unconfirmed. Reads cells via
+// getField only. There is deliberately NO "block" state — gaps only ever feed
+// a soft panel with "Generate anyway" always available.
+function recipeGateCheck(step) {
+  const gaps = [];
+  RECIPE_CRITICAL_FIELDS.forEach((entry) => {
+    const confirmed = entry.cells.some((key) => cellConfirmedEnough(getField(step, null, key)));
+    if (confirmed) return;
+    // Never resurface a retired intent: skip when the field intent or any of
+    // its member cells' single-key intents (the inline key questions) retired.
+    const retired = questionStatusForIntent(entry.cells) === "retired"
+      || entry.cells.some((key) => questionStatusForIntent([key]) === "retired");
+    gaps.push({ ...entry, retired });
+  });
+  const sensitivityGap = gaps.find((gap) => gap.field === "sensitivity");
+  return {
+    gaps,
+    askable: gaps.filter((gap) => !gap.retired).slice(0, 3),
+    p9Unconfirmed: Boolean(sensitivityGap)
+  };
+}
+
+// Inline gap panel rendered into the step's recipe-body slot INSTEAD of calling
+// the model. "Generate anyway" is always present and never disabled — the gate
+// is a soft detour, not governance (that happens outside the tool).
+function renderRecipeGatePanel(stepId, gate) {
+  const body = document.querySelector(`[data-recipe-body="${stepId}"]`);
+  if (!body) return;
+  const questions = gate.askable.map((gap) => `
+    <div data-gate-question="${escapeHtml(gap.q)}" data-gate-cells="${escapeHtml(gap.cells.join("+"))}" role="button" tabindex="0" style="background:#0d1b2a;border:1px solid #1e3350;border-radius:8px;padding:9px 12px;margin-bottom:6px;cursor:pointer;font-size:12px;color:#cfe0f0;line-height:1.4;">
+      <span style="color:#f59e0b;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-right:8px;">${escapeHtml(gap.label)}</span>${escapeHtml(gap.q)}
+    </div>`).join("");
+  body.innerHTML = `
+    <div style="background:#1a1500;border:1px solid #f59e0b55;border-radius:8px;padding:12px 14px;">
+      <div style="font-size:12px;color:#f5c451;line-height:1.5;margin-bottom:10px;">${gate.gaps.length} recipe-critical field${gate.gaps.length === 1 ? " is" : "s are"} unconfirmed — answering these makes a sharper prompt:</div>
+      ${questions || `<div style="font-size:12px;color:#8aa0b8;margin-bottom:6px;">The open questions for these fields were already asked and answered — regenerate after the grid updates, or generate now.</div>`}
+      <div style="display:flex;align-items:center;gap:10px;margin-top:10px;">
+        <button type="button" data-gate-generate-anyway style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Generate anyway</button>
+        <span data-gate-dismiss role="button" tabindex="0" style="color:#8aa0b8;font-size:12px;cursor:pointer;">Keep gaps for now</span>
+      </div>
+    </div>`;
+  body.querySelectorAll("[data-gate-question]").forEach((el) => {
+    el.addEventListener("click", () => {
+      // Same intent machinery as the inline key questions: tapping IS asking.
+      recordAskedQuestion(el.dataset.gateCells.split("+"), el.dataset.gateQuestion);
+      persistState();
+      setAppMode("interview"); // full render; composer is in the Discovery view
+      setActiveGapQuestion(el.dataset.gateQuestion);
+      toast("Answer in the composer, then regenerate the recipe.");
+    });
+  });
+  body.querySelector("[data-gate-generate-anyway]")?.addEventListener("click", () => {
+    generateRecipePrompt(stepId, { force: true });
+  });
+  body.querySelector("[data-gate-dismiss]")?.addEventListener("click", () => renderAnalysisTabRecipe());
+}
+
+async function generateRecipePrompt(stepId, options = {}) {
+  // PR 30b: the gate intercepts the generate action itself — with unconfirmed
+  // recipe-critical fields the panel shows and the model is NOT called until
+  // "Generate anyway" (options.force) is explicitly tapped.
+  if (!options.force) {
+    const step = analysisGridSteps().find((s) => s.id === stepId);
+    const gate = step ? recipeGateCheck(step) : { gaps: [] };
+    if (gate.gaps.length) {
+      renderRecipeGatePanel(stepId, gate);
+      return;
+    }
+  }
   // Phase 10a: confirm before sending a High-sensitivity workflow to OpenAI.
   if (isSensitiveSession()) {
     showSensitivityConfirmModal(() => runRecipeGeneration(stepId));
@@ -6589,7 +6687,9 @@ async function runRecipeGeneration(stepId) {
     body.innerHTML = `<div style="color:#ef9a9a;font-size:13px;display:flex;align-items:center;gap:10px;">Failed to generate — <button class="primary-button compact" type="button" data-recipe-retry style="position:static;">retry</button></div>`;
     body.querySelector("[data-recipe-retry]")?.addEventListener("click", (event) => {
       event.stopPropagation();
-      generateRecipePrompt(stepId);
+      // Retry preserves the explicit generate choice — never bounce a failed
+      // attempt back to the gate panel.
+      generateRecipePrompt(stepId, { force: true });
     });
   }
 }
