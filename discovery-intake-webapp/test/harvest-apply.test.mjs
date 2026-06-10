@@ -20,19 +20,24 @@ function harvestSandbox() {
     error: (...args) => logs.push(args.map(String).join(" "))
   };
   const fns = buildSandbox(source, {
-    consts: ["GRID_CELL_KEYS", "EXTRACTION_CELL_KEY_MAP"],
+    // PR 30: harvest writes route through the accessor layer, so its functions
+    // and consts join the extraction closure.
+    consts: ["GRID_CELL_KEYS", "EXTRACTION_CELL_KEY_MAP", "GRID_SOURCE_RANK", "GRID_CELL_LAYER"],
     functions: [
       "applyHarvestUpdates",
       "findGridStepForUpdate",
       "applyFieldUpdatesToStep",
       "createGridStepFromHarvest",
       "normalizeGridFieldKey",
+      "patchField",
+      "getField",
+      "deriveLegacyCellSource",
       "newGridStep",
       "newGridCell",
       "newAiPatternEntry",
       "makeId"
     ],
-    globals: { state, console: recordingConsole }
+    globals: { state, console: recordingConsole, currentGridStep: () => null }
   });
   return { ...fns, state, logs };
 }

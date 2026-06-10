@@ -1074,6 +1074,9 @@ const defaultState = {
   handoffQuestions: [],
   handoffPatterns: [],
   handoffOverrides: {},
+  // PR 30 Slice 2: per-session asked-question memory. Entries are deduped on
+  // intent (target cell keys), never exact text. See recordAskedQuestion().
+  questionHistory: [],
   questionFocus: "auto",
   currentQuestionOverride: "",
   currentQuestionSource: "Intake guide",
@@ -3581,16 +3584,13 @@ function buildWorkflowGridFromExtraction(extracted = {}) {
       if (!raw || typeof raw !== "object") return;
       // unknown = the document explicitly said this is unclear/TBD/unspecified.
       if (raw.state === "unknown") {
-        step.cells[targetKey] = { value: "", state: "unknown", confidence: 0 };
+        patchField(step, null, targetKey, "", "doc-extracted", 0, { state: "unknown" });
         return;
       }
       const value = typeof raw.value === "string" ? raw.value.trim() : "";
-      const confidence = typeof raw.confidence === "number" ? raw.confidence : "";
-      step.cells[targetKey] = {
-        value,
-        state: value ? "inferred" : "empty",
-        confidence: value ? confidence : ""
-      };
+      if (!value) return; // fresh factory cell already represents "empty"
+      const confidence = typeof raw.confidence === "number" ? raw.confidence : 0;
+      patchField(step, null, targetKey, value, "doc-extracted", confidence);
     });
     return step;
   });
@@ -3931,27 +3931,19 @@ function applyFieldUpdatesToStep(step, fieldUpdates) {
     const key = normalizeGridFieldKey(rawKey);
     if (!key || key === "aiPattern") return; // aiPattern is never harvested
     if (!update || typeof update !== "object") return;
-    // unknown = asked but the interviewee genuinely could not answer. Record it
-    // only when the cell has no real answer yet — never overwrite captured data.
+    // Provenance derives from the HARVEST payload's own state for this field —
+    // confirmed = the interviewee stated it; anything else is model inference.
+    const source = update.state === "confirmed" ? "user-stated" : "ai-inferred";
+    // unknown = asked but the interviewee genuinely could not answer.
     if (update.state === "unknown") {
-      const existing = step.cells[key];
-      if (!existing || existing.state === "empty") {
-        step.cells[key] = { value: "", state: "unknown", confidence: 0 };
-        changed = true;
-      }
+      if (patchField(step, null, key, "", "user-stated", 0, { state: "unknown" })) changed = true;
       return;
     }
     const value = typeof update.value === "string" ? update.value.trim() : "";
     if (!value) return;
     const confidence = typeof update.confidence === "number" ? update.confidence : 0;
     if (confidence < 0.5) return; // universal floor: below 0.5 = do not capture
-    const cell = step.cells[key] || newGridCell();
-    const existingConfidence = typeof cell.confidence === "number" ? cell.confidence : -1;
-    const isEmpty = cell.state === "empty";
-    if (!isEmpty && confidence <= existingConfidence) return; // only improve
-    const cellState = update.state === "confirmed" ? "confirmed" : "inferred";
-    step.cells[key] = { value, confidence, state: cellState };
-    changed = true;
+    if (patchField(step, null, key, value, source, confidence)) changed = true;
   });
   return changed;
 }
@@ -3962,8 +3954,7 @@ function createGridStepFromHarvest(raw = {}) {
   let touched = false;
   const name = raw.stepName || raw.name;
   if (typeof name === "string" && name.trim()) {
-    step.cells.name = { value: name.trim(), confidence: 0.7, state: "inferred" };
-    touched = true;
+    if (patchField(step, "layer1", "name", name.trim(), "ai-inferred", 0.7)) touched = true;
   }
   if (applyFieldUpdatesToStep(step, raw.fieldUpdates || raw.cells)) touched = true;
   return touched ? step : null;
@@ -4056,7 +4047,7 @@ function liveGridFieldValue(step, cellKeys) {
     const value = gridCellValue(step, key);
     if (value) {
       parts.push(value);
-      const raw = step.cells?.[key]?.confidence;
+      const raw = getField(step, null, key)?.confidence;
       const conf = (typeof raw === "number" && Number.isFinite(raw)) ? raw : liveGridStateConfidence(gridCellState(step, key));
       confidence = Math.max(confidence, conf);
     }
@@ -4219,6 +4210,100 @@ function workflowGapFields(steps) {
   );
 }
 
+// --- Question memory (PR 30, Slice 2) ----------------------------------------
+// state.questionHistory remembers what has been asked, keyed by INTENT (the
+// target cell keys), never exact text — so a reworded question is still the
+// same question. Retirement is driven from patchField (the single capture
+// point): user-stated/user-edited retire immediately; doc-extracted retires
+// above confidence 0.70; ai-inferred only deprioritizes — never fully retires,
+// so the field can resurface as a low-priority "confirm" question.
+
+function questionIntentId(intentKeys) {
+  const keys = (Array.isArray(intentKeys) ? intentKeys : [intentKeys])
+    .map((key) => String(key || "").trim())
+    .filter(Boolean)
+    .sort();
+  return keys.join("+");
+}
+
+// Record that a question with this intent was asked. Dedupe: an existing entry
+// is updated in place (askCount, latest wording); a retired intent is never
+// reopened. Returns the entry, or null for an empty intent.
+function recordAskedQuestion(intentKeys, text) {
+  const intent = questionIntentId(intentKeys);
+  if (!intent) return null;
+  state.questionHistory = Array.isArray(state.questionHistory) ? state.questionHistory : [];
+  const now = new Date().toISOString();
+  const existing = state.questionHistory.find((entry) => entry.intent === intent);
+  if (existing) {
+    if (existing.status !== "retired") {
+      existing.askCount = (existing.askCount || 1) + 1;
+      existing.text = String(text || existing.text || "");
+      existing.lastAskedAt = now;
+    }
+    return existing;
+  }
+  const entry = {
+    id: `q-${intent}`,
+    intent,
+    text: String(text || ""),
+    status: "open", // open | deprioritized | retired
+    askCount: 1,
+    askedAt: now,
+    lastAskedAt: now,
+    retiredBy: "",
+    retiredAt: ""
+  };
+  state.questionHistory.push(entry);
+  return entry;
+}
+
+function questionStatusForIntent(intentKeys) {
+  const intent = questionIntentId(intentKeys);
+  if (!intent) return "";
+  const entry = (state.questionHistory || []).find((item) => item.intent === intent);
+  return entry?.status || "";
+}
+
+// Retirement hook, called from patchField on every accepted value capture.
+// Multi-key intents retire when ANY of their keys is captured (today's wired
+// consumers are all single-key; documented simplification).
+function retireQuestionsForCell(cellKey, source, confidence) {
+  const history = Array.isArray(state.questionHistory) ? state.questionHistory : [];
+  const now = new Date().toISOString();
+  let changed = false;
+  history.forEach((entry) => {
+    if (!entry || entry.status === "retired") return;
+    if (!String(entry.intent || "").split("+").includes(cellKey)) return;
+    if (source === "user-stated" || source === "user-edited") {
+      entry.status = "retired";
+      entry.retiredBy = source;
+      entry.retiredAt = now;
+      changed = true;
+    } else if (source === "doc-extracted" && Number(confidence) > 0.7) {
+      entry.status = "retired";
+      entry.retiredBy = source;
+      entry.retiredAt = now;
+      changed = true;
+    } else if (source === "ai-inferred" && entry.status !== "deprioritized") {
+      entry.status = "deprioritized"; // never fully retired
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+// Key-question fields whose value exists but rests only on ai-inferred
+// provenance — the low-priority "confirm" lane (deprioritized, never retired).
+function aiInferredConfirmFields(steps) {
+  return KEY_QUESTION_FIELDS.filter((field) => {
+    if (questionStatusForIntent([field.key]) === "retired") return false;
+    const capturing = steps.filter((step) => isCapturedValue(gridCellValue(step, field.key)));
+    if (!capturing.length) return false;
+    return capturing.every((step) => getField(step, null, field.key)?.source === "ai-inferred");
+  });
+}
+
 // PR 29 fix: a tapped key question becomes the "Answering:" context above the
 // composer; the answer box itself stays empty + focused for the user's reply,
 // and the composer scrolls into view (the box is otherwise off-screen when many
@@ -4278,8 +4363,17 @@ function renderInlineKeyQuestions() {
   if (container.previousElementSibling !== anchor) anchor.insertAdjacentElement("afterend", container);
 
   const steps = Array.isArray(state.workflowGrid?.steps) ? state.workflowGrid.steps : [];
-  const top3 = steps.length ? workflowGapFields(steps).slice(0, 3) : [];
-  const sig = top3.map((field) => field.key).join(",");
+  // Slice 2: true gaps first (minus retired intents), then the deprioritized
+  // "confirm" lane — ai-inferred-only fields that were never retired.
+  const gaps = steps.length
+    ? workflowGapFields(steps).filter((field) => questionStatusForIntent([field.key]) !== "retired")
+    : [];
+  const confirms = steps.length ? aiInferredConfirmFields(steps) : [];
+  const top3 = [
+    ...gaps.map((field) => ({ ...field, confirm: false })),
+    ...confirms.map((field) => ({ ...field, confirm: true, q: `Confirm: ${field.q}` }))
+  ].slice(0, 3);
+  const sig = top3.map((field) => `${field.key}${field.confirm ? "*" : ""}`).join(",");
   if (container.dataset.sig === sig) return; // avoid rebuild/flicker when unchanged
   container.dataset.sig = sig;
 
@@ -4289,9 +4383,14 @@ function renderInlineKeyQuestions() {
   }
   container.innerHTML = `
     <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:#5b7186;text-transform:uppercase;margin-bottom:8px;">Key questions to fill gaps</div>
-    ${top3.map((field) => `<div data-gap-question="${escapeHtml(field.q)}" role="button" tabindex="0" style="background:#0d1b2a;border:1px solid #1e3350;border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;font-size:13px;color:#cfe0f0;line-height:1.4;transition:border-color 0.15s ease;">${escapeHtml(field.q)}</div>`).join("")}`;
+    ${top3.map((field) => `<div data-gap-question="${escapeHtml(field.q)}" data-gap-key="${escapeHtml(field.key)}" role="button" tabindex="0" style="background:#0d1b2a;border:1px solid #1e3350;border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;font-size:13px;color:${field.confirm ? "#8aa0b8" : "#cfe0f0"};line-height:1.4;transition:border-color 0.15s ease;">${escapeHtml(field.q)}</div>`).join("")}`;
   container.querySelectorAll("[data-gap-question]").forEach((el) => {
-    const choose = () => setActiveGapQuestion(el.dataset.gapQuestion);
+    const choose = () => {
+      // Asked-question memory: tapping IS asking. Dedupe lives on intent.
+      recordAskedQuestion([el.dataset.gapKey], el.dataset.gapQuestion);
+      persistState();
+      setActiveGapQuestion(el.dataset.gapQuestion);
+    };
     el.addEventListener("click", choose);
     el.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") { event.preventDefault(); choose(); }
@@ -4563,15 +4662,17 @@ function analysisWorkflowName() {
   return (state.workflowGrid?.workflowName || state.fields?.workflowName || "").trim();
 }
 
+// PR 30: reads route through the accessor layer (getField), so every existing
+// call site transitively honors the one read/write chokepoint.
 function gridCellValue(step, key) {
-  const cell = step?.cells?.[key];
+  const cell = getField(step, null, key);
   if (!cell) return "";
   if (key === "aiPattern") return stepPatternList(step).join(", ");
   return typeof cell.value === "string" ? cell.value.trim() : "";
 }
 
 function gridCellState(step, key) {
-  return step?.cells?.[key]?.state || "empty";
+  return getField(step, null, key)?.state || "empty";
 }
 
 // All non-empty pattern names from the aiPattern cell's value array.
@@ -5119,10 +5220,48 @@ function getStepOpportunityMeta(step) {
     "repetitiveness", "ruleDensity", "dataStructure", "volumeFrequency", "timeCostPerInstance",
     "errorRateAndConsequence", "humanJudgmentRequired", "integrationComplexity", "dataSensitivity", "outputClarity"
   ];
+
+  // PR 30 Slice 4: per-principle evidence — which grid cells fed the score,
+  // with excerpt + provenance. Mirrors each principle's text(...) inputs above.
+  // offset is a scaffold: transcript/doc offsets land once the harvest returns
+  // them (deliberate deviation, noted in the PR); excerpts are stored alongside
+  // the field reference, never as the only record.
+  const EVIDENCE_KEYS = {
+    repetitiveness: ["frequencyVolume", "trigger", "output", "handoff"],
+    ruleDensity: ["painFriction", "rulesDecisionLogic", "exceptionBranching"],
+    dataStructure: ["dataProcessing", "systemsTools"],
+    volumeFrequency: ["frequencyVolume"],
+    timeCostPerInstance: ["timeTaken", "frequencyVolume"],
+    errorRateAndConsequence: ["painFriction", "rulesDecisionLogic", "exceptionBranching"],
+    humanJudgmentRequired: ["painFriction", "rulesDecisionLogic", "exceptionBranching", "personaActors"],
+    integrationComplexity: ["systemsTools"],
+    dataSensitivity: ["regulatoryContext", "dataSensitivity", "dataProcessing"],
+    outputClarity: ["output", "trigger", "handoff", "description"]
+  };
+  const evidenceFor = (keys) => keys
+    .map((key) => {
+      const cell = cells[key];
+      const raw = cell?.value;
+      const value = Array.isArray(raw)
+        ? raw.map((entry) => entry?.pattern || "").filter(Boolean).join(", ")
+        : (typeof raw === "string" ? raw.trim() : "");
+      if (!value) return null;
+      const source = cell.source
+        || (cell.state === "confirmed" ? "user-stated" : cell.state === "inferred" ? "ai-inferred" : "");
+      return {
+        field: key,
+        excerpt: value.length > 140 ? `${value.slice(0, 140)}…` : value,
+        source,
+        confidence: typeof cell.confidence === "number" ? cell.confidence : null,
+        offset: null
+      };
+    })
+    .filter(Boolean);
+
   const principleScores = {};
   let total = 0;
   for (const name of order) {
-    principleScores[name] = P[name];
+    principleScores[name] = { ...P[name], evidence: evidenceFor(EVIDENCE_KEYS[name]) };
     total += P[name].score;
   }
 
@@ -5670,6 +5809,87 @@ function scoringTierBadge(tier) {
   return { cls: "ds-badge-purple", label: "Strategic" };
 }
 
+// --- Low-data warning (PR 30, Slice 3) ---------------------------------------
+// Threshold sensitivity FIRST: find the single principle whose ±1 correction
+// would flip the tier, and surface it as a specific prompt. A candidate counts
+// when (a) the flip is numeric — the total sits exactly on a tier boundary —
+// regardless of how certain the principle is, or (b) the flip comes from the
+// P7/P9 override rules AND that principle is still uncertain (insufficient
+// data) — a P7/P9 scored 2 from real evidence is an assessment, not a knife
+// edge, and would otherwise warn constantly. Fallback when nothing flips:
+// more than 4 principles neutral, with P7 and P9 each counting double.
+// Returns { kind: "flip"|"low-data", message, ... } or null.
+function tierSensitivity(meta) {
+  const ps = meta?.principleScores || {};
+  const scores = {};
+  SCORING_PRINCIPLES.forEach((p) => { scores[p.key] = Number(ps[p.key]?.score) || 2; });
+  const { tier } = scoringTierFromScores(scores);
+  const tierLabel = (t) =>
+    t === "quick-win" ? "Quick Win"
+      : t === "compliance" ? "Compliance review"
+        : t === "speculative" ? "Speculative" : "Strategic";
+  const uncertain = (key) => /insufficient data/i.test(ps[key]?.reason || "");
+
+  const flips = [];
+  SCORING_PRINCIPLES.forEach((p) => {
+    [-1, 1].forEach((delta) => {
+      const v = scores[p.key] + delta;
+      if (v < 1 || v > 3) return;
+      const flipped = scoringTierFromScores({ ...scores, [p.key]: v });
+      if (flipped.tier === tier) return;
+      // Override-driven flips (P7 cap / P9 compliance at score 1) only count
+      // while that principle is uncertain.
+      const overrideFlip = v === 1 && (p.key === "dataSensitivity" || p.key === "humanJudgmentRequired");
+      if (overrideFlip && !uncertain(p.key)) return;
+      flips.push({ principle: p, delta, to: flipped.tier, uncertain: uncertain(p.key) });
+    });
+  });
+
+  if (flips.length) {
+    // Most actionable first: uncertain principles, then the P9/P7 risk
+    // specials, then lowest principle number.
+    flips.sort((a, b) =>
+      (Number(b.uncertain) - Number(a.uncertain))
+      || (Number(b.principle.n === 9 || b.principle.n === 7) - Number(a.principle.n === 9 || a.principle.n === 7))
+      || (a.principle.n - b.principle.n));
+    const top = flips[0];
+    const direction = top.delta < 0 ? "lower" : "higher";
+    return {
+      kind: "flip",
+      principle: top.principle.key,
+      n: top.principle.n,
+      to: top.to,
+      message: `${tierLabel(tier)}, but confirm P${top.principle.n} (${top.principle.name}) — if it scores ${direction} this becomes ${tierLabel(top.to)}.`
+    };
+  }
+
+  let neutralWeight = 0;
+  SCORING_PRINCIPLES.forEach((p) => {
+    if (scores[p.key] === 2) neutralWeight += (p.n === 7 || p.n === 9) ? 2 : 1;
+  });
+  if (neutralWeight > 4) {
+    return {
+      kind: "low-data",
+      neutralWeight,
+      message: `${tierLabel(tier)} is provisional — too many principles are still neutral (weight ${neutralWeight}; human judgment and data sensitivity count double). Confirm those before trusting the tier.`
+    };
+  }
+  return null;
+}
+
+// Provenance badge (PR 30 Slice 4): the badge is the primary visual; the
+// confidence number appears only in the hover tooltip. Inline hex per source.
+function provenanceBadgeHtml(source, confidence) {
+  const meta = {
+    "user-stated": { label: "User", color: "#00d4b4" },
+    "user-edited": { label: "Edited", color: "#06b6d4" },
+    "doc-extracted": { label: "Doc", color: "#f59e0b" },
+    "ai-inferred": { label: "AI", color: "#5b7186" }
+  }[source] || { label: "—", color: "#3f5878" };
+  const tip = typeof confidence === "number" ? `confidence ${Math.round(confidence * 100)}%` : "no confidence recorded";
+  return `<span title="${escapeHtml(tip)}" style="flex-shrink:0;display:inline-block;background:${meta.color}22;color:${meta.color};border:1px solid ${meta.color}55;border-radius:99px;padding:1px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;cursor:default;">${meta.label}</span>`;
+}
+
 function scoringTransparencyBlockHtml(step) {
   const meta = getStepOpportunityMeta(step);
   const ps = meta.principleScores || {};
@@ -5682,22 +5902,47 @@ function scoringTransparencyBlockHtml(step) {
     const buttons = [1, 2, 3].map((v) =>
       `<button type="button" data-sc-btn="${p.key}" data-sc-val="${v}" style="width:26px;height:26px;border-radius:6px;border:1px solid #1e3350;background:#0d1b2e;color:#8899aa;font-size:12px;font-weight:700;cursor:pointer;">${v}</button>`
     ).join("");
+    // Slice 4: per-principle evidence — provenance badge is the primary visual;
+    // the confidence number lives in the badge tooltip only (hover).
+    const evidence = Array.isArray(ps[p.key]?.evidence) ? ps[p.key].evidence : [];
+    const evidenceHtml = evidence.length
+      ? `<div style="display:flex;flex-direction:column;gap:4px;margin-top:6px;">
+          ${evidence.map((item) => `
+            <div style="display:flex;align-items:baseline;gap:8px;min-width:0;">
+              ${provenanceBadgeHtml(item.source, item.confidence)}
+              <span style="font-size:11px;color:#5b7186;flex-shrink:0;">${escapeHtml(CELL_PLAIN_NAMES[item.field] || item.field)}</span>
+              <span style="font-size:11px;color:#8aa0b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">“${escapeHtml(item.excerpt)}”</span>
+            </div>`).join("")}
+        </div>`
+      : "";
     return `
       <div data-sc-row="${p.key}" style="display:flex;align-items:flex-start;gap:12px;padding:8px 0;border-top:1px solid #1e3350;">
         <div style="flex:1;min-width:0;">
           <div style="font-size:13px;color:#e8f4ff;">P${p.n} ${escapeHtml(p.name)}</div>
           <div data-sc-reason title="Click to expand" style="font-size:12px;color:#8899aa;line-height:1.4;margin-top:2px;cursor:pointer;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;">${escapeHtml(reason)}</div>
+          ${evidenceHtml}
         </div>
         <div style="display:flex;gap:4px;flex-shrink:0;">${buttons}</div>
       </div>`;
   }).join("");
 
+  // Slice 3: low-data warning — computed from the AI scores (the live what-if
+  // repaint deliberately does not recompute it; it reflects the AI baseline).
+  const sensitivity = tierSensitivity(meta);
+  const sensitivityHtml = sensitivity
+    ? `<div style="display:flex;gap:8px;align-items:flex-start;background:#1a1500;border:1px solid #f59e0b55;border-radius:8px;padding:9px 12px;margin-top:10px;">
+        <span style="color:#f59e0b;font-size:13px;line-height:1;flex-shrink:0;margin-top:1px;">⚠</span>
+        <span style="font-size:12px;color:#f5c451;line-height:1.45;">${escapeHtml(sensitivity.message)}</span>
+      </div>`
+    : "";
+
   return `
     <div class="ds-card" data-scoring-card data-step-id="${escapeHtml(String(stepId))}" data-originals='${escapeHtml(JSON.stringify(originals))}' style="padding:14px 16px;margin-top:16px;">
-      <div data-sc-toggle role="button" tabindex="0" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+      <div data-sc-toggle role="button" tabindex="0" title="Click to expand or collapse the scoring breakdown" style="display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;">
         <strong style="font-size:13px;color:#e8f4ff;">Scoring breakdown (10 principles)</strong>
-        <span data-sc-chevron style="color:#5b7186;font-size:12px;transition:transform 200ms ease;transform:rotate(-90deg);">▾</span>
+        <span data-sc-chevron style="flex-shrink:0;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;color:#00d4b4;font-size:15px;line-height:1;border:1px solid #1e4a44;border-radius:6px;background:#0c2a26;transition:transform 200ms ease;transform:rotate(-90deg);">▾</span>
       </div>
+      ${sensitivityHtml}
       <div data-sc-body style="display:none;margin-top:12px;">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
           <span><span class="ds-num-teal" data-sc-total style="font-size:1.6rem;font-weight:800;">0</span><span style="color:#5b7186;font-size:1rem;font-weight:700;"> / 30</span></span>
@@ -7157,17 +7402,16 @@ function handleDumpApply() {
     let step = grid.steps.find((item) => norm(item?.cells?.name?.value) === norm(exName));
     if (!step) {
       step = newGridStep();
-      step.cells.name.value = exName;
-      step.cells.name.state = "inferred";
+      patchField(step, "layer1", "name", exName, "doc-extracted", 0.6);
       grid.steps.push(step);
     }
     fields.forEach((key) => {
       const value = String(extracted[key] || "").trim();
       if (!value) return;
-      const cell = step.cells[key];
-      if (!cell || cell.state === "confirmed") return; // never overwrite confirmed cells
-      cell.value = value;
-      cell.state = "inferred";
+      // doc-extracted + refresh: a re-paste replaces earlier same/lower
+      // provenance values, but patchField still refuses to overwrite anything
+      // the user stated (rank precedence — the old "never overwrite confirmed").
+      patchField(step, null, key, value, "doc-extracted", 0.6, { refresh: true });
     });
   });
 
@@ -7422,9 +7666,8 @@ function handleHandoffConfirm() {
     const override = (state.handoffOverrides[stepId] || "").trim();
     const patternValue = override || (entry.pattern || "").trim();
     if (!patternValue) return;
-    step.cells.aiPattern.value = [{ pattern: patternValue, confidence: 1 }];
-    step.cells.aiPattern.state = "confirmed";
-    step.cells.aiPattern.confidence = 1;
+    // User confirmed (or overrode) the pattern — user-stated provenance.
+    patchField(step, "meta", "aiPattern", [{ pattern: patternValue, confidence: 1 }], "user-stated", 1);
   });
   persistState();
   // Re-render the blocks so Block 1's confidence dots flip to teal immediately.
@@ -27983,7 +28226,9 @@ const GRID_CELL_KEYS = [
 // unknown = raised in interview; interviewee could not provide a specific answer
 // confidence: "" | number (0-1, universal confidence framework)
 function newGridCell() {
-  return { value: "", state: "empty", confidence: "" };
+  // source = provenance of the captured value (PR 30): one of
+  // user-stated | user-edited | doc-extracted | ai-inferred, or "" while empty.
+  return { value: "", state: "empty", confidence: "", source: "" };
 }
 
 // One entry inside an aiPattern cell's value array (multiple patterns, each
@@ -28020,10 +28265,132 @@ function newWorkflowGrid() {
   };
 }
 
+// --- Grid cell accessor layer (PR 30, Slice 1) -------------------------------
+// ALL workflowGrid step-cell reads/writes go through getField()/patchField();
+// no direct cell mutation anywhere else (test/accessor.test.mjs guards this).
+// Provenance (cell.source) derives only from the write path that captured the
+// value — the harvest payload, a document extraction, or a user edit — never
+// from the AI reply's narration of what it "captured".
+// (dataSensitivityBaseline is a workflow-level cell outside this per-step API.)
+
+const GRID_SOURCE_RANK = { "user-edited": 3, "user-stated": 3, "doc-extracted": 2, "ai-inferred": 1 };
+
+const GRID_CELL_LAYER = {
+  name: "layer1", description: "layer1", trigger: "layer1", output: "layer1",
+  handoff: "layer1", frequencyVolume: "layer1", timeTaken: "layer1", systemsTools: "layer1",
+  personaActors: "layer2", painFriction: "layer2", rulesDecisionLogic: "layer2",
+  exceptionBranching: "layer2", humanCheckpoint: "layer2",
+  dataProcessing: "layer3", dataSensitivity: "layer3", regulatoryContext: "layer3",
+  aiPattern: "meta" // generated, never harvested; carries an array value
+};
+
+// True when every one of the 9 live-grid fields is captured somewhere in the
+// grid (any step, state confirmed/inferred). Used on session load: a complete
+// grid means a persisted currentQuestionOverride is stale and must not resurface
+// as the intro question next to an "all key areas covered" suggestion.
+function gridCoverageComplete(grid) {
+  const steps = Array.isArray(grid?.steps) ? grid.steps : [];
+  if (!steps.length) return false;
+  return LIVE_GRID_LAYERS.every((layer) => layer.fields.every((field) =>
+    steps.some((step) => field.cells.some((key) => {
+      const cell = step?.cells?.[key];
+      return cell && cell.value && (cell.state === "confirmed" || cell.state === "inferred");
+    }))
+  ));
+}
+
+// Cells saved before provenance existed derive source from their state.
+function deriveLegacyCellSource(state) {
+  if (state === "confirmed") return "user-stated";
+  if (state === "inferred") return "ai-inferred";
+  return "";
+}
+
+// Read accessor. step defaults to the current interview step; layer (when
+// given) is validated against the cell's canonical layer — a mismatch warns
+// but never blocks the read.
+function getField(step, layer, cellKey) {
+  if (!GRID_CELL_KEYS.includes(cellKey)) return null;
+  if (layer && GRID_CELL_LAYER[cellKey] !== layer) {
+    console.warn(`[grid] getField layer mismatch: ${cellKey} is ${GRID_CELL_LAYER[cellKey]}, not ${layer}`);
+  }
+  const target = step || currentGridStep();
+  return target?.cells?.[cellKey] || null;
+}
+
+// Write accessor — the ONLY place a step cell is mutated. Returns true when
+// the cell changed. Rules:
+//   - source must be one of GRID_SOURCE_RANK's keys;
+//   - provenance precedence: user-edited/user-stated > doc-extracted >
+//     ai-inferred. Upgrades apply; a lower-provenance write over a captured
+//     higher-provenance value is refused AND logged — never a silent downgrade;
+//   - equal provenance: only a higher confidence improves the cell, unless
+//     options.refresh (re-extraction replaces same-provenance values);
+//   - options.state === "unknown" records "asked but couldn't answer", only
+//     while the cell holds no real answer;
+//   - aiPattern accepts an array value (pattern entries); all other cells are
+//     trimmed strings.
+// Slice 2 wires question retirement here: every accepted patch is the single
+// point where a captured field can retire its open questions.
+function patchField(step, layer, cellKey, value, source, confidence, options = {}) {
+  if (!GRID_CELL_KEYS.includes(cellKey)) return false;
+  if (!GRID_SOURCE_RANK[source]) {
+    console.warn(`[grid] patchField rejected unknown source "${source}" for ${cellKey}`);
+    return false;
+  }
+  if (layer && GRID_CELL_LAYER[cellKey] !== layer) {
+    console.warn(`[grid] patchField layer mismatch: ${cellKey} is ${GRID_CELL_LAYER[cellKey]}, not ${layer}`);
+  }
+  const target = step || currentGridStep();
+  if (!target?.cells) return false;
+  const existing = target.cells[cellKey];
+
+  if (options.state === "unknown") {
+    if (!existing || existing.state === "empty") {
+      target.cells[cellKey] = { value: "", state: "unknown", confidence: 0, source };
+      return true;
+    }
+    return false;
+  }
+
+  const isArrayValue = Array.isArray(value);
+  const clean = isArrayValue ? value : (typeof value === "string" ? value.trim() : "");
+  if (!clean || (isArrayValue && !clean.length)) return false;
+  const conf = typeof confidence === "number" ? confidence : 0;
+
+  const hasCaptured = existing && existing.value && existing.state !== "empty" && existing.state !== "unknown";
+  const existingRank = hasCaptured
+    ? (GRID_SOURCE_RANK[existing.source] || GRID_SOURCE_RANK[deriveLegacyCellSource(existing.state)] || 0)
+    : 0;
+  const incomingRank = GRID_SOURCE_RANK[source];
+
+  if (incomingRank < existingRank) {
+    console.info(`[grid] kept ${existing.source || existing.state} ${cellKey} over lower-provenance ${source} write`);
+    return false;
+  }
+  if (incomingRank === existingRank && existingRank > 0 && !options.refresh) {
+    const existingConfidence = typeof existing.confidence === "number" ? existing.confidence : -1;
+    if (conf <= existingConfidence) return false; // same provenance: only improve
+  }
+
+  const cellState = options.state || (incomingRank >= 3 ? "confirmed" : "inferred");
+  target.cells[cellKey] = { value: clean, state: cellState, confidence: conf, source };
+  // Slice 2: every accepted capture is the one place questions retire. The
+  // typeof guard keeps extraction-test sandboxes (which evaluate patchField in
+  // isolation) working. "unknown" recordings deliberately do NOT retire — the
+  // question may legitimately be re-asked later.
+  if (typeof retireQuestionsForCell === "function") retireQuestionsForCell(cellKey, source, conf);
+  return true;
+}
+
 function normalizeGridCell(cell) {
   const base = newGridCell();
   if (!cell || typeof cell !== "object") return base;
-  return { ...base, ...cell };
+  const merged = { ...base, ...cell };
+  // Back-compat (PR 30): cells saved before provenance existed derive source
+  // from their state — confirmed → user-stated, inferred → ai-inferred.
+  if (!merged.source) merged.source = deriveLegacyCellSource(merged.state);
+  return merged;
 }
 
 function normalizeGridStep(step) {
@@ -28168,6 +28535,9 @@ function normalizeLoadedState(parsed = {}) {
       ...(parsed.pilotFeedback || {})
     },
     pilotFeedbackLog: Array.isArray(parsed.pilotFeedbackLog) ? parsed.pilotFeedbackLog : [],
+    questionHistory: Array.isArray(parsed.questionHistory)
+      ? parsed.questionHistory.filter((entry) => entry && typeof entry === "object" && entry.intent)
+      : [],
     pilotGuide: {
       ...structuredClone(defaultState.pilotGuide),
       ...(parsed.pilotGuide || {}),
@@ -28258,6 +28628,14 @@ function normalizeLoadedState(parsed = {}) {
     merged.activeSection = "workflow";
     merged.currentQuestionOverride = "";
     merged.currentQuestionSource = "Step-by-step interview";
+  }
+  // PR 30 (carried from PR 29): when the loaded grid already covers all 9
+  // live-grid fields, a persisted question override is stale — clear it so
+  // currentQuestion derives from grid coverage, consistent with the
+  // "all key areas covered" suggestion state.
+  if (merged.currentQuestionOverride && gridCoverageComplete(merged.workflowGrid)) {
+    merged.currentQuestionOverride = "";
+    merged.currentQuestionSource = "Grid coverage";
   }
   // #2 (interim — revisit PR 30): when a loaded session carried its name only on
   // the grid, backfill it onto sessionMeta/fields so the metadata surfaces that
