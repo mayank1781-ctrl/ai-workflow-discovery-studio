@@ -1473,6 +1473,13 @@ function bindEvents() {
 }
 
 function handleChatInputKeydown(event) {
+  // PR 31 Slice 4 (carry-item 4): Esc clears the "Answering:" context — the
+  // keyboard twin of the banner's × (which now advertises it).
+  if (event.key === "Escape" && activeGapQuestion) {
+    event.preventDefault();
+    clearActiveGapQuestion();
+    return;
+  }
   if (event.key !== "Enter" || event.shiftKey) return;
   event.preventDefault();
   sendChatMessage();
@@ -4358,6 +4365,37 @@ function fieldEditNormalize(value) {
     .trim();
 }
 
+// --- PR 31 Slice 4 (carry-item 3): model questions join the intent machinery --
+// Doc-extraction followUpQuestions are MODEL-generated free text — to give them
+// the same memory as gap/gate questions they need an intent. The mapper is
+// deterministic keyword routing onto grid cells (same style as the scoring
+// engine's keyword rules; first match wins, ordered most-specific first). A
+// question that maps to no cell gets a stable text-derived intent ("model:…")
+// so DEDUPE still applies — but with no cell linkage it can never retire via
+// patchField, which is honest: nothing in the grid answers it.
+const MODEL_QUESTION_INTENT_RULES = [
+  { cells: ["dataSensitivity", "regulatoryContext"], rx: /sensitiv|\bpii\b|\bmnpi\b|\bphi\b|confidential|regulat|complian|gdpr|\bsox\b|restricted|personal data/i },
+  { cells: ["timeTaken", "frequencyVolume"], rx: /how (long|often|much time)|minutes|hours per|volume|frequen|per (day|week|month)|how many (times|runs)/i },
+  { cells: ["exceptionBranching"], rx: /exception|edge case|error case|what happens (if|when)|goes wrong|fails?\b/i },
+  { cells: ["rulesDecisionLogic"], rx: /\brule|criteria|decision|logic|approv|threshold|escalat/i },
+  { cells: ["dataProcessing"], rx: /data (flow|process|transform|mov)|where does the data|happens to the data/i },
+  { cells: ["systemsTools"], rx: /system|tool|software|platform|application|spreadsheet|excel/i },
+  { cells: ["personaActors"], rx: /\bwho\b|which (role|team|person)|owner|responsib/i },
+  { cells: ["painFriction"], rx: /pain|friction|bottleneck|frustrat|manual effort|slow|tedious/i },
+  { cells: ["trigger"], rx: /trigger|kick.?off|initiat|what starts|when does .* (start|begin)/i },
+  { cells: ["handoff"], rx: /hand.?off|passes? to|downstream|next step after/i },
+  { cells: ["output"], rx: /output|deliverable|report|produce|end result/i }
+];
+
+function modelQuestionIntent(text) {
+  const t = String(text || "");
+  if (!t.trim()) return [];
+  for (const rule of MODEL_QUESTION_INTENT_RULES) {
+    if (rule.rx.test(t)) return rule.cells;
+  }
+  return [`model:${fieldEditNormalize(t).replace(/[^a-z0-9]+/g, "-").slice(0, 60)}`];
+}
+
 // Bounded Levenshtein distance: returns early with limit+1 once the distance
 // provably exceeds limit (we only ever care about small distances).
 function fieldEditDistance(a, b, limit) {
@@ -4440,7 +4478,7 @@ function renderActiveQuestionLabel() {
     label.style.cssText = "display:flex;align-items:flex-start;gap:8px;background:#0d1b2a;border:1px solid #1e3350;border-radius:6px;padding:6px 10px;margin-bottom:8px;";
     composer.insertBefore(label, input);
   }
-  label.innerHTML = `<span style="flex:1;min-width:0;font-size:12px;color:#8aa0b8;line-height:1.4;">Answering: <span style="color:#cfe0f0;">${escapeHtml(activeGapQuestion)}</span></span><span data-clear-question role="button" tabindex="0" title="Clear" style="color:#5b7186;font-size:16px;line-height:1;cursor:pointer;flex-shrink:0;">×</span>`;
+  label.innerHTML = `<span style="flex:1;min-width:0;font-size:12px;color:#8aa0b8;line-height:1.4;">Answering: <span style="color:#cfe0f0;">${escapeHtml(activeGapQuestion)}</span></span><kbd style="flex-shrink:0;font-size:10px;color:#5b7186;border:1px solid #1e3350;border-radius:4px;padding:1px 5px;line-height:1.3;font-family:inherit;" title="Press Esc to clear">Esc</kbd><span data-clear-question role="button" tabindex="0" title="Clear (Esc)" style="color:#5b7186;font-size:16px;line-height:1;cursor:pointer;flex-shrink:0;">×</span>`;
   label.querySelector("[data-clear-question]")?.addEventListener("click", clearActiveGapQuestion);
 }
 
@@ -27159,7 +27197,13 @@ function evidenceArtifactCard(artifact, mode = "compact") {
       ${links.length ? `<div class="evidence-link-list">${links.map((link) => `<span title="${escapeHtml(link.rationale || link.value || link.question || "")}">${escapeHtml(link.route)} · ${escapeHtml(link.targetType)} · ${escapeHtml(truncateUi(link.targetLabel, 42))}</span>`).join("")}</div>` : ""}
       ${full && artifact.textPreview ? `<div class="evidence-preview"><strong>Preview</strong><p>${escapeHtml(artifact.textPreview)}</p></div>` : ""}
       ${full ? evidenceRecordSummary(records) : ""}
-      ${full && questions.length ? `<div class="evidence-questions"><strong>Follow-up questions</strong><ol>${questions.map((question) => `<li>${escapeHtml(question)}</li>`).join("")}</ol></div>` : ""}
+      ${full && questions.length ? `<div class="evidence-questions"><strong>Follow-up questions</strong><ol>${questions.map((question) => {
+        // PR 31 Slice 4: model questions carry intent memory — tapping IS
+        // asking (same flow as gap/gate questions), and a question whose
+        // intent already retired shows as answered instead of nagging.
+        const retired = questionStatusForIntent(modelQuestionIntent(question)) === "retired";
+        return `<li data-model-question="${escapeHtml(question)}" role="button" tabindex="0" title="${retired ? "Already answered — captured in the grid" : "Click to ask in Discovery"}" style="cursor:pointer;${retired ? "color:#5b7186;" : ""}">${escapeHtml(question)}${retired ? ` <span style="color:#00d4b4;">✓ answered</span>` : ""}</li>`;
+      }).join("")}</ol></div>` : ""}
       ${artifact.warnings?.length ? `<div class="evidence-warning">${artifact.warnings.map((warning) => escapeHtml(warning)).join("<br />")}</div>` : ""}
       <div class="evidence-actions">
         <span>${count} suggestion${count === 1 ? "" : "s"}</span>
@@ -27204,6 +27248,28 @@ function bindEvidenceActions(root) {
       if (action === "apply") applyEvidenceArtifact(id);
       if (action === "dismiss") dismissEvidenceArtifact(id);
       if (action === "review") reviewEvidenceArtifact(id);
+    });
+  });
+  // PR 31 Slice 4 (carry-item 3): a tapped model question routes through the
+  // SAME intent machinery as gap/gate questions — recordAskedQuestion handles
+  // dedupe, retired stays quiet, and a re-ask-eligible intent reopens (the
+  // PR 31 retirement exception applies to model questions for free).
+  root.querySelectorAll("[data-model-question]").forEach((el) => {
+    const ask = () => {
+      const question = el.dataset.modelQuestion;
+      const entry = recordAskedQuestion(modelQuestionIntent(question), question);
+      if (entry?.status === "retired") {
+        toast("Already answered — the grid has this captured.");
+        return;
+      }
+      persistState();
+      setAppMode("interview"); // full render; the composer lives in Discovery
+      setActiveGapQuestion(question);
+      toast("Answer in the composer — the evidence question is active.");
+    };
+    el.addEventListener("click", ask);
+    el.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); ask(); }
     });
   });
 }
