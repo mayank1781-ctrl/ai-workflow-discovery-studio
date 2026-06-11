@@ -8,9 +8,14 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { readAppSource, buildSandbox, extractFunction } from "./helpers/extract.mjs";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const source = readAppSource();
+const indexHtml = readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
 
 function bulkSandbox() {
   const state = { questionHistory: [], workflowGrid: { workflowFamily: "", steps: [] } };
@@ -99,3 +104,35 @@ function applyPatternEditIsPatchField(source) {
   const fn = extractFunction(source, "applyPatternEdit");
   return fn.includes("patchField(") && fn.includes('"user-edited"');
 }
+
+// The re-land regression test: Slice 3 originally mounted the panel on
+// #sessionLibraryList — an id that exists NOWHERE in index.html, so
+// renderSessionLibrary bailed on its null-host guard and the panel rendered
+// nothing. This pins the mount to a host id that actually exists in the
+// shipped HTML, so a future re-mount onto a ghost host fails the suite.
+test("review panel mounts on a host that exists in index.html, above the summary strip, collapsed", () => {
+  const mountFn = extractFunction(source, "renderSavedSessionsPanel");
+
+  // The mount function's host id must be present in index.html.
+  const hostIds = [...mountFn.matchAll(/document\.getElementById\("([^"]+)"\)/g)].map((m) => m[1]);
+  assert.ok(hostIds.includes("savedSessionsPanel"), "panel mounts via #savedSessionsPanel");
+  for (const id of hostIds) {
+    assert.ok(indexHtml.includes(`id="${id}"`), `host #${id} must exist in index.html — a missing id makes the render a silent no-op`);
+  }
+
+  // The panel is built and wired by the SAME function that owns the live host,
+  // ordered above the summary strip.
+  assert.ok(mountFn.includes("head + bulkClassificationReviewHtml() + summaryStrip"),
+    "review panel renders between the header and the summary strip");
+  assert.ok(mountFn.includes("wireBulkClassificationReview("), "handlers wired where the panel mounts");
+
+  // Collapsed by default: the <details> ships without an open attribute (open
+  // state is only restored across rerenders, never the initial render).
+  const builder = extractFunction(source, "bulkClassificationReviewHtml");
+  assert.ok(builder.includes("<details data-bulk-review"), "panel details is tagged for open-state restore");
+  assert.ok(!/<details[^>]*\bopen\b/.test(builder), "panel is collapsed by default");
+
+  // And the dead legacy host stays unmounted (cleanup is a noted follow-up).
+  const deadFn = extractFunction(source, "renderSessionLibrary");
+  assert.ok(!deadFn.includes("bulkClassificationReviewHtml"), "no mount on the dead #sessionLibraryList path");
+});

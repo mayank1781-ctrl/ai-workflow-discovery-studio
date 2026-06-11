@@ -6736,7 +6736,7 @@ async function applyBulkPatternEdit(sessionId, stepId, pattern) {
   });
   if (changed) {
     toast(`Pattern set to ${pattern}.`);
-    renderSessionLibrary();
+    renderSavedSessionsPanel();
   }
 }
 
@@ -6750,7 +6750,7 @@ async function applyBulkFamilyEdit(sessionId, family) {
   });
   if (changed) {
     toast(`Family set to ${family}.`);
-    renderSessionLibrary();
+    renderSavedSessionsPanel();
   }
 }
 
@@ -6774,7 +6774,7 @@ async function confirmBulkSessionPatterns(sessionId) {
   });
   if (changed) {
     toast(`Confirmed ${confirmedCount} pattern${confirmedCount === 1 ? "" : "s"} as verified.`);
-    renderSessionLibrary();
+    renderSavedSessionsPanel();
   } else {
     toast("All patterns in this session are already verified.");
   }
@@ -6848,7 +6848,7 @@ function bulkClassificationReviewHtml() {
     ? `${verifiedTotal} of ${patternTotal} pattern${patternTotal === 1 ? "" : "s"} verified`
     : "No patterns captured yet";
   return `
-    <details style="margin-bottom:14px;background:#0f1f33;border:1px solid #1e3350;border-radius:10px;padding:0 12px;">
+    <details data-bulk-review style="margin-bottom:14px;background:#0f1f33;border:1px solid #1e3350;border-radius:10px;padding:0 12px;">
       <summary style="cursor:pointer;padding:12px 0;font-size:13px;font-weight:700;color:#dde8f5;list-style:none;display:flex;align-items:center;gap:8px;">
         <i data-lucide="check-check" style="width:15px;height:15px;color:#00d4b4;"></i>
         Classification review
@@ -6880,9 +6880,12 @@ function wireBulkClassificationReview(container) {
     button.addEventListener("click", () => confirmBulkSessionPatterns(button.dataset.bulkConfirm));
   });
   container.querySelectorAll("[data-bulk-load]").forEach((button) => {
-    button.addEventListener("click", async () => {
+    button.addEventListener("click", async (event) => {
+      // Inside the Open dropdown: don't let the click bubble into anything
+      // that would toggle the menu; rerender in place once the state arrives.
+      event.stopPropagation();
       await getSessionStateById(button.dataset.bulkLoad);
-      renderSessionLibrary();
+      renderSavedSessionsPanel();
     });
   });
 }
@@ -13579,6 +13582,10 @@ const SESSION_TIER_ORDER = { "quick-win": 0, strategic: 1, compliance: 2, specul
 function renderSavedSessionsPanel() {
   const container = document.getElementById("savedSessionsPanel");
   if (!container) return;
+  // PR 33: the bulk classification review re-renders this panel after every
+  // edit — remember whether its <details> was open so the rerender doesn't
+  // snap it shut mid-review (collapsed stays the default for fresh renders).
+  const reviewWasOpen = Boolean(container.querySelector("[data-bulk-review]")?.open);
   const sessions = getCombinedSessionLibrary().map((entry) => ({ entry, ...sessionCardMetrics(entry) }));
   const countBadge = document.getElementById("openSessionsCount");
   if (countBadge) {
@@ -13670,7 +13677,16 @@ function renderSavedSessionsPanel() {
       </button>`;
   }).join("");
 
-  container.innerHTML = head + summaryStrip + `<div style="display:flex;flex-direction:column;gap:6px;max-height:320px;overflow:auto;">${rows}</div>`;
+  // PR 33 Slice 3: the bulk classification review mounts HERE — above the
+  // summary strip, inside the Open popup. (#savedSessionsPanel is the live
+  // session-list host in index.html; #sessionLibraryList is a dead legacy id —
+  // test/bulk-classification.test.mjs pins this mount to a real host.)
+  container.innerHTML = head + bulkClassificationReviewHtml() + summaryStrip + `<div style="display:flex;flex-direction:column;gap:6px;max-height:320px;overflow:auto;">${rows}</div>`;
+  if (reviewWasOpen) {
+    const review = container.querySelector("[data-bulk-review]");
+    if (review) review.open = true;
+  }
+  wireBulkClassificationReview(container);
   container.querySelectorAll("[data-load-session]").forEach((button) => {
     button.addEventListener("click", () => {
       button.closest("details")?.removeAttribute("open");
@@ -13734,7 +13750,7 @@ function renderSessionLibrary() {
     refreshIcons();
     return;
   }
-  els.sessionLibraryList.innerHTML = bulkClassificationReviewHtml() + library.map(sessionLibraryCard).join("");
+  els.sessionLibraryList.innerHTML = library.map(sessionLibraryCard).join("");
   els.sessionLibraryList.querySelectorAll("[data-session-action]").forEach((button) => {
     button.addEventListener("click", () => {
       const id = button.dataset.sessionId;
@@ -13744,7 +13760,6 @@ function renderSessionLibrary() {
       if (action === "delete") deleteSessionFromLibrary(id);
     });
   });
-  wireBulkClassificationReview(els.sessionLibraryList);
   refreshIcons();
 }
 
