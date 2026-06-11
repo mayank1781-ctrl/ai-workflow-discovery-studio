@@ -1070,6 +1070,10 @@ const defaultState = {
   activeWorkbenchTab: "handoff",
   analysisActiveTab: "grid",
   recipeCache: {},
+  // PR 33: prior recipes preserved on regeneration (Invariant 2) + the labels
+  // each cached prompt was generated under (family/pattern/generatedAt).
+  recipeCachePrior: {},
+  recipeMeta: {},
   // PR 32: session schema version (distinct from workflowGrid.schemaVersion).
   // v2 = snapshot-only business case. Migration hook: migrateSessionState().
   schemaVersion: 2,
@@ -6019,11 +6023,23 @@ function recipeWorkflowHeaderHtml() {
   const engagement = (state.sessionMeta?.engagementContext || "").trim();
   const when = formatSavedSessionDate(state.sessionMeta?.updatedAt) || "";
   const label = name || when || "Untitled workflow";
+  // PR 33: editable workflow-family chip (workflow-level classification).
+  const family = String(state.workflowGrid?.workflowFamily || "").trim();
+  const familyColor = WORKFLOW_FAMILY_COLOR[family] || "#8899aa";
+  const familyOptions = Object.keys(WORKFLOW_FAMILY_COLOR).map((name) =>
+    `<div data-family-option="${escapeHtml(name)}" role="button" tabindex="0" style="padding:7px 12px;font-size:12px;color:${WORKFLOW_FAMILY_COLOR[name]};cursor:pointer;white-space:nowrap;">${escapeHtml(name)}</div>`
+  ).join("");
+  const familyChip = `
+    <div style="position:relative;display:inline-block;margin-top:6px;">
+      <button type="button" data-family-chip title="Click to change the workflow family" style="background:${familyColor}22;color:${familyColor};border:1px solid ${familyColor}55;border-radius:99px;padding:3px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;cursor:pointer;">${escapeHtml(family || "Set family")} ▾</button>
+      <div data-family-menu style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:40;background:#0d1b2e;border:1px solid #1e3350;border-radius:8px;padding:4px 0;box-shadow:0 8px 24px rgba(0,0,0,0.45);">${familyOptions}</div>
+    </div>`;
   return `
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px;">
       <div>
         <div style="font-size:16px;font-weight:700;color:#e8f4ff;">${escapeHtml(label)}</div>
         ${engagement ? `<div style="font-size:12px;color:#8899aa;margin-top:2px;">${escapeHtml(engagement)}</div>` : ""}
+        ${familyChip}
       </div>
       <button type="button" id="exportWordRecipeBtn" class="ds-btn-ghost" style="flex-shrink:0;display:inline-flex;align-items:center;gap:6px;">
         <i data-lucide="download" style="width:14px;height:14px;"></i>Export to Word
@@ -6392,9 +6408,17 @@ function renderAnalysisTabRecipe() {
     const source = gridCellValue(step, "trigger") || "doc-extracted";
     const cached = state.recipeCache[step.id];
 
-    const patternBadge = pattern
-      ? `<span style="background:#00d4b4;color:#0d1b2e;font-weight:700;font-size:11px;padding:2px 9px;border-radius:99px;">${escapeHtml(pattern)}</span>`
-      : `<span style="color:#5b7186;">—</span>`;
+    // PR 33: the pattern badge is an editable chip — click to reclassify; the
+    // change writes via patchField (user-edited) and routes into the NORMAL
+    // gated generation flow (prior rotated only when a new prompt lands).
+    const patternOptions = Object.keys(AI_PATTERNS).map((name) =>
+      `<div data-pattern-option="${escapeHtml(name)}" data-pattern-step="${escapeHtml(step.id)}" role="button" tabindex="0" style="padding:7px 12px;font-size:12px;color:${AI_PATTERNS[name]};cursor:pointer;white-space:nowrap;">${escapeHtml(name)}</div>`
+    ).join("");
+    const patternBadge = `
+      <span style="position:relative;display:inline-block;">
+        <button type="button" data-pattern-chip="${escapeHtml(step.id)}" title="Click to change the AI pattern" style="background:${pattern ? "#00d4b4" : "#1e3350"};color:${pattern ? "#0d1b2e" : "#8899aa"};font-weight:700;font-size:11px;padding:2px 9px;border-radius:99px;border:none;cursor:pointer;">${escapeHtml(pattern || "Set pattern")} ▾</button>
+        <span data-pattern-menu="${escapeHtml(step.id)}" style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:40;background:#0d1b2e;border:1px solid #1e3350;border-radius:8px;padding:4px 0;box-shadow:0 8px 24px rgba(0,0,0,0.45);">${patternOptions}</span>
+      </span>`;
 
     const timeSavedHtml = timeSaved != null
       ? `<span style="color:#00d4b4;font-size:13px;font-weight:600;white-space:nowrap;">~${timeSaved} min/day saved</span>`
@@ -6416,6 +6440,7 @@ function renderAnalysisTabRecipe() {
           <span><span style="color:#5b7186;">Frequency:</span> ${escapeHtml(frequency)}</span>
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Sensitivity:</span> <span style="width:8px;height:8px;border-radius:50%;background:${dot};display:inline-block;"></span> ${escapeHtml(sensitivity)}</span>
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Pattern:</span> ${patternBadge}</span>
+          ${state.workflowGrid?.workflowFamily ? `<span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Family:</span> <span style="color:${WORKFLOW_FAMILY_COLOR[state.workflowGrid.workflowFamily] || "#8899aa"};font-weight:600;">${escapeHtml(state.workflowGrid.workflowFamily)}</span></span>` : ""}
           <span><span style="color:#5b7186;">Confidence:</span> ${confidence}%</span>
           ${sectionMarker(["volume", "sensitivity"])}
         </div>
@@ -6431,6 +6456,13 @@ function renderAnalysisTabRecipe() {
             <button class="primary-button compact" type="button" data-recipe-generate="${escapeHtml(step.id)}">${cached ? "Regenerate" : "Generate prompt"}</button>
           </div>
           <div data-recipe-body="${escapeHtml(step.id)}">${cached ? "" : `<div style="background:#0a1422;border:1px dashed #1a2a3a;border-radius:8px;padding:14px 16px;color:#5b7186;font-size:12px;">No prompt yet — click "Generate prompt" to build one for this step.</div>`}</div>
+          ${(() => {
+            const prior = state.recipeCachePrior?.[step.id];
+            if (!prior?.prompt) return "";
+            const was = [prior.pattern, prior.family].filter(Boolean).join(" / ");
+            const when = Number.isNaN(Date.parse(prior.preservedAt || "")) ? "" : new Date(Date.parse(prior.preservedAt)).toLocaleString("en-US");
+            return `<details style="margin-top:8px;"><summary style="font-size:11px;color:#8aa0b8;cursor:pointer;">Previous recipe — preserved ${escapeHtml(when || "earlier")}${was ? ` (was ${escapeHtml(was)})` : ""}</summary><div style="margin-top:6px;background:#0a1422;border:1px solid #1a2a3a;border-radius:8px;padding:12px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.55;color:#8aa0b8;white-space:pre-wrap;word-break:break-word;">${escapeHtml(prior.prompt)}</div></details>`;
+          })()}
         </div>
 
         <div style="margin-top:16px;">
@@ -6484,6 +6516,7 @@ function renderAnalysisTabRecipe() {
   syncRecipeExportButton(recipeExportBtn);
   wireScoringCards(container);
   wireBusinessCaseBlock(container);
+  wireClassificationChips(container);
   container.querySelector("#exportWordRecipeBtn")?.addEventListener("click", () => exportWorkflowWord("recipe"));
 }
 
@@ -6539,6 +6572,347 @@ function showSensitivityConfirmModal(onConfirm, options = {}) {
   overlay.querySelector("#sensitivityProceed").addEventListener("click", () => {
     close();
     if (typeof onConfirm === "function") onConfirm();
+  });
+}
+
+// --- Classification correction (PR 33) ----------------------------------------
+// The ONLY place a prior recipe is rotated — called exclusively from
+// runRecipeGeneration's success path, i.e. when a new prompt actually LANDS.
+// A gate-panel detour with no generation never touches the cache or the prior.
+function rotateRecipeOnLanding(stepId, newPrompt, labels = {}) {
+  state.recipeCache = state.recipeCache || {};
+  state.recipeCachePrior = state.recipeCachePrior || {};
+  state.recipeMeta = state.recipeMeta || {};
+  const previous = state.recipeCache[stepId];
+  if (previous) {
+    state.recipeCachePrior[stepId] = {
+      prompt: previous,
+      preservedAt: new Date().toISOString(),
+      pattern: state.recipeMeta[stepId]?.pattern || "",
+      family: state.recipeMeta[stepId]?.family || "",
+      generatedAt: state.recipeMeta[stepId]?.generatedAt || ""
+    };
+  }
+  state.recipeCache[stepId] = newPrompt;
+  state.recipeMeta[stepId] = {
+    pattern: labels.pattern || "",
+    family: labels.family || "",
+    generatedAt: new Date().toISOString()
+  };
+  return Boolean(previous);
+}
+
+// Pattern edit (per step): user-edited provenance via patchField — the highest
+// authority, applied with refresh so an explicit edit always lands. Returns
+// true when the cell changed (the caller then routes into the NORMAL gated
+// generation flow; rotation only happens if a prompt actually lands).
+function applyPatternEdit(step, pattern) {
+  const clean = String(pattern || "").trim();
+  if (!step || !clean) return false;
+  return patchField(step, "meta", "aiPattern", [{ pattern: clean, confidence: 1 }], "user-edited", 1, { refresh: true });
+}
+
+// Family edit (workflow-level — sessions are single-workflow; the family is
+// metadata on the grid, not a step cell, so patchField does not apply).
+function applyFamilyEdit(family) {
+  const clean = String(family || "").trim();
+  if (!clean || !state.workflowGrid) return false;
+  if (state.workflowGrid.workflowFamily === clean) return false;
+  state.workflowGrid.workflowFamily = clean;
+  return true;
+}
+
+// Chip wiring for the Recipe Book (family on the header, pattern per card).
+// Menus are simple show/hide popovers; a chosen pattern routes into the normal
+// gated generation flow — if the gate panel intercepts and no prompt lands,
+// the existing recipe and its prior stay untouched.
+function wireClassificationChips(container) {
+  if (!container) return;
+  const closeMenus = () => container.querySelectorAll("[data-family-menu],[data-pattern-menu]").forEach((el) => { el.style.display = "none"; });
+  container.querySelector("[data-family-chip]")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const menu = container.querySelector("[data-family-menu]");
+    if (menu) menu.style.display = menu.style.display === "none" ? "block" : "none";
+  });
+  container.querySelectorAll("[data-family-option]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const family = el.dataset.familyOption;
+      if (applyFamilyEdit(family)) {
+        persistState();
+        toast(`Family set to ${family} — regenerate recipes to reflect it.`);
+        renderAnalysisTabRecipe();
+      } else {
+        closeMenus();
+      }
+    });
+  });
+  container.querySelectorAll("[data-pattern-chip]").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const menu = container.querySelector(`[data-pattern-menu="${btn.dataset.patternChip}"]`);
+      const open = menu && menu.style.display !== "none";
+      closeMenus();
+      if (menu && !open) menu.style.display = "block";
+    });
+  });
+  container.querySelectorAll("[data-pattern-option]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const stepId = el.dataset.patternStep;
+      const pattern = el.dataset.patternOption;
+      const step = analysisGridSteps().find((item) => item.id === stepId);
+      if (!step) return;
+      if (applyPatternEdit(step, pattern)) {
+        persistState();
+        // Don't promise regeneration: generateRecipePrompt routes through the
+        // PR 30b gate, which may intercept and surface its panel instead of
+        // landing a new prompt. State the fact; let the flow speak for itself.
+        toast(`Pattern set to ${pattern}.`);
+        renderAnalysisTabRecipe();
+        // Normal flow: the PR 30b gate may intercept; rotation only on landing.
+        generateRecipePrompt(stepId);
+      } else {
+        toast("Pattern unchanged.");
+        closeMenus();
+      }
+    });
+  });
+}
+
+// --- PR 33 Slice 3: Portfolio bulk classification review ---------------------
+// A confirm/correct surface for AI pattern + workflow family across EVERY saved
+// session, building the verified labeled set PR 35 will train against. The hard
+// rule (steer 3): cross-session writes go through load -> patchField -> save,
+// never a raw edit to stored JSON. A "verified" label is simply one whose
+// aiPattern cell carries user provenance — confirming promotes ai-inferred to
+// user-edited without changing the value; correcting writes a new pattern.
+
+// A pattern is "verified" once its cell source is user provenance (the same
+// precedence patchField enforces). ai-inferred / doc-extracted are unverified.
+function bulkReviewVerifiedPattern(step) {
+  const source = step?.cells?.aiPattern?.source || "";
+  return source === "user-edited" || source === "user-stated";
+}
+
+// Resolve a saved session's full state from a library entry. Local + cached
+// entries carry .state inline; remote-only summaries don't (they need a fetch),
+// so those render a "Load classification" affordance instead of inline chips.
+function bulkSessionState(entry) {
+  return entry?.state && typeof entry.state === "object" ? entry.state : null;
+}
+
+// The single cross-session commit path. Loads the target session's full state
+// (live state when it's the open session; a fresh clone otherwise), runs the
+// mutate() callback — which MUST go through patchField for cell writes — then
+// saves through the normal library + server save funcs. Never touches stored
+// JSON directly. mutate() returns true when it changed something.
+async function commitCrossSessionClassification(sessionId, mutate) {
+  if (!sessionId) return false;
+  if (sessionId === state.sessionMeta?.id) {
+    if (!mutate(state)) return false;
+    persistState();
+    saveSessionToServer(state);
+    return true;
+  }
+  const saved = await getSessionStateById(sessionId);
+  if (!saved) {
+    toast("Couldn't load that session to update its classification.");
+    return false;
+  }
+  const loaded = normalizeLoadedState(structuredClone(saved));
+  if (!mutate(loaded)) return false;
+  loaded.sessionMeta = loaded.sessionMeta || {};
+  loaded.sessionMeta.updatedAt = new Date().toISOString();
+  saveSessionToLibrary(loaded);
+  await saveSessionToServer(loaded);
+  return true;
+}
+
+// Correct a step's pattern in any session. Reuses applyPatternEdit so the write
+// is the exact user-edited patchField the in-session chip uses.
+async function applyBulkPatternEdit(sessionId, stepId, pattern) {
+  const changed = await commitCrossSessionClassification(sessionId, (target) => {
+    const step = (target.workflowGrid?.steps || []).find((item) => item.id === stepId);
+    return step ? applyPatternEdit(step, pattern) : false;
+  });
+  if (changed) {
+    toast(`Pattern set to ${pattern}.`);
+    renderSavedSessionsPanel();
+  }
+}
+
+// Correct a session's workflow family (workflow-level metadata, not a cell).
+async function applyBulkFamilyEdit(sessionId, family) {
+  const clean = String(family || "").trim();
+  const changed = await commitCrossSessionClassification(sessionId, (target) => {
+    if (!target.workflowGrid || target.workflowGrid.workflowFamily === clean) return false;
+    target.workflowGrid.workflowFamily = clean;
+    return true;
+  });
+  if (changed) {
+    toast(`Family set to ${family}.`);
+    renderSavedSessionsPanel();
+  }
+}
+
+// Confirm-all: promote every populated pattern in a session to user-edited
+// provenance WITHOUT changing the chosen label, marking them verified for PR 35.
+// Re-applying the same pattern at user-edited rank upgrades an ai-inferred /
+// doc-extracted cell; already-verified cells are skipped by the guard below
+// (so confirm is idempotent and reports an honest count).
+async function confirmBulkSessionPatterns(sessionId) {
+  let confirmedCount = 0;
+  const changed = await commitCrossSessionClassification(sessionId, (target) => {
+    let any = false;
+    (target.workflowGrid?.steps || []).forEach((step) => {
+      const pattern = stepPrimaryPattern(step);
+      if (pattern && !bulkReviewVerifiedPattern(step) && applyPatternEdit(step, pattern)) {
+        any = true;
+        confirmedCount += 1;
+      }
+    });
+    return any;
+  });
+  if (changed) {
+    toast(`Confirmed ${confirmedCount} pattern${confirmedCount === 1 ? "" : "s"} as verified.`);
+    renderSavedSessionsPanel();
+  } else {
+    toast("All patterns in this session are already verified.");
+  }
+}
+
+// Builds the collapsible review panel that sits above the saved-session cards.
+// One block per session: a family selector and, per step, a pattern selector
+// with a verified tick. Selectors (not popovers) keep a dense multi-row grid
+// usable; "Confirm all" bulk-verifies a session in one click.
+// Containment (user feedback at 61 sessions): sessions with zero captured
+// steps are hidden outright — nothing to classify — and each remaining session
+// renders as its own collapsed <details> (title + family + verified count),
+// so the panel is a short list, not several screens of empty blocks.
+function bulkClassificationReviewHtml() {
+  const library = getCombinedSessionLibrary();
+  if (!library.length) return "";
+  const patternOptions = (selected) =>
+    [`<option value="">— no pattern —</option>`]
+      .concat(Object.keys(AI_PATTERNS).map((name) =>
+        `<option value="${escapeHtml(name)}"${name === selected ? " selected" : ""}>${escapeHtml(name)}</option>`))
+      .join("");
+  const familyOptions = (selected) =>
+    [`<option value="">— unset —</option>`]
+      .concat(Object.keys(WORKFLOW_FAMILY_COLOR).map((name) =>
+        `<option value="${escapeHtml(name)}"${name === selected ? " selected" : ""}>${escapeHtml(name)}</option>`))
+      .join("");
+  const selectCss = "background:#0d1b2e;color:#dde8f5;border:1px solid #1e3350;border-radius:6px;padding:3px 8px;font-size:12px;cursor:pointer;";
+
+  let verifiedTotal = 0;
+  let patternTotal = 0;
+  const sessionSummaryCss = "cursor:pointer;display:flex;align-items:center;gap:10px;padding:8px 12px;list-style:none;";
+  const blocks = library.map((entry) => {
+    const id = entry.sessionId || entry.id;
+    const name = entry.workflowName || entry.name || "Untitled workflow";
+    const sessionState = bulkSessionState(entry);
+    if (!sessionState) {
+      // Remote-only summary (state not fetched yet): the summary's stepCount is
+      // all we know — zero steps means nothing to classify, hide it too.
+      const stepCount = Number(entry.stepCount);
+      if (!Number.isFinite(stepCount) || stepCount < 1) return "";
+      return `
+        <details data-bulk-session="${escapeHtml(id)}" style="border:1px solid #16263a;border-radius:8px;margin-bottom:8px;background:#0d1b2a;">
+          <summary style="${sessionSummaryCss}">
+            <strong style="font-size:13px;color:#dde8f5;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(name)}</strong>
+            <span style="font-size:11px;color:#5b7186;">${stepCount} step${stepCount === 1 ? "" : "s"} · not loaded</span>
+          </summary>
+          <div style="padding:0 12px 10px;">
+            <button type="button" data-bulk-load="${escapeHtml(id)}" style="background:#102338;color:#00d4b4;border:1px solid #1e3350;border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer;">Load classification</button>
+          </div>
+        </details>`;
+    }
+    const steps = Array.isArray(sessionState.workflowGrid?.steps) ? sessionState.workflowGrid.steps : [];
+    // Containment: nothing to classify in a step-less session — hide it.
+    if (!steps.length) return "";
+    const family = sessionState.workflowGrid?.workflowFamily || "";
+    const familyColor = WORKFLOW_FAMILY_COLOR[family] || "#5b7186";
+    let sessionVerified = 0;
+    let sessionPatterns = 0;
+    const rows = steps.map((step, index) => {
+      const verified = bulkReviewVerifiedPattern(step);
+      const pattern = stepPrimaryPattern(step);
+      if (pattern) { patternTotal += 1; sessionPatterns += 1; }
+      if (verified) { verifiedTotal += 1; sessionVerified += 1; }
+      const tick = verified
+        ? `<span title="Verified — user-confirmed label" style="color:#00d4b4;font-size:13px;">✓</span>`
+        : `<span title="Unverified — AI-inferred or extracted" style="color:#5b7186;font-size:13px;">○</span>`;
+      return `
+        <div style="display:flex;align-items:center;gap:10px;padding:4px 0;">
+          ${tick}
+          <span style="flex:1;min-width:0;font-size:12px;color:#9fb2c8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(stepDisplayName(step, index))}</span>
+          <select data-bulk-pattern-session="${escapeHtml(id)}" data-bulk-pattern-step="${escapeHtml(step.id)}" style="${selectCss}">${patternOptions(pattern)}</select>
+        </div>`;
+    }).join("");
+    const verifiedBadge = sessionPatterns
+      ? `<span style="font-size:11px;color:${sessionVerified === sessionPatterns ? "#00d4b4" : "#7a93b4"};">${sessionVerified}/${sessionPatterns} verified</span>`
+      : `<span style="font-size:11px;color:#5b7186;">no patterns</span>`;
+    return `
+      <details data-bulk-session="${escapeHtml(id)}" style="border:1px solid #16263a;border-radius:8px;margin-bottom:8px;background:#0d1b2a;">
+        <summary style="${sessionSummaryCss}">
+          <strong style="font-size:13px;color:#dde8f5;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(name)}</strong>
+          <span style="font-size:11px;color:${familyColor};">${escapeHtml(family || "Family —")}</span>
+          ${verifiedBadge}
+        </summary>
+        <div style="padding:0 12px 10px;">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px;">
+            <span style="font-size:11px;color:${familyColor};">Family:</span>
+            <select data-bulk-family-session="${escapeHtml(id)}" style="${selectCss}">${familyOptions(family)}</select>
+            <button type="button" data-bulk-confirm="${escapeHtml(id)}" title="Mark every pattern in this session as user-verified" style="background:#102338;color:#00d4b4;border:1px solid #1e3350;border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer;margin-left:auto;">Confirm all</button>
+          </div>
+          ${rows}
+        </div>
+      </details>`;
+  }).filter(Boolean).join("");
+  if (!blocks) return "";
+
+  const summary = patternTotal
+    ? `${verifiedTotal} of ${patternTotal} pattern${patternTotal === 1 ? "" : "s"} verified`
+    : "No patterns captured yet";
+  return `
+    <details data-bulk-review style="margin-bottom:14px;background:#0f1f33;border:1px solid #1e3350;border-radius:10px;padding:0 12px;">
+      <summary style="cursor:pointer;padding:12px 0;font-size:13px;font-weight:700;color:#dde8f5;list-style:none;display:flex;align-items:center;gap:8px;">
+        <i data-lucide="check-check" style="width:15px;height:15px;color:#00d4b4;"></i>
+        Classification review
+        <span style="font-weight:500;font-size:11px;color:#7a93b4;margin-left:auto;">${summary}</span>
+      </summary>
+      <div style="padding-bottom:12px;">
+        <p style="font-size:11px;color:#5b7186;margin:0 0 10px;">Confirm or correct the AI pattern and workflow family on every saved session. Edits are user-verified and saved straight to each session.</p>
+        ${blocks}
+      </div>
+    </details>`;
+}
+
+// Wires the review panel's selectors + buttons. Every write routes through the
+// cross-session commit path (load -> patchField -> save) — the handlers never
+// touch stored JSON directly.
+function wireBulkClassificationReview(container) {
+  if (!container) return;
+  container.querySelectorAll("[data-bulk-pattern-session]").forEach((select) => {
+    select.addEventListener("change", () => {
+      applyBulkPatternEdit(select.dataset.bulkPatternSession, select.dataset.bulkPatternStep, select.value);
+    });
+  });
+  container.querySelectorAll("[data-bulk-family-session]").forEach((select) => {
+    select.addEventListener("change", () => {
+      applyBulkFamilyEdit(select.dataset.bulkFamilySession, select.value);
+    });
+  });
+  container.querySelectorAll("[data-bulk-confirm]").forEach((button) => {
+    button.addEventListener("click", () => confirmBulkSessionPatterns(button.dataset.bulkConfirm));
+  });
+  container.querySelectorAll("[data-bulk-load]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      // Inside the Open dropdown: don't let the click bubble into anything
+      // that would toggle the menu; rerender in place once the state arrives.
+      event.stopPropagation();
+      await getSessionStateById(button.dataset.bulkLoad);
+      renderSavedSessionsPanel();
+    });
   });
 }
 
@@ -6675,8 +7049,12 @@ async function runRecipeGeneration(stepId) {
     if (!response.ok || !data.prompt) {
       throw new Error(data.error || "No prompt returned");
     }
-    state.recipeCache = state.recipeCache || {};
-    state.recipeCache[stepId] = data.prompt;
+    // PR 33: the landing point — rotate the prior ONLY now that a new prompt
+    // actually exists (steer: gate detours without generation rotate nothing).
+    rotateRecipeOnLanding(stepId, data.prompt, {
+      pattern: stepPrimaryPattern(step),
+      family: String(state.workflowGrid?.workflowFamily || "")
+    });
     // PR 30b Slice 2: snapshot which recipe-critical fields were unconfirmed
     // when THIS prompt was built. Markers render from the snapshot (not live
     // state) so a prompt generated from unconfirmed data stays marked until
@@ -13230,6 +13608,14 @@ const SESSION_TIER_ORDER = { "quick-win": 0, strategic: 1, compliance: 2, specul
 function renderSavedSessionsPanel() {
   const container = document.getElementById("savedSessionsPanel");
   if (!container) return;
+  // PR 33: the bulk classification review re-renders this panel after every
+  // edit — remember which <details> were open (the panel and any per-session
+  // blocks) so the rerender doesn't snap them shut mid-review (collapsed stays
+  // the default for fresh renders).
+  const reviewWasOpen = Boolean(container.querySelector("[data-bulk-review]")?.open);
+  const openBulkSessions = new Set(
+    [...container.querySelectorAll("[data-bulk-session]")].filter((el) => el.open).map((el) => el.dataset.bulkSession)
+  );
   const sessions = getCombinedSessionLibrary().map((entry) => ({ entry, ...sessionCardMetrics(entry) }));
   const countBadge = document.getElementById("openSessionsCount");
   if (countBadge) {
@@ -13321,7 +13707,19 @@ function renderSavedSessionsPanel() {
       </button>`;
   }).join("");
 
-  container.innerHTML = head + summaryStrip + `<div style="display:flex;flex-direction:column;gap:6px;max-height:320px;overflow:auto;">${rows}</div>`;
+  // PR 33 Slice 3: the bulk classification review mounts HERE — above the
+  // summary strip, inside the Open popup. (#savedSessionsPanel is the live
+  // session-list host in index.html; #sessionLibraryList is a dead legacy id —
+  // test/bulk-classification.test.mjs pins this mount to a real host.)
+  container.innerHTML = head + bulkClassificationReviewHtml() + summaryStrip + `<div style="display:flex;flex-direction:column;gap:6px;max-height:320px;overflow:auto;">${rows}</div>`;
+  if (reviewWasOpen) {
+    const review = container.querySelector("[data-bulk-review]");
+    if (review) review.open = true;
+  }
+  container.querySelectorAll("[data-bulk-session]").forEach((el) => {
+    if (openBulkSessions.has(el.dataset.bulkSession)) el.open = true;
+  });
+  wireBulkClassificationReview(container);
   container.querySelectorAll("[data-load-session]").forEach((button) => {
     button.addEventListener("click", () => {
       button.closest("details")?.removeAttribute("open");
@@ -28643,9 +29041,11 @@ function normalizeLoadedState(parsed = {}) {
   return merged;
 }
 
-// PR 32: minimal session-schema migration hook. PR 33's migration framework
-// will own a registered step list; until then this single idempotent function
-// IS the v1->v2 step it will wrap — keep it side-effect-free beyond `merged`.
+// PR 32/33: the CLIENT v1->v2 migration hook, applied to localStorage-loaded
+// sessions on open. The server batch framework registers its own copy of this
+// exact transform (migrateSessionStateV2 in server.mjs, SESSION_MIGRATIONS) —
+// the two MUST stay in lockstep; test/migrations.test.mjs "lockstep" runs both
+// against the same v1 fixture and fails the suite on drift.
 function migrateSessionState(merged) {
   const version = Number(merged.schemaVersion) || 1;
   if (version < 2) {
