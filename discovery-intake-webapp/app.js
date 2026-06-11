@@ -4396,6 +4396,26 @@ function modelQuestionIntent(text) {
   return [`model:${fieldEditNormalize(t).replace(/[^a-z0-9]+/g, "-").slice(0, 60)}`];
 }
 
+// Slice 4a: the document's own phrasing competes for the EXISTING ≤3 question
+// slots — wording only. A model follow-up substitutes for a canonical gap
+// question when its mapped cells intersect the slot's cells; slot counts,
+// intents, dedupe, retirement, and the PR 31 retirement exception are all
+// untouched (the slot still records under its canonical intent). Unmapped
+// "model:…" questions can never match a cell, so they never compete. First
+// match in artifact/question order wins (deterministic).
+function modelQuestionForCells(cells) {
+  const targets = Array.isArray(cells) ? cells : [cells];
+  if (!targets.length) return "";
+  const artifacts = Array.isArray(state.evidenceArtifacts) ? state.evidenceArtifacts : [];
+  for (const artifact of artifacts) {
+    for (const question of artifact.followUpQuestions || []) {
+      const mapped = modelQuestionIntent(question);
+      if (mapped.some((key) => targets.includes(key))) return String(question).trim();
+    }
+  }
+  return "";
+}
+
 // Bounded Levenshtein distance: returns early with limit+1 once the distance
 // provably exceeds limit (we only ever care about small distances).
 function fieldEditDistance(a, b, limit) {
@@ -4505,11 +4525,17 @@ function renderInlineKeyQuestions() {
     ? workflowGapFields(steps).filter((field) => questionStatusForIntent([field.key]) !== "retired")
     : [];
   const confirms = steps.length ? aiInferredConfirmFields(steps) : [];
+  // Slice 4a: a doc-extraction follow-up that maps onto a gap's cell supplies
+  // the WORDING for that slot (data-gap-key keeps the canonical intent, so
+  // dedupe/retirement are unchanged). Confirm-lane wording stays canonical —
+  // those confirm an ai-inferred value, not re-ask the document's question.
   const top3 = [
-    ...gaps.map((field) => ({ ...field, confirm: false })),
+    ...gaps.map((field) => ({ ...field, confirm: false, q: modelQuestionForCells([field.key]) || field.q })),
     ...confirms.map((field) => ({ ...field, confirm: true, q: `Confirm: ${field.q}` }))
   ].slice(0, 3);
-  const sig = top3.map((field) => `${field.key}${field.confirm ? "*" : ""}`).join(",");
+  // The signature includes the wording so a late-arriving artifact's phrasing
+  // still repaints a slot whose key/lane did not change.
+  const sig = top3.map((field) => `${field.key}${field.confirm ? "*" : ""}:${field.q}`).join("|");
   if (container.dataset.sig === sig) return; // avoid rebuild/flicker when unchanged
   container.dataset.sig = sig;
 
@@ -7537,10 +7563,15 @@ function recipeGateCheck(step) {
 function renderRecipeGatePanel(stepId, gate) {
   const body = document.querySelector(`[data-recipe-body="${stepId}"]`);
   if (!body) return;
-  const questions = gate.askable.map((gap) => `
-    <div data-gate-question="${escapeHtml(gap.q)}" data-gate-cells="${escapeHtml(gap.cells.join("+"))}" role="button" tabindex="0" style="background:#0d1b2a;border:1px solid #1e3350;border-radius:8px;padding:9px 12px;margin-bottom:6px;cursor:pointer;font-size:12px;color:#cfe0f0;line-height:1.4;">
-      <span style="color:#f59e0b;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-right:8px;">${escapeHtml(gap.label)}</span>${escapeHtml(gap.q)}
-    </div>`).join("");
+  // Slice 4a: same wording substitution as the inline key questions — the
+  // doc's phrasing fills the slot, data-gate-cells keeps the canonical intent.
+  const questions = gate.askable.map((gap) => {
+    const q = modelQuestionForCells(gap.cells) || gap.q;
+    return `
+    <div data-gate-question="${escapeHtml(q)}" data-gate-cells="${escapeHtml(gap.cells.join("+"))}" role="button" tabindex="0" style="background:#0d1b2a;border:1px solid #1e3350;border-radius:8px;padding:9px 12px;margin-bottom:6px;cursor:pointer;font-size:12px;color:#cfe0f0;line-height:1.4;">
+      <span style="color:#f59e0b;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-right:8px;">${escapeHtml(gap.label)}</span>${escapeHtml(q)}
+    </div>`;
+  }).join("");
   body.innerHTML = `
     <div style="background:#1a1500;border:1px solid #f59e0b55;border-radius:8px;padding:12px 14px;">
       <div style="font-size:12px;color:#f5c451;line-height:1.5;margin-bottom:10px;">${gate.gaps.length} recipe-critical field${gate.gaps.length === 1 ? " is" : "s are"} unconfirmed — answering these makes a sharper prompt:</div>
@@ -27197,13 +27228,7 @@ function evidenceArtifactCard(artifact, mode = "compact") {
       ${links.length ? `<div class="evidence-link-list">${links.map((link) => `<span title="${escapeHtml(link.rationale || link.value || link.question || "")}">${escapeHtml(link.route)} · ${escapeHtml(link.targetType)} · ${escapeHtml(truncateUi(link.targetLabel, 42))}</span>`).join("")}</div>` : ""}
       ${full && artifact.textPreview ? `<div class="evidence-preview"><strong>Preview</strong><p>${escapeHtml(artifact.textPreview)}</p></div>` : ""}
       ${full ? evidenceRecordSummary(records) : ""}
-      ${full && questions.length ? `<div class="evidence-questions"><strong>Follow-up questions</strong><ol>${questions.map((question) => {
-        // PR 31 Slice 4: model questions carry intent memory — tapping IS
-        // asking (same flow as gap/gate questions), and a question whose
-        // intent already retired shows as answered instead of nagging.
-        const retired = questionStatusForIntent(modelQuestionIntent(question)) === "retired";
-        return `<li data-model-question="${escapeHtml(question)}" role="button" tabindex="0" title="${retired ? "Already answered — captured in the grid" : "Click to ask in Discovery"}" style="cursor:pointer;${retired ? "color:#5b7186;" : ""}">${escapeHtml(question)}${retired ? ` <span style="color:#00d4b4;">✓ answered</span>` : ""}</li>`;
-      }).join("")}</ol></div>` : ""}
+      ${full && questions.length ? `<div class="evidence-questions"><strong>Follow-up questions</strong><ol>${questions.map((question) => `<li>${escapeHtml(question)}</li>`).join("")}</ol></div>` : ""}
       ${artifact.warnings?.length ? `<div class="evidence-warning">${artifact.warnings.map((warning) => escapeHtml(warning)).join("<br />")}</div>` : ""}
       <div class="evidence-actions">
         <span>${count} suggestion${count === 1 ? "" : "s"}</span>
@@ -27248,28 +27273,6 @@ function bindEvidenceActions(root) {
       if (action === "apply") applyEvidenceArtifact(id);
       if (action === "dismiss") dismissEvidenceArtifact(id);
       if (action === "review") reviewEvidenceArtifact(id);
-    });
-  });
-  // PR 31 Slice 4 (carry-item 3): a tapped model question routes through the
-  // SAME intent machinery as gap/gate questions — recordAskedQuestion handles
-  // dedupe, retired stays quiet, and a re-ask-eligible intent reopens (the
-  // PR 31 retirement exception applies to model questions for free).
-  root.querySelectorAll("[data-model-question]").forEach((el) => {
-    const ask = () => {
-      const question = el.dataset.modelQuestion;
-      const entry = recordAskedQuestion(modelQuestionIntent(question), question);
-      if (entry?.status === "retired") {
-        toast("Already answered — the grid has this captured.");
-        return;
-      }
-      persistState();
-      setAppMode("interview"); // full render; the composer lives in Discovery
-      setActiveGapQuestion(question);
-      toast("Answer in the composer — the evidence question is active.");
-    };
-    el.addEventListener("click", ask);
-    el.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); ask(); }
     });
   });
 }

@@ -18,6 +18,7 @@ function sandbox() {
     consts: ["MODEL_QUESTION_INTENT_RULES", "GRID_CELL_KEYS", "GRID_SOURCE_RANK", "GRID_CELL_LAYER"],
     functions: [
       "modelQuestionIntent",
+      "modelQuestionForCells",
       "fieldEditNormalize",
       "questionIntentId",
       "recordAskedQuestion",
@@ -91,16 +92,42 @@ test("an unmapped model question dedupes but never retires via the grid (no cell
   assert.equal(questionStatusForIntent(intent), "open", "no grid cell answers it — stays open, honestly");
 });
 
-test("evidence wiring: tapping is asking, retired stays quiet, banner activates", () => {
-  const card = extractFunction(source, "evidenceArtifactCard");
-  assert.ok(card.includes("data-model-question"), "follow-up questions are askable affordances");
-  assert.ok(card.includes("questionStatusForIntent(modelQuestionIntent("), "render shows retired memory");
-  assert.ok(card.includes("answered"), "retired questions display as answered, not nagging");
+test("modelQuestionForCells: the doc's phrasing wins a slot only when its cells intersect", () => {
+  const { modelQuestionForCells, state } = sandbox();
+  state.evidenceArtifacts = [
+    { id: "ev-1", followUpQuestions: ["What is the annual budget?", "Is any client-confidential or regulated data involved here?"] },
+    { id: "ev-2", followUpQuestions: ["How often does this run each week?"] }
+  ];
+  // Intersection match: the sensitivity slot ([dataSensitivity]) takes the
+  // doc's sensitivity question; the unmapped budget question never competes.
+  assert.equal(
+    modelQuestionForCells(["dataSensitivity"]),
+    "Is any client-confidential or regulated data involved here?"
+  );
+  assert.equal(modelQuestionForCells(["timeTaken", "frequencyVolume"]), "How often does this run each week?");
+  // No artifact question maps to these cells -> "" (caller keeps canonical q).
+  assert.equal(modelQuestionForCells(["output"]), "");
+  assert.equal(modelQuestionForCells([]), "");
+  state.evidenceArtifacts = [];
+  assert.equal(modelQuestionForCells(["dataSensitivity"]), "", "no artifacts -> canonical wording everywhere");
+});
 
+test("builder pins: both reachable surfaces substitute wording, intents stay canonical, slots stay <=3", () => {
+  // Slice 4a re-landed carry-item 3 on the two surfaces that actually render —
+  // the dead per-artifact evidence list is gone (ghost-host lesson from PR 33).
+  const inline = extractFunction(source, "renderInlineKeyQuestions");
+  assert.ok(inline.includes("modelQuestionForCells([field.key]) || field.q"), "key-questions slot takes the doc's wording");
+  assert.ok(inline.includes('data-gap-key="${escapeHtml(field.key)}"'), "intent stays the canonical cell key");
+  assert.ok(inline.includes(".slice(0, 3)"), "slot count unchanged");
+
+  const gatePanel = extractFunction(source, "renderRecipeGatePanel");
+  assert.ok(gatePanel.includes("modelQuestionForCells(gap.cells) || gap.q"), "gate slot takes the doc's wording");
+  assert.ok(gatePanel.includes('data-gate-cells="${escapeHtml(gap.cells.join("+"))}"'), "intent stays the canonical cell set");
+
+  const card = extractFunction(source, "evidenceArtifactCard");
+  assert.ok(!card.includes("data-model-question"), "dead evidence-card affordance removed");
   const bind = extractFunction(source, "bindEvidenceActions");
-  assert.ok(bind.includes("recordAskedQuestion(modelQuestionIntent("), "tap records through the intent machinery");
-  assert.ok(bind.includes("setActiveGapQuestion("), "tap activates the Answering banner");
-  assert.ok(bind.includes('"retired"'), "a still-retired intent toasts instead of re-asking");
+  assert.ok(!bind.includes("data-model-question"), "dead evidence wiring removed");
 });
 
 test("Answering banner: Esc is wired and advertised next to the ×", () => {
