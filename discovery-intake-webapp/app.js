@@ -5113,7 +5113,7 @@ function renderAnalysisTabGrid() {
       </table>
     </div>`;
 
-  container.innerHTML = header + stats + panels + matrix;
+  container.innerHTML = header + tierChangeNoticeHtml() + stats + panels + matrix;
   wireGridCellEditors(container);
 }
 
@@ -5948,6 +5948,80 @@ function tierSensitivity(meta) {
   return null;
 }
 
+// --- PR 31 Slice 2: live re-score --------------------------------------------
+
+// Explains a tier flip between two scoring runs in the breakdown's own evidence
+// language. Pure: takes the before/after getStepOpportunityMeta results and
+// names the decisive principle, its score movement, and the after-run reason.
+// The override rules get named explicitly — entering/leaving Compliance is
+// always P9's doing; a Quick Win capped to Strategic with P7 at 1 is P7's.
+// Falls back to the largest mover when the flip is purely numeric (the 16/24
+// total boundaries). Returns null when the tier did not change.
+function explainTierChange(beforeMeta, afterMeta) {
+  const from = beforeMeta?.tier || "";
+  const to = afterMeta?.tier || "";
+  if (!from || !to || from === to) return null;
+  const beforePs = beforeMeta.principleScores || {};
+  const afterPs = afterMeta.principleScores || {};
+  const score = (ps, key) => Number(ps[key]?.score) || 2;
+
+  let decisive = null;
+  if (to === "compliance" && score(afterPs, "dataSensitivity") === 1) decisive = "dataSensitivity";
+  else if (from === "compliance" && score(beforePs, "dataSensitivity") === 1 && score(afterPs, "dataSensitivity") !== 1) decisive = "dataSensitivity";
+  else if (from === "quick-win" && to === "strategic" && score(afterPs, "humanJudgmentRequired") === 1 && score(beforePs, "humanJudgmentRequired") !== 1) decisive = "humanJudgmentRequired";
+  else if (from === "strategic" && to === "quick-win" && score(beforePs, "humanJudgmentRequired") === 1 && score(afterPs, "humanJudgmentRequired") !== 1) decisive = "humanJudgmentRequired";
+  if (!decisive) {
+    let best = 0;
+    SCORING_PRINCIPLES.forEach((p) => {
+      const delta = Math.abs(score(afterPs, p.key) - score(beforePs, p.key));
+      if (delta > best) { best = delta; decisive = p.key; }
+    });
+  }
+  if (!decisive) return null;
+
+  const principle = SCORING_PRINCIPLES.find((p) => p.key === decisive);
+  const fromScore = score(beforePs, decisive);
+  const toScore = score(afterPs, decisive);
+  const reason = afterPs[decisive]?.reason || "";
+  const fromLabel = scoringTierBadge(from).label;
+  const toLabel = scoringTierBadge(to).label;
+  return {
+    from,
+    to,
+    principle: decisive,
+    n: principle.n,
+    fromScore,
+    toScore,
+    message: `Tier changed: ${fromLabel} → ${toLabel}. P${principle.n} (${principle.name}) moved ${fromScore} → ${toScore}${reason ? ` — ${reason}` : "."}`
+  };
+}
+
+// Pseudo-meta for the what-if repaint: overridden principles take the override
+// score with an explicit override reason (which tierSensitivity does NOT treat
+// as "insufficient data"); untouched principles keep the AI run's score+reason.
+function composeWhatIfMeta(originalScores, originalReasons, current) {
+  const principleScores = {};
+  SCORING_PRINCIPLES.forEach((p) => {
+    const score = current[p.key] ?? originalScores[p.key] ?? 2;
+    const overridden = score !== (originalScores[p.key] ?? 2);
+    principleScores[p.key] = {
+      score,
+      reason: overridden ? "User what-if override." : (originalReasons[p.key] || "")
+    };
+  });
+  return { principleScores };
+}
+
+// Shared renderer for the tier-sensitivity warning (baseline render and the
+// live what-if repaint use the same markup).
+function scoringSensitivityWarningHtml(sensitivity) {
+  if (!sensitivity) return "";
+  return `<div style="display:flex;gap:8px;align-items:flex-start;background:#1a1500;border:1px solid #f59e0b55;border-radius:8px;padding:9px 12px;margin-top:10px;">
+        <span style="color:#f59e0b;font-size:13px;line-height:1;flex-shrink:0;margin-top:1px;">⚠</span>
+        <span style="font-size:12px;color:#f5c451;line-height:1.45;">${escapeHtml(sensitivity.message)}</span>
+      </div>`;
+}
+
 // Provenance badge (PR 30 Slice 4): the badge is the primary visual; the
 // confidence number appears only in the hover tooltip. Inline hex per source.
 function provenanceBadgeHtml(source, confidence) {
@@ -5997,23 +6071,20 @@ function scoringTransparencyBlockHtml(step) {
       </div>`;
   }).join("");
 
-  // Slice 3: low-data warning — computed from the AI scores (the live what-if
-  // repaint deliberately does not recompute it; it reflects the AI baseline).
-  const sensitivity = tierSensitivity(meta);
-  const sensitivityHtml = sensitivity
-    ? `<div style="display:flex;gap:8px;align-items:flex-start;background:#1a1500;border:1px solid #f59e0b55;border-radius:8px;padding:9px 12px;margin-top:10px;">
-        <span style="color:#f59e0b;font-size:13px;line-height:1;flex-shrink:0;margin-top:1px;">⚠</span>
-        <span style="font-size:12px;color:#f5c451;line-height:1.45;">${escapeHtml(sensitivity.message)}</span>
-      </div>`
-    : "";
+  // PR 31 Slice 2 (carry-item 2): the warning is recomputed LIVE by
+  // paintScoringCard from the current what-if scores — this baseline render
+  // only seeds the container so there is no flash before the first paint.
+  const reasons = {};
+  SCORING_PRINCIPLES.forEach((p) => { reasons[p.key] = ps[p.key]?.reason || ""; });
+  const sensitivityHtml = scoringSensitivityWarningHtml(tierSensitivity(meta));
 
   return `
-    <div class="ds-card" data-scoring-card data-step-id="${escapeHtml(String(stepId))}" data-originals='${escapeHtml(JSON.stringify(originals))}' style="padding:14px 16px;margin-top:16px;">
+    <div class="ds-card" data-scoring-card data-step-id="${escapeHtml(String(stepId))}" data-originals='${escapeHtml(JSON.stringify(originals))}' data-reasons='${escapeHtml(JSON.stringify(reasons))}' style="padding:14px 16px;margin-top:16px;">
       <div data-sc-toggle role="button" tabindex="0" title="Click to expand or collapse the scoring breakdown" style="display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;">
         <strong style="font-size:13px;color:#e8f4ff;">Scoring breakdown (10 principles)</strong>
         <span data-sc-chevron style="flex-shrink:0;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;color:#00d4b4;font-size:15px;line-height:1;border:1px solid #1e4a44;border-radius:6px;background:#0c2a26;transition:transform 200ms ease;transform:rotate(-90deg);">▾</span>
       </div>
-      ${sensitivityHtml}
+      <div data-sc-sensitivity>${sensitivityHtml}</div>
       <div data-sc-body style="display:none;margin-top:12px;">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
           <span><span class="ds-num-teal" data-sc-total style="font-size:1.6rem;font-weight:800;">0</span><span style="color:#5b7186;font-size:1rem;font-weight:700;"> / 30</span></span>
@@ -6066,6 +6137,16 @@ function paintScoringCard(root) {
   if (modEl) modEl.style.display = modified ? "" : "none";
   const resetEl = root.querySelector("[data-sc-reset]");
   if (resetEl) resetEl.style.display = modified ? "" : "none";
+
+  // PR 31 Slice 2 (carry-item 2): the tier-sensitivity warning tracks the live
+  // what-if scores, not just the AI baseline — an override that resolves (or
+  // creates) a knife-edge updates the warning on the same repaint.
+  const warnEl = root.querySelector("[data-sc-sensitivity]");
+  if (warnEl) {
+    let reasons = {};
+    try { reasons = JSON.parse(root.dataset.reasons || "{}"); } catch { reasons = {}; }
+    warnEl.innerHTML = scoringSensitivityWarningHtml(tierSensitivity(composeWhatIfMeta(originals, reasons, current)));
+  }
 }
 
 // Wires collapse + override interactions for every scoring card in a container.
@@ -6881,8 +6962,25 @@ function openFieldEditor(step, field, anchorRect, onSaved) {
   fieldEditorEl.querySelector("textarea")?.focus();
 }
 
-// Wires every matrix cell rendered by renderAnalysisTabGrid. Re-rendering the
-// grid after a save repaints values, coverage stats, and badges from state.
+// PR 31 Slice 2: the last tier flip caused by a field edit, rendered as a
+// dismissible banner at the top of the grid tab (it survives the repaint the
+// save triggers; a non-flipping edit clears it).
+let tierChangeNotice = null;
+
+function tierChangeNoticeHtml() {
+  if (!tierChangeNotice) return "";
+  return `
+    <div data-tier-notice style="display:flex;gap:10px;align-items:flex-start;background:#0c2a26;border:1px solid #00d4b455;border-left:3px solid #00d4b4;border-radius:8px;padding:10px 14px;margin:16px 20px 0;">
+      <span style="color:#00d4b4;font-size:14px;line-height:1.2;flex-shrink:0;">↻</span>
+      <span style="flex:1;min-width:0;font-size:12px;color:#bfe8df;line-height:1.5;"><strong style="color:#e8f4ff;">${escapeHtml(tierChangeNotice.stepName)}</strong> — ${escapeHtml(tierChangeNotice.message)}</span>
+      <span data-tier-notice-dismiss role="button" tabindex="0" title="Dismiss" style="color:#5b7186;font-size:16px;line-height:1;cursor:pointer;flex-shrink:0;">×</span>
+    </div>`;
+}
+
+// Wires every matrix cell rendered by renderAnalysisTabGrid. After a save the
+// step is re-scored (getStepOpportunityMeta is the single scoring source) and
+// a tier flip surfaces the explanation banner; the grid repaint keeps every
+// derived figure honest either way.
 function wireGridCellEditors(container) {
   if (!container) return;
   const flat = GRID_LAYER_DEF.flatMap((layer) => layer.fields);
@@ -6891,9 +6989,14 @@ function wireGridCellEditors(container) {
       const step = analysisGridSteps().find((item) => item.id === td.dataset.feditStep);
       const field = flat[Number(td.dataset.feditField)];
       if (!step || !field) return;
+      const beforeMeta = getStepOpportunityMeta(step);
+      const stepIndex = analysisGridSteps().indexOf(step);
       openFieldEditor(step, field, td.getBoundingClientRect(), () => {
-        // PR 31 Slice 2 hooks the live re-score here; for now the grid repaint
-        // keeps every derived figure honest.
+        const afterMeta = getStepOpportunityMeta(step);
+        const change = explainTierChange(beforeMeta, afterMeta);
+        tierChangeNotice = change
+          ? { stepName: stepDisplayName(step, stepIndex), message: change.message }
+          : null;
         renderAnalysisTabGrid();
       });
     };
@@ -6901,6 +7004,10 @@ function wireGridCellEditors(container) {
     td.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); }
     });
+  });
+  container.querySelector("[data-tier-notice-dismiss]")?.addEventListener("click", () => {
+    tierChangeNotice = null;
+    renderAnalysisTabGrid();
   });
 }
 
