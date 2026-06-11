@@ -6060,12 +6060,41 @@ function scoringTransparencyBlockHtml(step) {
             </div>`).join("")}
         </div>`
       : "";
+    // PR 31 Slice 3: P9 gets explicit user control — confirm-to-lock writes the
+    // current basis at user provenance (re-extraction-proof); Reclassify opens
+    // the field editor on the basis cells so the tier only moves by correcting
+    // what drove it. Scoring permanence only; generation is never gated here.
+    let p9Controls = "";
+    if (p.key === "dataSensitivity") {
+      const locked = p9SensitivityLocked(step);
+      const hasBasis = FIELD_EDIT_DEFS.sensitivity.keys.some((key) => gridCellValue(step, key));
+      const btnCss = "background:#0d1b2e;color:#00d4b4;border:1px solid #1e4a44;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;";
+      if (locked) {
+        p9Controls = `
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px;">
+            <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#00d4b4;background:#0c2a26;border:1px solid #1e4a44;border-radius:99px;padding:2px 10px;">🔒 Locked by you — re-extraction can't change it</span>
+            <button type="button" data-sc-p9-edit style="${btnCss}">Reclassify</button>
+          </div>`;
+      } else if (hasBasis) {
+        p9Controls = `
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+            <button type="button" data-sc-p9-lock style="${btnCss}">Confirm &amp; lock</button>
+            <button type="button" data-sc-p9-edit style="background:#0d1b2e;color:#8899aa;border:1px solid #1e3350;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;">Edit basis</button>
+          </div>`;
+      } else {
+        p9Controls = `
+          <div style="margin-top:6px;">
+            <button type="button" data-sc-p9-edit style="${btnCss}">Set sensitivity</button>
+          </div>`;
+      }
+    }
     return `
       <div data-sc-row="${p.key}" style="display:flex;align-items:flex-start;gap:12px;padding:8px 0;border-top:1px solid #1e3350;">
         <div style="flex:1;min-width:0;">
           <div style="font-size:13px;color:#e8f4ff;">P${p.n} ${escapeHtml(p.name)}</div>
           <div data-sc-reason title="Click to expand" style="font-size:12px;color:#8899aa;line-height:1.4;margin-top:2px;cursor:pointer;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;">${escapeHtml(reason)}</div>
           ${evidenceHtml}
+          ${p9Controls}
         </div>
         <div style="display:flex;gap:4px;flex-shrink:0;">${buttons}</div>
       </div>`;
@@ -6180,6 +6209,35 @@ function wireScoringCards(container) {
         scoringOverrides = {};
         scoringOverridesStepId = root.dataset.stepId;
         paintScoringCard(root);
+        return;
+      }
+      // PR 31 Slice 3: P9 confirm-to-lock / reclassify. Lock is a provenance
+      // promotion via patchField; Reclassify routes through the same field
+      // editor + live re-score as a grid-cell edit. Neither touches recipe
+      // generation.
+      const p9Lock = event.target.closest("[data-sc-p9-lock]");
+      if (p9Lock && root.contains(p9Lock)) {
+        const step = analysisGridSteps().find((item) => item.id === root.dataset.stepId);
+        if (!step) return;
+        if (lockP9Sensitivity(step)) {
+          persistState();
+          toast("Data sensitivity confirmed and locked — re-extraction can't change it.");
+          renderAnalysisStudio();
+        } else {
+          toast("State the data sensitivity first, then lock it.");
+        }
+        return;
+      }
+      const p9Edit = event.target.closest("[data-sc-p9-edit]");
+      if (p9Edit && root.contains(p9Edit)) {
+        const step = analysisGridSteps().find((item) => item.id === root.dataset.stepId);
+        if (!step) return;
+        const beforeMeta = getStepOpportunityMeta(step);
+        openFieldEditor(step, FIELD_EDIT_DEFS.sensitivity, p9Edit.getBoundingClientRect(), () => {
+          const change = explainTierChange(beforeMeta, getStepOpportunityMeta(step));
+          if (change) toast(change.message);
+          renderAnalysisStudio();
+        });
         return;
       }
       const reason = event.target.closest("[data-sc-reason]");
@@ -6613,8 +6671,8 @@ function renderAnalysisTabRecipe() {
         </div>
 
         <div style="display:flex;flex-wrap:wrap;gap:20px;margin-top:12px;font-size:12px;color:#9fb2c8;align-items:center;">
-          <span><span style="color:#5b7186;">Frequency:</span> ${escapeHtml(frequency)}</span>
-          <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Sensitivity:</span> <span style="width:8px;height:8px;border-radius:50%;background:${dot};display:inline-block;"></span> ${escapeHtml(sensitivity)}</span>
+          <span><span style="color:#5b7186;">Frequency:</span> <span data-rmeta-edit="volume" data-rmeta-step="${escapeHtml(step.id)}" role="button" tabindex="0" title="Click to edit" style="cursor:pointer;border-bottom:1px dashed #2a3f5f;">${escapeHtml(frequency)} ✎</span></span>
+          <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Sensitivity:</span> <span style="width:8px;height:8px;border-radius:50%;background:${dot};display:inline-block;"></span> <span data-rmeta-edit="sensitivity" data-rmeta-step="${escapeHtml(step.id)}" role="button" tabindex="0" title="Click to edit" style="cursor:pointer;border-bottom:1px dashed #2a3f5f;">${escapeHtml(sensitivity)} ✎</span></span>
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Pattern:</span> ${patternBadge}</span>
           ${state.workflowGrid?.workflowFamily ? `<span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Family:</span> <span style="color:${WORKFLOW_FAMILY_COLOR[state.workflowGrid.workflowFamily] || "#8899aa"};font-weight:600;">${escapeHtml(state.workflowGrid.workflowFamily)}</span></span>` : ""}
           <span><span style="color:#5b7186;">Confidence:</span> ${confidence}%</span>
@@ -6693,7 +6751,34 @@ function renderAnalysisTabRecipe() {
   wireScoringCards(container);
   wireBusinessCaseBlock(container);
   wireClassificationChips(container);
+  wireRecipeMetaEditors(container);
   container.querySelector("#exportWordRecipeBtn")?.addEventListener("click", () => exportWorkflowWord("recipe"));
+}
+
+// PR 31 Slice 3: recipe-card meta values (Frequency, Sensitivity) are edit
+// affordances onto their UNDERLYING cells via the shared field editor — the
+// same applyFieldEdit path as the grid matrix, with the live re-score toasting
+// a tier flip (the grid-tab banner is grid-tab-only).
+function wireRecipeMetaEditors(container) {
+  if (!container) return;
+  container.querySelectorAll("[data-rmeta-edit]").forEach((el) => {
+    const open = (event) => {
+      event.stopPropagation();
+      const step = analysisGridSteps().find((item) => item.id === el.dataset.rmetaStep);
+      const def = FIELD_EDIT_DEFS[el.dataset.rmetaEdit];
+      if (!step || !def) return;
+      const beforeMeta = getStepOpportunityMeta(step);
+      openFieldEditor(step, def, el.getBoundingClientRect(), () => {
+        const change = explainTierChange(beforeMeta, getStepOpportunityMeta(step));
+        if (change) toast(change.message);
+        renderAnalysisTabRecipe();
+      });
+    };
+    el.addEventListener("click", open);
+    el.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(event); }
+    });
+  });
 }
 
 // Keep the export button clickable whenever the Recipe Book is shown (it only
@@ -6814,6 +6899,47 @@ function applyFieldEdit(step, cellKey, rawValue) {
   const changed = patchField(step, layer, cellKey, next, "user-edited", 1, { refresh: true });
   if (changed && material && prior) markQuestionsReaskEligible(cellKey);
   return { changed, cleared: false, material };
+}
+
+// Reusable merged-field definitions for edit affordances OFF the grid matrix
+// (recipe-card meta values, the P9 control). Same shape as GRID_LAYER_DEF
+// fields, same underlying-real-cells contract.
+const FIELD_EDIT_DEFS = {
+  sensitivity: { label: "Sensitivity", keys: ["dataSensitivity", "regulatoryContext"] },
+  volume: { label: "Volume", keys: ["frequencyVolume", "timeTaken"] }
+};
+
+// --- PR 31 Slice 3: P9 confirm-to-lock / unlock --------------------------------
+// "Locked" is pure provenance, not a new flag: every NON-EMPTY P9 basis cell
+// (dataSensitivity / regulatoryContext) carries user provenance, so patchField's
+// precedence already refuses any ai-inferred / doc-extracted overwrite — a
+// locked P9 cannot be silently changed by re-extraction or recompute. Scoring
+// permanence ONLY: nothing here is consulted by recipe generation, and the
+// PR 30b gate's "Generate anyway" is untouched.
+function p9SensitivityLocked(step) {
+  const captured = FIELD_EDIT_DEFS.sensitivity.keys
+    .map((key) => getField(step, null, key))
+    .filter((cell) => cell && cell.value && cell.state !== "empty" && cell.state !== "unknown");
+  if (!captured.length) return false;
+  return captured.every((cell) => cell.source === "user-edited" || cell.source === "user-stated");
+}
+
+// Confirm-to-lock: re-writes each captured basis cell's CURRENT value at
+// user-edited provenance (value unchanged — the user is endorsing it). Returns
+// true when at least one basis cell is locked afterwards; false when there is
+// no captured basis to lock (the caller routes to the editor instead).
+function lockP9Sensitivity(step) {
+  if (!step) return false;
+  let anyCaptured = false;
+  FIELD_EDIT_DEFS.sensitivity.keys.forEach((key) => {
+    const cell = getField(step, null, key);
+    const value = typeof cell?.value === "string" ? cell.value.trim() : "";
+    if (!value || cell.state === "empty" || cell.state === "unknown") return;
+    anyCaptured = true;
+    if (cell.source === "user-edited" || cell.source === "user-stated") return; // already user-authoritative
+    patchField(step, GRID_CELL_LAYER[key], key, value, "user-edited", 1, { refresh: true });
+  });
+  return anyCaptured && p9SensitivityLocked(step);
 }
 
 // Floating editor for one matrix column on one step. Merged columns (e.g.
