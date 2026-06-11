@@ -6784,6 +6784,10 @@ async function confirmBulkSessionPatterns(sessionId) {
 // One block per session: a family selector and, per step, a pattern selector
 // with a verified tick. Selectors (not popovers) keep a dense multi-row grid
 // usable; "Confirm all" bulk-verifies a session in one click.
+// Containment (user feedback at 61 sessions): sessions with zero captured
+// steps are hidden outright — nothing to classify — and each remaining session
+// renders as its own collapsed <details> (title + family + verified count),
+// so the panel is a short list, not several screens of empty blocks.
 function bulkClassificationReviewHtml() {
   const library = getCombinedSessionLibrary();
   if (!library.length) return "";
@@ -6801,27 +6805,39 @@ function bulkClassificationReviewHtml() {
 
   let verifiedTotal = 0;
   let patternTotal = 0;
+  const sessionSummaryCss = "cursor:pointer;display:flex;align-items:center;gap:10px;padding:8px 12px;list-style:none;";
   const blocks = library.map((entry) => {
     const id = entry.sessionId || entry.id;
     const name = entry.workflowName || entry.name || "Untitled workflow";
     const sessionState = bulkSessionState(entry);
     if (!sessionState) {
+      // Remote-only summary (state not fetched yet): the summary's stepCount is
+      // all we know — zero steps means nothing to classify, hide it too.
+      const stepCount = Number(entry.stepCount);
+      if (!Number.isFinite(stepCount) || stepCount < 1) return "";
       return `
-        <div style="border:1px solid #16263a;border-radius:8px;padding:10px 12px;margin-bottom:8px;background:#0d1b2a;">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-            <strong style="font-size:13px;color:#dde8f5;">${escapeHtml(name)}</strong>
+        <details data-bulk-session="${escapeHtml(id)}" style="border:1px solid #16263a;border-radius:8px;margin-bottom:8px;background:#0d1b2a;">
+          <summary style="${sessionSummaryCss}">
+            <strong style="font-size:13px;color:#dde8f5;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(name)}</strong>
+            <span style="font-size:11px;color:#5b7186;">${stepCount} step${stepCount === 1 ? "" : "s"} · not loaded</span>
+          </summary>
+          <div style="padding:0 12px 10px;">
             <button type="button" data-bulk-load="${escapeHtml(id)}" style="background:#102338;color:#00d4b4;border:1px solid #1e3350;border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer;">Load classification</button>
           </div>
-        </div>`;
+        </details>`;
     }
     const steps = Array.isArray(sessionState.workflowGrid?.steps) ? sessionState.workflowGrid.steps : [];
+    // Containment: nothing to classify in a step-less session — hide it.
+    if (!steps.length) return "";
     const family = sessionState.workflowGrid?.workflowFamily || "";
     const familyColor = WORKFLOW_FAMILY_COLOR[family] || "#5b7186";
+    let sessionVerified = 0;
+    let sessionPatterns = 0;
     const rows = steps.map((step, index) => {
       const verified = bulkReviewVerifiedPattern(step);
       const pattern = stepPrimaryPattern(step);
-      if (pattern) patternTotal += 1;
-      if (verified) verifiedTotal += 1;
+      if (pattern) { patternTotal += 1; sessionPatterns += 1; }
+      if (verified) { verifiedTotal += 1; sessionVerified += 1; }
       const tick = verified
         ? `<span title="Verified — user-confirmed label" style="color:#00d4b4;font-size:13px;">✓</span>`
         : `<span title="Unverified — AI-inferred or extracted" style="color:#5b7186;font-size:13px;">○</span>`;
@@ -6832,17 +6848,27 @@ function bulkClassificationReviewHtml() {
           <select data-bulk-pattern-session="${escapeHtml(id)}" data-bulk-pattern-step="${escapeHtml(step.id)}" style="${selectCss}">${patternOptions(pattern)}</select>
         </div>`;
     }).join("");
+    const verifiedBadge = sessionPatterns
+      ? `<span style="font-size:11px;color:${sessionVerified === sessionPatterns ? "#00d4b4" : "#7a93b4"};">${sessionVerified}/${sessionPatterns} verified</span>`
+      : `<span style="font-size:11px;color:#5b7186;">no patterns</span>`;
     return `
-      <div style="border:1px solid #16263a;border-radius:8px;padding:10px 12px;margin-bottom:8px;background:#0d1b2a;">
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px;">
+      <details data-bulk-session="${escapeHtml(id)}" style="border:1px solid #16263a;border-radius:8px;margin-bottom:8px;background:#0d1b2a;">
+        <summary style="${sessionSummaryCss}">
           <strong style="font-size:13px;color:#dde8f5;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(name)}</strong>
-          <span style="font-size:11px;color:${familyColor};">Family:</span>
-          <select data-bulk-family-session="${escapeHtml(id)}" style="${selectCss}">${familyOptions(family)}</select>
-          <button type="button" data-bulk-confirm="${escapeHtml(id)}" title="Mark every pattern in this session as user-verified" style="background:#102338;color:#00d4b4;border:1px solid #1e3350;border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer;">Confirm all</button>
+          <span style="font-size:11px;color:${familyColor};">${escapeHtml(family || "Family —")}</span>
+          ${verifiedBadge}
+        </summary>
+        <div style="padding:0 12px 10px;">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px;">
+            <span style="font-size:11px;color:${familyColor};">Family:</span>
+            <select data-bulk-family-session="${escapeHtml(id)}" style="${selectCss}">${familyOptions(family)}</select>
+            <button type="button" data-bulk-confirm="${escapeHtml(id)}" title="Mark every pattern in this session as user-verified" style="background:#102338;color:#00d4b4;border:1px solid #1e3350;border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer;margin-left:auto;">Confirm all</button>
+          </div>
+          ${rows}
         </div>
-        ${rows || `<p style="font-size:12px;color:#5b7186;margin:4px 0 0;">No steps captured in this session.</p>`}
-      </div>`;
-  }).join("");
+      </details>`;
+  }).filter(Boolean).join("");
+  if (!blocks) return "";
 
   const summary = patternTotal
     ? `${verifiedTotal} of ${patternTotal} pattern${patternTotal === 1 ? "" : "s"} verified`
@@ -13583,9 +13609,13 @@ function renderSavedSessionsPanel() {
   const container = document.getElementById("savedSessionsPanel");
   if (!container) return;
   // PR 33: the bulk classification review re-renders this panel after every
-  // edit — remember whether its <details> was open so the rerender doesn't
-  // snap it shut mid-review (collapsed stays the default for fresh renders).
+  // edit — remember which <details> were open (the panel and any per-session
+  // blocks) so the rerender doesn't snap them shut mid-review (collapsed stays
+  // the default for fresh renders).
   const reviewWasOpen = Boolean(container.querySelector("[data-bulk-review]")?.open);
+  const openBulkSessions = new Set(
+    [...container.querySelectorAll("[data-bulk-session]")].filter((el) => el.open).map((el) => el.dataset.bulkSession)
+  );
   const sessions = getCombinedSessionLibrary().map((entry) => ({ entry, ...sessionCardMetrics(entry) }));
   const countBadge = document.getElementById("openSessionsCount");
   if (countBadge) {
@@ -13686,6 +13716,9 @@ function renderSavedSessionsPanel() {
     const review = container.querySelector("[data-bulk-review]");
     if (review) review.open = true;
   }
+  container.querySelectorAll("[data-bulk-session]").forEach((el) => {
+    if (openBulkSessions.has(el.dataset.bulkSession)) el.open = true;
+  });
   wireBulkClassificationReview(container);
   container.querySelectorAll("[data-load-session]").forEach((button) => {
     button.addEventListener("click", () => {
