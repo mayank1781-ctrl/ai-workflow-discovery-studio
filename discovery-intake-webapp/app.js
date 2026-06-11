@@ -6663,7 +6663,10 @@ function wireClassificationChips(container) {
       if (!step) return;
       if (applyPatternEdit(step, pattern)) {
         persistState();
-        toast(`Pattern set to ${pattern} — regenerating recipe.`);
+        // Don't promise regeneration: generateRecipePrompt routes through the
+        // PR 30b gate, which may intercept and surface its panel instead of
+        // landing a new prompt. State the fact; let the flow speak for itself.
+        toast(`Pattern set to ${pattern}.`);
         renderAnalysisTabRecipe();
         // Normal flow: the PR 30b gate may intercept; rotation only on landing.
         generateRecipePrompt(stepId);
@@ -6671,6 +6674,215 @@ function wireClassificationChips(container) {
         toast("Pattern unchanged.");
         closeMenus();
       }
+    });
+  });
+}
+
+// --- PR 33 Slice 3: Portfolio bulk classification review ---------------------
+// A confirm/correct surface for AI pattern + workflow family across EVERY saved
+// session, building the verified labeled set PR 35 will train against. The hard
+// rule (steer 3): cross-session writes go through load -> patchField -> save,
+// never a raw edit to stored JSON. A "verified" label is simply one whose
+// aiPattern cell carries user provenance — confirming promotes ai-inferred to
+// user-edited without changing the value; correcting writes a new pattern.
+
+// A pattern is "verified" once its cell source is user provenance (the same
+// precedence patchField enforces). ai-inferred / doc-extracted are unverified.
+function bulkReviewVerifiedPattern(step) {
+  const source = step?.cells?.aiPattern?.source || "";
+  return source === "user-edited" || source === "user-stated";
+}
+
+// Resolve a saved session's full state from a library entry. Local + cached
+// entries carry .state inline; remote-only summaries don't (they need a fetch),
+// so those render a "Load classification" affordance instead of inline chips.
+function bulkSessionState(entry) {
+  return entry?.state && typeof entry.state === "object" ? entry.state : null;
+}
+
+// The single cross-session commit path. Loads the target session's full state
+// (live state when it's the open session; a fresh clone otherwise), runs the
+// mutate() callback — which MUST go through patchField for cell writes — then
+// saves through the normal library + server save funcs. Never touches stored
+// JSON directly. mutate() returns true when it changed something.
+async function commitCrossSessionClassification(sessionId, mutate) {
+  if (!sessionId) return false;
+  if (sessionId === state.sessionMeta?.id) {
+    if (!mutate(state)) return false;
+    persistState();
+    saveSessionToServer(state);
+    return true;
+  }
+  const saved = await getSessionStateById(sessionId);
+  if (!saved) {
+    toast("Couldn't load that session to update its classification.");
+    return false;
+  }
+  const loaded = normalizeLoadedState(structuredClone(saved));
+  if (!mutate(loaded)) return false;
+  loaded.sessionMeta = loaded.sessionMeta || {};
+  loaded.sessionMeta.updatedAt = new Date().toISOString();
+  saveSessionToLibrary(loaded);
+  await saveSessionToServer(loaded);
+  return true;
+}
+
+// Correct a step's pattern in any session. Reuses applyPatternEdit so the write
+// is the exact user-edited patchField the in-session chip uses.
+async function applyBulkPatternEdit(sessionId, stepId, pattern) {
+  const changed = await commitCrossSessionClassification(sessionId, (target) => {
+    const step = (target.workflowGrid?.steps || []).find((item) => item.id === stepId);
+    return step ? applyPatternEdit(step, pattern) : false;
+  });
+  if (changed) {
+    toast(`Pattern set to ${pattern}.`);
+    renderSessionLibrary();
+  }
+}
+
+// Correct a session's workflow family (workflow-level metadata, not a cell).
+async function applyBulkFamilyEdit(sessionId, family) {
+  const clean = String(family || "").trim();
+  const changed = await commitCrossSessionClassification(sessionId, (target) => {
+    if (!target.workflowGrid || target.workflowGrid.workflowFamily === clean) return false;
+    target.workflowGrid.workflowFamily = clean;
+    return true;
+  });
+  if (changed) {
+    toast(`Family set to ${family}.`);
+    renderSessionLibrary();
+  }
+}
+
+// Confirm-all: promote every populated pattern in a session to user-edited
+// provenance WITHOUT changing the chosen label, marking them verified for PR 35.
+// Re-applying the same pattern at user-edited rank upgrades an ai-inferred /
+// doc-extracted cell; already-verified cells are skipped by the guard below
+// (so confirm is idempotent and reports an honest count).
+async function confirmBulkSessionPatterns(sessionId) {
+  let confirmedCount = 0;
+  const changed = await commitCrossSessionClassification(sessionId, (target) => {
+    let any = false;
+    (target.workflowGrid?.steps || []).forEach((step) => {
+      const pattern = stepPrimaryPattern(step);
+      if (pattern && !bulkReviewVerifiedPattern(step) && applyPatternEdit(step, pattern)) {
+        any = true;
+        confirmedCount += 1;
+      }
+    });
+    return any;
+  });
+  if (changed) {
+    toast(`Confirmed ${confirmedCount} pattern${confirmedCount === 1 ? "" : "s"} as verified.`);
+    renderSessionLibrary();
+  } else {
+    toast("All patterns in this session are already verified.");
+  }
+}
+
+// Builds the collapsible review panel that sits above the saved-session cards.
+// One block per session: a family selector and, per step, a pattern selector
+// with a verified tick. Selectors (not popovers) keep a dense multi-row grid
+// usable; "Confirm all" bulk-verifies a session in one click.
+function bulkClassificationReviewHtml() {
+  const library = getCombinedSessionLibrary();
+  if (!library.length) return "";
+  const patternOptions = (selected) =>
+    [`<option value="">— no pattern —</option>`]
+      .concat(Object.keys(AI_PATTERNS).map((name) =>
+        `<option value="${escapeHtml(name)}"${name === selected ? " selected" : ""}>${escapeHtml(name)}</option>`))
+      .join("");
+  const familyOptions = (selected) =>
+    [`<option value="">— unset —</option>`]
+      .concat(Object.keys(WORKFLOW_FAMILY_COLOR).map((name) =>
+        `<option value="${escapeHtml(name)}"${name === selected ? " selected" : ""}>${escapeHtml(name)}</option>`))
+      .join("");
+  const selectCss = "background:#0d1b2e;color:#dde8f5;border:1px solid #1e3350;border-radius:6px;padding:3px 8px;font-size:12px;cursor:pointer;";
+
+  let verifiedTotal = 0;
+  let patternTotal = 0;
+  const blocks = library.map((entry) => {
+    const id = entry.sessionId || entry.id;
+    const name = entry.workflowName || entry.name || "Untitled workflow";
+    const sessionState = bulkSessionState(entry);
+    if (!sessionState) {
+      return `
+        <div style="border:1px solid #16263a;border-radius:8px;padding:10px 12px;margin-bottom:8px;background:#0d1b2a;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <strong style="font-size:13px;color:#dde8f5;">${escapeHtml(name)}</strong>
+            <button type="button" data-bulk-load="${escapeHtml(id)}" style="background:#102338;color:#00d4b4;border:1px solid #1e3350;border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer;">Load classification</button>
+          </div>
+        </div>`;
+    }
+    const steps = Array.isArray(sessionState.workflowGrid?.steps) ? sessionState.workflowGrid.steps : [];
+    const family = sessionState.workflowGrid?.workflowFamily || "";
+    const familyColor = WORKFLOW_FAMILY_COLOR[family] || "#5b7186";
+    const rows = steps.map((step, index) => {
+      const verified = bulkReviewVerifiedPattern(step);
+      const pattern = stepPrimaryPattern(step);
+      if (pattern) patternTotal += 1;
+      if (verified) verifiedTotal += 1;
+      const tick = verified
+        ? `<span title="Verified — user-confirmed label" style="color:#00d4b4;font-size:13px;">✓</span>`
+        : `<span title="Unverified — AI-inferred or extracted" style="color:#5b7186;font-size:13px;">○</span>`;
+      return `
+        <div style="display:flex;align-items:center;gap:10px;padding:4px 0;">
+          ${tick}
+          <span style="flex:1;min-width:0;font-size:12px;color:#9fb2c8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(stepDisplayName(step, index))}</span>
+          <select data-bulk-pattern-session="${escapeHtml(id)}" data-bulk-pattern-step="${escapeHtml(step.id)}" style="${selectCss}">${patternOptions(pattern)}</select>
+        </div>`;
+    }).join("");
+    return `
+      <div style="border:1px solid #16263a;border-radius:8px;padding:10px 12px;margin-bottom:8px;background:#0d1b2a;">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px;">
+          <strong style="font-size:13px;color:#dde8f5;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(name)}</strong>
+          <span style="font-size:11px;color:${familyColor};">Family:</span>
+          <select data-bulk-family-session="${escapeHtml(id)}" style="${selectCss}">${familyOptions(family)}</select>
+          <button type="button" data-bulk-confirm="${escapeHtml(id)}" title="Mark every pattern in this session as user-verified" style="background:#102338;color:#00d4b4;border:1px solid #1e3350;border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer;">Confirm all</button>
+        </div>
+        ${rows || `<p style="font-size:12px;color:#5b7186;margin:4px 0 0;">No steps captured in this session.</p>`}
+      </div>`;
+  }).join("");
+
+  const summary = patternTotal
+    ? `${verifiedTotal} of ${patternTotal} pattern${patternTotal === 1 ? "" : "s"} verified`
+    : "No patterns captured yet";
+  return `
+    <details style="margin-bottom:14px;background:#0f1f33;border:1px solid #1e3350;border-radius:10px;padding:0 12px;">
+      <summary style="cursor:pointer;padding:12px 0;font-size:13px;font-weight:700;color:#dde8f5;list-style:none;display:flex;align-items:center;gap:8px;">
+        <i data-lucide="check-check" style="width:15px;height:15px;color:#00d4b4;"></i>
+        Classification review
+        <span style="font-weight:500;font-size:11px;color:#7a93b4;margin-left:auto;">${summary}</span>
+      </summary>
+      <div style="padding-bottom:12px;">
+        <p style="font-size:11px;color:#5b7186;margin:0 0 10px;">Confirm or correct the AI pattern and workflow family on every saved session. Edits are user-verified and saved straight to each session.</p>
+        ${blocks}
+      </div>
+    </details>`;
+}
+
+// Wires the review panel's selectors + buttons. Every write routes through the
+// cross-session commit path (load -> patchField -> save) — the handlers never
+// touch stored JSON directly.
+function wireBulkClassificationReview(container) {
+  if (!container) return;
+  container.querySelectorAll("[data-bulk-pattern-session]").forEach((select) => {
+    select.addEventListener("change", () => {
+      applyBulkPatternEdit(select.dataset.bulkPatternSession, select.dataset.bulkPatternStep, select.value);
+    });
+  });
+  container.querySelectorAll("[data-bulk-family-session]").forEach((select) => {
+    select.addEventListener("change", () => {
+      applyBulkFamilyEdit(select.dataset.bulkFamilySession, select.value);
+    });
+  });
+  container.querySelectorAll("[data-bulk-confirm]").forEach((button) => {
+    button.addEventListener("click", () => confirmBulkSessionPatterns(button.dataset.bulkConfirm));
+  });
+  container.querySelectorAll("[data-bulk-load]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await getSessionStateById(button.dataset.bulkLoad);
+      renderSessionLibrary();
     });
   });
 }
@@ -13522,7 +13734,7 @@ function renderSessionLibrary() {
     refreshIcons();
     return;
   }
-  els.sessionLibraryList.innerHTML = library.map(sessionLibraryCard).join("");
+  els.sessionLibraryList.innerHTML = bulkClassificationReviewHtml() + library.map(sessionLibraryCard).join("");
   els.sessionLibraryList.querySelectorAll("[data-session-action]").forEach((button) => {
     button.addEventListener("click", () => {
       const id = button.dataset.sessionId;
@@ -13532,6 +13744,7 @@ function renderSessionLibrary() {
       if (action === "delete") deleteSessionFromLibrary(id);
     });
   });
+  wireBulkClassificationReview(els.sessionLibraryList);
   refreshIcons();
 }
 
