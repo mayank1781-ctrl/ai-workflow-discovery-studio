@@ -4234,8 +4234,9 @@ function questionIntentId(intentKeys) {
 }
 
 // Record that a question with this intent was asked. Dedupe: an existing entry
-// is updated in place (askCount, latest wording); a retired intent is never
-// reopened. Returns the entry, or null for an empty intent.
+// is updated in place (askCount, latest wording). A retired intent stays
+// retired UNLESS a user edit made it re-ask eligible (PR 31: emptying or
+// materially changing the field) — then asking it reopens the entry.
 function recordAskedQuestion(intentKeys, text) {
   const intent = questionIntentId(intentKeys);
   if (!intent) return null;
@@ -4243,7 +4244,15 @@ function recordAskedQuestion(intentKeys, text) {
   const now = new Date().toISOString();
   const existing = state.questionHistory.find((entry) => entry.intent === intent);
   if (existing) {
-    if (existing.status !== "retired") {
+    if (existing.status === "retired" && existing.reaskEligible) {
+      existing.status = "open";
+      existing.reaskEligible = false;
+      existing.retiredBy = "";
+      existing.retiredAt = "";
+      existing.askCount = (existing.askCount || 1) + 1;
+      existing.text = String(text || existing.text || "");
+      existing.lastAskedAt = now;
+    } else if (existing.status !== "retired") {
       existing.askCount = (existing.askCount || 1) + 1;
       existing.text = String(text || existing.text || "");
       existing.lastAskedAt = now;
@@ -4298,6 +4307,88 @@ function retireQuestionsForCell(cellKey, source, confidence) {
     }
   });
   return changed;
+}
+
+// --- PR 31: the retirement exception -----------------------------------------
+// Retirement said "this question is answered". Two user edits break that
+// premise and re-enter the intent into the ask pool:
+//   - EMPTYING the field: the answer is gone → the question reopens NOW
+//     (reopenQuestionsForCell, hooked from patchField's clear path).
+//   - MATERIALLY changing the field: the user just supplied the new answer, so
+//     the entry stays retired — but it becomes re-ask ELIGIBLE: the next
+//     recordAskedQuestion for that intent may reopen it instead of being
+//     silently deduped away (markQuestionsReaskEligible).
+// Trivial edits (whitespace/case/punctuation or a small typo fix — see
+// isMaterialFieldChange) change neither status nor eligibility.
+
+function reopenQuestionsForCell(cellKey) {
+  const history = Array.isArray(state.questionHistory) ? state.questionHistory : [];
+  let changed = false;
+  history.forEach((entry) => {
+    if (!entry || entry.status !== "retired") return;
+    if (!String(entry.intent || "").split("+").includes(cellKey)) return;
+    entry.status = "open";
+    entry.reaskEligible = false;
+    entry.retiredBy = "";
+    entry.retiredAt = "";
+    changed = true;
+  });
+  return changed;
+}
+
+function markQuestionsReaskEligible(cellKey) {
+  const history = Array.isArray(state.questionHistory) ? state.questionHistory : [];
+  let changed = false;
+  history.forEach((entry) => {
+    if (!entry || entry.status !== "retired" || entry.reaskEligible) return;
+    if (!String(entry.intent || "").split("+").includes(cellKey)) return;
+    entry.reaskEligible = true;
+    changed = true;
+  });
+  return changed;
+}
+
+// Normalized comparison for the materiality test: case, runs of whitespace and
+// edge punctuation never make an edit material.
+function fieldEditNormalize(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/^[\s.,;:!?]+|[\s.,;:!?]+$/g, "")
+    .trim();
+}
+
+// Bounded Levenshtein distance: returns early with limit+1 once the distance
+// provably exceeds limit (we only ever care about small distances).
+function fieldEditDistance(a, b, limit) {
+  if (Math.abs(a.length - b.length) > limit) return limit + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const row = [i];
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const v = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + cost);
+      row.push(v);
+      if (v < rowMin) rowMin = v;
+    }
+    if (rowMin > limit) return limit + 1;
+    prev = row;
+  }
+  return prev[b.length];
+}
+
+// An edit is MATERIAL when the normalized values differ by more than a typo:
+// distance above max(2, 20% of the longer value). Whitespace/case/punctuation
+// edits normalize equal; "recieve"→"receive" style fixes fall under the typo
+// allowance; rewording or changing the substance of the answer is material.
+function isMaterialFieldChange(prior, next) {
+  const a = fieldEditNormalize(prior);
+  const b = fieldEditNormalize(next);
+  if (a === b) return false;
+  if (!a || !b) return true; // emptying/filling is always material
+  const allowance = Math.max(2, Math.ceil(Math.max(a.length, b.length) * 0.2));
+  return fieldEditDistance(a, b, allowance) > allowance;
 }
 
 // Key-question fields whose value exists but rests only on ai-inferred
@@ -5001,10 +5092,13 @@ function renderAnalysisTabGrid() {
     layer.fields.map((f) => `<th style="padding:8px 10px;text-align:left;background:#09131f;border:1px solid #152236;color:${layer.color};font-size:0.66rem;font-weight:600;letter-spacing:0.03em;white-space:nowrap;">${escapeHtml(f.label)}</th>`)
   ).join("");
   const flatFields = GRID_LAYER_DEF.flatMap((layer) => layer.fields);
+  // PR 31: every matrix cell is an Edit affordance — click opens the field
+  // editor on the column's UNDERLYING cells (merged columns expose each real
+  // cell as its own row; writes only ever go through patchField).
   const gridRows = steps.map((s, i) =>
-    `<tr>${flatFields.map((f) => {
+    `<tr>${flatFields.map((f, fi) => {
       const v = fieldValue(s, f, i);
-      return `<td style="padding:6px 10px;border:1px solid #152236;vertical-align:top;font-size:0.72rem;color:${v ? "#c8d8e8" : "#2a3f5f"};" title="${escapeHtml(v)}">${v ? escapeHtml(truncate(v, 60)) : "—"}</td>`;
+      return `<td data-fedit-step="${escapeHtml(s.id)}" data-fedit-field="${fi}" role="button" tabindex="0" style="padding:6px 10px;border:1px solid #152236;vertical-align:top;font-size:0.72rem;color:${v ? "#c8d8e8" : "#2a3f5f"};cursor:pointer;" title="${escapeHtml(v ? `${v} — click to edit` : "Click to add a value")}">${v ? escapeHtml(truncate(v, 60)) : "—"}<span style="color:#2a3f5f;font-size:10px;margin-left:6px;">✎</span></td>`;
     }).join("")}</tr>`
   ).join("");
   const matrix = `
@@ -5020,6 +5114,7 @@ function renderAnalysisTabGrid() {
     </div>`;
 
   container.innerHTML = header + stats + panels + matrix;
+  wireGridCellEditors(container);
 }
 
 // --- TAB 2: AI Opportunities --------------------------------------------------
@@ -6610,6 +6705,141 @@ function applyPatternEdit(step, pattern) {
   const clean = String(pattern || "").trim();
   if (!step || !clean) return false;
   return patchField(step, "meta", "aiPattern", [{ pattern: clean, confidence: 1 }], "user-edited", 1, { refresh: true });
+}
+
+// --- PR 31: field-level correction --------------------------------------------
+// The one edit path for string grid cells (aiPattern keeps its own chip). Same
+// shape as applyPatternEdit: user-edited provenance at confidence 1, refresh so
+// an explicit edit always lands. Retirement-exception semantics:
+//   - non-empty write → patchField retires the intent (existing hook); if the
+//     change was MATERIAL the intent is then marked re-ask eligible;
+//   - empty write → patchField's clear path empties the cell and reopens the
+//     intent immediately.
+// Returns { changed, cleared, material } so callers can word their toast.
+function applyFieldEdit(step, cellKey, rawValue) {
+  if (!step || cellKey === "aiPattern" || !GRID_CELL_KEYS.includes(cellKey)) {
+    return { changed: false, cleared: false, material: false };
+  }
+  const layer = GRID_CELL_LAYER[cellKey];
+  const prior = typeof getField(step, layer, cellKey)?.value === "string"
+    ? getField(step, layer, cellKey).value
+    : "";
+  const next = String(rawValue ?? "").trim();
+  if (!next) {
+    const changed = patchField(step, layer, cellKey, "", "user-edited", 1, { clear: true });
+    return { changed, cleared: changed, material: changed };
+  }
+  const material = isMaterialFieldChange(prior, next);
+  const changed = patchField(step, layer, cellKey, next, "user-edited", 1, { refresh: true });
+  if (changed && material && prior) markQuestionsReaskEligible(cellKey);
+  return { changed, cleared: false, material };
+}
+
+// Floating editor for one matrix column on one step. Merged columns (e.g.
+// Sensitivity = dataSensitivity + regulatoryContext) list each underlying cell
+// as its own labeled row with a provenance badge; saving routes every changed
+// row through applyFieldEdit. Singleton: opening a second editor closes the
+// first; Esc or an outside click closes without saving.
+let fieldEditorEl = null;
+
+function closeFieldEditor() {
+  if (!fieldEditorEl) return;
+  fieldEditorEl.remove();
+  fieldEditorEl = null;
+  document.removeEventListener("mousedown", fieldEditorOutsideClick, true);
+}
+
+function fieldEditorOutsideClick(event) {
+  if (fieldEditorEl && !fieldEditorEl.contains(event.target)) closeFieldEditor();
+}
+
+function openFieldEditor(step, field, anchorRect, onSaved) {
+  closeFieldEditor();
+  const keys = field.keys.filter((key) => key !== "aiPattern");
+  if (!keys.length) return;
+  const rowsHtml = keys.map((key) => {
+    const cell = getField(step, null, key);
+    const value = typeof cell?.value === "string" ? cell.value : "";
+    const badge = cell?.value ? provenanceBadgeHtml(cell.source, cell.confidence) : "";
+    return `
+      <div style="margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+          <span style="font-size:11px;color:#7a93b4;text-transform:uppercase;letter-spacing:0.05em;">${escapeHtml(CELL_PLAIN_NAMES[key] || key)}</span>
+          ${badge}
+        </div>
+        <textarea data-fedit-input="${escapeHtml(key)}" rows="2" style="width:100%;box-sizing:border-box;background:#0d1b2e;color:#dde8f5;border:1px solid #1e3350;border-radius:6px;padding:6px 8px;font-size:12px;font-family:inherit;resize:vertical;">${escapeHtml(value)}</textarea>
+      </div>`;
+  }).join("");
+
+  fieldEditorEl = document.createElement("div");
+  fieldEditorEl.setAttribute("data-field-editor", "");
+  const top = Math.min(anchorRect.bottom + 6, window.innerHeight - 60);
+  const left = Math.min(anchorRect.left, Math.max(8, window.innerWidth - 380));
+  fieldEditorEl.style.cssText = `position:fixed;top:${top}px;left:${left}px;z-index:90;width:360px;max-height:60vh;overflow:auto;background:#0f1f33;border:1px solid #1e3350;border-radius:10px;padding:14px 16px;box-shadow:0 10px 30px rgba(0,0,0,0.5);`;
+  fieldEditorEl.innerHTML = `
+    <div style="font-size:12px;font-weight:700;color:#e8f4ff;margin-bottom:10px;">${escapeHtml(field.label)}</div>
+    ${rowsHtml}
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px;">
+      <button type="button" data-fedit-cancel style="background:#0d1b2e;color:#8899aa;border:1px solid #1e3350;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;">Cancel</button>
+      <button type="button" data-fedit-save style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer;">Save</button>
+    </div>`;
+  document.body.appendChild(fieldEditorEl);
+
+  const save = () => {
+    const updated = [];
+    const cleared = [];
+    keys.forEach((key) => {
+      const input = fieldEditorEl.querySelector(`[data-fedit-input="${key}"]`);
+      if (!input) return;
+      const prior = typeof getField(step, null, key)?.value === "string" ? getField(step, null, key).value : "";
+      if (input.value.trim() === prior.trim()) return; // untouched row
+      const result = applyFieldEdit(step, key, input.value);
+      if (result.cleared) cleared.push(CELL_PLAIN_NAMES[key] || key);
+      else if (result.changed) updated.push(CELL_PLAIN_NAMES[key] || key);
+    });
+    closeFieldEditor();
+    if (!updated.length && !cleared.length) {
+      toast("No changes to save.");
+      return;
+    }
+    persistState();
+    const parts = [];
+    if (updated.length) parts.push(`Updated ${updated.join(", ")}`);
+    if (cleared.length) parts.push(`Cleared ${cleared.join(", ")} — its question is back in the ask pool`);
+    toast(`${parts.join(". ")}.`);
+    if (typeof onSaved === "function") onSaved({ updated, cleared });
+  };
+
+  fieldEditorEl.querySelector("[data-fedit-save]")?.addEventListener("click", save);
+  fieldEditorEl.querySelector("[data-fedit-cancel]")?.addEventListener("click", closeFieldEditor);
+  fieldEditorEl.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); closeFieldEditor(); }
+  });
+  document.addEventListener("mousedown", fieldEditorOutsideClick, true);
+  fieldEditorEl.querySelector("textarea")?.focus();
+}
+
+// Wires every matrix cell rendered by renderAnalysisTabGrid. Re-rendering the
+// grid after a save repaints values, coverage stats, and badges from state.
+function wireGridCellEditors(container) {
+  if (!container) return;
+  const flat = GRID_LAYER_DEF.flatMap((layer) => layer.fields);
+  container.querySelectorAll("[data-fedit-step]").forEach((td) => {
+    const open = () => {
+      const step = analysisGridSteps().find((item) => item.id === td.dataset.feditStep);
+      const field = flat[Number(td.dataset.feditField)];
+      if (!step || !field) return;
+      openFieldEditor(step, field, td.getBoundingClientRect(), () => {
+        // PR 31 Slice 2 hooks the live re-score here; for now the grid repaint
+        // keeps every derived figure honest.
+        renderAnalysisTabGrid();
+      });
+    };
+    td.addEventListener("click", open);
+    td.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); }
+    });
+  });
 }
 
 // Family edit (workflow-level — sessions are single-workflow; the family is
@@ -28741,6 +28971,20 @@ function patchField(step, layer, cellKey, value, source, confidence, options = {
       return true;
     }
     return false;
+  }
+
+  // PR 31: options.clear empties a captured cell — USER provenance only (an
+  // extraction must never blank a field). The answer is gone, so instead of
+  // retiring, the cell's intent REOPENS (the retirement exception's clear arm).
+  if (options.clear) {
+    if (source !== "user-edited" && source !== "user-stated") {
+      console.warn(`[grid] patchField refused non-user clear of ${cellKey} (source "${source}")`);
+      return false;
+    }
+    if (!existing || !existing.value || existing.state === "empty") return false;
+    target.cells[cellKey] = { value: "", state: "empty", confidence: 0, source };
+    if (typeof reopenQuestionsForCell === "function") reopenQuestionsForCell(cellKey);
+    return true;
   }
 
   const isArrayValue = Array.isArray(value);
