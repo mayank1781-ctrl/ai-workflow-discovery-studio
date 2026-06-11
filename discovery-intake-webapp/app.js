@@ -6741,16 +6741,57 @@ function applyFieldEdit(step, cellKey, rawValue) {
 // row through applyFieldEdit. Singleton: opening a second editor closes the
 // first; Esc or an outside click closes without saving.
 let fieldEditorEl = null;
+let fieldEditorReposition = null;
 
 function closeFieldEditor() {
   if (!fieldEditorEl) return;
   fieldEditorEl.remove();
   fieldEditorEl = null;
   document.removeEventListener("mousedown", fieldEditorOutsideClick, true);
+  if (fieldEditorReposition) {
+    window.removeEventListener("resize", fieldEditorReposition);
+    fieldEditorReposition = null;
+  }
 }
 
 function fieldEditorOutsideClick(event) {
   if (fieldEditorEl && !fieldEditorEl.contains(event.target)) closeFieldEditor();
+}
+
+// PR 31 Slice 1a (containment): pure placement math for the floating editor —
+// guarantees the popup is FULLY within the viewport so Save/Cancel are always
+// reachable (the bug: a bottom-row cell pushed a fixed-position editor past the
+// fold with no way to scroll to it). Strategy, in order: place below the cell
+// if it fits; else flip above if that fits; else pick the side with more room
+// and cap maxHeight to it (the editor scrolls internally). top/left are then
+// clamped so the (possibly capped) box sits inside [margin, viewport-margin].
+// Returns { top, left, maxHeight }. Kept DOM-free so the containment invariants
+// are unit-testable.
+function computeFieldEditorPosition({ anchorTop, anchorBottom, anchorLeft, naturalHeight, width, viewportW, viewportH, margin = 8, gap = 6 }) {
+  const spaceBelow = viewportH - anchorBottom - gap - margin;
+  const spaceAbove = anchorTop - gap - margin;
+  let top;
+  let maxHeight;
+  if (naturalHeight <= spaceBelow) {
+    top = anchorBottom + gap;
+    maxHeight = spaceBelow;
+  } else if (naturalHeight <= spaceAbove) {
+    top = anchorTop - gap - naturalHeight;
+    maxHeight = spaceAbove;
+  } else if (spaceBelow >= spaceAbove) {
+    top = anchorBottom + gap;
+    maxHeight = spaceBelow;
+  } else {
+    maxHeight = spaceAbove;
+    top = anchorTop - gap - maxHeight;
+  }
+  // Never let the cap collapse the popup to nothing on a tiny viewport.
+  maxHeight = Math.max(120, Math.min(maxHeight, viewportH - 2 * margin));
+  const boxHeight = Math.min(naturalHeight, maxHeight);
+  top = Math.max(margin, Math.min(top, viewportH - boxHeight - margin));
+  let left = Math.min(anchorLeft, viewportW - width - margin);
+  left = Math.max(margin, left);
+  return { top, left, maxHeight };
 }
 
 function openFieldEditor(step, field, anchorRect, onSaved) {
@@ -6771,11 +6812,12 @@ function openFieldEditor(step, field, anchorRect, onSaved) {
       </div>`;
   }).join("");
 
+  const EDITOR_WIDTH = 360;
   fieldEditorEl = document.createElement("div");
   fieldEditorEl.setAttribute("data-field-editor", "");
-  const top = Math.min(anchorRect.bottom + 6, window.innerHeight - 60);
-  const left = Math.min(anchorRect.left, Math.max(8, window.innerWidth - 380));
-  fieldEditorEl.style.cssText = `position:fixed;top:${top}px;left:${left}px;z-index:90;width:360px;max-height:60vh;overflow:auto;background:#0f1f33;border:1px solid #1e3350;border-radius:10px;padding:14px 16px;box-shadow:0 10px 30px rgba(0,0,0,0.5);`;
+  // Insert first (off-screen, uncapped) so we can measure the natural height,
+  // then place it fully within the viewport.
+  fieldEditorEl.style.cssText = `position:fixed;top:-9999px;left:-9999px;z-index:90;width:${EDITOR_WIDTH}px;overflow:auto;background:#0f1f33;border:1px solid #1e3350;border-radius:10px;padding:14px 16px;box-shadow:0 10px 30px rgba(0,0,0,0.5);`;
   fieldEditorEl.innerHTML = `
     <div style="font-size:12px;font-weight:700;color:#e8f4ff;margin-bottom:10px;">${escapeHtml(field.label)}</div>
     ${rowsHtml}
@@ -6784,6 +6826,26 @@ function openFieldEditor(step, field, anchorRect, onSaved) {
       <button type="button" data-fedit-save style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer;">Save</button>
     </div>`;
   document.body.appendChild(fieldEditorEl);
+
+  const place = () => {
+    const naturalHeight = fieldEditorEl.scrollHeight;
+    const { top, left, maxHeight } = computeFieldEditorPosition({
+      anchorTop: anchorRect.top,
+      anchorBottom: anchorRect.bottom,
+      anchorLeft: anchorRect.left,
+      naturalHeight,
+      width: EDITOR_WIDTH,
+      viewportW: window.innerWidth,
+      viewportH: window.innerHeight
+    });
+    fieldEditorEl.style.top = `${top}px`;
+    fieldEditorEl.style.left = `${left}px`;
+    fieldEditorEl.style.maxHeight = `${maxHeight}px`;
+  };
+  place();
+  // Re-clamp if the viewport changes while the editor is open.
+  fieldEditorReposition = place;
+  window.addEventListener("resize", fieldEditorReposition);
 
   const save = () => {
     const updated = [];

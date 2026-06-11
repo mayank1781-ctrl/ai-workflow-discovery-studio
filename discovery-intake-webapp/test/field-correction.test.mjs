@@ -17,6 +17,7 @@ function correctionSandbox() {
   const fns = buildSandbox(source, {
     consts: ["GRID_CELL_KEYS", "GRID_SOURCE_RANK", "GRID_CELL_LAYER"],
     functions: [
+      "computeFieldEditorPosition",
       "applyFieldEdit",
       "patchField",
       "getField",
@@ -116,6 +117,35 @@ test("materiality rule: whitespace/case/punctuation and small typos are trivial;
   assert.equal(isMaterialFieldChange("Daily at 9am", "Monthly, after close"), true, "different answer");
   assert.equal(isMaterialFieldChange("", "Anything"), true, "filling an empty field is material");
   assert.equal(isMaterialFieldChange("Excel", "Excel, Outlook, and the trade booking system"), true, "substantial expansion");
+});
+
+test("editor containment: the popup stays fully inside the viewport for every anchor", () => {
+  const { computeFieldEditorPosition } = correctionSandbox();
+  const margin = 8;
+  const width = 360;
+  const W = 1280;
+  const H = 720;
+  // A cell near the bottom edge (the reported bug), a tall editor, plus top,
+  // right, and a viewport too short to hold the natural height.
+  const cases = [
+    { name: "bottom-row cell, tall editor", anchorTop: 690, anchorBottom: 712, anchorLeft: 600, naturalHeight: 420, viewportH: H },
+    { name: "top-row cell", anchorTop: 40, anchorBottom: 62, anchorLeft: 20, naturalHeight: 300, viewportH: H },
+    { name: "far-right cell", anchorTop: 300, anchorBottom: 322, anchorLeft: 1260, naturalHeight: 200, viewportH: H },
+    { name: "editor taller than viewport", anchorTop: 360, anchorBottom: 382, anchorLeft: 500, naturalHeight: 2000, viewportH: H },
+    { name: "very short viewport", anchorTop: 300, anchorBottom: 322, anchorLeft: 500, naturalHeight: 500, viewportH: 240 }
+  ];
+  for (const c of cases) {
+    const { top, left, maxHeight } = computeFieldEditorPosition({
+      anchorTop: c.anchorTop, anchorBottom: c.anchorBottom, anchorLeft: c.anchorLeft,
+      naturalHeight: c.naturalHeight, width, viewportW: W, viewportH: c.viewportH
+    });
+    const boxHeight = Math.min(c.naturalHeight, maxHeight);
+    assert.ok(top >= margin, `${c.name}: top within top margin (${top})`);
+    assert.ok(top + boxHeight <= c.viewportH - margin + 0.001, `${c.name}: bottom (Save/Cancel) within viewport (${top}+${boxHeight} <= ${c.viewportH})`);
+    assert.ok(left >= margin, `${c.name}: left within margin (${left})`);
+    assert.ok(left + width <= W - margin + 0.001, `${c.name}: right edge within viewport (${left})`);
+    assert.ok(maxHeight >= 120 || maxHeight === c.viewportH - 2 * margin, `${c.name}: cap not collapsed (${maxHeight})`);
+  }
 });
 
 test("patchField clear path is user-only and never blanks via extraction sources", () => {
