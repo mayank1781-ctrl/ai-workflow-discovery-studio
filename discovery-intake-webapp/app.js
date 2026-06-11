@@ -4403,14 +4403,26 @@ function modelQuestionIntent(text) {
 // untouched (the slot still records under its canonical intent). Unmapped
 // "model:…" questions can never match a cell, so they never compete. First
 // match in artifact/question order wins (deterministic).
-function modelQuestionForCells(cells) {
+//
+// `claimed` (Slice 4a fix): an optional Set threaded across a surface's slots
+// so a single doc question's wording is consumed by AT MOST ONE slot — without
+// it, the sensitivity question (cells dataSensitivity+regulatoryContext) is
+// taken by BOTH the dataSensitivity and regulatoryContext slots and renders
+// twice. The first slot to claim it keeps the phrasing; the next falls back to
+// canonical wording (both slots, both intents, survive — only wording dedupes).
+function modelQuestionForCells(cells, claimed = null) {
   const targets = Array.isArray(cells) ? cells : [cells];
   if (!targets.length) return "";
   const artifacts = Array.isArray(state.evidenceArtifacts) ? state.evidenceArtifacts : [];
   for (const artifact of artifacts) {
     for (const question of artifact.followUpQuestions || []) {
+      const text = String(question).trim();
+      if (!text || (claimed && claimed.has(text))) continue;
       const mapped = modelQuestionIntent(question);
-      if (mapped.some((key) => targets.includes(key))) return String(question).trim();
+      if (mapped.some((key) => targets.includes(key))) {
+        if (claimed) claimed.add(text);
+        return text;
+      }
     }
   }
   return "";
@@ -4529,8 +4541,11 @@ function renderInlineKeyQuestions() {
   // the WORDING for that slot (data-gap-key keeps the canonical intent, so
   // dedupe/retirement are unchanged). Confirm-lane wording stays canonical —
   // those confirm an ai-inferred value, not re-ask the document's question.
+  // `claimedWording` keeps one doc question from filling two slots (gaps map in
+  // render order, so the first to claim a phrasing keeps it).
+  const claimedWording = new Set();
   const top3 = [
-    ...gaps.map((field) => ({ ...field, confirm: false, q: modelQuestionForCells([field.key]) || field.q })),
+    ...gaps.map((field) => ({ ...field, confirm: false, q: modelQuestionForCells([field.key], claimedWording) || field.q })),
     ...confirms.map((field) => ({ ...field, confirm: true, q: `Confirm: ${field.q}` }))
   ].slice(0, 3);
   // The signature includes the wording so a late-arriving artifact's phrasing
@@ -7565,8 +7580,10 @@ function renderRecipeGatePanel(stepId, gate) {
   if (!body) return;
   // Slice 4a: same wording substitution as the inline key questions — the
   // doc's phrasing fills the slot, data-gate-cells keeps the canonical intent.
+  // A per-panel claim set keeps one doc question from filling two slots.
+  const claimedWording = new Set();
   const questions = gate.askable.map((gap) => {
-    const q = modelQuestionForCells(gap.cells) || gap.q;
+    const q = modelQuestionForCells(gap.cells, claimedWording) || gap.q;
     return `
     <div data-gate-question="${escapeHtml(q)}" data-gate-cells="${escapeHtml(gap.cells.join("+"))}" role="button" tabindex="0" style="background:#0d1b2a;border:1px solid #1e3350;border-radius:8px;padding:9px 12px;margin-bottom:6px;cursor:pointer;font-size:12px;color:#cfe0f0;line-height:1.4;">
       <span style="color:#f59e0b;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-right:8px;">${escapeHtml(gap.label)}</span>${escapeHtml(q)}

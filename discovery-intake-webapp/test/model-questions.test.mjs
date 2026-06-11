@@ -112,16 +112,44 @@ test("modelQuestionForCells: the doc's phrasing wins a slot only when its cells 
   assert.equal(modelQuestionForCells(["dataSensitivity"]), "", "no artifacts -> canonical wording everywhere");
 });
 
+test("no duplicate visible wording: a doc question is claimed by at most one slot per surface", () => {
+  const { modelQuestionForCells, state } = sandbox();
+  // The sensitivity question maps to BOTH dataSensitivity and regulatoryContext
+  // — the two distinct KEY_QUESTION_FIELDS gap intents that rendered it twice.
+  state.evidenceArtifacts = [
+    { id: "ev-1", followUpQuestions: ["Is any client-confidential or regulated data involved here?"] }
+  ];
+  const claimed = new Set();
+  // Slots map in render order, sharing one claim set (as the builders do).
+  const slot1 = modelQuestionForCells(["dataSensitivity"], claimed);
+  const slot2 = modelQuestionForCells(["regulatoryContext"], claimed);
+  assert.equal(slot1, "Is any client-confidential or regulated data involved here?", "first slot takes the doc wording");
+  assert.equal(slot2, "", "second slot does NOT repeat it -> caller keeps canonical wording");
+
+  // Without a shared set the old double-render returns (proves the set is the fix).
+  assert.equal(modelQuestionForCells(["dataSensitivity"]), modelQuestionForCells(["regulatoryContext"]),
+    "unclaimed lookups both match the same question (the bug, now guarded by the claim set)");
+
+  // A second distinct doc question still fills its own slot.
+  state.evidenceArtifacts = [
+    { id: "ev-1", followUpQuestions: ["Is any client-confidential or regulated data involved here?", "How often does this run each week?"] }
+  ];
+  const claimed2 = new Set();
+  assert.ok(modelQuestionForCells(["dataSensitivity"], claimed2));
+  assert.equal(modelQuestionForCells(["timeTaken", "frequencyVolume"], claimed2), "How often does this run each week?",
+    "a different doc question is unaffected by an earlier claim");
+});
+
 test("builder pins: both reachable surfaces substitute wording, intents stay canonical, slots stay <=3", () => {
   // Slice 4a re-landed carry-item 3 on the two surfaces that actually render —
   // the dead per-artifact evidence list is gone (ghost-host lesson from PR 33).
   const inline = extractFunction(source, "renderInlineKeyQuestions");
-  assert.ok(inline.includes("modelQuestionForCells([field.key]) || field.q"), "key-questions slot takes the doc's wording");
+  assert.ok(inline.includes("modelQuestionForCells([field.key], claimedWording) || field.q"), "key-questions slot takes the doc's wording, threading a claim set");
   assert.ok(inline.includes('data-gap-key="${escapeHtml(field.key)}"'), "intent stays the canonical cell key");
   assert.ok(inline.includes(".slice(0, 3)"), "slot count unchanged");
 
   const gatePanel = extractFunction(source, "renderRecipeGatePanel");
-  assert.ok(gatePanel.includes("modelQuestionForCells(gap.cells) || gap.q"), "gate slot takes the doc's wording");
+  assert.ok(gatePanel.includes("modelQuestionForCells(gap.cells, claimedWording) || gap.q"), "gate slot takes the doc's wording, threading a claim set");
   assert.ok(gatePanel.includes('data-gate-cells="${escapeHtml(gap.cells.join("+"))}"'), "intent stays the canonical cell set");
 
   const card = extractFunction(source, "evidenceArtifactCard");
