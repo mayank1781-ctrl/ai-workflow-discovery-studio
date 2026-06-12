@@ -12143,6 +12143,26 @@ body[data-app-mode="interview"] .discovery-start-button {
   transform: none;
 }
 
+/* Polish item 3: dim + click-block the page behind the open Saved Sessions
+   popup. The overlay lives on body::before because the topbar's
+   backdrop-filter makes it a containing block — a fixed overlay inside the
+   <details> would clamp to the topbar instead of covering the viewport.
+   A click on the overlay lands outside #openSessionsMenu, so the existing
+   outside-click handler closes the menu. The topbar is lifted above the dim
+   while the menu is open (it's one stacking context, popover included). */
+body:has(#openSessionsMenu[open])::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(4, 9, 18, 0.6);
+}
+
+body:has(#openSessionsMenu[open]) .session-topbar {
+  position: relative;
+  z-index: 45;
+}
+
 /* --- Stage 1a: document-first upload entry point ------------------------- */
 .document-upload-panel {
   margin-bottom: var(--future-space-5);

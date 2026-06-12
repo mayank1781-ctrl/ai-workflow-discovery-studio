@@ -7290,6 +7290,26 @@ function wireClassificationChips(container) {
 // aiPattern cell carries user provenance — confirming promotes ai-inferred to
 // user-edited without changing the value; correcting writes a new pattern.
 
+// Polish item 8: review-panel filters. Module state (the tier-change banner
+// pattern) so the values survive the panel's re-render after every edit.
+let bulkReviewUnverifiedOnly = false;
+let bulkReviewSearchTerm = "";
+
+// Case-insensitive substring match for the panel's search box.
+function bulkReviewNameMatches(name, term) {
+  const needle = String(term || "").trim().toLowerCase();
+  return !needle || String(name || "").toLowerCase().includes(needle);
+}
+
+// Session-level filter: search matches the display name; "unverified only"
+// hides sessions whose every captured pattern is already verified. A session
+// with no patterns yet stays visible — it still needs classification.
+function bulkReviewSessionVisible(name, sessionVerified, sessionPatterns, unverifiedOnly, searchTerm) {
+  if (!bulkReviewNameMatches(name, searchTerm)) return false;
+  if (unverifiedOnly && sessionPatterns > 0 && sessionVerified >= sessionPatterns) return false;
+  return true;
+}
+
 // A pattern is "verified" once its cell source is user provenance (the same
 // precedence patchField enforces). ai-inferred / doc-extracted are unverified.
 function bulkReviewVerifiedPattern(step) {
@@ -7409,6 +7429,9 @@ function bulkClassificationReviewHtml() {
 
   let verifiedTotal = 0;
   let patternTotal = 0;
+  // Sessions that survive the zero-step containment, BEFORE the item-8 filters
+  // — when filters hide every block, the panel still renders its controls.
+  let classifiableCount = 0;
   const sessionSummaryCss = "cursor:pointer;display:flex;align-items:center;gap:10px;padding:8px 12px;list-style:none;";
   const blocks = library.map((entry) => {
     const id = entry.sessionId || entry.id;
@@ -7419,6 +7442,9 @@ function bulkClassificationReviewHtml() {
       // all we know — zero steps means nothing to classify, hide it too.
       const stepCount = Number(entry.stepCount);
       if (!Number.isFinite(stepCount) || stepCount < 1) return "";
+      classifiableCount += 1;
+      // Verified state is unknown until loaded — only the search filters these.
+      if (!bulkReviewSessionVisible(name, 0, 0, bulkReviewUnverifiedOnly, bulkReviewSearchTerm)) return "";
       return `
         <details data-bulk-session="${escapeHtml(id)}" style="border:1px solid #16263a;border-radius:8px;margin-bottom:8px;background:#0d1b2a;">
           <summary style="${sessionSummaryCss}">
@@ -7433,6 +7459,7 @@ function bulkClassificationReviewHtml() {
     const steps = Array.isArray(sessionState.workflowGrid?.steps) ? sessionState.workflowGrid.steps : [];
     // Containment: nothing to classify in a step-less session — hide it.
     if (!steps.length) return "";
+    classifiableCount += 1;
     const family = sessionState.workflowGrid?.workflowFamily || "";
     const familyColor = WORKFLOW_FAMILY_COLOR[family] || "#5b7186";
     let sessionVerified = 0;
@@ -7455,6 +7482,9 @@ function bulkClassificationReviewHtml() {
     const verifiedBadge = sessionPatterns
       ? `<span style="font-size:11px;color:${sessionVerified === sessionPatterns ? "#00d4b4" : "#7a93b4"};">${sessionVerified}/${sessionPatterns} verified</span>`
       : `<span style="font-size:11px;color:#5b7186;">no patterns</span>`;
+    // Item-8 filters apply AFTER the verified/pattern totals accumulate, so
+    // the summary line keeps describing the whole library, not the filter.
+    if (!bulkReviewSessionVisible(name, sessionVerified, sessionPatterns, bulkReviewUnverifiedOnly, bulkReviewSearchTerm)) return "";
     return `
       <details data-bulk-session="${escapeHtml(id)}" style="border:1px solid #16263a;border-radius:8px;margin-bottom:8px;background:#0d1b2a;">
         <summary style="${sessionSummaryCss}">
@@ -7472,11 +7502,21 @@ function bulkClassificationReviewHtml() {
         </div>
       </details>`;
   }).filter(Boolean).join("");
-  if (!blocks) return "";
+  // No classifiable sessions at all — no panel. (Filters that merely hide
+  // every block still render the panel, or the search box would vanish.)
+  if (!classifiableCount) return "";
 
   const summary = patternTotal
     ? `${verifiedTotal} of ${patternTotal} pattern${patternTotal === 1 ? "" : "s"} verified`
     : "No patterns captured yet";
+  const filterControls = `
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 10px;">
+      <input id="bulkReviewSearchInput" type="search" placeholder="Search sessions..." value="${escapeHtml(bulkReviewSearchTerm)}" style="flex:1;min-width:140px;background:#0d1b2e;color:#dde8f5;border:1px solid #1e3350;border-radius:6px;padding:5px 10px;font-size:12px;" />
+      <label style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#9fb2c8;cursor:pointer;white-space:nowrap;">
+        <input id="bulkReviewUnverifiedToggle" type="checkbox"${bulkReviewUnverifiedOnly ? " checked" : ""} style="accent-color:#00d4b4;cursor:pointer;" />
+        Unverified only
+      </label>
+    </div>`;
   return `
     <details data-bulk-review style="margin-bottom:14px;background:#0f1f33;border:1px solid #1e3350;border-radius:10px;padding:0 12px;">
       <summary style="cursor:pointer;padding:12px 0;font-size:13px;font-weight:700;color:#dde8f5;list-style:none;display:flex;align-items:center;gap:8px;">
@@ -7486,7 +7526,8 @@ function bulkClassificationReviewHtml() {
       </summary>
       <div style="padding-bottom:12px;">
         <p style="font-size:11px;color:#5b7186;margin:0 0 10px;">Confirm or correct the AI pattern and workflow family on every saved session. Edits are user-verified and saved straight to each session.</p>
-        ${blocks}
+        ${filterControls}
+        ${blocks || `<p style="font-size:12px;color:#5b7186;margin:0 0 10px;">No sessions match the current filter.</p>`}
       </div>
     </details>`;
 }
@@ -7517,6 +7558,25 @@ function wireBulkClassificationReview(container) {
       await getSessionStateById(button.dataset.bulkLoad);
       renderSavedSessionsPanel();
     });
+  });
+  // Polish item 8: filter wiring. Each keystroke re-renders the panel (the
+  // same full-rerender pattern every other panel edit uses), so focus and
+  // caret are restored to the rebuilt search input afterwards.
+  const searchInput = container.querySelector("#bulkReviewSearchInput");
+  searchInput?.addEventListener("input", () => {
+    bulkReviewSearchTerm = searchInput.value;
+    renderSavedSessionsPanel();
+    const rebuilt = document.getElementById("bulkReviewSearchInput");
+    if (rebuilt) {
+      rebuilt.focus();
+      const end = rebuilt.value.length;
+      rebuilt.setSelectionRange(end, end);
+    }
+  });
+  const unverifiedToggle = container.querySelector("#bulkReviewUnverifiedToggle");
+  unverifiedToggle?.addEventListener("change", () => {
+    bulkReviewUnverifiedOnly = Boolean(unverifiedToggle.checked);
+    renderSavedSessionsPanel();
   });
 }
 
@@ -14216,6 +14276,18 @@ function sessionCardMetrics(entry) {
 
 const SESSION_TIER_ORDER = { "quick-win": 0, strategic: 1, compliance: 2, speculative: 3 };
 
+// Polish item 2: visibility rule for the Open-popup session list (and its
+// count badge). Stray sessions — zero captured steps AND no user-meaningful
+// name (the derived "Untitled discovery" placeholder) — are hidden, matching
+// the bulk classification panel's existing zero-step containment. A
+// deliberately saved empty session with a real name stays visible.
+function savedSessionVisibleInList(entry) {
+  const stepCount = Number(entry?.stepCount);
+  if (Number.isFinite(stepCount) && stepCount > 0) return true;
+  const name = String(entry?.workflowName || entry?.name || "").trim();
+  return Boolean(name) && name !== "Untitled discovery";
+}
+
 function renderSavedSessionsPanel() {
   const container = document.getElementById("savedSessionsPanel");
   if (!container) return;
@@ -14227,18 +14299,22 @@ function renderSavedSessionsPanel() {
   const openBulkSessions = new Set(
     [...container.querySelectorAll("[data-bulk-session]")].filter((el) => el.open).map((el) => el.dataset.bulkSession)
   );
-  const sessions = getCombinedSessionLibrary().map((entry) => ({ entry, ...sessionCardMetrics(entry) }));
+  const library = getCombinedSessionLibrary();
+  const hiddenCount = library.filter((entry) => !savedSessionVisibleInList(entry)).length;
+  const sessions = library.filter(savedSessionVisibleInList).map((entry) => ({ entry, ...sessionCardMetrics(entry) }));
   const countBadge = document.getElementById("openSessionsCount");
   if (countBadge) {
     countBadge.textContent = String(sessions.length);
     countBadge.style.display = sessions.length ? "" : "none";
   }
   const currentId = state.sessionMeta?.id;
+  // The hidden strays are named in the header line, not silently dropped.
+  const hiddenNote = hiddenCount ? ` · ${hiddenCount} empty hidden` : "";
   const head = `
     <div class="saved-sessions-head" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
       <i data-lucide="folder-clock" style="width:14px;height:14px;color:#7a93b4;"></i>
       <strong style="font-size:12px;letter-spacing:0.04em;text-transform:uppercase;color:#7a93b4;">Saved Sessions</strong>
-      <span style="font-size:11px;color:#5b7186;margin-left:auto;">${sessions.length} saved</span>
+      <span style="font-size:11px;color:#5b7186;margin-left:auto;">${sessions.length} saved${hiddenNote}</span>
     </div>`;
   if (!sessions.length) {
     container.innerHTML = head + `<p style="font-size:12px;color:#5b7186;margin:0;">No saved sessions yet. Click <strong>Save</strong> to keep this workflow on disk.</p>`;
@@ -29473,6 +29549,12 @@ function persistState() {
   ensureDrilldownState();
   state.sessionMeta.updatedAt = new Date().toISOString();
   localStorage.setItem(CURRENT_STATE_KEY, JSON.stringify(state));
+  // Polish item 2: a contentless session never auto-saves to the library or
+  // the server — this unconditional sync was the path that accumulated the
+  // stray zero-step "Untitled discovery" rows. The current-state write above
+  // stays unconditional (refresh recovery), and the explicit Save button
+  // still server-saves whatever the user asks it to.
+  if (!sessionHasContent()) return;
   saveSessionToLibrary(state);
   scheduleServerSessionSave();
 }
