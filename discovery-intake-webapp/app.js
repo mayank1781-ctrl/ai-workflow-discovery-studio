@@ -29114,6 +29114,112 @@ function deriveLegacyCellSource(state) {
   return "";
 }
 
+// --- PR 36 Slice B1: append-only cell ledger (pure core — no wiring yet) ------
+// One entry shape everywhere:
+//   { at, kind: "capture" | "clear" | "unknown", value (string | pattern
+//     array), source (GRID_SOURCE_RANK key), confidence, refresh,
+//     originArtifactId? }
+// The PROJECTION is a pure fold that reproduces patchField's contract exactly
+// (the four rules from the 2026-06-12 ledger findings):
+//   1. highest provenance rank since the last clear wins; within a rank the
+//      latest entry wins only when it improves confidence or carries refresh;
+//   2. a clear RESETS precedence (the #134 pin) — rank competition restarts;
+//   3. entries that lose the precedence race are SHADOWED: kept as visible
+//      history, never the projection (and, in Slice B2, never firing hooks);
+//   4. projection is replay: pure, deterministic, hook-free, non-mutating.
+// Enforcement that a clear must be user-sourced stays the ACCESSOR's job at
+// append time (Slice B2), mirroring today's patchField guard.
+
+function newLedgerEntry(kind, fields = {}) {
+  const entry = {
+    at: new Date().toISOString(),
+    kind: kind === "clear" || kind === "unknown" ? kind : "capture",
+    value: fields.value ?? "",
+    source: fields.source || "",
+    confidence: typeof fields.confidence === "number" ? fields.confidence : 0,
+    refresh: Boolean(fields.refresh)
+  };
+  if (fields.originArtifactId) entry.originArtifactId = fields.originArtifactId;
+  return entry;
+}
+
+// Fold the ledger into { cell, projectedIndex }. cell is the same shape the
+// grid stores ({ value, state, confidence, source }); null when no entry ever
+// projected (caller keeps its empty default). projectedIndex names the entry
+// the projection came from (compaction must always keep it).
+function projectCellLedgerDetailed(entries) {
+  const list = Array.isArray(entries) ? entries : [];
+  let cell = null;
+  let projectedIndex = -1;
+  let capturedRank = 0; // rank of the projected CAPTURE since the last clear
+  list.forEach((entry, index) => {
+    if (!entry || typeof entry !== "object") return;
+    const incomingRank = GRID_SOURCE_RANK[entry.source];
+    if (!incomingRank) return; // invalid source never projects (rule 3)
+    if (entry.kind === "clear") {
+      cell = { value: "", state: "empty", confidence: 0, source: entry.source };
+      projectedIndex = index;
+      capturedRank = 0; // rule 2: precedence resets with the value
+      return;
+    }
+    if (entry.kind === "unknown") {
+      // Mirrors patchField: "asked but couldn't answer" records only while
+      // the cell holds no real answer, and never twice in a row.
+      if (!capturedRank && (!cell || cell.state === "empty")) {
+        cell = { value: "", state: "unknown", confidence: 0, source: entry.source };
+        projectedIndex = index;
+      }
+      return;
+    }
+    // kind "capture" — patchField's value/precedence rules, verbatim.
+    const isArrayValue = Array.isArray(entry.value);
+    const clean = isArrayValue ? entry.value : (typeof entry.value === "string" ? entry.value.trim() : "");
+    if (!clean || (isArrayValue && !clean.length)) return;
+    const conf = typeof entry.confidence === "number" ? entry.confidence : 0;
+    if (incomingRank < capturedRank) return; // rule 3: shadowed
+    if (incomingRank === capturedRank && capturedRank > 0 && !entry.refresh) {
+      const existingConfidence = typeof cell.confidence === "number" ? cell.confidence : -1;
+      if (conf <= existingConfidence) return; // same provenance: only improve
+    }
+    cell = {
+      value: clean,
+      state: incomingRank >= 3 ? "confirmed" : "inferred",
+      confidence: conf,
+      source: entry.source
+    };
+    projectedIndex = index;
+    capturedRank = incomingRank;
+  });
+  return { cell, projectedIndex };
+}
+
+function projectCellLedger(entries) {
+  return projectCellLedgerDetailed(entries).cell;
+}
+
+// Persist-time compaction (settled policy): keep ALL user-rank entries, ALL
+// clears, the currently-projected entry, and at most `keepShadowed` of the
+// most recent remaining extraction entries. Pinned invariant: compaction is
+// projection-preserving and never drops a user entry or a clear.
+function compactCellLedger(entries, keepShadowed = 3) {
+  const list = Array.isArray(entries) ? entries : [];
+  const { projectedIndex } = projectCellLedgerDetailed(list);
+  const keep = new Set();
+  const compactable = [];
+  list.forEach((entry, index) => {
+    if (!entry || typeof entry !== "object") return; // malformed entries drop
+    const rank = GRID_SOURCE_RANK[entry.source] || 0;
+    if (entry.kind === "clear" || rank >= 3 || index === projectedIndex) {
+      keep.add(index);
+      return;
+    }
+    compactable.push(index);
+  });
+  compactable.slice(-Math.max(0, keepShadowed)).forEach((index) => keep.add(index));
+  return list.filter((entry, index) => keep.has(index));
+}
+
+
 // Read accessor. step defaults to the current interview step; layer (when
 // given) is validated against the cell's canonical layer — a mismatch warns
 // but never blocks the read.
