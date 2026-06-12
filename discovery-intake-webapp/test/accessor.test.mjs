@@ -22,6 +22,10 @@ function accessorSandbox(globals = {}) {
     functions: [
       "getField",
       "patchField",
+      "ensureCellLog",
+      "newLedgerEntry",
+      "projectCellLedgerDetailed",
+      "projectCellLedger",
       "deriveLegacyCellSource",
       "gridCoverageComplete",
       "normalizeGridCell",

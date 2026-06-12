@@ -29232,8 +29232,32 @@ function getField(step, layer, cellKey) {
   return target?.cells?.[cellKey] || null;
 }
 
+// Lazily backs a cell with its ledger. Pre-migration sessions (Slice C seeds
+// real baselines) get one synthesized from the materialized cell, so an empty
+// ledger can never let a lower-provenance append shadow-jump an existing
+// user value on the first post-upgrade write.
+function ensureCellLog(target, cellKey) {
+  if (!target.cellLog || typeof target.cellLog !== "object") target.cellLog = {};
+  if (!Array.isArray(target.cellLog[cellKey])) target.cellLog[cellKey] = [];
+  const log = target.cellLog[cellKey];
+  if (!log.length) {
+    const existing = target.cells?.[cellKey];
+    if (existing && existing.value && existing.state !== "empty" && existing.state !== "unknown") {
+      log.push(newLedgerEntry("capture", {
+        value: existing.value,
+        source: existing.source || deriveLegacyCellSource(existing.state) || "ai-inferred",
+        confidence: typeof existing.confidence === "number" ? existing.confidence : 0
+      }));
+    } else if (existing && existing.state === "unknown") {
+      log.push(newLedgerEntry("unknown", { source: existing.source || "ai-inferred" }));
+    }
+  }
+  return log;
+}
+
 // Write accessor — the ONLY place a step cell is mutated. Returns true when
-// the cell changed. Rules:
+// the cell changed. Rules (unchanged since PR 30/31 — the executed suite is
+// the spec):
 //   - source must be one of GRID_SOURCE_RANK's keys;
 //   - provenance precedence: user-edited/user-stated > doc-extracted >
 //     ai-inferred. Upgrades apply; a lower-provenance write over a captured
@@ -29244,8 +29268,16 @@ function getField(step, layer, cellKey) {
 //     while the cell holds no real answer;
 //   - aiPattern accepts an array value (pattern entries); all other cells are
 //     trimmed strings.
-// Slice 2 wires question retirement here: every accepted patch is the single
-// point where a captured field can retire its open questions.
+// PR 36 Slice B2: the internals are ledger-backed. Every valid write attempt
+// APPENDS to step.cellLog[cellKey]; step.cells[cellKey] holds the materialized
+// PROJECTION (getField, serialization, and exports read what they always
+// read). Refused captures are no longer dropped — they append as SHADOWED
+// history (Invariant 1's refusal log made visible), still logged, still
+// returning false, still firing no hooks. Hooks fire ONLY here, only on a
+// live accepted append — projection/replay is hook-free by construction.
+// (The capture path's old `options.state` override is gone: no caller ever
+// passed it — "unknown" is the only state option in the codebase — and the
+// projection derives state from rank.)
 function patchField(step, layer, cellKey, value, source, confidence, options = {}) {
   if (!GRID_CELL_KEYS.includes(cellKey)) return false;
   if (!GRID_SOURCE_RANK[source]) {
@@ -29260,8 +29292,12 @@ function patchField(step, layer, cellKey, value, source, confidence, options = {
   const existing = target.cells[cellKey];
 
   if (options.state === "unknown") {
+    // Refused unknowns (cell already holds something) are API no-ops, not
+    // history — same as before the ledger.
     if (!existing || existing.state === "empty") {
-      target.cells[cellKey] = { value: "", state: "unknown", confidence: 0, source };
+      const log = ensureCellLog(target, cellKey);
+      log.push(newLedgerEntry("unknown", { source }));
+      target.cells[cellKey] = projectCellLedger(log) || newGridCell();
       return true;
     }
     return false;
@@ -29270,13 +29306,17 @@ function patchField(step, layer, cellKey, value, source, confidence, options = {
   // PR 31: options.clear empties a captured cell — USER provenance only (an
   // extraction must never blank a field). The answer is gone, so instead of
   // retiring, the cell's intent REOPENS (the retirement exception's clear arm).
+  // An invalid clear attempt (non-user source, or nothing to clear) is API
+  // misuse, not history — refused without an append.
   if (options.clear) {
     if (source !== "user-edited" && source !== "user-stated") {
       console.warn(`[grid] patchField refused non-user clear of ${cellKey} (source "${source}")`);
       return false;
     }
     if (!existing || !existing.value || existing.state === "empty") return false;
-    target.cells[cellKey] = { value: "", state: "empty", confidence: 0, source };
+    const log = ensureCellLog(target, cellKey);
+    log.push(newLedgerEntry("clear", { source }));
+    target.cells[cellKey] = projectCellLedger(log) || newGridCell();
     if (typeof reopenQuestionsForCell === "function") reopenQuestionsForCell(cellKey);
     return true;
   }
@@ -29292,17 +29332,28 @@ function patchField(step, layer, cellKey, value, source, confidence, options = {
     : 0;
   const incomingRank = GRID_SOURCE_RANK[source];
 
+  // Every valid capture attempt becomes history BEFORE the precedence
+  // decision — a refused write survives as a shadowed entry instead of
+  // vanishing into a console line.
+  const log = ensureCellLog(target, cellKey);
+  log.push(newLedgerEntry("capture", {
+    value: clean,
+    source,
+    confidence: conf,
+    refresh: Boolean(options.refresh),
+    originArtifactId: options.originArtifactId
+  }));
+
   if (incomingRank < existingRank) {
-    console.info(`[grid] kept ${existing.source || existing.state} ${cellKey} over lower-provenance ${source} write`);
+    console.info(`[grid] kept ${existing.source || existing.state} ${cellKey} over lower-provenance ${source} write (shadowed in history)`);
     return false;
   }
   if (incomingRank === existingRank && existingRank > 0 && !options.refresh) {
     const existingConfidence = typeof existing.confidence === "number" ? existing.confidence : -1;
-    if (conf <= existingConfidence) return false; // same provenance: only improve
+    if (conf <= existingConfidence) return false; // same provenance: only improve (shadowed)
   }
 
-  const cellState = options.state || (incomingRank >= 3 ? "confirmed" : "inferred");
-  target.cells[cellKey] = { value: clean, state: cellState, confidence: conf, source };
+  target.cells[cellKey] = projectCellLedger(log) || newGridCell();
   // Slice 2: every accepted capture is the one place questions retire. The
   // typeof guard keeps extraction-test sandboxes (which evaluate patchField in
   // isolation) working. "unknown" recordings deliberately do NOT retire — the
@@ -29381,9 +29432,23 @@ function recordTitle(type, record, index) {
   return record.step || `Pattern ${index + 1}`;
 }
 
+// PR 36 B2: bound per-cell history before it persists anywhere (localStorage,
+// library, server). Pure compactCellLedger per cell — pinned never to drop a
+// user entry, a clear, or the projecting entry, and never to change the
+// projection.
+function compactStateCellLogs() {
+  (state.workflowGrid?.steps || []).forEach((step) => {
+    if (!step?.cellLog || typeof step.cellLog !== "object") return;
+    Object.keys(step.cellLog).forEach((key) => {
+      step.cellLog[key] = compactCellLedger(step.cellLog[key]);
+    });
+  });
+}
+
 function persistState() {
   ensureSessionMeta();
   ensureDrilldownState();
+  compactStateCellLogs();
   state.sessionMeta.updatedAt = new Date().toISOString();
   localStorage.setItem(CURRENT_STATE_KEY, JSON.stringify(state));
   // Polish item 2: a contentless session never auto-saves to the library or
