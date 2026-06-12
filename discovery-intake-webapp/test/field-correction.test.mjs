@@ -158,3 +158,28 @@ test("patchField clear path is user-only and never blanks via extraction sources
   assert.equal(patchField(step, "flow", "output", "", "user-edited", 1, { clear: true }), true, "user clear lands");
   assert.equal(getField(step, null, "output").state, "empty");
 });
+
+// PR 36 pre-pin (ledger findings, 2026-06-12): a user CLEAR doesn't just empty
+// the cell — it RESETS PRECEDENCE. After the clear nothing is captured, so a
+// later doc-extracted or ai-inferred write lands again (re-extraction can
+// refill a deliberately emptied field). An append-only ledger projection that
+// treated the clear as "the latest user-class entry" would silently refuse
+// those writes — this pins today's reset behavior BEFORE any ledger code.
+test("post-clear precedence reset: extraction sources can refill a user-cleared cell", () => {
+  const { patchField, getField, newGridStep } = correctionSandbox();
+  const step = newGridStep();
+  patchField(step, null, "systemsTools", "Murex + Excel", "user-edited", 1, { refresh: true });
+  assert.equal(patchField(step, null, "systemsTools", "Aladdin", "doc-extracted", 0.99), false,
+    "control: doc write over a user value is refused (upgrade-only rule)");
+  assert.equal(patchField(step, null, "systemsTools", "", "user-edited", 1, { clear: true }), true);
+  assert.equal(getField(step, null, "systemsTools").state, "empty");
+  assert.equal(patchField(step, null, "systemsTools", "Aladdin", "doc-extracted", 0.8), true,
+    "doc-extracted lands after the clear — precedence reset with the value");
+  const refilled = getField(step, null, "systemsTools");
+  assert.equal(refilled.value, "Aladdin");
+  assert.equal(refilled.source, "doc-extracted");
+  assert.equal(refilled.state, "inferred");
+  assert.equal(patchField(step, null, "systemsTools", "", "user-edited", 1, { clear: true }), true);
+  assert.equal(patchField(step, null, "systemsTools", "Bloomberg AIM", "ai-inferred", 0.5), true,
+    "ai-inferred lands after a clear too");
+});
