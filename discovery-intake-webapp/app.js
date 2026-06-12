@@ -1473,6 +1473,13 @@ function bindEvents() {
 }
 
 function handleChatInputKeydown(event) {
+  // PR 31 Slice 4 (carry-item 4): Esc clears the "Answering:" context — the
+  // keyboard twin of the banner's × (which now advertises it).
+  if (event.key === "Escape" && activeGapQuestion) {
+    event.preventDefault();
+    clearActiveGapQuestion();
+    return;
+  }
   if (event.key !== "Enter" || event.shiftKey) return;
   event.preventDefault();
   sendChatMessage();
@@ -4234,8 +4241,9 @@ function questionIntentId(intentKeys) {
 }
 
 // Record that a question with this intent was asked. Dedupe: an existing entry
-// is updated in place (askCount, latest wording); a retired intent is never
-// reopened. Returns the entry, or null for an empty intent.
+// is updated in place (askCount, latest wording). A retired intent stays
+// retired UNLESS a user edit made it re-ask eligible (PR 31: emptying or
+// materially changing the field) — then asking it reopens the entry.
 function recordAskedQuestion(intentKeys, text) {
   const intent = questionIntentId(intentKeys);
   if (!intent) return null;
@@ -4243,7 +4251,15 @@ function recordAskedQuestion(intentKeys, text) {
   const now = new Date().toISOString();
   const existing = state.questionHistory.find((entry) => entry.intent === intent);
   if (existing) {
-    if (existing.status !== "retired") {
+    if (existing.status === "retired" && existing.reaskEligible) {
+      existing.status = "open";
+      existing.reaskEligible = false;
+      existing.retiredBy = "";
+      existing.retiredAt = "";
+      existing.askCount = (existing.askCount || 1) + 1;
+      existing.text = String(text || existing.text || "");
+      existing.lastAskedAt = now;
+    } else if (existing.status !== "retired") {
       existing.askCount = (existing.askCount || 1) + 1;
       existing.text = String(text || existing.text || "");
       existing.lastAskedAt = now;
@@ -4300,6 +4316,151 @@ function retireQuestionsForCell(cellKey, source, confidence) {
   return changed;
 }
 
+// --- PR 31: the retirement exception -----------------------------------------
+// Retirement said "this question is answered". Two user edits break that
+// premise and re-enter the intent into the ask pool:
+//   - EMPTYING the field: the answer is gone → the question reopens NOW
+//     (reopenQuestionsForCell, hooked from patchField's clear path).
+//   - MATERIALLY changing the field: the user just supplied the new answer, so
+//     the entry stays retired — but it becomes re-ask ELIGIBLE: the next
+//     recordAskedQuestion for that intent may reopen it instead of being
+//     silently deduped away (markQuestionsReaskEligible).
+// Trivial edits (whitespace/case/punctuation or a small typo fix — see
+// isMaterialFieldChange) change neither status nor eligibility.
+
+function reopenQuestionsForCell(cellKey) {
+  const history = Array.isArray(state.questionHistory) ? state.questionHistory : [];
+  let changed = false;
+  history.forEach((entry) => {
+    if (!entry || entry.status !== "retired") return;
+    if (!String(entry.intent || "").split("+").includes(cellKey)) return;
+    entry.status = "open";
+    entry.reaskEligible = false;
+    entry.retiredBy = "";
+    entry.retiredAt = "";
+    changed = true;
+  });
+  return changed;
+}
+
+function markQuestionsReaskEligible(cellKey) {
+  const history = Array.isArray(state.questionHistory) ? state.questionHistory : [];
+  let changed = false;
+  history.forEach((entry) => {
+    if (!entry || entry.status !== "retired" || entry.reaskEligible) return;
+    if (!String(entry.intent || "").split("+").includes(cellKey)) return;
+    entry.reaskEligible = true;
+    changed = true;
+  });
+  return changed;
+}
+
+// Normalized comparison for the materiality test: case, runs of whitespace and
+// edge punctuation never make an edit material.
+function fieldEditNormalize(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/^[\s.,;:!?]+|[\s.,;:!?]+$/g, "")
+    .trim();
+}
+
+// --- PR 31 Slice 4 (carry-item 3): model questions join the intent machinery --
+// Doc-extraction followUpQuestions are MODEL-generated free text — to give them
+// the same memory as gap/gate questions they need an intent. The mapper is
+// deterministic keyword routing onto grid cells (same style as the scoring
+// engine's keyword rules; first match wins, ordered most-specific first). A
+// question that maps to no cell gets a stable text-derived intent ("model:…")
+// so DEDUPE still applies — but with no cell linkage it can never retire via
+// patchField, which is honest: nothing in the grid answers it.
+const MODEL_QUESTION_INTENT_RULES = [
+  { cells: ["dataSensitivity", "regulatoryContext"], rx: /sensitiv|\bpii\b|\bmnpi\b|\bphi\b|confidential|regulat|complian|gdpr|\bsox\b|restricted|personal data/i },
+  { cells: ["timeTaken", "frequencyVolume"], rx: /how (long|often|much time)|minutes|hours per|volume|frequen|per (day|week|month)|how many (times|runs)/i },
+  { cells: ["exceptionBranching"], rx: /exception|edge case|error case|what happens (if|when)|goes wrong|fails?\b/i },
+  { cells: ["rulesDecisionLogic"], rx: /\brule|criteria|decision|logic|approv|threshold|escalat/i },
+  { cells: ["dataProcessing"], rx: /data (flow|process|transform|mov)|where does the data|happens to the data/i },
+  { cells: ["systemsTools"], rx: /system|tool|software|platform|application|spreadsheet|excel/i },
+  { cells: ["personaActors"], rx: /\bwho\b|which (role|team|person)|owner|responsib/i },
+  { cells: ["painFriction"], rx: /pain|friction|bottleneck|frustrat|manual effort|slow|tedious/i },
+  { cells: ["trigger"], rx: /trigger|kick.?off|initiat|what starts|when does .* (start|begin)/i },
+  { cells: ["handoff"], rx: /hand.?off|passes? to|downstream|next step after/i },
+  { cells: ["output"], rx: /output|deliverable|report|produce|end result/i }
+];
+
+function modelQuestionIntent(text) {
+  const t = String(text || "");
+  if (!t.trim()) return [];
+  for (const rule of MODEL_QUESTION_INTENT_RULES) {
+    if (rule.rx.test(t)) return rule.cells;
+  }
+  return [`model:${fieldEditNormalize(t).replace(/[^a-z0-9]+/g, "-").slice(0, 60)}`];
+}
+
+// Slice 4a: the document's own phrasing competes for the EXISTING ≤3 question
+// slots — wording only. A model follow-up substitutes for a canonical gap
+// question when its mapped cells intersect the slot's cells; slot counts,
+// intents, dedupe, retirement, and the PR 31 retirement exception are all
+// untouched (the slot still records under its canonical intent). Unmapped
+// "model:…" questions can never match a cell, so they never compete. First
+// match in artifact/question order wins (deterministic).
+//
+// `claimed` (Slice 4a fix): an optional Set threaded across a surface's slots
+// so a single doc question's wording is consumed by AT MOST ONE slot — without
+// it, the sensitivity question (cells dataSensitivity+regulatoryContext) is
+// taken by BOTH the dataSensitivity and regulatoryContext slots and renders
+// twice. The first slot to claim it keeps the phrasing; the next falls back to
+// canonical wording (both slots, both intents, survive — only wording dedupes).
+function modelQuestionForCells(cells, claimed = null) {
+  const targets = Array.isArray(cells) ? cells : [cells];
+  if (!targets.length) return "";
+  const artifacts = Array.isArray(state.evidenceArtifacts) ? state.evidenceArtifacts : [];
+  for (const artifact of artifacts) {
+    for (const question of artifact.followUpQuestions || []) {
+      const text = String(question).trim();
+      if (!text || (claimed && claimed.has(text))) continue;
+      const mapped = modelQuestionIntent(question);
+      if (mapped.some((key) => targets.includes(key))) {
+        if (claimed) claimed.add(text);
+        return text;
+      }
+    }
+  }
+  return "";
+}
+
+// Bounded Levenshtein distance: returns early with limit+1 once the distance
+// provably exceeds limit (we only ever care about small distances).
+function fieldEditDistance(a, b, limit) {
+  if (Math.abs(a.length - b.length) > limit) return limit + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const row = [i];
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const v = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + cost);
+      row.push(v);
+      if (v < rowMin) rowMin = v;
+    }
+    if (rowMin > limit) return limit + 1;
+    prev = row;
+  }
+  return prev[b.length];
+}
+
+// An edit is MATERIAL when the normalized values differ by more than a typo:
+// distance above max(2, 20% of the longer value). Whitespace/case/punctuation
+// edits normalize equal; "recieve"→"receive" style fixes fall under the typo
+// allowance; rewording or changing the substance of the answer is material.
+function isMaterialFieldChange(prior, next) {
+  const a = fieldEditNormalize(prior);
+  const b = fieldEditNormalize(next);
+  if (a === b) return false;
+  if (!a || !b) return true; // emptying/filling is always material
+  const allowance = Math.max(2, Math.ceil(Math.max(a.length, b.length) * 0.2));
+  return fieldEditDistance(a, b, allowance) > allowance;
+}
+
 // Key-question fields whose value exists but rests only on ai-inferred
 // provenance — the low-priority "confirm" lane (deprioritized, never retired).
 function aiInferredConfirmFields(steps) {
@@ -4349,7 +4510,7 @@ function renderActiveQuestionLabel() {
     label.style.cssText = "display:flex;align-items:flex-start;gap:8px;background:#0d1b2a;border:1px solid #1e3350;border-radius:6px;padding:6px 10px;margin-bottom:8px;";
     composer.insertBefore(label, input);
   }
-  label.innerHTML = `<span style="flex:1;min-width:0;font-size:12px;color:#8aa0b8;line-height:1.4;">Answering: <span style="color:#cfe0f0;">${escapeHtml(activeGapQuestion)}</span></span><span data-clear-question role="button" tabindex="0" title="Clear" style="color:#5b7186;font-size:16px;line-height:1;cursor:pointer;flex-shrink:0;">×</span>`;
+  label.innerHTML = `<span style="flex:1;min-width:0;font-size:12px;color:#8aa0b8;line-height:1.4;">Answering: <span style="color:#cfe0f0;">${escapeHtml(activeGapQuestion)}</span></span><kbd style="flex-shrink:0;font-size:10px;color:#5b7186;border:1px solid #1e3350;border-radius:4px;padding:1px 5px;line-height:1.3;font-family:inherit;" title="Press Esc to clear">Esc</kbd><span data-clear-question role="button" tabindex="0" title="Clear (Esc)" style="color:#5b7186;font-size:16px;line-height:1;cursor:pointer;flex-shrink:0;">×</span>`;
   label.querySelector("[data-clear-question]")?.addEventListener("click", clearActiveGapQuestion);
 }
 
@@ -4376,11 +4537,20 @@ function renderInlineKeyQuestions() {
     ? workflowGapFields(steps).filter((field) => questionStatusForIntent([field.key]) !== "retired")
     : [];
   const confirms = steps.length ? aiInferredConfirmFields(steps) : [];
+  // Slice 4a: a doc-extraction follow-up that maps onto a gap's cell supplies
+  // the WORDING for that slot (data-gap-key keeps the canonical intent, so
+  // dedupe/retirement are unchanged). Confirm-lane wording stays canonical —
+  // those confirm an ai-inferred value, not re-ask the document's question.
+  // `claimedWording` keeps one doc question from filling two slots (gaps map in
+  // render order, so the first to claim a phrasing keeps it).
+  const claimedWording = new Set();
   const top3 = [
-    ...gaps.map((field) => ({ ...field, confirm: false })),
+    ...gaps.map((field) => ({ ...field, confirm: false, q: modelQuestionForCells([field.key], claimedWording) || field.q })),
     ...confirms.map((field) => ({ ...field, confirm: true, q: `Confirm: ${field.q}` }))
   ].slice(0, 3);
-  const sig = top3.map((field) => `${field.key}${field.confirm ? "*" : ""}`).join(",");
+  // The signature includes the wording so a late-arriving artifact's phrasing
+  // still repaints a slot whose key/lane did not change.
+  const sig = top3.map((field) => `${field.key}${field.confirm ? "*" : ""}:${field.q}`).join("|");
   if (container.dataset.sig === sig) return; // avoid rebuild/flicker when unchanged
   container.dataset.sig = sig;
 
@@ -5001,10 +5171,13 @@ function renderAnalysisTabGrid() {
     layer.fields.map((f) => `<th style="padding:8px 10px;text-align:left;background:#09131f;border:1px solid #152236;color:${layer.color};font-size:0.66rem;font-weight:600;letter-spacing:0.03em;white-space:nowrap;">${escapeHtml(f.label)}</th>`)
   ).join("");
   const flatFields = GRID_LAYER_DEF.flatMap((layer) => layer.fields);
+  // PR 31: every matrix cell is an Edit affordance — click opens the field
+  // editor on the column's UNDERLYING cells (merged columns expose each real
+  // cell as its own row; writes only ever go through patchField).
   const gridRows = steps.map((s, i) =>
-    `<tr>${flatFields.map((f) => {
+    `<tr>${flatFields.map((f, fi) => {
       const v = fieldValue(s, f, i);
-      return `<td style="padding:6px 10px;border:1px solid #152236;vertical-align:top;font-size:0.72rem;color:${v ? "#c8d8e8" : "#2a3f5f"};" title="${escapeHtml(v)}">${v ? escapeHtml(truncate(v, 60)) : "—"}</td>`;
+      return `<td data-fedit-step="${escapeHtml(s.id)}" data-fedit-field="${fi}" role="button" tabindex="0" style="padding:6px 10px;border:1px solid #152236;vertical-align:top;font-size:0.72rem;color:${v ? "#c8d8e8" : "#2a3f5f"};cursor:pointer;" title="${escapeHtml(v ? `${v} — click to edit` : "Click to add a value")}">${v ? escapeHtml(truncate(v, 60)) : "—"}<span style="color:#2a3f5f;font-size:10px;margin-left:6px;">✎</span></td>`;
     }).join("")}</tr>`
   ).join("");
   const matrix = `
@@ -5019,7 +5192,8 @@ function renderAnalysisTabGrid() {
       </table>
     </div>`;
 
-  container.innerHTML = header + stats + panels + matrix;
+  container.innerHTML = header + tierChangeNoticeHtml() + stats + panels + matrix;
+  wireGridCellEditors(container);
 }
 
 // --- TAB 2: AI Opportunities --------------------------------------------------
@@ -5853,6 +6027,80 @@ function tierSensitivity(meta) {
   return null;
 }
 
+// --- PR 31 Slice 2: live re-score --------------------------------------------
+
+// Explains a tier flip between two scoring runs in the breakdown's own evidence
+// language. Pure: takes the before/after getStepOpportunityMeta results and
+// names the decisive principle, its score movement, and the after-run reason.
+// The override rules get named explicitly — entering/leaving Compliance is
+// always P9's doing; a Quick Win capped to Strategic with P7 at 1 is P7's.
+// Falls back to the largest mover when the flip is purely numeric (the 16/24
+// total boundaries). Returns null when the tier did not change.
+function explainTierChange(beforeMeta, afterMeta) {
+  const from = beforeMeta?.tier || "";
+  const to = afterMeta?.tier || "";
+  if (!from || !to || from === to) return null;
+  const beforePs = beforeMeta.principleScores || {};
+  const afterPs = afterMeta.principleScores || {};
+  const score = (ps, key) => Number(ps[key]?.score) || 2;
+
+  let decisive = null;
+  if (to === "compliance" && score(afterPs, "dataSensitivity") === 1) decisive = "dataSensitivity";
+  else if (from === "compliance" && score(beforePs, "dataSensitivity") === 1 && score(afterPs, "dataSensitivity") !== 1) decisive = "dataSensitivity";
+  else if (from === "quick-win" && to === "strategic" && score(afterPs, "humanJudgmentRequired") === 1 && score(beforePs, "humanJudgmentRequired") !== 1) decisive = "humanJudgmentRequired";
+  else if (from === "strategic" && to === "quick-win" && score(beforePs, "humanJudgmentRequired") === 1 && score(afterPs, "humanJudgmentRequired") !== 1) decisive = "humanJudgmentRequired";
+  if (!decisive) {
+    let best = 0;
+    SCORING_PRINCIPLES.forEach((p) => {
+      const delta = Math.abs(score(afterPs, p.key) - score(beforePs, p.key));
+      if (delta > best) { best = delta; decisive = p.key; }
+    });
+  }
+  if (!decisive) return null;
+
+  const principle = SCORING_PRINCIPLES.find((p) => p.key === decisive);
+  const fromScore = score(beforePs, decisive);
+  const toScore = score(afterPs, decisive);
+  const reason = afterPs[decisive]?.reason || "";
+  const fromLabel = scoringTierBadge(from).label;
+  const toLabel = scoringTierBadge(to).label;
+  return {
+    from,
+    to,
+    principle: decisive,
+    n: principle.n,
+    fromScore,
+    toScore,
+    message: `Tier changed: ${fromLabel} → ${toLabel}. P${principle.n} (${principle.name}) moved ${fromScore} → ${toScore}${reason ? ` — ${reason}` : "."}`
+  };
+}
+
+// Pseudo-meta for the what-if repaint: overridden principles take the override
+// score with an explicit override reason (which tierSensitivity does NOT treat
+// as "insufficient data"); untouched principles keep the AI run's score+reason.
+function composeWhatIfMeta(originalScores, originalReasons, current) {
+  const principleScores = {};
+  SCORING_PRINCIPLES.forEach((p) => {
+    const score = current[p.key] ?? originalScores[p.key] ?? 2;
+    const overridden = score !== (originalScores[p.key] ?? 2);
+    principleScores[p.key] = {
+      score,
+      reason: overridden ? "User what-if override." : (originalReasons[p.key] || "")
+    };
+  });
+  return { principleScores };
+}
+
+// Shared renderer for the tier-sensitivity warning (baseline render and the
+// live what-if repaint use the same markup).
+function scoringSensitivityWarningHtml(sensitivity) {
+  if (!sensitivity) return "";
+  return `<div style="display:flex;gap:8px;align-items:flex-start;background:#1a1500;border:1px solid #f59e0b55;border-radius:8px;padding:9px 12px;margin-top:10px;">
+        <span style="color:#f59e0b;font-size:13px;line-height:1;flex-shrink:0;margin-top:1px;">⚠</span>
+        <span style="font-size:12px;color:#f5c451;line-height:1.45;">${escapeHtml(sensitivity.message)}</span>
+      </div>`;
+}
+
 // Provenance badge (PR 30 Slice 4): the badge is the primary visual; the
 // confidence number appears only in the hover tooltip. Inline hex per source.
 function provenanceBadgeHtml(source, confidence) {
@@ -5891,34 +6139,60 @@ function scoringTransparencyBlockHtml(step) {
             </div>`).join("")}
         </div>`
       : "";
+    // PR 31 Slice 3: P9 gets explicit user control — confirm-to-lock writes the
+    // current basis at user provenance (re-extraction-proof); Reclassify opens
+    // the field editor on the basis cells so the tier only moves by correcting
+    // what drove it. Scoring permanence only; generation is never gated here.
+    let p9Controls = "";
+    if (p.key === "dataSensitivity") {
+      const locked = p9SensitivityLocked(step);
+      const hasBasis = FIELD_EDIT_DEFS.sensitivity.keys.some((key) => gridCellValue(step, key));
+      const btnCss = "background:#0d1b2e;color:#00d4b4;border:1px solid #1e4a44;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;";
+      if (locked) {
+        p9Controls = `
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px;">
+            <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#00d4b4;background:#0c2a26;border:1px solid #1e4a44;border-radius:99px;padding:2px 10px;">🔒 Locked by you — re-extraction can't change it</span>
+            <button type="button" data-sc-p9-edit style="${btnCss}">Reclassify</button>
+          </div>`;
+      } else if (hasBasis) {
+        p9Controls = `
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+            <button type="button" data-sc-p9-lock style="${btnCss}">Confirm &amp; lock</button>
+            <button type="button" data-sc-p9-edit style="background:#0d1b2e;color:#8899aa;border:1px solid #1e3350;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;">Edit basis</button>
+          </div>`;
+      } else {
+        p9Controls = `
+          <div style="margin-top:6px;">
+            <button type="button" data-sc-p9-edit style="${btnCss}">Set sensitivity</button>
+          </div>`;
+      }
+    }
     return `
       <div data-sc-row="${p.key}" style="display:flex;align-items:flex-start;gap:12px;padding:8px 0;border-top:1px solid #1e3350;">
         <div style="flex:1;min-width:0;">
           <div style="font-size:13px;color:#e8f4ff;">P${p.n} ${escapeHtml(p.name)}</div>
           <div data-sc-reason title="Click to expand" style="font-size:12px;color:#8899aa;line-height:1.4;margin-top:2px;cursor:pointer;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;">${escapeHtml(reason)}</div>
           ${evidenceHtml}
+          ${p9Controls}
         </div>
         <div style="display:flex;gap:4px;flex-shrink:0;">${buttons}</div>
       </div>`;
   }).join("");
 
-  // Slice 3: low-data warning — computed from the AI scores (the live what-if
-  // repaint deliberately does not recompute it; it reflects the AI baseline).
-  const sensitivity = tierSensitivity(meta);
-  const sensitivityHtml = sensitivity
-    ? `<div style="display:flex;gap:8px;align-items:flex-start;background:#1a1500;border:1px solid #f59e0b55;border-radius:8px;padding:9px 12px;margin-top:10px;">
-        <span style="color:#f59e0b;font-size:13px;line-height:1;flex-shrink:0;margin-top:1px;">⚠</span>
-        <span style="font-size:12px;color:#f5c451;line-height:1.45;">${escapeHtml(sensitivity.message)}</span>
-      </div>`
-    : "";
+  // PR 31 Slice 2 (carry-item 2): the warning is recomputed LIVE by
+  // paintScoringCard from the current what-if scores — this baseline render
+  // only seeds the container so there is no flash before the first paint.
+  const reasons = {};
+  SCORING_PRINCIPLES.forEach((p) => { reasons[p.key] = ps[p.key]?.reason || ""; });
+  const sensitivityHtml = scoringSensitivityWarningHtml(tierSensitivity(meta));
 
   return `
-    <div class="ds-card" data-scoring-card data-step-id="${escapeHtml(String(stepId))}" data-originals='${escapeHtml(JSON.stringify(originals))}' style="padding:14px 16px;margin-top:16px;">
+    <div class="ds-card" data-scoring-card data-step-id="${escapeHtml(String(stepId))}" data-originals='${escapeHtml(JSON.stringify(originals))}' data-reasons='${escapeHtml(JSON.stringify(reasons))}' style="padding:14px 16px;margin-top:16px;">
       <div data-sc-toggle role="button" tabindex="0" title="Click to expand or collapse the scoring breakdown" style="display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;">
         <strong style="font-size:13px;color:#e8f4ff;">Scoring breakdown (10 principles)</strong>
         <span data-sc-chevron style="flex-shrink:0;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;color:#00d4b4;font-size:15px;line-height:1;border:1px solid #1e4a44;border-radius:6px;background:#0c2a26;transition:transform 200ms ease;transform:rotate(-90deg);">▾</span>
       </div>
-      ${sensitivityHtml}
+      <div data-sc-sensitivity>${sensitivityHtml}</div>
       <div data-sc-body style="display:none;margin-top:12px;">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
           <span><span class="ds-num-teal" data-sc-total style="font-size:1.6rem;font-weight:800;">0</span><span style="color:#5b7186;font-size:1rem;font-weight:700;"> / 30</span></span>
@@ -5971,6 +6245,16 @@ function paintScoringCard(root) {
   if (modEl) modEl.style.display = modified ? "" : "none";
   const resetEl = root.querySelector("[data-sc-reset]");
   if (resetEl) resetEl.style.display = modified ? "" : "none";
+
+  // PR 31 Slice 2 (carry-item 2): the tier-sensitivity warning tracks the live
+  // what-if scores, not just the AI baseline — an override that resolves (or
+  // creates) a knife-edge updates the warning on the same repaint.
+  const warnEl = root.querySelector("[data-sc-sensitivity]");
+  if (warnEl) {
+    let reasons = {};
+    try { reasons = JSON.parse(root.dataset.reasons || "{}"); } catch { reasons = {}; }
+    warnEl.innerHTML = scoringSensitivityWarningHtml(tierSensitivity(composeWhatIfMeta(originals, reasons, current)));
+  }
 }
 
 // Wires collapse + override interactions for every scoring card in a container.
@@ -6004,6 +6288,35 @@ function wireScoringCards(container) {
         scoringOverrides = {};
         scoringOverridesStepId = root.dataset.stepId;
         paintScoringCard(root);
+        return;
+      }
+      // PR 31 Slice 3: P9 confirm-to-lock / reclassify. Lock is a provenance
+      // promotion via patchField; Reclassify routes through the same field
+      // editor + live re-score as a grid-cell edit. Neither touches recipe
+      // generation.
+      const p9Lock = event.target.closest("[data-sc-p9-lock]");
+      if (p9Lock && root.contains(p9Lock)) {
+        const step = analysisGridSteps().find((item) => item.id === root.dataset.stepId);
+        if (!step) return;
+        if (lockP9Sensitivity(step)) {
+          persistState();
+          toast("Data sensitivity confirmed and locked — re-extraction can't change it.");
+          renderAnalysisStudio();
+        } else {
+          toast("State the data sensitivity first, then lock it.");
+        }
+        return;
+      }
+      const p9Edit = event.target.closest("[data-sc-p9-edit]");
+      if (p9Edit && root.contains(p9Edit)) {
+        const step = analysisGridSteps().find((item) => item.id === root.dataset.stepId);
+        if (!step) return;
+        const beforeMeta = getStepOpportunityMeta(step);
+        openFieldEditor(step, FIELD_EDIT_DEFS.sensitivity, p9Edit.getBoundingClientRect(), () => {
+          const change = explainTierChange(beforeMeta, getStepOpportunityMeta(step));
+          if (change) toast(change.message);
+          renderAnalysisStudio();
+        });
         return;
       }
       const reason = event.target.closest("[data-sc-reason]");
@@ -6437,8 +6750,8 @@ function renderAnalysisTabRecipe() {
         </div>
 
         <div style="display:flex;flex-wrap:wrap;gap:20px;margin-top:12px;font-size:12px;color:#9fb2c8;align-items:center;">
-          <span><span style="color:#5b7186;">Frequency:</span> ${escapeHtml(frequency)}</span>
-          <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Sensitivity:</span> <span style="width:8px;height:8px;border-radius:50%;background:${dot};display:inline-block;"></span> ${escapeHtml(sensitivity)}</span>
+          <span><span style="color:#5b7186;">Frequency:</span> <span data-rmeta-edit="volume" data-rmeta-step="${escapeHtml(step.id)}" role="button" tabindex="0" title="Click to edit" style="cursor:pointer;border-bottom:1px dashed #2a3f5f;">${escapeHtml(frequency)} ✎</span></span>
+          <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Sensitivity:</span> <span style="width:8px;height:8px;border-radius:50%;background:${dot};display:inline-block;"></span> <span data-rmeta-edit="sensitivity" data-rmeta-step="${escapeHtml(step.id)}" role="button" tabindex="0" title="Click to edit" style="cursor:pointer;border-bottom:1px dashed #2a3f5f;">${escapeHtml(sensitivity)} ✎</span></span>
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Pattern:</span> ${patternBadge}</span>
           ${state.workflowGrid?.workflowFamily ? `<span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Family:</span> <span style="color:${WORKFLOW_FAMILY_COLOR[state.workflowGrid.workflowFamily] || "#8899aa"};font-weight:600;">${escapeHtml(state.workflowGrid.workflowFamily)}</span></span>` : ""}
           <span><span style="color:#5b7186;">Confidence:</span> ${confidence}%</span>
@@ -6517,7 +6830,34 @@ function renderAnalysisTabRecipe() {
   wireScoringCards(container);
   wireBusinessCaseBlock(container);
   wireClassificationChips(container);
+  wireRecipeMetaEditors(container);
   container.querySelector("#exportWordRecipeBtn")?.addEventListener("click", () => exportWorkflowWord("recipe"));
+}
+
+// PR 31 Slice 3: recipe-card meta values (Frequency, Sensitivity) are edit
+// affordances onto their UNDERLYING cells via the shared field editor — the
+// same applyFieldEdit path as the grid matrix, with the live re-score toasting
+// a tier flip (the grid-tab banner is grid-tab-only).
+function wireRecipeMetaEditors(container) {
+  if (!container) return;
+  container.querySelectorAll("[data-rmeta-edit]").forEach((el) => {
+    const open = (event) => {
+      event.stopPropagation();
+      const step = analysisGridSteps().find((item) => item.id === el.dataset.rmetaStep);
+      const def = FIELD_EDIT_DEFS[el.dataset.rmetaEdit];
+      if (!step || !def) return;
+      const beforeMeta = getStepOpportunityMeta(step);
+      openFieldEditor(step, def, el.getBoundingClientRect(), () => {
+        const change = explainTierChange(beforeMeta, getStepOpportunityMeta(step));
+        if (change) toast(change.message);
+        renderAnalysisTabRecipe();
+      });
+    };
+    el.addEventListener("click", open);
+    el.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(event); }
+    });
+  });
 }
 
 // Keep the export button clickable whenever the Recipe Book is shown (it only
@@ -6610,6 +6950,270 @@ function applyPatternEdit(step, pattern) {
   const clean = String(pattern || "").trim();
   if (!step || !clean) return false;
   return patchField(step, "meta", "aiPattern", [{ pattern: clean, confidence: 1 }], "user-edited", 1, { refresh: true });
+}
+
+// --- PR 31: field-level correction --------------------------------------------
+// The one edit path for string grid cells (aiPattern keeps its own chip). Same
+// shape as applyPatternEdit: user-edited provenance at confidence 1, refresh so
+// an explicit edit always lands. Retirement-exception semantics:
+//   - non-empty write → patchField retires the intent (existing hook); if the
+//     change was MATERIAL the intent is then marked re-ask eligible;
+//   - empty write → patchField's clear path empties the cell and reopens the
+//     intent immediately.
+// Returns { changed, cleared, material } so callers can word their toast.
+function applyFieldEdit(step, cellKey, rawValue) {
+  if (!step || cellKey === "aiPattern" || !GRID_CELL_KEYS.includes(cellKey)) {
+    return { changed: false, cleared: false, material: false };
+  }
+  const layer = GRID_CELL_LAYER[cellKey];
+  const prior = typeof getField(step, layer, cellKey)?.value === "string"
+    ? getField(step, layer, cellKey).value
+    : "";
+  const next = String(rawValue ?? "").trim();
+  if (!next) {
+    const changed = patchField(step, layer, cellKey, "", "user-edited", 1, { clear: true });
+    return { changed, cleared: changed, material: changed };
+  }
+  const material = isMaterialFieldChange(prior, next);
+  const changed = patchField(step, layer, cellKey, next, "user-edited", 1, { refresh: true });
+  if (changed && material && prior) markQuestionsReaskEligible(cellKey);
+  return { changed, cleared: false, material };
+}
+
+// Reusable merged-field definitions for edit affordances OFF the grid matrix
+// (recipe-card meta values, the P9 control). Same shape as GRID_LAYER_DEF
+// fields, same underlying-real-cells contract.
+const FIELD_EDIT_DEFS = {
+  sensitivity: { label: "Sensitivity", keys: ["dataSensitivity", "regulatoryContext"] },
+  volume: { label: "Volume", keys: ["frequencyVolume", "timeTaken"] }
+};
+
+// --- PR 31 Slice 3: P9 confirm-to-lock / unlock --------------------------------
+// "Locked" is pure provenance, not a new flag: every NON-EMPTY P9 basis cell
+// (dataSensitivity / regulatoryContext) carries user provenance, so patchField's
+// precedence already refuses any ai-inferred / doc-extracted overwrite — a
+// locked P9 cannot be silently changed by re-extraction or recompute. Scoring
+// permanence ONLY: nothing here is consulted by recipe generation, and the
+// PR 30b gate's "Generate anyway" is untouched.
+function p9SensitivityLocked(step) {
+  const captured = FIELD_EDIT_DEFS.sensitivity.keys
+    .map((key) => getField(step, null, key))
+    .filter((cell) => cell && cell.value && cell.state !== "empty" && cell.state !== "unknown");
+  if (!captured.length) return false;
+  return captured.every((cell) => cell.source === "user-edited" || cell.source === "user-stated");
+}
+
+// Confirm-to-lock: re-writes each captured basis cell's CURRENT value at
+// user-edited provenance (value unchanged — the user is endorsing it). Returns
+// true when at least one basis cell is locked afterwards; false when there is
+// no captured basis to lock (the caller routes to the editor instead).
+function lockP9Sensitivity(step) {
+  if (!step) return false;
+  let anyCaptured = false;
+  FIELD_EDIT_DEFS.sensitivity.keys.forEach((key) => {
+    const cell = getField(step, null, key);
+    const value = typeof cell?.value === "string" ? cell.value.trim() : "";
+    if (!value || cell.state === "empty" || cell.state === "unknown") return;
+    anyCaptured = true;
+    if (cell.source === "user-edited" || cell.source === "user-stated") return; // already user-authoritative
+    patchField(step, GRID_CELL_LAYER[key], key, value, "user-edited", 1, { refresh: true });
+  });
+  return anyCaptured && p9SensitivityLocked(step);
+}
+
+// Floating editor for one matrix column on one step. Merged columns (e.g.
+// Sensitivity = dataSensitivity + regulatoryContext) list each underlying cell
+// as its own labeled row with a provenance badge; saving routes every changed
+// row through applyFieldEdit. Singleton: opening a second editor closes the
+// first; Esc or an outside click closes without saving.
+let fieldEditorEl = null;
+let fieldEditorReposition = null;
+
+function closeFieldEditor() {
+  if (!fieldEditorEl) return;
+  fieldEditorEl.remove();
+  fieldEditorEl = null;
+  document.removeEventListener("mousedown", fieldEditorOutsideClick, true);
+  if (fieldEditorReposition) {
+    window.removeEventListener("resize", fieldEditorReposition);
+    fieldEditorReposition = null;
+  }
+}
+
+function fieldEditorOutsideClick(event) {
+  if (fieldEditorEl && !fieldEditorEl.contains(event.target)) closeFieldEditor();
+}
+
+// PR 31 Slice 1a (containment): pure placement math for the floating editor —
+// guarantees the popup is FULLY within the viewport so Save/Cancel are always
+// reachable (the bug: a bottom-row cell pushed a fixed-position editor past the
+// fold with no way to scroll to it). Strategy, in order: place below the cell
+// if it fits; else flip above if that fits; else pick the side with more room
+// and cap maxHeight to it (the editor scrolls internally). top/left are then
+// clamped so the (possibly capped) box sits inside [margin, viewport-margin].
+// Returns { top, left, maxHeight }. Kept DOM-free so the containment invariants
+// are unit-testable.
+function computeFieldEditorPosition({ anchorTop, anchorBottom, anchorLeft, naturalHeight, width, viewportW, viewportH, margin = 8, gap = 6 }) {
+  const spaceBelow = viewportH - anchorBottom - gap - margin;
+  const spaceAbove = anchorTop - gap - margin;
+  let top;
+  let maxHeight;
+  if (naturalHeight <= spaceBelow) {
+    top = anchorBottom + gap;
+    maxHeight = spaceBelow;
+  } else if (naturalHeight <= spaceAbove) {
+    top = anchorTop - gap - naturalHeight;
+    maxHeight = spaceAbove;
+  } else if (spaceBelow >= spaceAbove) {
+    top = anchorBottom + gap;
+    maxHeight = spaceBelow;
+  } else {
+    maxHeight = spaceAbove;
+    top = anchorTop - gap - maxHeight;
+  }
+  // Never let the cap collapse the popup to nothing on a tiny viewport.
+  maxHeight = Math.max(120, Math.min(maxHeight, viewportH - 2 * margin));
+  const boxHeight = Math.min(naturalHeight, maxHeight);
+  top = Math.max(margin, Math.min(top, viewportH - boxHeight - margin));
+  let left = Math.min(anchorLeft, viewportW - width - margin);
+  left = Math.max(margin, left);
+  return { top, left, maxHeight };
+}
+
+function openFieldEditor(step, field, anchorRect, onSaved) {
+  closeFieldEditor();
+  const keys = field.keys.filter((key) => key !== "aiPattern");
+  if (!keys.length) return;
+  const rowsHtml = keys.map((key) => {
+    const cell = getField(step, null, key);
+    const value = typeof cell?.value === "string" ? cell.value : "";
+    const badge = cell?.value ? provenanceBadgeHtml(cell.source, cell.confidence) : "";
+    return `
+      <div style="margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+          <span style="font-size:11px;color:#7a93b4;text-transform:uppercase;letter-spacing:0.05em;">${escapeHtml(CELL_PLAIN_NAMES[key] || key)}</span>
+          ${badge}
+        </div>
+        <textarea data-fedit-input="${escapeHtml(key)}" rows="2" style="width:100%;box-sizing:border-box;background:#0d1b2e;color:#dde8f5;border:1px solid #1e3350;border-radius:6px;padding:6px 8px;font-size:12px;font-family:inherit;resize:vertical;">${escapeHtml(value)}</textarea>
+      </div>`;
+  }).join("");
+
+  const EDITOR_WIDTH = 360;
+  fieldEditorEl = document.createElement("div");
+  fieldEditorEl.setAttribute("data-field-editor", "");
+  // Insert first (off-screen, uncapped) so we can measure the natural height,
+  // then place it fully within the viewport.
+  fieldEditorEl.style.cssText = `position:fixed;top:-9999px;left:-9999px;z-index:90;width:${EDITOR_WIDTH}px;overflow:auto;background:#0f1f33;border:1px solid #1e3350;border-radius:10px;padding:14px 16px;box-shadow:0 10px 30px rgba(0,0,0,0.5);`;
+  fieldEditorEl.innerHTML = `
+    <div style="font-size:12px;font-weight:700;color:#e8f4ff;margin-bottom:10px;">${escapeHtml(field.label)}</div>
+    ${rowsHtml}
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px;">
+      <button type="button" data-fedit-cancel style="background:#0d1b2e;color:#8899aa;border:1px solid #1e3350;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;">Cancel</button>
+      <button type="button" data-fedit-save style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer;">Save</button>
+    </div>`;
+  document.body.appendChild(fieldEditorEl);
+
+  const place = () => {
+    const naturalHeight = fieldEditorEl.scrollHeight;
+    const { top, left, maxHeight } = computeFieldEditorPosition({
+      anchorTop: anchorRect.top,
+      anchorBottom: anchorRect.bottom,
+      anchorLeft: anchorRect.left,
+      naturalHeight,
+      width: EDITOR_WIDTH,
+      viewportW: window.innerWidth,
+      viewportH: window.innerHeight
+    });
+    fieldEditorEl.style.top = `${top}px`;
+    fieldEditorEl.style.left = `${left}px`;
+    fieldEditorEl.style.maxHeight = `${maxHeight}px`;
+  };
+  place();
+  // Re-clamp if the viewport changes while the editor is open.
+  fieldEditorReposition = place;
+  window.addEventListener("resize", fieldEditorReposition);
+
+  const save = () => {
+    const updated = [];
+    const cleared = [];
+    keys.forEach((key) => {
+      const input = fieldEditorEl.querySelector(`[data-fedit-input="${key}"]`);
+      if (!input) return;
+      const prior = typeof getField(step, null, key)?.value === "string" ? getField(step, null, key).value : "";
+      if (input.value.trim() === prior.trim()) return; // untouched row
+      const result = applyFieldEdit(step, key, input.value);
+      if (result.cleared) cleared.push(CELL_PLAIN_NAMES[key] || key);
+      else if (result.changed) updated.push(CELL_PLAIN_NAMES[key] || key);
+    });
+    closeFieldEditor();
+    if (!updated.length && !cleared.length) {
+      toast("No changes to save.");
+      return;
+    }
+    persistState();
+    const parts = [];
+    if (updated.length) parts.push(`Updated ${updated.join(", ")}`);
+    if (cleared.length) parts.push(`Cleared ${cleared.join(", ")} — its question is back in the ask pool`);
+    toast(`${parts.join(". ")}.`);
+    if (typeof onSaved === "function") onSaved({ updated, cleared });
+  };
+
+  fieldEditorEl.querySelector("[data-fedit-save]")?.addEventListener("click", save);
+  fieldEditorEl.querySelector("[data-fedit-cancel]")?.addEventListener("click", closeFieldEditor);
+  fieldEditorEl.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); closeFieldEditor(); }
+  });
+  document.addEventListener("mousedown", fieldEditorOutsideClick, true);
+  fieldEditorEl.querySelector("textarea")?.focus();
+}
+
+// PR 31 Slice 2: the last tier flip caused by a field edit, rendered as a
+// dismissible banner at the top of the grid tab (it survives the repaint the
+// save triggers; a non-flipping edit clears it).
+let tierChangeNotice = null;
+
+function tierChangeNoticeHtml() {
+  if (!tierChangeNotice) return "";
+  return `
+    <div data-tier-notice style="display:flex;gap:10px;align-items:flex-start;background:#0c2a26;border:1px solid #00d4b455;border-left:3px solid #00d4b4;border-radius:8px;padding:10px 14px;margin:16px 20px 0;">
+      <span style="color:#00d4b4;font-size:14px;line-height:1.2;flex-shrink:0;">↻</span>
+      <span style="flex:1;min-width:0;font-size:12px;color:#bfe8df;line-height:1.5;"><strong style="color:#e8f4ff;">${escapeHtml(tierChangeNotice.stepName)}</strong> — ${escapeHtml(tierChangeNotice.message)}</span>
+      <span data-tier-notice-dismiss role="button" tabindex="0" title="Dismiss" style="color:#5b7186;font-size:16px;line-height:1;cursor:pointer;flex-shrink:0;">×</span>
+    </div>`;
+}
+
+// Wires every matrix cell rendered by renderAnalysisTabGrid. After a save the
+// step is re-scored (getStepOpportunityMeta is the single scoring source) and
+// a tier flip surfaces the explanation banner; the grid repaint keeps every
+// derived figure honest either way.
+function wireGridCellEditors(container) {
+  if (!container) return;
+  const flat = GRID_LAYER_DEF.flatMap((layer) => layer.fields);
+  container.querySelectorAll("[data-fedit-step]").forEach((td) => {
+    const open = () => {
+      const step = analysisGridSteps().find((item) => item.id === td.dataset.feditStep);
+      const field = flat[Number(td.dataset.feditField)];
+      if (!step || !field) return;
+      const beforeMeta = getStepOpportunityMeta(step);
+      const stepIndex = analysisGridSteps().indexOf(step);
+      openFieldEditor(step, field, td.getBoundingClientRect(), () => {
+        const afterMeta = getStepOpportunityMeta(step);
+        const change = explainTierChange(beforeMeta, afterMeta);
+        tierChangeNotice = change
+          ? { stepName: stepDisplayName(step, stepIndex), message: change.message }
+          : null;
+        renderAnalysisTabGrid();
+      });
+    };
+    td.addEventListener("click", open);
+    td.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); }
+    });
+  });
+  container.querySelector("[data-tier-notice-dismiss]")?.addEventListener("click", () => {
+    tierChangeNotice = null;
+    renderAnalysisTabGrid();
+  });
 }
 
 // Family edit (workflow-level — sessions are single-workflow; the family is
@@ -6974,10 +7578,17 @@ function recipeGateCheck(step) {
 function renderRecipeGatePanel(stepId, gate) {
   const body = document.querySelector(`[data-recipe-body="${stepId}"]`);
   if (!body) return;
-  const questions = gate.askable.map((gap) => `
-    <div data-gate-question="${escapeHtml(gap.q)}" data-gate-cells="${escapeHtml(gap.cells.join("+"))}" role="button" tabindex="0" style="background:#0d1b2a;border:1px solid #1e3350;border-radius:8px;padding:9px 12px;margin-bottom:6px;cursor:pointer;font-size:12px;color:#cfe0f0;line-height:1.4;">
-      <span style="color:#f59e0b;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-right:8px;">${escapeHtml(gap.label)}</span>${escapeHtml(gap.q)}
-    </div>`).join("");
+  // Slice 4a: same wording substitution as the inline key questions — the
+  // doc's phrasing fills the slot, data-gate-cells keeps the canonical intent.
+  // A per-panel claim set keeps one doc question from filling two slots.
+  const claimedWording = new Set();
+  const questions = gate.askable.map((gap) => {
+    const q = modelQuestionForCells(gap.cells, claimedWording) || gap.q;
+    return `
+    <div data-gate-question="${escapeHtml(q)}" data-gate-cells="${escapeHtml(gap.cells.join("+"))}" role="button" tabindex="0" style="background:#0d1b2a;border:1px solid #1e3350;border-radius:8px;padding:9px 12px;margin-bottom:6px;cursor:pointer;font-size:12px;color:#cfe0f0;line-height:1.4;">
+      <span style="color:#f59e0b;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-right:8px;">${escapeHtml(gap.label)}</span>${escapeHtml(q)}
+    </div>`;
+  }).join("");
   body.innerHTML = `
     <div style="background:#1a1500;border:1px solid #f59e0b55;border-radius:8px;padding:12px 14px;">
       <div style="font-size:12px;color:#f5c451;line-height:1.5;margin-bottom:10px;">${gate.gaps.length} recipe-critical field${gate.gaps.length === 1 ? " is" : "s are"} unconfirmed — answering these makes a sharper prompt:</div>
@@ -28741,6 +29352,20 @@ function patchField(step, layer, cellKey, value, source, confidence, options = {
       return true;
     }
     return false;
+  }
+
+  // PR 31: options.clear empties a captured cell — USER provenance only (an
+  // extraction must never blank a field). The answer is gone, so instead of
+  // retiring, the cell's intent REOPENS (the retirement exception's clear arm).
+  if (options.clear) {
+    if (source !== "user-edited" && source !== "user-stated") {
+      console.warn(`[grid] patchField refused non-user clear of ${cellKey} (source "${source}")`);
+      return false;
+    }
+    if (!existing || !existing.value || existing.state === "empty") return false;
+    target.cells[cellKey] = { value: "", state: "empty", confidence: 0, source };
+    if (typeof reopenQuestionsForCell === "function") reopenQuestionsForCell(cellKey);
+    return true;
   }
 
   const isArrayValue = Array.isArray(value);
