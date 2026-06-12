@@ -5815,10 +5815,15 @@ function businessCaseBlockHtml(bc) {
   const estBadge = bc.defaulted
     ? `<span class="ds-badge ds-badge-amber" style="margin-left:8px;">Estimates — refine in conversation</span>`
     : "";
-  // Rate suffix: "$Z/hr (Level)" when a level is set, else "$100/hr default".
-  const rateSuffix = bc.userRole
-    ? `$${bc.blendedRate}/hr (${BC_ROLE_LABELS[bc.userRole] || "Consultant"})`
-    : `$${bc.blendedRate}/hr default`;
+  // Rate suffix mirrors the snapshot's rateSource (polish item 7): a Settings
+  // override says so explicitly; otherwise the role label, or "default rate"
+  // when no role was set. Keyed off userRole alone, an override still read
+  // "(Level)" / "default" — dishonest about where the number came from.
+  const rateSuffix = bc.rateSource === "override"
+    ? `$${bc.blendedRate}/hr (Settings override)`
+    : bc.userRole
+      ? `$${bc.blendedRate}/hr (${BC_ROLE_LABELS[bc.userRole] || "Consultant"})`
+      : `$${bc.blendedRate}/hr (default rate)`;
 
   let callouts;
   let basis;
@@ -6358,9 +6363,15 @@ function recipeWorkflowHeaderHtml() {
   const familyOptions = Object.keys(WORKFLOW_FAMILY_COLOR).map((name) =>
     `<div data-family-option="${escapeHtml(name)}" role="button" tabindex="0" style="padding:7px 12px;font-size:12px;color:${WORKFLOW_FAMILY_COLOR[name]};cursor:pointer;white-space:nowrap;">${escapeHtml(name)}</div>`
   ).join("");
+  // Polish item 9: de-emphasized presentation — muted text and border, the
+  // family color reduced to a small dot. Same chip, same popover, same
+  // data-family-chip wiring (the logic is a settled decision; weight only).
+  const familyDot = family
+    ? `<span style="width:6px;height:6px;border-radius:50%;background:${familyColor};display:inline-block;"></span>`
+    : "";
   const familyChip = `
     <div style="position:relative;display:inline-block;margin-top:6px;">
-      <button type="button" data-family-chip title="Click to change the workflow family" style="background:${familyColor}22;color:${familyColor};border:1px solid ${familyColor}55;border-radius:99px;padding:3px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;cursor:pointer;">${escapeHtml(family || "Set family")} ▾</button>
+      <button type="button" data-family-chip title="Click to change the workflow family" style="display:inline-flex;align-items:center;gap:6px;background:transparent;color:#8899aa;border:1px solid #2a3f5f;border-radius:99px;padding:2px 10px;font-size:10px;font-weight:500;letter-spacing:0.03em;cursor:pointer;">${familyDot}${escapeHtml(family || "Set family")} ▾</button>
       <div data-family-menu style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:40;background:#0d1b2e;border:1px solid #1e3350;border-radius:8px;padding:4px 0;box-shadow:0 8px 24px rgba(0,0,0,0.45);">${familyOptions}</div>
     </div>`;
   return `
@@ -6769,7 +6780,7 @@ function renderAnalysisTabRecipe() {
           <span><span style="color:#5b7186;">Frequency:</span> <span data-rmeta-edit="volume" data-rmeta-step="${escapeHtml(step.id)}" role="button" tabindex="0" title="Click to edit" style="cursor:pointer;border-bottom:1px dashed #2a3f5f;">${escapeHtml(frequency)} ✎</span></span>
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Sensitivity:</span> <span style="width:8px;height:8px;border-radius:50%;background:${dot};display:inline-block;"></span> <span data-rmeta-edit="sensitivity" data-rmeta-step="${escapeHtml(step.id)}" role="button" tabindex="0" title="Click to edit" style="cursor:pointer;border-bottom:1px dashed #2a3f5f;">${escapeHtml(sensitivity)} ✎</span></span>
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Pattern:</span> ${patternBadge}</span>
-          ${state.workflowGrid?.workflowFamily ? `<span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Family:</span> <span style="color:${WORKFLOW_FAMILY_COLOR[state.workflowGrid.workflowFamily] || "#8899aa"};font-weight:600;">${escapeHtml(state.workflowGrid.workflowFamily)}</span></span>` : ""}
+          ${state.workflowGrid?.workflowFamily ? `<span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Family:</span> <span style="display:inline-flex;align-items:center;gap:5px;color:#8899aa;"><span style="width:6px;height:6px;border-radius:50%;background:${WORKFLOW_FAMILY_COLOR[state.workflowGrid.workflowFamily] || "#8899aa"};display:inline-block;"></span>${escapeHtml(state.workflowGrid.workflowFamily)}</span></span>` : ""}
           <span><span style="color:#5b7186;">Pattern confidence:</span> ${confidence}%</span>
           ${sectionMarker(["volume", "sensitivity"])}
         </div>
