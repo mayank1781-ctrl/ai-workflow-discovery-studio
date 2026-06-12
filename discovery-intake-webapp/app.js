@@ -1243,10 +1243,6 @@ const els = {
   recapPanel: document.getElementById("recapPanel"),
   evidenceFileInput: document.getElementById("evidenceFileInput"),
   workbookImportInput: document.getElementById("workbookImportInput"),
-  evidenceReviewPanel: document.getElementById("evidenceReviewPanel"),
-  evidenceWorkbench: document.getElementById("evidenceWorkbench"),
-  evidenceWorkbenchFull: document.getElementById("evidenceWorkbenchFull"),
-  evidenceWorkbenchMetrics: document.getElementById("evidenceWorkbenchMetrics"),
   evidenceNoteInput: document.getElementById("evidenceNoteInput"),
   analyzeEvidenceNoteButton: document.getElementById("analyzeEvidenceNoteButton"),
   dictateEvidenceNoteButton: document.getElementById("dictateEvidenceNoteButton"),
@@ -1279,7 +1275,6 @@ const els = {
   sessionStatusSelect: document.getElementById("sessionStatusSelect"),
   sessionMetaSummary: document.getElementById("sessionMetaSummary"),
   liveIntakeLedger: document.getElementById("liveIntakeLedger"),
-  sessionLibraryList: document.getElementById("sessionLibraryList"),
   newSessionButton: document.getElementById("newSessionButton"),
   duplicateSessionButton: document.getElementById("duplicateSessionButton"),
   saveSessionLibraryButton: document.getElementById("saveSessionLibraryButton"),
@@ -1401,7 +1396,6 @@ function bindEvents() {
   els.saveSessionLibraryButton?.addEventListener("click", () => {
     persistState();
     saveSessionToServer(state, { immediate: true });
-    renderSessionLibrary();
     toast("Session saved to the local and server library.");
   });
   els.createPackageButton?.addEventListener("click", createHandoffPackage);
@@ -2097,8 +2091,6 @@ async function analyzeEvidenceFile(file, options = {}) {
   };
   state.evidenceArtifacts = [artifact, ...(state.evidenceArtifacts || [])].slice(0, 20);
   persistState();
-  renderEvidenceReviewPanel();
-  renderEvidenceWorkbench();
 
   if (!aiAvailable) {
     toast("Evidence uploaded. AI analysis needs server.mjs running with OPENAI_API_KEY.");
@@ -2146,8 +2138,6 @@ async function analyzeEvidenceFile(file, options = {}) {
     artifact.summary = String(error.message || error);
     artifact.warnings = [String(error.message || error)];
     persistState();
-    renderEvidenceReviewPanel();
-    renderEvidenceWorkbench();
     toast(`Could not analyze ${displayName}: ${String(error.message || error)}`);
   }
 }
@@ -2230,7 +2220,6 @@ function updateEvidenceWorkbenchDraft() {
     evidenceDictationInterim = "";
   }
   persistState();
-  renderEvidenceWorkbench();
 }
 
 function useDiscoveryDraftForEvidence() {
@@ -2244,7 +2233,6 @@ function useDiscoveryDraftForEvidence() {
   state.evidenceWorkbench.lastSource = "Discovery draft";
   if (els.evidenceNoteInput) els.evidenceNoteInput.value = text;
   persistState();
-  renderEvidenceWorkbench();
   toast("Discovery draft moved into the Evidence Analysis Workbench.");
 }
 
@@ -2257,7 +2245,6 @@ function clearEvidenceWorkbenchDraft() {
   evidenceDictationInterim = "";
   if (els.evidenceNoteInput) els.evidenceNoteInput.value = "";
   persistState();
-  renderEvidenceWorkbench();
 }
 
 async function analyzeEvidenceWorkbenchNote() {
@@ -2292,7 +2279,6 @@ async function analyzeEvidenceWorkbenchNote() {
       button.innerHTML = original;
       refreshIcons();
     }
-    renderEvidenceWorkbench();
   }
 }
 
@@ -2377,7 +2363,6 @@ function stateFromWorkbook(workbook, fileName = "imported-workbook.xlsx") {
     updatedAt: now
   };
   next.appMode = "analysis";
-  next.activeWorkbenchTab = "library";
   next.activeSection = next.steps.length ? "workflow" : "idea";
   next.activeStepIndex = 0;
   next.drilldown = {
@@ -3484,7 +3469,6 @@ function render() {
     () => renderCurrentQuestion(section),
     renderTurnSignalPanel,
     renderDiscoveryDumpMode,
-    renderAiMirror,
     renderDiscoveryPatternInterview,
     () => renderInterviewGuide(section),
     renderCaptureCoach,
@@ -3516,14 +3500,11 @@ function render() {
     renderPilotInsights,
     renderPilotFeedback,
     renderRecapPanel,
-    renderEvidenceReviewPanel,
-    renderEvidenceWorkbench,
     renderOperatorAddOnsPanel,
     renderDemoConsole,
     renderAnalysisMatrixMap,
     renderCaseComparison,
     renderLifecyclePanel,
-    renderSessionLibrary,
     renderSavedSessionsPanel,
     renderPilotControls,
     renderTestLab,
@@ -8632,58 +8613,6 @@ function handleDumpApply() {
 function handleDumpDiscard() {
   dumpExtractResult = null;
   renderDumpMode();
-}
-
-// --- AI Understanding ("AI Mirror") -------------------------------------------
-// Live plain-English summary of the current workflow grid. Summary + loading are
-// module-level (survive re-renders within the page session; no state schema
-// change). The Refresh button re-calls /api/ai-mirror.
-let aiMirrorSummary = "";
-let aiMirrorLoading = false;
-
-function renderAiMirror() {
-  const container = document.getElementById("aiMirrorPanel");
-  if (!container) return;
-  const body = aiMirrorLoading
-    ? `<p style="font-size:13px;color:#5b7186;font-style:italic;margin:0;">Analysing workflow…</p>`
-    : aiMirrorSummary
-      ? `<p style="font-size:13px;color:#dde8f5;line-height:1.55;margin:0;">${escapeHtml(aiMirrorSummary)}</p>`
-      : `<p style="font-size:13px;color:#7a93b4;margin:0;">Click Refresh to generate a plain-English summary of the workflow so far.</p>`;
-  container.innerHTML = `
-    <div style="background:#0d2137;border:1px solid #1c3b57;border-radius:10px;padding:16px;margin-bottom:14px;">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-        <h3 style="font-size:13px;font-weight:700;color:#dde8f5;margin:0;text-transform:uppercase;letter-spacing:0.04em;flex:1;">AI Understanding</h3>
-        <button type="button" id="aiMirrorRefreshBtn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:6px 14px;font-weight:600;font-size:13px;cursor:pointer;transition:opacity 0.2s;">Refresh</button>
-      </div>
-      ${body}
-    </div>`;
-  container.querySelector("#aiMirrorRefreshBtn")?.addEventListener("click", handleAiMirrorRefresh);
-}
-
-async function handleAiMirrorRefresh() {
-  if (aiMirrorLoading) return; // soft re-entrancy guard (button is never hard-disabled)
-  const steps = analysisGridSteps();
-  if (!steps.length) {
-    toast("Capture some workflow steps before generating a summary.");
-    return;
-  }
-  aiMirrorLoading = true;
-  renderAiMirror();
-  try {
-    const response = await fetch("/api/ai-mirror", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ grid: state.workflowGrid })
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data?.error || `Request failed (${response.status}).`);
-    aiMirrorSummary = typeof data.summary === "string" ? data.summary : "";
-  } catch (error) {
-    toast(error?.message || "Could not generate the summary.");
-  } finally {
-    aiMirrorLoading = false;
-    renderAiMirror();
-  }
 }
 
 // Pattern interview, hosted on the Discovery page as three stacked blocks.
@@ -14435,8 +14364,8 @@ function renderSavedSessionsPanel() {
 
   // PR 33 Slice 3: the bulk classification review mounts HERE — above the
   // summary strip, inside the Open popup. (#savedSessionsPanel is the live
-  // session-list host in index.html; #sessionLibraryList is a dead legacy id —
-  // test/bulk-classification.test.mjs pins this mount to a real host.)
+  // session-list host in index.html; the legacy ghost-host library path was
+  // removed in PR 36 Slice A — test/bulk-classification.test.mjs pins both.)
   container.innerHTML = head + bulkClassificationReviewHtml() + summaryStrip + `<div style="display:flex;flex-direction:column;gap:6px;max-height:320px;overflow:auto;">${rows}</div>`;
   if (reviewWasOpen) {
     const review = container.querySelector("[data-bulk-review]");
@@ -14491,75 +14420,6 @@ function formatSavedSessionDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
-function renderSessionLibrary() {
-  if (!els.sessionLibraryList) return;
-  ensureSessionMeta();
-  renderSessionControls();
-  const library = getCombinedSessionLibrary();
-  if (!library.length) {
-    els.sessionLibraryList.innerHTML = `
-      <div class="session-empty-state">
-        <i data-lucide="folder-clock"></i>
-        <strong>No saved intakes yet</strong>
-        <p>Use Save Session to keep this intake in the local browser library. Sample cases can also be loaded and duplicated into working sessions.</p>
-      </div>
-    `;
-    refreshIcons();
-    return;
-  }
-  els.sessionLibraryList.innerHTML = library.map(sessionLibraryCard).join("");
-  els.sessionLibraryList.querySelectorAll("[data-session-action]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const id = button.dataset.sessionId;
-      const action = button.dataset.sessionAction;
-      if (action === "load") loadSessionFromLibrary(id);
-      if (action === "duplicate") duplicateSavedSession(id);
-      if (action === "delete") deleteSessionFromLibrary(id);
-    });
-  });
-  refreshIcons();
-}
-
-function renderSessionControls() {
-  const meta = ensureSessionMeta();
-  if (els.sessionNameInput && document.activeElement !== els.sessionNameInput) {
-    els.sessionNameInput.value = meta.name || "";
-  }
-  if (els.sessionOwnerInput && document.activeElement !== els.sessionOwnerInput) {
-    els.sessionOwnerInput.value = meta.owner || "";
-  }
-  if (els.sessionDataClassificationSelect) {
-    els.sessionDataClassificationSelect.value = meta.dataClassification || "Unknown";
-  }
-  if (els.sessionStatusSelect) {
-    els.sessionStatusSelect.value = meta.status || "Discovery";
-  }
-  if (!els.sessionMetaSummary) return;
-  const summary = sessionSummaryMeta(state);
-  els.sessionMetaSummary.innerHTML = `
-    <div>
-      <span>Current session</span>
-      <strong>${escapeHtml(summary.name)}</strong>
-      <p>${escapeHtml(summary.workflowName || "Workflow not named yet")} · ${escapeHtml(summary.category)}</p>
-    </div>
-    <div>
-      <span>Data classification</span>
-      <strong>${escapeHtml(summary.dataClassification)}</strong>
-      <p>${escapeHtml(summary.status)} · ${escapeHtml(summary.source)}</p>
-    </div>
-    <div>
-      <span>Coverage</span>
-      <strong>${summary.stepCount} steps</strong>
-      <p>${summary.dataCount} data · ${summary.systemCount} systems · ${summary.decisionCount} decisions</p>
-    </div>
-    <div>
-      <span>Updated</span>
-      <strong>${escapeHtml(formatDateTime(summary.updatedAt))}</strong>
-      <p>${summary.lastPackagePath ? `Package ${escapeHtml(summary.lastPackagePath)}` : `ID ${escapeHtml(summary.id.slice(-8))}`}</p>
-    </div>
-  `;
 }
 
 function renderLiveIntakeLedger() {
@@ -14702,43 +14562,6 @@ function handoffBridgeCard(item) {
   `;
 }
 
-function sessionLibraryCard(entry) {
-  const active = entry.id === state.sessionMeta?.id;
-  const serverLabel = entry.serverStored ? "Server file" : entry.remoteOnly ? "Server only" : "Browser";
-  return `
-    <article class="session-library-card ${active ? "active" : ""}">
-      <div class="session-card-main">
-        <span>${escapeHtml(entry.status || "Discovery")} · ${escapeHtml(serverLabel)}</span>
-        <strong>${escapeHtml(entry.name || "Untitled discovery")}</strong>
-        <p>${escapeHtml(entry.workflowName || "Workflow TBD")} · ${escapeHtml(entry.category || "Category TBD")}</p>
-        <div class="session-card-tags">
-          <small>${escapeHtml(entry.dataClassification || "Unknown")}</small>
-          <small>${entry.stepCount || 0} steps</small>
-          <small>${entry.dataCount || 0} data</small>
-          <small>${entry.systemCount || 0} systems</small>
-          <small>${entry.decisionCount || 0} decisions</small>
-        </div>
-      </div>
-      <div class="session-card-side">
-        <span>${escapeHtml(formatDateTime(entry.updatedAt))}</span>
-        <div class="session-card-actions">
-          <button class="secondary-button compact" data-session-action="load" data-session-id="${escapeHtml(entry.id)}" type="button" ${active ? "disabled" : ""}>
-            <i data-lucide="${active ? "check" : "folder-open"}"></i>
-            ${active ? "Open" : "Load"}
-          </button>
-          <button class="secondary-button compact" data-session-action="duplicate" data-session-id="${escapeHtml(entry.id)}" type="button">
-            <i data-lucide="copy-plus"></i>
-            Copy
-          </button>
-          <button class="icon-button danger" data-session-action="delete" data-session-id="${escapeHtml(entry.id)}" type="button" title="Delete session">
-            <i data-lucide="trash-2"></i>
-          </button>
-        </div>
-      </div>
-    </article>
-  `;
-}
-
 function consoleMetricCard(label, value, detail, icon, percent, color) {
   const spark = [10, 14, 18, 16, 22, 24, 20, 28, 34, Math.max(8, Math.min(48, Math.round(percent / 2)))];
   return `
@@ -14813,7 +14636,6 @@ function stateFromDemoCase(payload, config) {
   };
   next.demoCaseId = config.id;
   next.appMode = "analysis";
-  next.activeWorkbenchTab = "library";
   next.activeSection = "workflow";
   next.fields = {
     ...structuredClone(defaultState.fields),
@@ -25804,7 +25626,6 @@ function openPilotGuideStep(stepId) {
   }
   if (stepId === "package") {
     state.appMode = "analysis";
-    state.activeWorkbenchTab = "library";
     persistState();
     render();
     createHandoffPackage();
@@ -26443,24 +26264,6 @@ function translationLensHtml(lens = {}) {
   `;
 }
 
-function renderEvidenceReviewPanel() {
-  if (!els.evidenceReviewPanel) return;
-  const artifacts = (state.evidenceArtifacts || []).filter((artifact) => !artifact.dismissed).slice(0, 2);
-  if (!artifacts.length) {
-    els.evidenceReviewPanel.innerHTML = `
-      <div class="evidence-empty">
-        <i data-lucide="files"></i>
-        <span>Optional: add a screenshot, tracker, SOP, or note when it helps. The interview can continue without files.</span>
-      </div>
-    `;
-    refreshIcons();
-    return;
-  }
-  els.evidenceReviewPanel.innerHTML = artifacts.map((artifact) => evidenceArtifactCard(artifact, "compact")).join("");
-  bindEvidenceActions(els.evidenceReviewPanel);
-  refreshIcons();
-}
-
 function buildFallbackAddOnProviderStatus() {
   return {
     version: 1,
@@ -26967,73 +26770,6 @@ function summarizeClientAddOnTestResults(results = []) {
   };
 }
 
-function renderEvidenceWorkbench() {
-  ensureEvidenceWorkbenchState();
-  const artifacts = state.evidenceArtifacts || [];
-  if (els.evidenceNoteInput && document.activeElement !== els.evidenceNoteInput) {
-    els.evidenceNoteInput.value = state.evidenceWorkbench.draftText || "";
-  }
-  if (els.evidenceWorkbenchMetrics) {
-    els.evidenceWorkbenchMetrics.innerHTML = evidenceWorkbenchMetricsHtml(artifacts);
-  }
-  if (!els.evidenceWorkbench && !els.evidenceWorkbenchFull) return;
-  if (!artifacts.length) {
-    const empty = `
-      <div class="evidence-empty compact-evidence-empty">
-        <i data-lucide="paperclip"></i>
-        <div>
-          <strong>No evidence uploaded yet</strong>
-          <span>Optional add-on only. Use evidence when a screenshot, tracker, process doc, or note would improve confidence.</span>
-        </div>
-      </div>
-    `;
-    if (els.evidenceWorkbench) els.evidenceWorkbench.innerHTML = empty;
-    if (els.evidenceWorkbenchFull) els.evidenceWorkbenchFull.innerHTML = empty;
-    refreshIcons();
-    return;
-  }
-  if (els.evidenceWorkbench) {
-    els.evidenceWorkbench.innerHTML = `
-    <div class="evidence-workbench-grid compact-evidence-grid">
-      ${artifacts.map((artifact) => evidenceArtifactCard(artifact, "compact")).join("")}
-    </div>
-  `;
-    bindEvidenceActions(els.evidenceWorkbench);
-  }
-  if (els.evidenceWorkbenchFull) {
-    els.evidenceWorkbenchFull.innerHTML = `
-      <div class="evidence-workbench-grid full-evidence-grid">
-        ${artifacts.map((artifact) => evidenceArtifactCard(artifact, "full")).join("")}
-      </div>
-    `;
-    bindEvidenceActions(els.evidenceWorkbenchFull);
-  }
-  refreshIcons();
-}
-
-function evidenceWorkbenchMetricsHtml(artifacts = state.evidenceArtifacts || []) {
-  const stats = evidenceWorkbenchStats(artifacts);
-  return `
-    <div class="evidence-metric-strip">
-      ${evidenceMetricCard("Artifacts", stats.total, "paperclip", `${stats.reviewed} reviewed`)}
-      ${evidenceMetricCard("Apply queue", stats.readyToApply, "search-check", `${stats.suggestions} suggestions`)}
-      ${evidenceMetricCard("Applied", stats.applied, "check-circle-2", `${stats.appliedRecords} records fed`)}
-      ${evidenceMetricCard("Risks & approvals", stats.riskSignals, "shield-alert", `${stats.followUps} follow-ups`)}
-    </div>
-    <div class="evidence-output-feed">
-      ${evidenceOutputFeedCards().map((item) => `
-        <article class="${item.ready ? "ready" : item.pending ? "pending" : "open"}">
-          <span><i data-lucide="${escapeHtml(item.icon)}"></i></span>
-          <div>
-            <strong>${escapeHtml(item.label)}</strong>
-            <small>${escapeHtml(item.detail)}</small>
-          </div>
-        </article>
-      `).join("")}
-    </div>
-  `;
-}
-
 function evidenceMetricCard(label, value, icon, detail) {
   return `
     <article class="evidence-metric-card">
@@ -27335,50 +27071,6 @@ function testScoreLabel(score) {
   if (score >= 60) return "needs light follow-up";
   if (score >= 40) return "discovery gaps remain";
   return "not ready";
-}
-
-function evidenceArtifactCard(artifact, mode = "compact") {
-  const records = normalizeSuggestedRecords(artifact.suggestedRecords);
-  const status = artifact.applied ? "applied" : artifact.status || "uploaded";
-  const count = evidenceSuggestionCount(artifact);
-  const questions = artifact.followUpQuestions || [];
-  const fields = (artifact.suggestedFieldUpdates || []).slice(0, mode === "compact" ? 3 : 12);
-  const links = evidenceLinksForArtifact(artifact).slice(0, mode === "compact" ? 4 : 14);
-  const full = mode === "full";
-  return `
-    <article class="evidence-card ${escapeHtml(status)}">
-      <div class="evidence-card-heading">
-        <span><i data-lucide="${evidenceIcon(artifact)}"></i></span>
-        <div>
-          <strong>${escapeHtml(artifact.fileName)}</strong>
-          <p>${escapeHtml(artifact.artifactType || artifact.sourceKind || "Uploaded artifact")} · ${escapeHtml(status)}</p>
-        </div>
-        <small>${escapeHtml(artifact.confidence || "unknown")}</small>
-      </div>
-      <p class="evidence-summary">${escapeHtml(artifact.summary || artifact.textPreview || "Waiting for analysis.")}</p>
-      ${fields.length ? `<div class="evidence-field-list">${fields.map((item) => `<span title="${escapeHtml(item.rationale || "")}">${escapeHtml(fieldLabelForKey(item.key))}</span>`).join("")}</div>` : ""}
-      ${links.length ? `<div class="evidence-link-list">${links.map((link) => `<span title="${escapeHtml(link.rationale || link.value || link.question || "")}">${escapeHtml(link.route)} · ${escapeHtml(link.targetType)} · ${escapeHtml(truncateUi(link.targetLabel, 42))}</span>`).join("")}</div>` : ""}
-      ${full && artifact.textPreview ? `<div class="evidence-preview"><strong>Preview</strong><p>${escapeHtml(artifact.textPreview)}</p></div>` : ""}
-      ${full ? evidenceRecordSummary(records) : ""}
-      ${full && questions.length ? `<div class="evidence-questions"><strong>Follow-up questions</strong><ol>${questions.map((question) => `<li>${escapeHtml(question)}</li>`).join("")}</ol></div>` : ""}
-      ${artifact.warnings?.length ? `<div class="evidence-warning">${artifact.warnings.map((warning) => escapeHtml(warning)).join("<br />")}</div>` : ""}
-      <div class="evidence-actions">
-        <span>${count} suggestion${count === 1 ? "" : "s"}</span>
-        <button class="secondary-button compact" data-evidence-action="review" data-evidence-id="${escapeHtml(artifact.id)}" type="button">
-          <i data-lucide="search-check"></i>
-          Review
-        </button>
-        <button class="primary-button compact" data-evidence-action="apply" data-evidence-id="${escapeHtml(artifact.id)}" type="button" ${artifact.applied || artifact.status === "analyzing" || artifact.status === "error" ? "disabled" : ""}>
-          <i data-lucide="check"></i>
-          Apply
-        </button>
-        <button class="secondary-button compact" data-evidence-action="dismiss" data-evidence-id="${escapeHtml(artifact.id)}" type="button" ${artifact.applied ? "disabled" : ""}>
-          <i data-lucide="x"></i>
-          Ignore
-        </button>
-      </div>
-    </article>
-  `;
 }
 
 function evidenceRecordSummary(records) {
@@ -29814,7 +29506,6 @@ function updateSessionMetadataFromControls() {
   meta.dataClassification = els.sessionDataClassificationSelect?.value || "Unknown";
   meta.status = els.sessionStatusSelect?.value || "Discovery";
   persistState();
-  renderSessionLibrary();
 }
 
 function getSessionLibrary() {
@@ -29859,7 +29550,6 @@ async function syncSessionsFromServer() {
   try {
     const payload = await requestJson("/api/sessions");
     serverSessions = Array.isArray(payload.sessions) ? payload.sessions : [];
-    renderSessionLibrary();
     renderSavedSessionsPanel();
   } catch (error) {
     console.warn("Server session sync unavailable", error.message);
@@ -29884,7 +29574,6 @@ async function saveSessionToServer(sessionState = state, options = {}) {
     });
     if (response.summary) {
       serverSessions = [response.summary, ...serverSessions.filter((entry) => entry.id !== response.summary.id)];
-      renderSessionLibrary();
       renderSavedSessionsPanel();
     }
     if (options.immediate) toast("Session saved to server files.");
@@ -30150,33 +29839,10 @@ function duplicateCurrentSession() {
     updatedAt: new Date().toISOString()
   };
   copy.appMode = "analysis";
-  copy.activeWorkbenchTab = "library";
   state = copy;
   persistState();
   render();
   toast("Duplicated into a new working session.");
-}
-
-async function duplicateSavedSession(id) {
-  const entry = getCombinedSessionLibrary().find((item) => item.id === id);
-  const savedState = await getSessionStateById(id);
-  if (!entry || !savedState) return;
-  persistState();
-  const copy = normalizeLoadedState(structuredClone(savedState));
-  copy.sessionMeta = {
-    ...copy.sessionMeta,
-    id: makeId("session"),
-    name: `Copy of ${entry.name || deriveSessionName(copy)}`,
-    source: `Duplicate of ${entry.name || "saved session"}`,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-  copy.appMode = "analysis";
-  copy.activeWorkbenchTab = "library";
-  state = copy;
-  persistState();
-  render();
-  toast("Saved session duplicated.");
 }
 
 async function loadSessionFromLibrary(id) {
@@ -30208,40 +29874,9 @@ async function loadSessionFromLibrary(id) {
   persistState();
   state = normalizeLoadedState(savedState);
   state.appMode = "analysis";
-  state.activeWorkbenchTab = "library";
   persistState();
   render();
   toast(`${entry.name || "Session"} loaded.`);
-}
-
-async function deleteSessionFromLibrary(id) {
-  const entry = getCombinedSessionLibrary().find((item) => item.id === id);
-  if (!entry) return;
-  const isCurrent = id === state.sessionMeta?.id;
-  const message = isCurrent
-    ? "Delete the current saved session and start a new blank intake?"
-    : `Delete "${entry.name || "this saved session"}" from the local library?`;
-  if (!confirm(message)) return;
-  const library = getSessionLibrary().filter((item) => item.id !== id);
-  writeSessionLibrary(library);
-  try {
-    await requestJson(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
-    serverSessions = serverSessions.filter((item) => item.id !== id);
-  } catch (error) {
-    console.warn("Could not delete server session", error.message);
-  }
-  if (isCurrent) {
-    state = structuredClone(defaultState);
-    ensureSessionMeta(state, { forceNew: true });
-    state.appMode = "analysis";
-    state.activeWorkbenchTab = "library";
-    persistState();
-    render();
-    toast("Session deleted. New blank intake started.");
-    return;
-  }
-  renderSessionLibrary();
-  toast("Saved session deleted.");
 }
 
 async function getSessionStateById(id) {
@@ -30433,7 +30068,6 @@ async function createHandoffPackage() {
     persistState();
     saveSessionToServer(state, { immediate: false });
     syncPackagesFromServer();
-    renderSessionLibrary();
     renderTemplateHandoffStudio();
     renderLiveTestCommandCenter();
     renderPilotControls();

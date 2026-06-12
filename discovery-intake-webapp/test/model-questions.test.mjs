@@ -152,8 +152,9 @@ test("builder pins: both reachable surfaces substitute wording, intents stay can
   assert.ok(gatePanel.includes("modelQuestionForCells(gap.cells, claimedWording) || gap.q"), "gate slot takes the doc's wording, threading a claim set");
   assert.ok(gatePanel.includes('data-gate-cells="${escapeHtml(gap.cells.join("+"))}"'), "intent stays the canonical cell set");
 
-  const card = extractFunction(source, "evidenceArtifactCard");
-  assert.ok(!card.includes("data-model-question"), "dead evidence-card affordance removed");
+  // The dead evidence card lost its affordance in 4a and the WHOLE function in
+  // PR 36 Slice A (its only callers were the ghost workbench renderers).
+  assert.ok(!/function evidenceArtifactCard\b/.test(source), "dead evidence card removed entirely");
   const bind = extractFunction(source, "bindEvidenceActions");
   assert.ok(!bind.includes("data-model-question"), "dead evidence wiring removed");
 });

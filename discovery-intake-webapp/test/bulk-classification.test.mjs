@@ -132,7 +132,9 @@ test("review panel mounts on a host that exists in index.html, above the summary
   assert.ok(builder.includes("<details data-bulk-review"), "panel details is tagged for open-state restore");
   assert.ok(!/<details[^>]*\bopen\b/.test(builder), "panel is collapsed by default");
 
-  // And the dead legacy host stays unmounted (cleanup is a noted follow-up).
-  const deadFn = extractFunction(source, "renderSessionLibrary");
-  assert.ok(!deadFn.includes("bulkClassificationReviewHtml"), "no mount on the dead #sessionLibraryList path");
+  // And the dead legacy path is GONE (PR 36 Slice A removed renderSessionLibrary
+  // and its ghost #sessionLibraryList host outright — pinned absent so it can't
+  // quietly return).
+  assert.ok(!/function renderSessionLibrary\b/.test(source), "dead renderSessionLibrary removed");
+  assert.ok(!source.includes("sessionLibraryList"), "ghost #sessionLibraryList lookup removed");
 });
