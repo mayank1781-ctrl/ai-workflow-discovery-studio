@@ -4839,6 +4839,15 @@ function analysisWorkflowName() {
   return (state.workflowGrid?.workflowName || state.fields?.workflowName || "").trim();
 }
 
+// Polish item 1: when the workflow carries no name of its own, both Analysis
+// Studio headers fall back to the SESSION name, so a loaded fixture reads
+// "TEST B — ..." instead of "Untitled Workflow". The derived placeholder
+// "Untitled discovery" doesn't count as a name.
+function sessionNameForHeader() {
+  const name = String(state.sessionMeta?.name || "").trim();
+  return name && name !== "Untitled discovery" ? name : "";
+}
+
 // PR 30: reads route through the accessor layer (getField), so every existing
 // call site transitively honors the one read/write chokepoint.
 function gridCellValue(step, key) {
@@ -5059,7 +5068,7 @@ function renderAnalysisTabGrid() {
     <div style="padding:16px 20px;background:#0a1525;border-bottom:1px solid #152236;">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div style="display:flex;align-items:center;gap:10px;">
-          <span style="font-size:1.1rem;font-weight:700;color:#e8f4ff;">${escapeHtml(grid.workflowName || "Untitled Workflow")}</span>
+          <span style="font-size:1.1rem;font-weight:700;color:#e8f4ff;">${escapeHtml(grid.workflowName || sessionNameForHeader() || "Untitled Workflow")}</span>
           ${lockBadge}
           ${sensitivityBadge}
         </div>
@@ -5729,17 +5738,23 @@ function recipeConfidencePct(step) {
   return Math.round(oppConfidence(step) * 100);
 }
 
+// First substantive line of a recipe prompt — skips "Key: value" metadata
+// headers AND bare "Key:" section labels (polish item 6: a label with nothing
+// after the colon, e.g. "Pipeline:", is still metadata, not a blurb). Pure;
+// returns "" when the prompt is all metadata.
+function recipePromptBlurbLine(prompt) {
+  return String(prompt || "").split("\n")
+    .map((line) => line.trim())
+    .find((line) => line && !/^[A-Za-z ]{2,24}:(\s|$)/.test(line)) || "";
+}
+
 // "WHAT AI DOES HERE" copy. Prefers the first non-empty line of the generated
 // recipe prompt; otherwise derives a short blurb from the step description and
 // AI pattern.
 function recipeWhatAiDoes(step, index) {
   const prompt = (state.recipeCache?.[step.id] || "").trim();
   if (prompt) {
-    // Skip leading "Key: value" metadata lines (e.g. "Tier: Compliance") so
-    // the blurb is the first real sentence of the prompt, not its header.
-    const firstLine = prompt.split("\n")
-      .map((line) => line.trim())
-      .find((line) => line && !/^[A-Za-z ]{2,24}:\s/.test(line));
+    const firstLine = recipePromptBlurbLine(prompt);
     if (firstLine) return firstLine;
   }
   const pattern = stepPrimaryPattern(step);
@@ -6335,7 +6350,8 @@ function recipeWorkflowHeaderHtml() {
   const name = (state.sessionMeta?.workflowName || analysisWorkflowName() || "").trim();
   const engagement = (state.sessionMeta?.engagementContext || "").trim();
   const when = formatSavedSessionDate(state.sessionMeta?.updatedAt) || "";
-  const label = name || when || "Untitled workflow";
+  // Polish item 1: the session name outranks the bare saved timestamp.
+  const label = name || sessionNameForHeader() || when || "Untitled workflow";
   // PR 33: editable workflow-family chip (workflow-level classification).
   const family = String(state.workflowGrid?.workflowFamily || "").trim();
   const familyColor = WORKFLOW_FAMILY_COLOR[family] || "#8899aa";
@@ -6754,7 +6770,7 @@ function renderAnalysisTabRecipe() {
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Sensitivity:</span> <span style="width:8px;height:8px;border-radius:50%;background:${dot};display:inline-block;"></span> <span data-rmeta-edit="sensitivity" data-rmeta-step="${escapeHtml(step.id)}" role="button" tabindex="0" title="Click to edit" style="cursor:pointer;border-bottom:1px dashed #2a3f5f;">${escapeHtml(sensitivity)} ✎</span></span>
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Pattern:</span> ${patternBadge}</span>
           ${state.workflowGrid?.workflowFamily ? `<span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Family:</span> <span style="color:${WORKFLOW_FAMILY_COLOR[state.workflowGrid.workflowFamily] || "#8899aa"};font-weight:600;">${escapeHtml(state.workflowGrid.workflowFamily)}</span></span>` : ""}
-          <span><span style="color:#5b7186;">Confidence:</span> ${confidence}%</span>
+          <span><span style="color:#5b7186;">Pattern confidence:</span> ${confidence}%</span>
           ${sectionMarker(["volume", "sensitivity"])}
         </div>
 
@@ -6788,7 +6804,7 @@ function renderAnalysisTabRecipe() {
 
         <div style="margin-top:14px;padding-top:12px;border-top:1px solid #16263a;display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:#5b7186;font-size:11px;">
           <span>Source: ${escapeHtml(source)}</span><span>·</span>
-          <span>Confidence: ${confidence}%</span><span>·</span>
+          <span>Pattern confidence: ${confidence}%</span><span>·</span>
           <span class="ds-badge ${opportunityTierBadgeClass(meta.tier)}">${escapeHtml(meta.label)}</span>
         </div>
       </div>`;
@@ -7682,7 +7698,16 @@ async function generateRecipePrompt(stepId, options = {}) {
     const step = analysisGridSteps().find((s) => s.id === stepId);
     const gate = step ? recipeGateCheck(step) : { gaps: [] };
     if (gate.gaps.length) {
+      // Polish item 5: clicking Generate/Regenerate while the panel is already
+      // up used to re-render it in place — indistinguishable from a dead
+      // button. Acknowledge the click; the copy promises nothing the gate
+      // intercepts (settled toast rule).
+      const body = document.querySelector(`[data-recipe-body="${stepId}"]`);
+      const alreadyShowing = Boolean(body?.querySelector("[data-gate-generate-anyway]"));
       renderRecipeGatePanel(stepId, gate);
+      if (alreadyShowing) {
+        toast(`Still gated — ${gate.gaps.length} field${gate.gaps.length === 1 ? "" : "s"} unconfirmed. Answer below, or use Generate anyway.`);
+      }
       return;
     }
   }
