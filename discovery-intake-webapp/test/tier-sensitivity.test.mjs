@@ -64,7 +64,9 @@ test("uncertain P9 surfaces the compliance flip even far from the numeric bounda
   assert.equal(result.kind, "flip");
   assert.equal(result.principle, "dataSensitivity");
   assert.match(result.message, /confirm P9/);
-  assert.match(result.message, /Compliance review/);
+  // Polish item 11: the flip warning names the tier plainly ("becomes
+  // Compliance"), without the "review required" gate energy.
+  assert.match(result.message, /becomes Compliance\./);
 });
 
 test("uncertain P7 on a Quick Win surfaces the strategic cap", () => {

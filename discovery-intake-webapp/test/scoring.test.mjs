@@ -132,7 +132,8 @@ test("P9 = 1 (PII) overrides to compliance regardless of total", () => {
   assert.equal(result.principleScores.dataSensitivity.score, 1);
   assert.deepEqual(
     { label: result.label, tier: result.tier, priority: result.priority },
-    { label: "Compliance review required", tier: "compliance", priority: null }
+    // Polish item 11: advisory label — the tier value and override are unchanged.
+    { label: "Flagged for governance review", tier: "compliance", priority: null }
   );
 });
 
