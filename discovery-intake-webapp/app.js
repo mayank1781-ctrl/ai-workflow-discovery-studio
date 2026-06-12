@@ -5468,8 +5468,11 @@ function getStepOpportunityMeta(step) {
     label = "Strategic"; tier = "strategic"; priority = 2;
   }
   // P9 override: highly sensitive data forces Compliance, regardless of total.
+  // Polish item 11 (copy only): the label reads as an advisory flag, not a
+  // gate — firm-policy-based evaluation is a later PR; the tier value, the
+  // override rule, and the generation flow are unchanged.
   if (P.dataSensitivity.score === 1) {
-    label = "Compliance review required"; tier = "compliance"; priority = null;
+    label = "Flagged for governance review"; tier = "compliance"; priority = null;
   }
 
   return { label, tier, priority, principleScores };
@@ -5996,7 +5999,7 @@ function tierSensitivity(meta) {
   const { tier } = scoringTierFromScores(scores);
   const tierLabel = (t) =>
     t === "quick-win" ? "Quick Win"
-      : t === "compliance" ? "Compliance review"
+      : t === "compliance" ? "Compliance"
         : t === "speculative" ? "Speculative" : "Strategic";
   const uncertain = (key) => /insufficient data/i.test(ps[key]?.reason || "");
 
@@ -6741,7 +6744,7 @@ function renderAnalysisTabRecipe() {
       return `<span style="display:inline-flex;align-items:center;gap:6px;background:#1a1500;border:1px solid #f59e0b55;border-radius:99px;padding:2px 10px;font-size:10px;font-weight:700;color:#f5c451;text-transform:uppercase;letter-spacing:0.04em;" title="Generated before ${escapeHtml(fieldLabels(hits))} was confirmed — regenerate to refresh">⚠ Low confidence — ${escapeHtml(fieldLabels(hits))}</span>`;
     };
     const p9Note = snap?.p9Unconfirmed
-      ? `<div style="margin-top:10px;background:#160d24;border:1px solid #a78bfa55;border-left:3px solid #a78bfa;border-radius:6px;padding:9px 12px;color:#c4b5fd;font-size:12px;line-height:1.5;">Provenance note: data sensitivity was unconfirmed (AI-inferred or below threshold) when this recipe was generated — verify data handling before sharing outputs.</div>`
+      ? `<div style="margin-top:10px;background:#160d24;border:1px solid #a78bfa55;border-left:3px solid #a78bfa;border-radius:6px;padding:9px 12px;color:#c4b5fd;font-size:12px;line-height:1.5;">Provenance note: data sensitivity was unconfirmed (AI-inferred or below threshold) when this recipe was generated. Flagged for governance review — recipe produced; review data handling against firm AI policy before deploying.</div>`
       : "";
     const howTo = recipeHowToUse(step);
     const meta = getStepOpportunityMeta(step);
@@ -7806,7 +7809,7 @@ function downloadRecipeBook() {
     parts.push(`AI Pattern: ${stepPrimaryPattern(step) || "n/a"}`);
     const snap = state.recipeGateSnapshots?.[step.id];
     if (snap?.p9Unconfirmed) {
-      parts.push("PROVENANCE NOTE: data sensitivity was unconfirmed (AI-inferred or below threshold) when this recipe was generated — verify data handling before sharing outputs.");
+      parts.push("PROVENANCE NOTE: data sensitivity was unconfirmed (AI-inferred or below threshold) when this recipe was generated. Flagged for governance review — recipe produced; review data handling against firm AI policy before deploying.");
     }
     if (Array.isArray(snap?.gaps) && snap.gaps.length) {
       parts.push(`LOW-CONFIDENCE FIELDS AT GENERATION: ${snap.gaps.join(", ")}`);
