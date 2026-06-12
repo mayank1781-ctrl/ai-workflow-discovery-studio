@@ -15,10 +15,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readAppSource, buildSandbox, extractFunction } from "./helpers/extract.mjs";
+import { readAppSource, readServerSource, buildSandbox, extractFunction } from "./helpers/extract.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const source = readAppSource();
+const serverSource = readServerSource();
 const indexHtml = readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
 const futureCss = readFileSync(path.join(__dirname, "..", "future.css"), "utf8");
 
@@ -83,6 +84,36 @@ test("bulkReviewSessionVisible: search matches names, unverified-only hides full
   // Both filters compose.
   assert.equal(bulkReviewSessionVisible("Client fees", 1, 3, true, "fees"), true);
   assert.equal(bulkReviewSessionVisible("Client fees", 3, 3, true, "fees"), false);
+});
+
+// Found in the Slice 1 browser pass: a remote-only grid-built session listed
+// as "0 steps". The server's summarizeSession counted only the LEGACY
+// state.steps intake list, so every conversational session (steps live in
+// workflowGrid.steps) reported 0 in its server summary — a false meta line,
+// invisible to the bulk panel's zero-step containment, and (post item 2) at
+// risk of being hidden as a stray if it were unnamed. These pin the server
+// count to the client's sessionSummaryMeta rule.
+test("server summarizeSession counts grid steps like the client (legacy list as fallback)", () => {
+  const { summarizeSession } = buildSandbox(serverSource, {
+    functions: ["summarizeSession", "safeIdentifier"]
+  });
+  const gridBuilt = { sessionMeta: { id: "s1" }, workflowGrid: { steps: [{}, {}, {}, {}] }, steps: [] };
+  assert.equal(summarizeSession(gridBuilt).stepCount, 4, "grid-built sessions report their grid steps");
+  const legacy = { sessionMeta: { id: "s2" }, steps: [{}, {}] };
+  assert.equal(summarizeSession(legacy).stepCount, 2, "legacy intake list still counts");
+  const empty = { sessionMeta: { id: "s3" } };
+  assert.equal(summarizeSession(empty).stepCount, 0, "a truly empty session reports 0");
+  // Lockstep with the client rule: both sources count workflowGrid first.
+  const clientSummary = extractFunction(source, "sessionSummaryMeta");
+  assert.ok(clientSummary.includes("workflowGrid?.steps?.length"), "client counts grid steps first");
+  assert.ok(extractFunction(serverSource, "summarizeSession").includes("workflowGrid?.steps?.length"),
+    "server counts grid steps first");
+});
+
+test("the session list recomputes summaries from stored state, not stale stored summaries", () => {
+  const handler = extractFunction(serverSource, "handleListSessions");
+  assert.ok(handler.includes("payload.state ? summarizeSession(payload.state)"),
+    "fresh state wins; a stored summary only serves state-less rows");
 });
 
 test("review panel: filters hide blocks but never unmount the controls; totals stay library-wide", () => {

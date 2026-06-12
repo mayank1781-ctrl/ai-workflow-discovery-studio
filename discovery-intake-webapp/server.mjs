@@ -2689,7 +2689,12 @@ async function handleListSessions(req, res) {
   // Auth off → everything is owned by "anon", so the user sees all sessions, as
   // before. With a user, listSessions only returns rows owned by that user.
   const payloads = listSessions(userId);
-  const summaries = payloads.map((payload) => payload.summary || summarizeSession(payload.state || {}));
+  // Summaries are recomputed from the stored state on every list, so rows
+  // whose STORED summary predates a summarizeSession fix (e.g. the legacy
+  // stepCount miscount) self-correct instead of serving the stale shape
+  // forever. The stored summary remains the fallback for state-less rows.
+  const summaries = payloads.map((payload) =>
+    payload.state ? summarizeSession(payload.state) : (payload.summary || summarizeSession({})));
   summaries.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
   return sendJson(res, 200, { sessions: summaries });
 }
@@ -3223,7 +3228,13 @@ function summarizeSession(state = {}) {
     gateDecision: fields.gateDecision || "More discovery",
     domain: fields.domain || "",
     readiness: fields.buildReadiness || "unknown",
-    stepCount: Array.isArray(state.steps) ? state.steps.length : 0,
+    // Count grid steps first, exactly like the client's sessionSummaryMeta —
+    // conversational sessions hold their steps in workflowGrid.steps;
+    // state.steps is the legacy intake list. Counting only the legacy list
+    // made every grid-built session report stepCount 0 in its server summary
+    // (a false "0 steps" in the Open list, and hidden from the bulk
+    // classification panel's zero-step containment when remote-only).
+    stepCount: state.workflowGrid?.steps?.length || state.steps?.length || 0,
     dataCount: Array.isArray(state.data) ? state.data.length : 0,
     systemCount: Array.isArray(state.systems) ? state.systems.length : 0,
     decisionCount: Array.isArray(state.decisions) ? state.decisions.length : 0,
