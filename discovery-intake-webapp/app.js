@@ -1074,6 +1074,14 @@ const defaultState = {
   // each cached prompt was generated under (family/pattern/generatedAt).
   recipeCachePrior: {},
   recipeMeta: {},
+  artifactCompiler: {
+    targetSurface: "recommend",
+    recipeScope: "step",
+    compiled: {},
+    compiledPrior: {},
+    bundles: {},
+    bundlePrior: {}
+  },
   // PR 32: session schema version (distinct from workflowGrid.schemaVersion).
   // v2 = snapshot-only business case. Migration hook: migrateSessionState().
   schemaVersion: 2,
@@ -4894,6 +4902,668 @@ function stepDisplayName(step, index) {
   return gridCellValue(step, "name") || `Step ${index + 1}`;
 }
 
+// --- Artifact compiler helpers ----------------------------------------------
+// Deterministic layer between workflow-grid evidence and generated prose. This
+// is deliberately client-side like getStepOpportunityMeta: it reads cells via
+// getField, never calls a model, and never changes state unless a user clicks a
+// compile action.
+const ARTIFACT_TARGET_SURFACES = {
+  recommend: "Recommended artifact",
+  chatgptPrompt: "ChatGPT prompt",
+  customGPT: "Custom GPT configuration",
+  microsoft365Copilot: "Microsoft 365 Copilot",
+  copilotStudio: "Copilot Studio configuration",
+  githubCopilot: "GitHub Copilot developer pack",
+  genericEnterpriseCopilot: "Generic enterprise copilot spec",
+  wholeWorkflowOrchestrator: "Whole-workflow orchestrator",
+  transitionArtifact: "Transition artifact"
+};
+
+const ARTIFACT_SCOPE_OPTIONS = {
+  step: "Step",
+  transition: "Transition",
+  wholeWorkflow: "Whole workflow"
+};
+
+const NO_INTEGRATION_MVP_NOTE = "This artifact assumes no live system integrations, no API actions, no writeback, and no automated external tool use. It is designed for prompt-based or knowledge-based execution only.";
+const FUTURE_INTEGRATION_NOTE = "Future integration candidate only - not included in this artifact.";
+
+const ARTIFACT_CRITICAL_CELLS = [
+  "name", "description", "systemsTools", "dataProcessing", "rulesDecisionLogic",
+  "output", "trigger", "handoff", "humanCheckpoint", "frequencyVolume",
+  "timeTaken", "painFriction", "dataSensitivity", "exceptionBranching",
+  "regulatoryContext"
+];
+
+const TRANSITION_SIGNAL_RULES = [
+  { key: "approval", label: "Approval", re: /\b(approval|approve|approved|review|checkpoint|sign[ -]?off|signoff)\b/i },
+  { key: "waiting", label: "Waiting", re: /\b(wait|waiting|pending|await|hold|blocked|dependency)\b/i },
+  { key: "handoff", label: "Handoff", re: /\b(handoff|hand[ -]?off|send to|pass to|turn over|transfer)\b/i },
+  { key: "routing", label: "Routing", re: /\b(route|routing|triage|assign|queue|dispatch)\b/i },
+  { key: "escalation", label: "Escalation", re: /\b(escalat|exception path|raise to|manager review)\b/i },
+  { key: "decision", label: "Decision pending", re: /\b(decision|decide|go\/no-go|go no go|judgment|judgement)\b/i }
+];
+
+function artifactSurfaceLabel(surface) {
+  return ARTIFACT_TARGET_SURFACES[surface] || ARTIFACT_TARGET_SURFACES.recommend;
+}
+
+function normalizeArtifactTargetSurface(surface) {
+  return ARTIFACT_TARGET_SURFACES[surface] ? surface : "recommend";
+}
+
+function normalizeRecipeScope(scope) {
+  return ARTIFACT_SCOPE_OPTIONS[scope] ? scope : "step";
+}
+
+function compilerCellText(step, key) {
+  const cell = getField(step, null, key);
+  if (!cell) return "";
+  if (key === "aiPattern") {
+    const entries = Array.isArray(cell.value) ? cell.value : [];
+    return entries.map((entry) => entry?.pattern || "").filter(Boolean).join(", ");
+  }
+  return typeof cell.value === "string" ? cell.value.trim() : "";
+}
+
+function compilerCellSnapshot(step, key) {
+  const cell = getField(step, null, key) || {};
+  const value = compilerCellText(step, key);
+  const source = cell.source || deriveLegacyCellSource(cell.state);
+  const confidence = typeof cell.confidence === "number" ? cell.confidence : null;
+  const stateName = cell.state || "empty";
+  const evidenceBacked = Boolean(value)
+    && (source === "user-stated" || source === "user-edited" || (source === "doc-extracted" && (confidence === null || confidence >= 0.7)));
+  return {
+    key,
+    label: CELL_PLAIN_NAMES[key] || key,
+    value,
+    state: stateName,
+    confidence,
+    source,
+    evidenceBacked,
+    inferredOnly: Boolean(value) && source === "ai-inferred",
+    lowConfidence: Boolean(value) && confidence !== null && confidence < 0.7
+  };
+}
+
+function compilerEvidenceSummary(step) {
+  const cells = ARTIFACT_CRITICAL_CELLS.map((key) => compilerCellSnapshot(step, key));
+  const withValue = cells.filter((cell) => cell.value);
+  const sourceCounts = { "user-stated": 0, "user-edited": 0, "doc-extracted": 0, "ai-inferred": 0, empty: 0, unknown: 0 };
+  cells.forEach((cell) => {
+    if (!cell.value) {
+      sourceCounts[cell.state === "unknown" ? "unknown" : "empty"] += 1;
+    } else if (cell.source in sourceCounts) {
+      sourceCounts[cell.source] += 1;
+    }
+  });
+  return {
+    totalCells: cells.length,
+    capturedCells: withValue.length,
+    evidenceBackedCells: withValue.filter((cell) => cell.evidenceBacked).length,
+    inferredCells: withValue.filter((cell) => cell.source === "ai-inferred").length,
+    lowConfidenceCells: withValue.filter((cell) => cell.lowConfidence || cell.inferredOnly).map((cell) => cell.label),
+    missingCells: cells.filter((cell) => !cell.value).map((cell) => cell.label),
+    sourceCounts
+  };
+}
+
+function inferRecipeDataSensitivity(step) {
+  const text = [
+    compilerCellText(step, "dataSensitivity"),
+    compilerCellText(step, "regulatoryContext"),
+    compilerCellText(step, "dataProcessing")
+  ].join(" ").toLowerCase();
+  if (!text.trim()) return "unknown";
+  if (/\b(pii|mnpi|pci|phi|restricted|regulated|regulatory|personal data|client confidential|highly sensitive|very high)\b/.test(text)) return "high";
+  if (/\b(confidential|sensitive|internal|non-public|high)\b/.test(text)) return "moderate";
+  if (/\b(public|low|non-sensitive|synthetic|anonymized|anonymised)\b/.test(text)) return "low";
+  return "unknown";
+}
+
+function inferRecipeReuseFrequency(step) {
+  const text = [compilerCellText(step, "frequencyVolume"), compilerCellText(step, "trigger")].join(" ").toLowerCase();
+  if (!text.trim()) return "unknown";
+  if (/\b(one[- ]?off|ad hoc|rare|once)\b/.test(text)) return "oneOff";
+  if (/\b(daily|weekly|monthly|quarterly|recurring|repeat|every|each|per week|per day)\b/.test(text)) return "recurring";
+  if (/\b(operational|continuous|always|queue|sla|business as usual)\b/.test(text)) return "operationalized";
+  return "unknown";
+}
+
+function inferWorkflowStability(step) {
+  const text = [
+    compilerCellText(step, "description"),
+    compilerCellText(step, "rulesDecisionLogic"),
+    compilerCellText(step, "exceptionBranching"),
+    compilerCellText(step, "frequencyVolume")
+  ].join(" ").toLowerCase();
+  if (/\b(standard|same way|repeatable|consistent|routine|sop|checklist)\b/.test(text)) return "stable";
+  if (/\b(varies|case by case|changing|ad hoc|bespoke|depends)\b/.test(text)) return "changing";
+  return "unclear";
+}
+
+function detectTransitionStep(step) {
+  const text = [
+    compilerCellText(step, "name"),
+    compilerCellText(step, "description"),
+    compilerCellText(step, "trigger"),
+    compilerCellText(step, "handoff"),
+    compilerCellText(step, "humanCheckpoint"),
+    compilerCellText(step, "rulesDecisionLogic"),
+    compilerCellText(step, "exceptionBranching"),
+    compilerCellText(step, "output")
+  ].join(" ");
+  const matches = TRANSITION_SIGNAL_RULES.filter((rule) => rule.re.test(text));
+  const labels = matches.map((rule) => rule.label);
+  const isTransition = labels.length > 0;
+  const owner = compilerCellText(step, "personaActors") || compilerCellText(step, "humanCheckpoint") || "Human owner to confirm";
+  return {
+    isTransition,
+    labels,
+    reason: isTransition ? `Transition signals detected: ${labels.join(", ")}.` : "",
+    waitingOn: compilerCellText(step, "handoff") || compilerCellText(step, "trigger") || "Decision, handoff, or approval details to confirm",
+    decisionOwner: owner,
+    requiredInformation: [
+      compilerCellText(step, "output") || "Prepared decision or handoff packet",
+      compilerCellText(step, "rulesDecisionLogic") || "Decision criteria",
+      compilerCellText(step, "dataProcessing") || "Source information"
+    ].filter(Boolean),
+    aiRole: "Prepare the handoff packet, summarize open questions, and draft reminder or routing text.",
+    mustNotDecide: "Do not automate the decision, approval, sign-off, routing outcome, or external action.",
+    reminderPrompt: `Summarize what is waiting, what information is missing, and the next human owner for ${compilerCellText(step, "name") || "this transition"}.`,
+    routingNote: compilerCellText(step, "handoff") || "Route to the confirmed human owner once required information is ready.",
+    humanReviewRule: "A person must confirm the decision or handoff before the workflow moves forward."
+  };
+}
+
+function recommendArtifactTargetSurface(step, profileSeed = {}, transition = detectTransitionStep(step)) {
+  if (transition.isTransition) return "transitionArtifact";
+  const systems = compilerCellText(step, "systemsTools").toLowerCase();
+  const description = [compilerCellText(step, "description"), compilerCellText(step, "dataProcessing"), compilerCellText(step, "output")].join(" ").toLowerCase();
+  const reuse = inferRecipeReuseFrequency(step);
+  const needsKnowledge = /\b(sharepoint|teams|outlook|excel|word|powerpoint|m365|microsoft 365|file|folder|policy|knowledge|sop|document|reference)\b/.test(`${systems} ${description}`);
+  if (/\b(github|repo|code|pull request|developer|test automation|ci|cd|implementation)\b/.test(`${systems} ${description}`)) return "githubCopilot";
+  if (/\b(sharepoint|teams|outlook|excel|word|powerpoint|m365|microsoft 365)\b/.test(systems)) {
+    return needsKnowledge || reuse === "recurring" || reuse === "operationalized" ? "copilotStudio" : "microsoft365Copilot";
+  }
+  if (needsKnowledge || reuse === "recurring" || reuse === "operationalized") return "customGPT";
+  if (inferRecipeDataSensitivity(step) === "high") return "genericEnterpriseCopilot";
+  return "chatgptPrompt";
+}
+
+function artifactRecommendationReason(profile, transition = null) {
+  if (transition?.isTransition) return "This step is primarily a handoff, waiting, routing, approval, or decision moment, so the artifact supports the human transition instead of pretending an agent should decide.";
+  if (profile.targetSurface === "copilotStudio") return "The workflow appears to use Microsoft 365 knowledge or files, repeatable steps, and human review, so Copilot Studio is the best controlled artifact.";
+  if (profile.targetSurface === "microsoft365Copilot") return "The work appears to happen inside Microsoft 365 apps, so a Microsoft 365 Copilot prompt/configuration is the closest user surface.";
+  if (profile.targetSurface === "customGPT") return "The step appears recurring or knowledge-backed, so a reusable Custom GPT configuration is more durable than a one-off prompt.";
+  if (profile.targetSurface === "githubCopilot") return "The evidence points to developer implementation work, so GitHub Copilot belongs in the developer package rather than the main business-user artifact.";
+  if (profile.targetSurface === "genericEnterpriseCopilot") return "The data posture or platform context calls for a generic enterprise copilot specification with explicit controls and review.";
+  return "The step is bounded enough for a prompt-based artifact and does not require live integrations.";
+}
+
+function buildRecipeDeploymentProfile(step, workflowContext = {}, options = {}) {
+  const selectedSurface = normalizeArtifactTargetSurface(options.targetSurface || workflowContext.targetSurface || "recommend");
+  const transition = detectTransitionStep(step);
+  const recommendedSurface = recommendArtifactTargetSurface(step, workflowContext, transition);
+  const targetSurface = selectedSurface === "recommend" ? recommendedSurface : selectedSurface;
+  const systems = compilerCellText(step, "systemsTools");
+  const knowledgeText = [systems, compilerCellText(step, "dataProcessing"), compilerCellText(step, "rulesDecisionLogic")].join(" ").toLowerCase();
+  const dataSensitivity = inferRecipeDataSensitivity(step);
+  const reuseFrequency = inferRecipeReuseFrequency(step);
+  const needsKnowledge = /\b(sharepoint|teams|outlook|excel|word|powerpoint|file|folder|policy|sop|knowledge|document|reference|template)\b/.test(knowledgeText);
+  const needsHumanApproval = transition.isTransition
+    || dataSensitivity === "high"
+    || dataSensitivity === "moderate"
+    || Boolean(compilerCellText(step, "humanCheckpoint"))
+    || /\b(approve|approval|review|sign[ -]?off|decision|exception|escalat)\b/i.test([compilerCellText(step, "rulesDecisionLogic"), compilerCellText(step, "exceptionBranching")].join(" "));
+  const recipeScope = transition.isTransition
+    ? "transition"
+    : normalizeRecipeScope(options.recipeScope || workflowContext.recipeScope || "step");
+  const deploymentLevel = needsKnowledge || targetSurface === "customGPT" || targetSurface === "copilotStudio"
+    ? "knowledgeBasedAssistant"
+    : "promptOnly";
+  const expectedUser = targetSurface === "githubCopilot"
+    ? "developer"
+    : recipeScope === "transition" ? "reviewer" : needsKnowledge ? "analyst" : "businessUser";
+  const profile = {
+    recipeScope,
+    targetSurface,
+    recommendedSurface,
+    selectedSurface,
+    deploymentLevel,
+    integrationMode: "none",
+    confidenceMode: "hybrid",
+    reuseFrequency,
+    dataSensitivity,
+    needsKnowledge,
+    needsHumanApproval,
+    workflowStability: inferWorkflowStability(step),
+    expectedUser,
+    defaultOutputMode: "recommendedArtifactPlusOptionalBundle",
+    noIntegrationNote: NO_INTEGRATION_MVP_NOTE
+  };
+  profile.recommendationReason = artifactRecommendationReason(profile, transition);
+  return profile;
+}
+
+function scoreRecipeReadiness(step, profile = buildRecipeDeploymentProfile(step)) {
+  const summary = compilerEvidenceSummary(step);
+  const transition = detectTransitionStep(step);
+  const cells = ARTIFACT_CRITICAL_CELLS.map((key) => compilerCellSnapshot(step, key));
+  const required = ["name", "description", "systemsTools", "output", "dataProcessing", "rulesDecisionLogic", "humanCheckpoint", "dataSensitivity"];
+  const missingRequired = required.map((key) => compilerCellSnapshot(step, key)).filter((cell) => !cell.value).map((cell) => cell.label);
+  const lowConfidence = cells.filter((cell) => cell.inferredOnly || cell.lowConfidence).map((cell) => cell.label);
+  let score = 25;
+  score += Math.min(35, summary.evidenceBackedCells * 4);
+  score += compilerCellText(step, "output") ? 8 : 0;
+  score += compilerCellText(step, "rulesDecisionLogic") ? 8 : 0;
+  score += compilerCellText(step, "humanCheckpoint") || profile.needsHumanApproval ? 8 : 0;
+  score += compilerCellText(step, "dataSensitivity") || compilerCellText(step, "regulatoryContext") ? 8 : 0;
+  score += compilerCellText(step, "exceptionBranching") ? 5 : 0;
+  score -= missingRequired.length * 6;
+  score -= lowConfidence.length * 4;
+  if (profile.dataSensitivity === "high" && !compilerCellText(step, "humanCheckpoint")) score -= 10;
+  if (transition.isTransition && !compilerCellText(step, "handoff")) score -= 7;
+  score = Math.max(0, Math.min(100, Math.round(score)));
+  const label = score >= 80
+    ? "Ready for controlled use"
+    : score >= 60 ? "Usable with caveats" : score >= 35 ? "Draft until confirmed" : "Not enough information";
+  const blockers = [
+    ...missingRequired.map((labelText) => `Missing ${labelText}`),
+    ...lowConfidence.map((labelText) => `${labelText} is inferred or low-confidence`)
+  ].slice(0, 8);
+  const strengths = [];
+  if (summary.evidenceBackedCells) strengths.push(`${summary.evidenceBackedCells} evidence-backed field${summary.evidenceBackedCells === 1 ? "" : "s"}`);
+  if (profile.needsHumanApproval) strengths.push("Human review rule included");
+  if (compilerCellText(step, "output")) strengths.push("Expected output captured");
+  return { score, label, blockers, strengths, summary };
+}
+
+function buildAgentRecipeIr(step, workflowContext = {}, options = {}) {
+  const profile = buildRecipeDeploymentProfile(step, workflowContext, options);
+  const transition = detectTransitionStep(step);
+  const readiness = scoreRecipeReadiness(step, profile);
+  const facts = [];
+  const assumptions = [];
+  const knownGaps = [];
+  const cells = ARTIFACT_CRITICAL_CELLS.map((key) => compilerCellSnapshot(step, key));
+  cells.forEach((cell) => {
+    if (!cell.value) {
+      knownGaps.push(`${cell.label} is not captured.`);
+      return;
+    }
+    if (cell.evidenceBacked) {
+      facts.push({
+        field: cell.key,
+        label: cell.label,
+        value: cell.value,
+        source: cell.source,
+        confidence: cell.confidence
+      });
+      return;
+    }
+    assumptions.push(`${cell.label}: treat "${cell.value}" as tentative because it is ${cell.source || "unproven"}${cell.confidence !== null ? ` at ${Math.round(cell.confidence * 100)}% confidence` : ""}.`);
+  });
+
+  const factValue = (key) => facts.find((item) => item.field === key)?.value || "";
+  const rules = [];
+  const rulesFact = factValue("rulesDecisionLogic");
+  if (rulesFact) rules.push(rulesFact);
+  const exceptionsFact = factValue("exceptionBranching");
+  if (exceptionsFact) rules.push(`Exceptions: ${exceptionsFact}`);
+
+  const humanReview = [];
+  if (profile.needsHumanApproval) {
+    humanReview.push(factValue("humanCheckpoint") || transition.humanReviewRule || "Human review is required before the artifact is used downstream.");
+  }
+  if (profile.dataSensitivity === "high" || compilerCellText(step, "regulatoryContext")) {
+    humanReview.push("Review data handling, sensitivity, and policy guidance before controlled use.");
+  }
+  if (!humanReview.length) humanReview.push("A person reviews output quality before use.");
+
+  const designChoices = [
+    `Target surface: ${artifactSurfaceLabel(profile.targetSurface)}.`,
+    `Deployment level: ${profile.deploymentLevel}.`,
+    `Integration mode: ${profile.integrationMode}; ${NO_INTEGRATION_MVP_NOTE}`
+  ];
+  if (transition.isTransition) designChoices.push("Use transition support, not automated decisioning.");
+  if (compilerCellText(step, "aiPattern")) designChoices.push(`AI pattern is ${compilerCellText(step, "aiPattern")}.`);
+
+  const systems = compilerCellText(step, "systemsTools");
+  const futureIntegrationCandidates = systems
+    ? systems.split(/[,;\n]|\band\b/i).map((item) => item.trim()).filter(Boolean).slice(0, 5)
+      .map((item) => `${item}: ${FUTURE_INTEGRATION_NOTE}`)
+    : [];
+
+  const outputs = [
+    factValue("output") || compilerCellText(step, "output") || "Draft artifact output for human review"
+  ];
+  const inputs = [
+    factValue("trigger") || compilerCellText(step, "trigger") || "User-provided workflow input",
+    factValue("dataProcessing") || compilerCellText(step, "dataProcessing") || "Relevant source context"
+  ];
+
+  const testCases = [
+    {
+      name: "Happy path",
+      given: inputs[0],
+      expected: outputs[0],
+      reviewer: humanReview[0]
+    },
+    {
+      name: "Missing or ambiguous input",
+      given: "One required input is absent or unclear.",
+      expected: "Artifact asks a follow-up or marks the output as draft.",
+      reviewer: "Human confirms before use."
+    },
+    {
+      name: "Exception path",
+      given: compilerCellText(step, "exceptionBranching") || "An exception or edge case appears.",
+      expected: "Artifact surfaces the exception and routes to human review.",
+      reviewer: "Human owner decides the next action."
+    }
+  ];
+  if (profile.dataSensitivity !== "low") {
+    testCases.push({
+      name: "Sensitivity caution",
+      given: "Input may contain confidential, regulated, or uncertain data.",
+      expected: "Artifact cautions the user and avoids claims of approved handling.",
+      reviewer: "Human reviewer checks policy and data boundary."
+    });
+  }
+
+  const doNotAutomateNotes = [
+    "Do not perform live API actions, writeback, automated approval, or hidden tool use.",
+    "Do not treat low-confidence inferred values as hard rules."
+  ];
+  if (transition.isTransition) doNotAutomateNotes.push(transition.mustNotDecide);
+  if (profile.dataSensitivity !== "low") doNotAutomateNotes.push("Do not use unreviewed sensitive data outside approved procedures.");
+
+  return {
+    recipeScope: profile.recipeScope,
+    targetSurface: profile.targetSurface,
+    deploymentLevel: profile.deploymentLevel,
+    integrationMode: profile.integrationMode,
+    artifactName: `${compilerCellText(step, "name") || "Workflow step"} - ${artifactSurfaceLabel(profile.targetSurface)}`,
+    purpose: compilerCellText(step, "description") || "Support the workflow step with controlled AI assistance.",
+    trigger: compilerCellText(step, "trigger") || "User starts the task with available context.",
+    inputs,
+    outputs,
+    systemsMentioned: systems ? systems.split(/[,;\n]|\band\b/i).map((item) => item.trim()).filter(Boolean) : [],
+    knowledgeSources: profile.needsKnowledge ? inputs.concat(systems || []).filter(Boolean) : [],
+    rules,
+    exceptions: [compilerCellText(step, "exceptionBranching")].filter(Boolean),
+    humanReview,
+    dataSensitivity: profile.dataSensitivity,
+    regulatoryContext: compilerCellText(step, "regulatoryContext"),
+    evidenceBackedFacts: facts,
+    designChoices,
+    assumptions,
+    knownGaps,
+    blockedClaims: [
+      "No live integrations, API actions, writeback, automated external tool use, or automated approvals are included.",
+      "Readiness is not formal compliance approval.",
+      "Policy-specific claims require uploaded policy evidence."
+    ],
+    testCases,
+    doNotAutomateNotes,
+    futureIntegrationCandidates,
+    provenanceSummary: readiness.summary,
+    readinessScore: readiness,
+    transition,
+    recommendationReason: profile.recommendationReason,
+    noIntegrationNote: NO_INTEGRATION_MVP_NOTE
+  };
+}
+
+function artifactBullets(items, fallback = "Not captured yet.") {
+  const list = (Array.isArray(items) ? items : []).filter(Boolean);
+  return list.length ? list.map((item) => `- ${typeof item === "string" ? item : JSON.stringify(item)}`).join("\n") : `- ${fallback}`;
+}
+
+function renderChatGptPrompt(ir) {
+  return [
+    `# ${ir.artifactName}`,
+    "",
+    "## Role",
+    "You are a careful workflow assistant. Use only the provided context and ask before filling gaps.",
+    "",
+    "## Goal",
+    ir.purpose,
+    "",
+    "## Inputs",
+    artifactBullets(ir.inputs),
+    "",
+    "## Rules",
+    artifactBullets(ir.rules, "No hard rules captured; treat this as draft until confirmed."),
+    "",
+    "## Human Review",
+    artifactBullets(ir.humanReview),
+    "",
+    "## Do Not Automate",
+    artifactBullets(ir.doNotAutomateNotes),
+    "",
+    "## Test Cases",
+    artifactBullets(ir.testCases.map((test) => `${test.name}: given ${test.given}; expect ${test.expected}`)),
+    "",
+    ir.noIntegrationNote
+  ].join("\n");
+}
+
+function renderCustomGptConfig(ir) {
+  return [
+    `# ${ir.artifactName}`,
+    "",
+    "## Instructions",
+    `Purpose: ${ir.purpose}`,
+    "Use the knowledge sources listed below. Ask for missing inputs instead of inventing them.",
+    ir.noIntegrationNote,
+    "",
+    "## Knowledge",
+    artifactBullets(ir.knowledgeSources, "Upload SOPs, templates, examples, or policy extracts before reuse."),
+    "",
+    "## Capabilities",
+    "- Web browsing/actions: off for MVP unless separately approved.",
+    "- File knowledge: allowed when the uploaded files are approved for this use.",
+    "- External actions: not included.",
+    "",
+    "## Conversation Starters",
+    artifactBullets([
+      `Help me run ${ir.artifactName}.`,
+      "Check whether my input is complete before drafting.",
+      "Create a reviewer checklist for this workflow step."
+    ])
+  ].join("\n");
+}
+
+function renderMicrosoftCopilotConfig(ir) {
+  return [
+    `# ${ir.artifactName}`,
+    "",
+    "## Microsoft 365 / Copilot Studio Guidance",
+    `Recommended surface: ${artifactSurfaceLabel(ir.targetSurface)}.`,
+    "Use inside the approved Microsoft 365 work surface or as a Copilot Studio topic with knowledge-only behavior.",
+    "",
+    "## Instructions",
+    artifactBullets([ir.purpose, ...ir.designChoices]),
+    "",
+    "## Knowledge And Files",
+    artifactBullets(ir.knowledgeSources, "Point to approved SharePoint, Teams, Outlook, Excel, Word, or policy sources when available."),
+    "",
+    "## Human Review",
+    artifactBullets(ir.humanReview),
+    "",
+    ir.noIntegrationNote
+  ].join("\n");
+}
+
+function renderGithubCopilotDeveloperPack(ir) {
+  return [
+    `# ${ir.artifactName}`,
+    "",
+    "## Developer Implementation Pack",
+    "Use this as developer-facing context, not as the main business-user artifact.",
+    "",
+    "## Acceptance Criteria",
+    artifactBullets([
+      "Implementation preserves provenance and visible assumptions.",
+      "No hidden integrations or writeback are added.",
+      "Tests cover happy path, missing input, exception path, and sensitivity caution."
+    ]),
+    "",
+    "## Data Contract",
+    artifactBullets(ir.evidenceBackedFacts.map((fact) => `${fact.label}: ${fact.value}`)),
+    "",
+    "## Test Plan",
+    artifactBullets(ir.testCases.map((test) => `${test.name}: ${test.expected}`)),
+    "",
+    "## Future Integration Candidates",
+    artifactBullets(ir.futureIntegrationCandidates, FUTURE_INTEGRATION_NOTE)
+  ].join("\n");
+}
+
+function renderGenericEnterpriseCopilotSpec(ir) {
+  return [
+    `# ${ir.artifactName}`,
+    "",
+    "## Enterprise Copilot Spec",
+    `Readiness: ${ir.readinessScore.label} (${ir.readinessScore.score}/100).`,
+    "",
+    "## Purpose",
+    ir.purpose,
+    "",
+    "## Controls",
+    artifactBullets([...ir.humanReview, ...ir.doNotAutomateNotes]),
+    "",
+    "## Assumptions And Known Gaps",
+    artifactBullets([...ir.assumptions, ...ir.knownGaps]),
+    "",
+    "## Provenance",
+    artifactBullets(ir.evidenceBackedFacts.map((fact) => `${fact.label}: ${fact.source}${fact.confidence !== null ? ` ${Math.round(fact.confidence * 100)}%` : ""}`)),
+    "",
+    ir.noIntegrationNote
+  ].join("\n");
+}
+
+function renderWholeWorkflowOrchestrator(ir) {
+  return [
+    `# ${ir.artifactName}`,
+    "",
+    "## Orchestrator Posture",
+    "Coordinate steps through user-provided context and human checkpoints. Do not perform live system actions.",
+    "",
+    "## Trigger",
+    ir.trigger,
+    "",
+    "## Inputs And Outputs",
+    artifactBullets([...ir.inputs, ...ir.outputs]),
+    "",
+    "## Human Gates",
+    artifactBullets(ir.humanReview),
+    "",
+    "## Blocked Claims",
+    artifactBullets(ir.blockedClaims)
+  ].join("\n");
+}
+
+function renderTransitionArtifact(ir) {
+  const t = ir.transition || {};
+  return [
+    `# ${ir.artifactName}`,
+    "",
+    "## Transition Support Artifact",
+    t.reason || "This artifact supports a human handoff or decision point.",
+    "",
+    "## What Is Being Waited On",
+    t.waitingOn || "Confirm the waiting item.",
+    "",
+    "## Decision Owner",
+    t.decisionOwner || "Human owner to confirm.",
+    "",
+    "## Required Information",
+    artifactBullets(t.requiredInformation),
+    "",
+    "## AI Role",
+    t.aiRole || "Prepare context and draft follow-up text.",
+    "",
+    "## What AI Must Not Decide",
+    t.mustNotDecide || "Do not automate the decision.",
+    "",
+    "## Reminder / Escalation Prompt",
+    t.reminderPrompt || "Summarize the open item and route it to the responsible owner.",
+    "",
+    "## Next-Step Routing Note",
+    t.routingNote || "Route to the confirmed human owner."
+  ].join("\n");
+}
+
+function renderPlatformArtifact(ir, targetSurface = ir.targetSurface) {
+  const surface = normalizeArtifactTargetSurface(targetSurface === "recommend" ? ir.targetSurface : targetSurface);
+  const content = surface === "customGPT"
+    ? renderCustomGptConfig(ir)
+    : surface === "microsoft365Copilot" || surface === "copilotStudio"
+      ? renderMicrosoftCopilotConfig(ir)
+      : surface === "githubCopilot"
+        ? renderGithubCopilotDeveloperPack(ir)
+        : surface === "genericEnterpriseCopilot"
+          ? renderGenericEnterpriseCopilotSpec(ir)
+          : surface === "wholeWorkflowOrchestrator"
+            ? renderWholeWorkflowOrchestrator(ir)
+            : surface === "transitionArtifact"
+              ? renderTransitionArtifact(ir)
+              : renderChatGptPrompt(ir);
+  return {
+    targetSurface: surface,
+    label: artifactSurfaceLabel(surface),
+    title: `${artifactSurfaceLabel(surface)} - ${ir.artifactName}`,
+    content
+  };
+}
+
+function buildRecommendedArtifactPackage(step, workflowContext = {}, options = {}) {
+  const profile = buildRecipeDeploymentProfile(step, workflowContext, options);
+  const ir = buildAgentRecipeIr(step, workflowContext, { ...options, targetSurface: profile.targetSurface, recipeScope: profile.recipeScope });
+  const recommendedArtifact = renderPlatformArtifact(ir, profile.targetSurface);
+  return {
+    profile,
+    ir,
+    recommendedArtifact,
+    readiness: ir.readinessScore,
+    recommendationReason: profile.recommendationReason,
+    noIntegrationNote: NO_INTEGRATION_MVP_NOTE
+  };
+}
+
+function buildFullArtifactBundle(step, workflowContext = {}, options = {}) {
+  const recommended = buildRecommendedArtifactPackage(step, workflowContext, options);
+  const surfaces = [
+    "chatgptPrompt",
+    "customGPT",
+    "microsoft365Copilot",
+    "genericEnterpriseCopilot",
+    "githubCopilot",
+    recommended.ir.transition?.isTransition ? "transitionArtifact" : "wholeWorkflowOrchestrator"
+  ];
+  const artifacts = {};
+  surfaces.forEach((surface) => {
+    artifacts[surface] = renderPlatformArtifact(recommended.ir, surface);
+  });
+  return {
+    ...recommended,
+    artifacts,
+    testCasePack: recommended.ir.testCases,
+    humanReviewChecklist: recommended.ir.humanReview,
+    knowledgeChecklist: recommended.ir.knowledgeSources,
+    futureIntegrationCandidates: recommended.ir.futureIntegrationCandidates,
+    readinessAndProvenanceNotes: [
+      `${recommended.readiness.label} (${recommended.readiness.score}/100).`,
+      `${recommended.ir.provenanceSummary.evidenceBackedCells} evidence-backed fields; ${recommended.ir.provenanceSummary.inferredCells} inferred fields.`,
+      NO_INTEGRATION_MVP_NOTE
+    ]
+  };
+}
+
 // PR 28: one-line plain-English "what AI understands" for a step card. Prefer the
 // captured description; otherwise synthesise from the pattern/persona/system.
 function stepUnderstandingLine(step) {
@@ -4981,9 +5651,87 @@ function activateAnalysisTab(tab) {
 
 // Routes to the active tab's render function. Called from render() only when
 // the Analysis Studio is the visible panel (state.appMode === "analysis").
+function workflowIntelligenceSummaryHtml() {
+  const steps = analysisGridSteps();
+  if (!steps.length) {
+    return `
+      <section class="ds-panel" style="padding:16px 18px;margin-bottom:14px;">
+        <div class="ds-micro" style="margin-bottom:6px;">Workflow Intelligence Summary</div>
+        <div style="color:#8aa0b8;font-size:13px;line-height:1.5;">Capture or upload a workflow to see readiness, platform fit, provenance, generated assets, and next actions.</div>
+      </section>`;
+  }
+  const compiler = ensureArtifactCompilerState();
+  const context = artifactWorkflowContext();
+  const packages = steps.map((step) => buildRecommendedArtifactPackage(step, context, {
+    targetSurface: compiler.targetSurface,
+    recipeScope: compiler.recipeScope
+  }));
+  const first = packages[0];
+  const readinessAvg = Math.round(packages.reduce((sum, item) => sum + item.readiness.score, 0) / packages.length);
+  const blockers = packages.flatMap((item) => item.readiness.blockers).slice(0, 3);
+  const transitions = packages.filter((item) => item.ir.transition?.isTransition).length;
+  const futureCandidates = packages.flatMap((item) => item.ir.futureIntegrationCandidates).slice(0, 3);
+  const generatedAssets = Object.keys(compiler.compiled || {}).length + Object.keys(compiler.bundles || {}).length;
+  const value = state.businessCaseSnapshot
+    ? state.businessCaseSnapshot.mode === "role"
+      ? `$${Math.round(state.businessCaseSnapshot.results?.annualValue || 0).toLocaleString("en-US")} / year`
+      : `$${Math.round(state.businessCaseSnapshot.results?.projectValue || 0).toLocaleString("en-US")} project`
+    : "Not computed";
+  const nextAction = blockers[0]
+    ? `Confirm ${blockers[0].replace(/^Missing\s+/i, "")}.`
+    : generatedAssets ? "Review preserved artifact snapshots and export." : "Compile the recommended artifact.";
+  const chip = (label, valueText, cls = "ds-badge-dim") => `
+    <div class="ds-card" style="padding:12px 14px;">
+      <div class="ds-micro" style="margin-bottom:5px;">${escapeHtml(label)}</div>
+      <strong style="display:block;color:#e8f4ff;font-size:13px;line-height:1.35;">${escapeHtml(valueText)}</strong>
+      <span class="ds-badge ${cls}" style="margin-top:8px;">${escapeHtml(label)}</span>
+    </div>`;
+  return `
+    <section id="workflowIntelligenceSummary" class="ds-panel" style="padding:16px 18px;margin-bottom:14px;border-left:3px solid #00d4b4;">
+      <div style="display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap;margin-bottom:12px;">
+        <div>
+          <div class="ds-micro" style="margin-bottom:6px;">Workflow Intelligence Summary</div>
+          <h3 style="margin:0;color:#e8f4ff;font-size:17px;">${escapeHtml(first.recommendedArtifact.label)}</h3>
+          <p style="margin:7px 0 0;color:#8aa0b8;font-size:13px;line-height:1.5;">${escapeHtml(first.recommendationReason)}</p>
+        </div>
+        <span class="ds-badge ${artifactReadinessBadgeClass(first.readiness.label)}">${escapeHtml(first.readiness.label)} · ${readinessAvg}/100 avg</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;">
+        ${chip("Current-session value", value, "ds-badge-amber")}
+        ${chip("Generated assets", String(generatedAssets), generatedAssets ? "ds-badge-teal" : "ds-badge-dim")}
+        ${chip("Transition warnings", String(transitions), transitions ? "ds-badge-amber" : "ds-badge-teal")}
+        ${chip("Best next action", nextAction, blockers.length ? "ds-badge-amber" : "ds-badge-teal")}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
+        <div class="ds-card-inner" style="padding:11px 13px;">
+          <div class="ds-micro" style="margin-bottom:5px;">Top blockers</div>
+          <div style="font-size:12px;color:#8aa0b8;line-height:1.5;">${escapeHtml(blockers.join(" · ") || "No major blockers detected.")}</div>
+        </div>
+        <div class="ds-card-inner" style="padding:11px 13px;">
+          <div class="ds-micro" style="margin-bottom:5px;">Future integration candidates</div>
+          <div style="font-size:12px;color:#8aa0b8;line-height:1.5;">${escapeHtml(futureCandidates.join(" · ") || FUTURE_INTEGRATION_NOTE)}</div>
+        </div>
+      </div>
+    </section>`;
+}
+
+function renderWorkflowIntelligenceSummary() {
+  const analysis = document.querySelector(".analysis-studio");
+  const tabBar = analysis?.querySelector(".analysis-tab-bar");
+  if (!analysis || !tabBar) return;
+  let host = document.getElementById("workflowIntelligenceSummaryHost");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "workflowIntelligenceSummaryHost";
+    tabBar.insertAdjacentElement("beforebegin", host);
+  }
+  host.innerHTML = workflowIntelligenceSummaryHtml();
+}
+
 function renderAnalysisStudio() {
   const active = normalizeAnalysisTab(state.analysisActiveTab);
   if (state.analysisActiveTab !== active) state.analysisActiveTab = active;
+  renderWorkflowIntelligenceSummary();
 
   document.querySelectorAll("[data-analysis-tab]").forEach((button) => {
     const selected = button.dataset.analysisTab === active;
@@ -6710,6 +7458,234 @@ async function setOutcomeStatus(status) {
   }).catch(() => {});
 }
 
+function ensureArtifactCompilerState() {
+  state.artifactCompiler = {
+    ...structuredClone(defaultState.artifactCompiler),
+    ...(state.artifactCompiler || {}),
+    compiled: { ...(state.artifactCompiler?.compiled || {}) },
+    compiledPrior: { ...(state.artifactCompiler?.compiledPrior || {}) },
+    bundles: { ...(state.artifactCompiler?.bundles || {}) },
+    bundlePrior: { ...(state.artifactCompiler?.bundlePrior || {}) }
+  };
+  state.artifactCompiler.targetSurface = normalizeArtifactTargetSurface(state.artifactCompiler.targetSurface);
+  state.artifactCompiler.recipeScope = normalizeRecipeScope(state.artifactCompiler.recipeScope);
+  return state.artifactCompiler;
+}
+
+function artifactWorkflowContext() {
+  return {
+    workflowName: analysisWorkflowName() || sessionNameForHeader() || "Workflow",
+    targetSurface: ensureArtifactCompilerState().targetSurface,
+    recipeScope: ensureArtifactCompilerState().recipeScope,
+    steps: analysisGridSteps()
+  };
+}
+
+function artifactSnapshotMeta(snapshot) {
+  const generatedAt = snapshot?.generatedAt || snapshot?.compiledAt || "";
+  const when = Number.isNaN(Date.parse(generatedAt || "")) ? "" : new Date(Date.parse(generatedAt)).toLocaleString("en-US");
+  const readiness = snapshot?.package?.readiness || snapshot?.readiness || snapshot?.package?.ir?.readinessScore;
+  const artifact = snapshot?.package?.recommendedArtifact || snapshot?.recommendedArtifact;
+  return {
+    when,
+    readinessLabel: readiness?.label || "Not compiled",
+    readinessScore: readiness?.score ?? null,
+    artifactLabel: artifact?.label || artifactSurfaceLabel(snapshot?.package?.profile?.targetSurface || snapshot?.targetSurface || "recommend"),
+    content: artifact?.content || ""
+  };
+}
+
+function rotateArtifactSnapshot(stepId, packagePayload, kind = "compiled") {
+  const compiler = ensureArtifactCompilerState();
+  const currentKey = kind === "bundle" ? "bundles" : "compiled";
+  const priorKey = kind === "bundle" ? "bundlePrior" : "compiledPrior";
+  const previous = compiler[currentKey][stepId];
+  if (previous) {
+    compiler[priorKey][stepId] = {
+      ...previous,
+      preservedAt: new Date().toISOString()
+    };
+  }
+  compiler[currentKey][stepId] = {
+    id: makeId(kind === "bundle" ? "artifactbundle" : "artifact"),
+    generatedAt: new Date().toISOString(),
+    kind,
+    package: packagePayload
+  };
+  return Boolean(previous);
+}
+
+function compileArtifactForStep(stepId, options = {}) {
+  const step = analysisGridSteps().find((item) => item.id === stepId);
+  if (!step) {
+    toast("Capture a workflow step before compiling artifacts.");
+    return;
+  }
+  const compiler = ensureArtifactCompilerState();
+  const context = artifactWorkflowContext();
+  const compileOptions = {
+    targetSurface: compiler.targetSurface,
+    recipeScope: compiler.recipeScope
+  };
+  const packagePayload = options.bundle
+    ? buildFullArtifactBundle(step, context, compileOptions)
+    : buildRecommendedArtifactPackage(step, context, compileOptions);
+  const hadPrior = rotateArtifactSnapshot(stepId, packagePayload, options.bundle ? "bundle" : "compiled");
+  persistState();
+  renderAnalysisTabRecipe();
+  toast(`${options.bundle ? "Full bundle" : "Recommended artifact"} compiled${hadPrior ? " — prior version preserved." : "."}`);
+}
+
+function artifactReadinessBadgeClass(label = "") {
+  if (/ready/i.test(label)) return "ds-badge-teal";
+  if (/caveat/i.test(label)) return "ds-badge-purple";
+  if (/draft/i.test(label)) return "ds-badge-amber";
+  return "ds-badge-dim";
+}
+
+function shortArtifactPreview(text) {
+  const clean = String(text || "").replace(/\s+/g, " ").trim();
+  return clean.length > 280 ? `${clean.slice(0, 280)}...` : clean;
+}
+
+function artifactSnapshotHtml(snapshot, prior, emptyText) {
+  if (!snapshot) {
+    return `<div style="background:#0a1422;border:1px dashed #1a2a3a;border-radius:8px;padding:12px 14px;color:#5b7186;font-size:12px;line-height:1.5;">${escapeHtml(emptyText)}</div>`;
+  }
+  const meta = artifactSnapshotMeta(snapshot);
+  const priorMeta = artifactSnapshotMeta(prior);
+  return `
+    <div style="background:#0a1422;border:1px solid #1a2a3a;border-radius:8px;padding:12px 14px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+        <span class="ds-badge ds-badge-teal">${escapeHtml(meta.artifactLabel)}</span>
+        <span class="ds-badge ${artifactReadinessBadgeClass(meta.readinessLabel)}">${escapeHtml(meta.readinessLabel)}${meta.readinessScore !== null ? ` · ${meta.readinessScore}/100` : ""}</span>
+        ${meta.when ? `<span style="font-size:11px;color:#5b7186;">Compiled ${escapeHtml(meta.when)}</span>` : ""}
+      </div>
+      <div style="font-size:12px;color:#8aa0b8;line-height:1.55;">${escapeHtml(shortArtifactPreview(meta.content))}</div>
+      ${prior ? `<details style="margin-top:8px;"><summary style="font-size:11px;color:#8aa0b8;cursor:pointer;">Previous artifact preserved${priorMeta.when ? ` · ${escapeHtml(priorMeta.when)}` : ""}</summary><div style="margin-top:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.55;color:#8aa0b8;white-space:pre-wrap;">${escapeHtml((priorMeta.content || "").slice(0, 1800))}</div></details>` : ""}
+    </div>`;
+}
+
+function artifactStudioHeaderHtml(steps) {
+  const compiler = ensureArtifactCompilerState();
+  const context = artifactWorkflowContext();
+  const samplePackages = steps.map((step) => buildRecommendedArtifactPackage(step, context, {
+    targetSurface: compiler.targetSurface,
+    recipeScope: compiler.recipeScope
+  }));
+  const first = samplePackages[0];
+  const avgReadiness = samplePackages.length
+    ? Math.round(samplePackages.reduce((sum, item) => sum + item.readiness.score, 0) / samplePackages.length)
+    : 0;
+  const transitions = samplePackages.filter((item) => item.ir.transition?.isTransition).length;
+  const generated = Object.keys(compiler.compiled || {}).length;
+  const bundleCount = Object.keys(compiler.bundles || {}).length;
+  const surfaceOptions = Object.entries(ARTIFACT_TARGET_SURFACES)
+    .filter(([value]) => value !== "transitionArtifact")
+    .map(([value, label]) => `<option value="${escapeHtml(value)}" ${compiler.targetSurface === value ? "selected" : ""}>${escapeHtml(label)}</option>`)
+    .join("");
+  const scopeOptions = Object.entries(ARTIFACT_SCOPE_OPTIONS)
+    .map(([value, label]) => `<option value="${escapeHtml(value)}" ${compiler.recipeScope === value ? "selected" : ""}>${escapeHtml(label)}</option>`)
+    .join("");
+  return `
+    <section class="ds-panel" style="padding:18px 20px;margin:14px 0 16px;border-left:3px solid #a855f7;">
+      <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap;">
+        <div style="flex:1;min-width:260px;">
+          <div class="ds-micro" style="margin-bottom:6px;">Artifact Studio</div>
+          <h3 style="margin:0;color:#e8f4ff;font-size:18px;">${escapeHtml(first?.recommendedArtifact?.label || "Recommended artifact")}</h3>
+          <p style="margin:8px 0 0;color:#8aa0b8;font-size:13px;line-height:1.55;">${escapeHtml(first?.recommendationReason || "Capture a workflow step to see the recommended artifact.")}</p>
+          <p style="margin:8px 0 0;color:#5b7186;font-size:12px;line-height:1.45;">${escapeHtml(NO_INTEGRATION_MVP_NOTE)}</p>
+        </div>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+          <label style="display:flex;flex-direction:column;gap:5px;font-size:11px;color:#5b7186;text-transform:uppercase;letter-spacing:0.06em;">Target surface
+            <select id="artifactTargetSurfaceSelect" style="background:#0a1525;color:#e8f4ff;border:1px solid #1e3350;border-radius:7px;padding:8px 10px;font-size:13px;min-width:220px;">${surfaceOptions}</select>
+          </label>
+          <label style="display:flex;flex-direction:column;gap:5px;font-size:11px;color:#5b7186;text-transform:uppercase;letter-spacing:0.06em;">Scope
+            <select id="artifactScopeSelect" style="background:#0a1525;color:#e8f4ff;border:1px solid #1e3350;border-radius:7px;padding:8px 10px;font-size:13px;min-width:160px;">${scopeOptions}</select>
+          </label>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:16px;">
+        <div class="ds-card ds-accent-teal" style="padding:14px;"><div class="ds-micro">Avg readiness</div><div class="ds-num-teal" style="font-size:1.5rem;font-weight:800;">${avgReadiness}</div></div>
+        <div class="ds-card ds-accent-purple" style="padding:14px;"><div class="ds-micro">Generated assets</div><div class="ds-num-purple" style="font-size:1.5rem;font-weight:800;">${generated}</div></div>
+        <div class="ds-card ds-accent-pink" style="padding:14px;"><div class="ds-micro">Full bundles</div><div class="ds-num-pink" style="font-size:1.5rem;font-weight:800;">${bundleCount}</div></div>
+        <div class="ds-card ds-accent-amber" style="padding:14px;"><div class="ds-micro">Transitions</div><div class="ds-num-amber" style="font-size:1.5rem;font-weight:800;">${transitions}</div></div>
+      </div>
+    </section>`;
+}
+
+function artifactCompilerCardHtml(step, index) {
+  const compiler = ensureArtifactCompilerState();
+  const context = artifactWorkflowContext();
+  const pkg = buildRecommendedArtifactPackage(step, context, {
+    targetSurface: compiler.targetSurface,
+    recipeScope: compiler.recipeScope
+  });
+  const ir = pkg.ir;
+  const saved = compiler.compiled?.[step.id];
+  const prior = compiler.compiledPrior?.[step.id];
+  const bundle = compiler.bundles?.[step.id];
+  const bundlePrior = compiler.bundlePrior?.[step.id];
+  const blockerHtml = pkg.readiness.blockers.length
+    ? pkg.readiness.blockers.slice(0, 4).map((item) => `<li>${escapeHtml(item)}</li>`).join("")
+    : `<li>No critical readiness blocker detected.</li>`;
+  const testHtml = ir.testCases.slice(0, 3).map((test) =>
+    `<li><strong>${escapeHtml(test.name)}:</strong> ${escapeHtml(test.expected)}</li>`
+  ).join("");
+  const futureHtml = ir.futureIntegrationCandidates.length
+    ? ir.futureIntegrationCandidates.slice(0, 3).map((item) => `<li>${escapeHtml(item)}</li>`).join("")
+    : `<li>${escapeHtml(FUTURE_INTEGRATION_NOTE)}</li>`;
+  const provenance = ir.provenanceSummary;
+  return `
+    <div style="margin-top:16px;background:#09131f;border:1px solid #1e3350;border-radius:10px;padding:14px 16px;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <div style="min-width:240px;flex:1;">
+          <div class="ds-micro" style="margin-bottom:5px;">Recommended artifact</div>
+          <strong style="display:block;color:#e8f4ff;font-size:14px;">${escapeHtml(pkg.recommendedArtifact.label)}</strong>
+          <p style="margin:6px 0 0;color:#8aa0b8;font-size:12px;line-height:1.5;">${escapeHtml(pkg.recommendationReason)}</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <span class="ds-badge ${artifactReadinessBadgeClass(pkg.readiness.label)}">${escapeHtml(pkg.readiness.label)} · ${pkg.readiness.score}/100</span>
+          <span class="ds-badge ds-badge-dim">${escapeHtml(pkg.profile.deploymentLevel)}</span>
+          <span class="ds-badge ds-badge-dim">No integrations</span>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:12px;margin-top:12px;">
+        <div class="ds-card-inner" style="padding:12px;">
+          <div class="ds-micro" style="margin-bottom:6px;">Assumptions and known gaps</div>
+          <ul style="margin:0;padding-left:18px;color:#8aa0b8;font-size:12px;line-height:1.5;">${blockerHtml}</ul>
+        </div>
+        <div class="ds-card-inner" style="padding:12px;">
+          <div class="ds-micro" style="margin-bottom:6px;">Test case pack</div>
+          <ul style="margin:0;padding-left:18px;color:#8aa0b8;font-size:12px;line-height:1.5;">${testHtml}</ul>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;">
+        <div class="ds-card-inner" style="padding:12px;">
+          <div class="ds-micro" style="margin-bottom:6px;">Review and risk</div>
+          <p style="margin:0;color:#8aa0b8;font-size:12px;line-height:1.5;">${escapeHtml(ir.humanReview[0] || "Human review is required before use.")}</p>
+          <p style="margin:8px 0 0;color:#f5c451;font-size:12px;line-height:1.5;">${escapeHtml(ir.doNotAutomateNotes[0])}</p>
+        </div>
+        <div class="ds-card-inner" style="padding:12px;">
+          <div class="ds-micro" style="margin-bottom:6px;">Provenance</div>
+          <p style="margin:0;color:#8aa0b8;font-size:12px;line-height:1.5;">${provenance.evidenceBackedCells} evidence-backed · ${provenance.inferredCells} inferred · ${provenance.missingCells.length} missing</p>
+          <p style="margin:8px 0 0;color:#8aa0b8;font-size:12px;line-height:1.5;">Future candidates: ${futureHtml.replace(/<\/?li>/g, "").slice(0, 160)}</p>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+        <button type="button" class="primary-button compact" data-artifact-compile="${escapeHtml(step.id)}">Compile recommended artifact</button>
+        <button type="button" class="secondary-button compact" data-artifact-bundle="${escapeHtml(step.id)}">Generate full bundle</button>
+      </div>
+      <div style="margin-top:12px;">
+        ${artifactSnapshotHtml(saved, prior, "No compiled artifact snapshot yet. Click Compile recommended artifact to preserve the current package.")}
+      </div>
+      <details style="margin-top:10px;">
+        <summary style="font-size:11px;color:#8aa0b8;cursor:pointer;">Optional full bundle snapshot</summary>
+        <div style="margin-top:8px;">${artifactSnapshotHtml(bundle, bundlePrior, "No full bundle snapshot yet. Click Generate full bundle to preserve the multi-surface package.")}</div>
+      </details>
+    </div>`;
+}
+
 function renderAnalysisTabRecipe() {
   const container = document.getElementById("analysis-tab-recipe");
   if (!container) return;
@@ -6719,6 +7695,7 @@ function renderAnalysisTabRecipe() {
     return;
   }
   state.recipeCache = state.recipeCache || {};
+  ensureArtifactCompilerState();
 
   const labelCss = "font-size:10px;letter-spacing:0.08em;text-transform:uppercase;font-weight:700;";
   const cards = steps.map((step, index) => {
@@ -6788,6 +7765,8 @@ function renderAnalysisTabRecipe() {
           ${sectionMarker(["volume", "sensitivity"])}
         </div>
 
+        ${artifactCompilerCardHtml(step, index)}
+
         <div style="margin-top:16px;">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><div style="color:#00d4b4;${labelCss}">What AI Does Here</div>${sectionMarker(["systemsTools", "dataFlow"])}</div>
           <p style="margin:0;color:#c7d4e3;font-size:13px;line-height:1.55;">${escapeHtml(whatAi)}</p>
@@ -6826,6 +7805,7 @@ function renderAnalysisTabRecipe() {
 
   container.innerHTML =
     recipeWorkflowHeaderHtml() +
+    artifactStudioHeaderHtml(steps) +
     cards +
     businessCaseBlockForCurrentWorkflow() +
     scoringTransparencyBlockForCurrentWorkflow() +
@@ -6852,6 +7832,28 @@ function renderAnalysisTabRecipe() {
     });
   });
   container.querySelector("#downloadRecipeBookBtn")?.addEventListener("click", downloadRecipeBook);
+  container.querySelector("#artifactTargetSurfaceSelect")?.addEventListener("change", (event) => {
+    ensureArtifactCompilerState().targetSurface = normalizeArtifactTargetSurface(event.target.value);
+    persistState();
+    renderAnalysisTabRecipe();
+  });
+  container.querySelector("#artifactScopeSelect")?.addEventListener("change", (event) => {
+    ensureArtifactCompilerState().recipeScope = normalizeRecipeScope(event.target.value);
+    persistState();
+    renderAnalysisTabRecipe();
+  });
+  container.querySelectorAll("[data-artifact-compile]").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      compileArtifactForStep(btn.dataset.artifactCompile);
+    });
+  });
+  container.querySelectorAll("[data-artifact-bundle]").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      compileArtifactForStep(btn.dataset.artifactBundle, { bundle: true });
+    });
+  });
 
   const recipeExportBtn = container.querySelector("#recipe-export-btn");
   recipeExportBtn?.addEventListener("click", handleRecipeExport);
@@ -7803,10 +8805,26 @@ function downloadRecipeBook() {
   let any = false;
   steps.forEach((step, index) => {
     const prompt = cache[step.id];
-    if (!prompt) return;
+    const artifactSnapshot = state.artifactCompiler?.compiled?.[step.id] || null;
+    const bundleSnapshot = state.artifactCompiler?.bundles?.[step.id] || null;
+    if (!prompt && !artifactSnapshot && !bundleSnapshot) return;
     any = true;
     parts.push(`=== STEP ${index + 1}: ${stepDisplayName(step, index)} ===`);
     parts.push(`AI Pattern: ${stepPrimaryPattern(step) || "n/a"}`);
+    if (artifactSnapshot) {
+      const meta = artifactSnapshotMeta(artifactSnapshot);
+      parts.push(`RECOMMENDED ARTIFACT SNAPSHOT: ${meta.artifactLabel}`);
+      parts.push(`READINESS: ${meta.readinessLabel}${meta.readinessScore !== null ? ` (${meta.readinessScore}/100)` : ""}`);
+      parts.push(`COMPILED: ${meta.when || artifactSnapshot.generatedAt || "unknown"}`);
+      parts.push("--- ARTIFACT CONTENT ---");
+      parts.push(meta.content || "");
+      parts.push("--- END ARTIFACT CONTENT ---");
+    }
+    if (bundleSnapshot) {
+      const meta = artifactSnapshotMeta(bundleSnapshot);
+      parts.push(`FULL BUNDLE SNAPSHOT: ${meta.artifactLabel}`);
+      parts.push(`BUNDLE COMPILED: ${meta.when || bundleSnapshot.generatedAt || "unknown"}`);
+    }
     const snap = state.recipeGateSnapshots?.[step.id];
     if (snap?.p9Unconfirmed) {
       parts.push("PROVENANCE NOTE: data sensitivity was unconfirmed (AI-inferred or below threshold) when this recipe was generated. Flagged for governance review — recipe produced; review data handling against firm AI policy before deploying.");
@@ -7815,11 +8833,11 @@ function downloadRecipeBook() {
       parts.push(`LOW-CONFIDENCE FIELDS AT GENERATION: ${snap.gaps.join(", ")}`);
     }
     parts.push("---");
-    parts.push(prompt);
+    if (prompt) parts.push(prompt);
     parts.push("");
   });
   if (!any) {
-    toast("Generate at least one prompt before downloading.");
+    toast("Generate a prompt or compile at least one artifact before downloading.");
     return;
   }
   const safeName = workflowName.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "workflow";
@@ -7837,11 +8855,13 @@ async function handleRecipeExport() {
     aiPattern: stepPrimaryPattern(step),
     prompt: state.recipeCache?.[step.id] || "",
     personaActors: gridCellValue(step, "personaActors"),
-    systemsTools: gridCellValue(step, "systemsTools")
+    systemsTools: gridCellValue(step, "systemsTools"),
+    artifactSnapshot: state.artifactCompiler?.compiled?.[step.id] || null,
+    fullBundleSnapshot: state.artifactCompiler?.bundles?.[step.id] || null
   }));
 
-  if (!steps.some((step) => step.prompt.trim() || step.aiPattern.trim())) {
-    notify("Generate at least one recipe prompt before exporting.");
+  if (!steps.some((step) => step.prompt.trim() || step.aiPattern.trim() || step.artifactSnapshot || step.fullBundleSnapshot)) {
+    notify("Generate a prompt or compile at least one artifact before exporting.");
     return;
   }
 
@@ -8105,6 +9125,100 @@ async function pushStepToJira(stepId) {
 }
 // === end Phase 6a Jira connector UI ==========================================
 
+function engineeringCommandCenterHtml(steps) {
+  const compiler = ensureArtifactCompilerState();
+  const context = artifactWorkflowContext();
+  const packages = steps.map((step, index) => ({
+    step,
+    index,
+    pkg: buildRecommendedArtifactPackage(step, context, {
+      targetSurface: compiler.targetSurface,
+      recipeScope: compiler.recipeScope
+    }),
+    saved: compiler.compiled?.[step.id],
+    bundle: compiler.bundles?.[step.id]
+  }));
+  const packageRows = packages.map(({ step, index, pkg, saved, bundle }) => {
+    const savedMeta = artifactSnapshotMeta(saved);
+    return `
+      <tr>
+        <td style="padding:7px 10px;border-bottom:1px solid #152236;color:#c8d8e8;">${escapeHtml(stepDisplayName(step, index))}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid #152236;color:#8aa0b8;">${escapeHtml(pkg.recommendedArtifact.label)}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid #152236;"><span class="ds-badge ${artifactReadinessBadgeClass(pkg.readiness.label)}">${escapeHtml(pkg.readiness.label)} · ${pkg.readiness.score}/100</span></td>
+        <td style="padding:7px 10px;border-bottom:1px solid #152236;color:#8aa0b8;">${saved ? `Compiled ${escapeHtml(savedMeta.when || "")}` : "Not compiled"}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid #152236;color:#8aa0b8;">${bundle ? "Full bundle saved" : "Recommended only"}</td>
+      </tr>`;
+  }).join("");
+  const future = packages.flatMap(({ pkg }) => pkg.ir.futureIntegrationCandidates).slice(0, 6);
+  const tests = packages.flatMap(({ pkg, index }) => pkg.ir.testCases.slice(0, 2).map((test) => `Step ${index + 1} - ${test.name}: ${test.expected}`)).slice(0, 8);
+  const githubPack = packages
+    .map(({ pkg }) => pkg.ir)
+    .find((ir) => ir.targetSurface === "githubCopilot")
+    || packages[0]?.pkg.ir;
+  const acceptanceCriteria = [
+    "Generated outputs change only through explicit user action and prior versions remain visible.",
+    "Readiness stays separate from AI opportunity score.",
+    "Low-confidence inferred values are assumptions, not hard rules.",
+    "Exports include saved artifact snapshots when available.",
+    "No live integration, writeback, automated approval, or hidden tool use is claimed."
+  ];
+  return `
+    <section class="ds-panel" style="padding:18px 20px;margin-bottom:16px;border-left:3px solid #ff4fc8;">
+      <div class="ds-section-head">
+        <div class="ds-section-title"><span class="ds-grad-bar-v" style="height:14px;background:linear-gradient(180deg,#ff4fc8,#a855f7);"></span>Implementation command center</div>
+        <div class="ds-section-meta">artifact package index, tests, controls</div>
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;min-width:760px;font-size:12px;">
+          <thead>
+            <tr style="background:#09131f;">
+              <th style="padding:7px 10px;color:#5b7186;text-align:left;border-bottom:1px solid #152236;">Step</th>
+              <th style="padding:7px 10px;color:#5b7186;text-align:left;border-bottom:1px solid #152236;">Recommended artifact</th>
+              <th style="padding:7px 10px;color:#5b7186;text-align:left;border-bottom:1px solid #152236;">Readiness</th>
+              <th style="padding:7px 10px;color:#5b7186;text-align:left;border-bottom:1px solid #152236;">Snapshot</th>
+              <th style="padding:7px 10px;color:#5b7186;text-align:left;border-bottom:1px solid #152236;">Bundle</th>
+            </tr>
+          </thead>
+          <tbody>${packageRows}</tbody>
+        </table>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;">
+        <div class="ds-card-inner" style="padding:12px;">
+          <div class="ds-micro" style="margin-bottom:6px;">No-integration MVP note</div>
+          <p style="margin:0;color:#8aa0b8;font-size:12px;line-height:1.5;">${escapeHtml(NO_INTEGRATION_MVP_NOTE)}</p>
+        </div>
+        <div class="ds-card-inner" style="padding:12px;">
+          <div class="ds-micro" style="margin-bottom:6px;">Future integration candidates</div>
+          <ul style="margin:0;padding-left:18px;color:#8aa0b8;font-size:12px;line-height:1.5;">
+            ${(future.length ? future : [FUTURE_INTEGRATION_NOTE]).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ul>
+        </div>
+        <div class="ds-card-inner" style="padding:12px;">
+          <div class="ds-micro" style="margin-bottom:6px;">Governance and policy review notes</div>
+          <ul style="margin:0;padding-left:18px;color:#8aa0b8;font-size:12px;line-height:1.5;">
+            <li>Readiness is not formal compliance approval.</li>
+            <li>Policy-specific guidance should come from uploaded policy evidence when that feature is available.</li>
+            <li>Human review stays visible for sensitive, uncertain, exception-heavy, or decision-bearing work.</li>
+          </ul>
+        </div>
+        <div class="ds-card-inner" style="padding:12px;">
+          <div class="ds-micro" style="margin-bottom:6px;">GitHub Copilot developer pack</div>
+          <p style="margin:0;color:#8aa0b8;font-size:12px;line-height:1.5;">${escapeHtml(shortArtifactPreview(renderGithubCopilotDeveloperPack(githubPack || buildAgentRecipeIr(steps[0], context))))}</p>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;">
+        <div class="ds-card-inner" style="padding:12px;">
+          <div class="ds-micro" style="margin-bottom:6px;">Test plan</div>
+          <ul style="margin:0;padding-left:18px;color:#8aa0b8;font-size:12px;line-height:1.5;">${tests.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+        </div>
+        <div class="ds-card-inner" style="padding:12px;">
+          <div class="ds-micro" style="margin-bottom:6px;">Acceptance criteria</div>
+          <ul style="margin:0;padding-left:18px;color:#8aa0b8;font-size:12px;line-height:1.5;">${acceptanceCriteria.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+        </div>
+      </div>
+    </section>`;
+}
+
 async function renderAnalysisTabEngineering() {
   const container = document.getElementById("analysis-tab-engineering");
   if (!container) return;
@@ -8336,7 +9450,7 @@ async function renderAnalysisTabEngineering() {
       ${cards}
     </div>`;
 
-  container.innerHTML = jiraBar + confluenceBar + section1 + toolbar + section2 + section3 + section4 + businessCaseBlockForCurrentWorkflow() + scoringTransparencyBlockForCurrentWorkflow();
+  container.innerHTML = jiraBar + confluenceBar + section1 + toolbar + engineeringCommandCenterHtml(steps) + section2 + section3 + section4 + businessCaseBlockForCurrentWorkflow() + scoringTransparencyBlockForCurrentWorkflow();
   if (jiraStatus.connected) populateJiraProjects();
 
   container.querySelector("#exportEngineeringDocBtn")?.addEventListener("click", exportEngineeringDoc);
@@ -8384,12 +9498,15 @@ async function handleEngineeringExport() {
     rulesDecisionLogic: gridCellValue(step, "rulesDecisionLogic"),
     exceptionBranching: gridCellValue(step, "exceptionBranching"),
     regulatoryContext: gridCellValue(step, "regulatoryContext"),
-    humanCheckpoint: gridCellValue(step, "humanCheckpoint")
+    humanCheckpoint: gridCellValue(step, "humanCheckpoint"),
+    artifactSnapshot: state.artifactCompiler?.compiled?.[step.id] || null,
+    fullBundleSnapshot: state.artifactCompiler?.bundles?.[step.id] || null
   }));
 
   const hasContent = steps.some((step) =>
     step.systemsTools.trim() || step.dataProcessing.trim() || step.rulesDecisionLogic.trim() ||
-    step.exceptionBranching.trim() || step.regulatoryContext.trim() || step.humanCheckpoint.trim()
+    step.exceptionBranching.trim() || step.regulatoryContext.trim() || step.humanCheckpoint.trim() ||
+    step.artifactSnapshot || step.fullBundleSnapshot
   );
   if (!hasContent) {
     notify("Capture engineering details (systems, data processing, rules, etc.) before exporting.");
@@ -8438,6 +9555,18 @@ function exportEngineeringDoc() {
   const steps = analysisGridSteps();
   const workflowName = analysisWorkflowName() || "workflow";
   const lines = [`=== ENGINEERING DOC: ${workflowName} ===`, ""];
+
+  lines.push("## Artifact Package Index");
+  steps.forEach((step, index) => {
+    const snapshot = state.artifactCompiler?.compiled?.[step.id] || null;
+    const bundle = state.artifactCompiler?.bundles?.[step.id] || null;
+    const meta = artifactSnapshotMeta(snapshot);
+    lines.push(`- Step ${index + 1}: ${stepDisplayName(step, index)} | Recommended: ${meta.artifactLabel} | Readiness: ${meta.readinessLabel}${meta.readinessScore !== null ? ` (${meta.readinessScore}/100)` : ""} | Snapshot: ${snapshot ? "saved" : "not compiled"} | Bundle: ${bundle ? "saved" : "not generated"}`);
+  });
+  lines.push("");
+  lines.push("No-integration MVP note:");
+  lines.push(NO_INTEGRATION_MVP_NOTE);
+  lines.push("");
 
   lines.push("## Implementation Gantt");
   steps.forEach((step, index) => {
@@ -8813,10 +9942,12 @@ async function handleRecipePdfExport() {
   const steps = analysisGridSteps().map((step, index) => ({
     name: stepDisplayName(step, index),
     aiPattern: stepPrimaryPattern(step),
-    prompt: state.recipeCache?.[step.id] || ""
+    prompt: state.recipeCache?.[step.id] || "",
+    artifactSnapshot: state.artifactCompiler?.compiled?.[step.id] || null,
+    fullBundleSnapshot: state.artifactCompiler?.bundles?.[step.id] || null
   }));
-  if (!steps.some((step) => step.prompt.trim() || step.aiPattern.trim())) {
-    notify("Generate at least one recipe prompt before exporting.");
+  if (!steps.some((step) => step.prompt.trim() || step.aiPattern.trim() || step.artifactSnapshot || step.fullBundleSnapshot)) {
+    notify("Generate a prompt or compile at least one artifact before exporting.");
     return;
   }
   await downloadPdf(
@@ -8836,11 +9967,14 @@ async function handleEngineeringPdfExport() {
     rulesDecisionLogic: gridCellValue(step, "rulesDecisionLogic"),
     exceptionBranching: gridCellValue(step, "exceptionBranching"),
     regulatoryContext: gridCellValue(step, "regulatoryContext"),
-    humanCheckpoint: gridCellValue(step, "humanCheckpoint")
+    humanCheckpoint: gridCellValue(step, "humanCheckpoint"),
+    artifactSnapshot: state.artifactCompiler?.compiled?.[step.id] || null,
+    fullBundleSnapshot: state.artifactCompiler?.bundles?.[step.id] || null
   }));
   const hasContent = steps.some((step) =>
     step.systemsTools.trim() || step.dataProcessing.trim() || step.rulesDecisionLogic.trim() ||
-    step.exceptionBranching.trim() || step.regulatoryContext.trim() || step.humanCheckpoint.trim()
+    step.exceptionBranching.trim() || step.regulatoryContext.trim() || step.humanCheckpoint.trim() ||
+    step.artifactSnapshot || step.fullBundleSnapshot
   );
   if (!hasContent) {
     notify("Capture engineering details (systems, data processing, rules, etc.) before exporting.");
@@ -9965,6 +11099,74 @@ function copySuggestedQuestionToAnswer(question) {
   toast("Suggested question copied to the answer box");
 }
 
+function questionImpactForField(field) {
+  const map = {
+    flowAndDependencies: "Improves trigger, output, handoff, and transition routing.",
+    whoIsInvolved: "Improves human review, owner routing, and approval handling.",
+    dataFlow: "Improves knowledge inputs, provenance, and sensitivity review.",
+    volume: "Improves value case and reuse frequency.",
+    systemsTools: "Improves target surface recommendation and future integration candidates.",
+    painAndRules: "Improves rules, exception tests, and readiness caveats.",
+    whatHappens: "Improves artifact purpose and prompt clarity.",
+    sensitivity: "Improves data handling caution, human review, and readiness.",
+    stepName: "Improves artifact naming and package indexing."
+  };
+  return map[field] || "Improves artifact readiness and provenance.";
+}
+
+function specStackMetrics() {
+  const step = currentGridStep() || analysisGridSteps()[0] || null;
+  const filled = step ? ARTIFACT_CRITICAL_CELLS.filter((key) => compilerCellText(step, key)).length : 0;
+  const readiness = step ? scoreRecipeReadiness(step).score : 0;
+  const hasIntent = step ? ["description", "output", "painFriction", "rulesDecisionLogic"].filter((key) => compilerCellText(step, key)).length : 0;
+  const promptClarity = step ? Math.min(100, Math.round(((compilerCellText(step, "description") ? 35 : 0) + (compilerCellText(step, "output") ? 35 : 0) + (compilerCellText(step, "rulesDecisionLogic") ? 30 : 0)))) : 0;
+  return [
+    { label: "Prompt clarity", score: promptClarity },
+    { label: "Context captured", score: Math.round((filled / ARTIFACT_CRITICAL_CELLS.length) * 100) },
+    { label: "Intent defined", score: Math.round((hasIntent / 4) * 100) },
+    { label: "Spec readiness", score: readiness }
+  ];
+}
+
+function latestIntakeChangeText() {
+  const latest = state.intakeDeltas?.[0];
+  if (!latest) return "No analyzed answer yet in this session.";
+  const counts = [
+    latest.fields ? `${latest.fields} field${latest.fields === 1 ? "" : "s"}` : "",
+    latest.steps ? `${latest.steps} step${latest.steps === 1 ? "" : "s"}` : "",
+    latest.evidenceArtifacts ? `${latest.evidenceArtifacts} evidence item${latest.evidenceArtifacts === 1 ? "" : "s"}` : ""
+  ].filter(Boolean).join(", ");
+  return counts ? `${counts} changed from the latest answer.` : (latest.note || "Latest answer reviewed; no structured change was needed.");
+}
+
+function specStackCockpitHtml(next) {
+  const metrics = specStackMetrics();
+  const step = currentGridStep() || analysisGridSteps()[0] || null;
+  const profile = step ? buildRecipeDeploymentProfile(step, artifactWorkflowContext(), ensureArtifactCompilerState()) : null;
+  const recommendation = step ? artifactSurfaceLabel(profile.targetSurface) : "Waiting for workflow evidence";
+  return `
+    <div class="ds-panel ds-border-teal" style="width:100%;box-sizing:border-box;padding:12px 16px;">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+        <div style="flex:1;min-width:220px;">
+          <div class="ds-micro" style="margin-bottom:4px;">Suggested next question</div>
+          <div style="font-size:0.9rem;color:#e2e8f0;line-height:1.4;">${escapeHtml(next?.question || "All key areas covered — ready to analyse.")}</div>
+          <div style="margin-top:6px;font-size:12px;color:#8aa0b8;line-height:1.45;">${escapeHtml(next ? questionImpactForField(next.field) : `Recommended artifact: ${recommendation}.`)}</div>
+        </div>
+        <div style="min-width:180px;">
+          <div class="ds-micro" style="margin-bottom:4px;">What changed</div>
+          <div style="font-size:12px;color:#8aa0b8;line-height:1.45;">${escapeHtml(latestIntakeChangeText())}</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px;">
+        ${metrics.map((metric) => `
+          <div class="ds-card-inner" style="padding:8px 10px;">
+            <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;color:#8aa0b8;"><span>${escapeHtml(metric.label)}</span><strong style="color:#00d4b4;">${metric.score}%</strong></div>
+            <div class="ds-progress" style="margin-top:6px;"><div class="ds-progress-fill" style="width:${Math.max(4, Math.min(100, metric.score))}%;"></div></div>
+          </div>`).join("")}
+      </div>
+    </div>`;
+}
+
 // The narrow strip under the current question. It surfaces the next-best
 // discovery question — the first field on the current step whose extraction
 // confidence is still "missing" — and is tappable to copy that question into
@@ -9973,23 +11175,11 @@ function copySuggestedQuestionToAnswer(question) {
 function renderQuestionLensBar() {
   if (!els.questionLensBar) return;
   const next = nextBestGridQuestion();
-  if (!next) {
-    els.questionLensBar.innerHTML = `
-      <div class="ds-panel ds-border-teal" style="width:100%;box-sizing:border-box;padding:12px 16px;">
-        <div class="ds-micro" style="margin-bottom:4px;">SUGGESTED NEXT QUESTION</div>
-        <div style="font-size:0.9rem;color:#e2e8f0;line-height:1.4;">All key areas covered — ready to analyse.</div>
-      </div>
-    `;
-    return;
-  }
-  els.questionLensBar.innerHTML = `
-    <div class="ds-panel ds-border-teal" role="button" tabindex="0" title="Tap to copy this question into the answer box" style="width:100%;box-sizing:border-box;padding:12px 16px;cursor:pointer;">
-      <div class="ds-micro" style="margin-bottom:4px;">SUGGESTED NEXT QUESTION</div>
-      <div style="font-size:0.9rem;color:#e2e8f0;line-height:1.4;">${escapeHtml(next.question)}</div>
-    </div>
-  `;
+  els.questionLensBar.innerHTML = specStackCockpitHtml(next);
   const panel = els.questionLensBar.firstElementChild;
-  if (panel) {
+  if (panel && next) {
+    panel.style.cursor = "pointer";
+    panel.title = "Tap to copy this question into the answer box";
     panel.addEventListener("click", () => copySuggestedQuestionToAnswer(next.question));
     panel.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
@@ -29694,6 +30884,14 @@ function normalizeLoadedState(parsed = {}) {
     evidenceWorkbench: {
       ...structuredClone(defaultState.evidenceWorkbench),
       ...(parsed.evidenceWorkbench || {})
+    },
+    artifactCompiler: {
+      ...structuredClone(defaultState.artifactCompiler),
+      ...(parsed.artifactCompiler || {}),
+      compiled: { ...(parsed.artifactCompiler?.compiled || {}) },
+      compiledPrior: { ...(parsed.artifactCompiler?.compiledPrior || {}) },
+      bundles: { ...(parsed.artifactCompiler?.bundles || {}) },
+      bundlePrior: { ...(parsed.artifactCompiler?.bundlePrior || {}) }
     },
     steps: (parsed.steps || []).map((step) => ({ ...newRecord("steps"), ...step })),
     data: (parsed.data || []).map((item) => ({ ...newRecord("data"), ...item })),
