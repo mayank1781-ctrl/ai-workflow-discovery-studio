@@ -15,7 +15,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readServerSource, buildSandbox } from "./helpers/extract.mjs";
+import { readAppSource, readServerSource, buildSandbox } from "./helpers/extract.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(__dirname, "..", "server.mjs");
@@ -174,4 +174,41 @@ test("e2e: free text in a label is dropped, never appears in the summary", async
   assert.ok(!/Acme|confidential|reconciliation/i.test(serialized), "free-text label never reaches the aggregates");
   // The event still counted as an intake event; its label was simply nulled.
   assert.ok(summary.byType.intake_method_chosen >= 2);
+});
+
+// ---- client recorder (defensive + content-free) ----------------------------
+function clientSandbox(fetchStub) {
+  const globals = { state: { sessionMeta: { id: "session-client-1" } }, console };
+  if (fetchStub !== undefined) globals.fetch = fetchStub;
+  return buildSandbox(readAppSource(), { functions: ["recordTelemetryClient"], globals });
+}
+
+test("client: recordTelemetryClient posts only the typed fields, never content", () => {
+  const calls = [];
+  const fetchStub = (url, opts) => { calls.push({ url, opts }); return { catch() {} }; };
+  const { recordTelemetryClient } = clientSandbox(fetchStub);
+
+  // Pass a hostile extra field; it must never be forwarded.
+  recordTelemetryClient("readiness_label_produced", { label_a: "Usable with caveats", value_num: 67, secret: "client merger memo" });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "/api/telemetry");
+  const body = JSON.parse(calls[0].opts.body);
+  assert.deepEqual(Object.keys(body).sort(), [
+    "count_a", "count_b", "duration_ms", "event_type", "label_a", "label_b", "session_key", "value_num"
+  ]);
+  assert.equal(body.event_type, "readiness_label_produced");
+  assert.equal(body.session_key, "session-client-1");
+  assert.equal(body.label_a, "Usable with caveats");
+  assert.equal(body.value_num, 67);
+  assert.ok(!/secret|merger/i.test(calls[0].opts.body), "hostile extra field is never forwarded");
+});
+
+test("client: recordTelemetryClient no-ops when fetch is unavailable (never throws)", () => {
+  const { recordTelemetryClient } = clientSandbox(undefined); // no fetch in scope
+  assert.doesNotThrow(() => recordTelemetryClient("bundle_built", { count_a: 6 }));
+});
+
+test("client: recordTelemetryClient swallows a throwing fetch (telemetry never breaks the app)", () => {
+  const { recordTelemetryClient } = clientSandbox(() => { throw new Error("network down"); });
+  assert.doesNotThrow(() => recordTelemetryClient("snapshot_saved", { label_a: "compiled", count_a: 1 }));
 });
