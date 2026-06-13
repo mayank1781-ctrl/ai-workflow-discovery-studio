@@ -36,7 +36,7 @@ function compilerSandbox() {
       "artifactSurfaceLabel", "normalizeArtifactTargetSurface", "normalizeRecipeScope",
       "gridCellValue", "compilerCellText", "compilerCellSnapshot", "compilerEvidenceSummary",
       "inferRecipeDataSensitivity", "inferRecipeReuseFrequency", "inferWorkflowStability",
-      "detectTransitionStep", "recommendArtifactTargetSurface", "artifactRecommendationReason",
+      "detectTransitionStep", "isDeveloperOrientedStep", "recommendArtifactTargetSurface", "artifactRecommendationReason",
       "buildRecipeDeploymentProfile", "scoreRecipeReadiness", "buildAgentRecipeIr",
       "artifactBullets", "artifactCautionSection", "renderChatGptPrompt", "renderCustomGptConfig", "renderMicrosoftCopilotConfig",
       "renderGithubCopilotDeveloperPack", "renderGenericEnterpriseCopilotSpec",
@@ -271,6 +271,41 @@ test("bundle: each surface is titled with its OWN label, not the recommended sur
         `${surface}: H1 must not be mislabeled with the recommended surface "${recommendedLabel}"`);
     }
   }
+});
+
+test("GitHub pack is developer-facing: never the recommended main artifact, but stays in the bundle", () => {
+  const { step, fill, isDeveloperOrientedStep, buildRecommendedArtifactPackage, buildFullArtifactBundle } = compilerSandbox();
+  // Clear developer signals, no transition wording.
+  fill("name", "Implement the statement parser");
+  fill("description", "Write code in the GitHub repo and add unit tests for the parser.");
+  fill("systemsTools", "GitHub");
+  fill("output", "Pull request");
+
+  assert.equal(isDeveloperOrientedStep(step), true, "developer signals are detected");
+
+  const pkg = buildRecommendedArtifactPackage(step, {}, { targetSurface: "recommend" });
+  assert.notEqual(pkg.profile.recommendedSurface, "githubCopilot",
+    "the recommended (main business) surface is never the GitHub developer pack");
+  assert.notEqual(pkg.recommendedArtifact.targetSurface, "githubCopilot");
+  assert.equal(pkg.profile.developerOriented, true);
+  assert.match(pkg.recommendationReason, /Engineering Doc/);
+  assert.match(pkg.recommendationReason, /full bundle/);
+
+  // The pack is not lost — it remains available as developer-facing context.
+  const bundle = buildFullArtifactBundle(step, {}, { targetSurface: "recommend" });
+  assert.ok(bundle.artifacts.githubCopilot, "the GitHub developer pack remains in the full bundle");
+  assert.ok(bundle.artifacts.githubCopilot.content.includes("Developer Implementation Pack"));
+});
+
+test("an explicit GitHub Copilot selection still renders the developer pack", () => {
+  const { step, fill, buildRecommendedArtifactPackage } = compilerSandbox();
+  fill("name", "Implement the statement parser");
+  fill("description", "Write code and add unit tests.");
+  fill("output", "Pull request");
+  const pkg = buildRecommendedArtifactPackage(step, {}, { targetSurface: "githubCopilot" });
+  assert.equal(pkg.profile.targetSurface, "githubCopilot", "explicit selection is honored");
+  assert.ok(pkg.recommendedArtifact.content.includes("Developer Implementation Pack"));
+  assert.match(pkg.recommendationReason, /developer-facing/i);
 });
 
 test("Q5: the server embeds saved artifact snapshots and defines no compiler of its own", () => {

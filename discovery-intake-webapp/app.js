@@ -5168,13 +5168,29 @@ function detectTransitionStep(step) {
   };
 }
 
+// Developer-implementation signals. The GitHub Copilot pack is developer-facing
+// (CLAUDE.md), so this flag drives WHERE the pack is surfaced (Engineering Doc +
+// full bundle) and the recommendation reason - it never makes the pack the main
+// business artifact.
+function isDeveloperOrientedStep(step) {
+  const text = [
+    compilerCellText(step, "systemsTools"),
+    compilerCellText(step, "description"),
+    compilerCellText(step, "dataProcessing"),
+    compilerCellText(step, "output")
+  ].join(" ").toLowerCase();
+  return /\b(github|repo|code|pull request|developer|test automation|ci|cd|implementation)\b/.test(text);
+}
+
 function recommendArtifactTargetSurface(step, profileSeed = {}, transition = detectTransitionStep(step)) {
   if (transition.isTransition) return "transitionArtifact";
   const systems = compilerCellText(step, "systemsTools").toLowerCase();
   const description = [compilerCellText(step, "description"), compilerCellText(step, "dataProcessing"), compilerCellText(step, "output")].join(" ").toLowerCase();
   const reuse = inferRecipeReuseFrequency(step);
   const needsKnowledge = /\b(sharepoint|teams|outlook|excel|word|powerpoint|m365|microsoft 365|file|folder|policy|knowledge|sop|document|reference)\b/.test(`${systems} ${description}`);
-  if (/\b(github|repo|code|pull request|developer|test automation|ci|cd|implementation)\b/.test(`${systems} ${description}`)) return "githubCopilot";
+  // GitHub Copilot is developer-facing and is surfaced in the Engineering Doc and
+  // the full bundle - never as the recommended MAIN business artifact. So a
+  // developer-signal step still resolves to the best business surface below.
   if (/\b(sharepoint|teams|outlook|excel|word|powerpoint|m365|microsoft 365)\b/.test(systems)) {
     return needsKnowledge || reuse === "recurring" || reuse === "operationalized" ? "copilotStudio" : "microsoft365Copilot";
   }
@@ -5185,12 +5201,19 @@ function recommendArtifactTargetSurface(step, profileSeed = {}, transition = det
 
 function artifactRecommendationReason(profile, transition = null) {
   if (transition?.isTransition) return "This step is primarily a handoff, waiting, routing, approval, or decision moment, so the artifact supports the human transition instead of pretending an agent should decide.";
-  if (profile.targetSurface === "copilotStudio") return "The workflow appears to use Microsoft 365 knowledge or files, repeatable steps, and human review, so Copilot Studio is the best controlled artifact.";
-  if (profile.targetSurface === "microsoft365Copilot") return "The work appears to happen inside Microsoft 365 apps, so a Microsoft 365 Copilot prompt/configuration is the closest user surface.";
-  if (profile.targetSurface === "customGPT") return "The step appears recurring or knowledge-backed, so a reusable Custom GPT configuration is more durable than a one-off prompt.";
-  if (profile.targetSurface === "githubCopilot") return "The evidence points to developer implementation work, so GitHub Copilot belongs in the developer package rather than the main business-user artifact.";
-  if (profile.targetSurface === "genericEnterpriseCopilot") return "The data posture or platform context calls for a generic enterprise copilot specification with explicit controls and review.";
-  return "The step is bounded enough for a prompt-based artifact and does not require live integrations.";
+  let reason;
+  if (profile.targetSurface === "copilotStudio") reason = "The workflow appears to use Microsoft 365 knowledge or files, repeatable steps, and human review, so Copilot Studio is the best controlled artifact.";
+  else if (profile.targetSurface === "microsoft365Copilot") reason = "The work appears to happen inside Microsoft 365 apps, so a Microsoft 365 Copilot prompt/configuration is the closest user surface.";
+  else if (profile.targetSurface === "customGPT") reason = "The step appears recurring or knowledge-backed, so a reusable Custom GPT configuration is more durable than a one-off prompt.";
+  else if (profile.targetSurface === "githubCopilot") reason = "You selected the GitHub Copilot developer pack; it is developer-facing implementation context rather than a business-user artifact.";
+  else if (profile.targetSurface === "genericEnterpriseCopilot") reason = "The data posture or platform context calls for a generic enterprise copilot specification with explicit controls and review.";
+  else reason = "The step is bounded enough for a prompt-based artifact and does not require live integrations.";
+  // Developer signals never promote the GitHub pack to the main business artifact;
+  // point the user to where the pack actually lives instead.
+  if (profile.developerOriented && profile.targetSurface !== "githubCopilot") {
+    reason += " Developer signals were detected, so the GitHub Copilot developer pack is provided in the Engineering Doc and the full bundle rather than as the main business artifact.";
+  }
+  return reason;
 }
 
 function buildRecipeDeploymentProfile(step, workflowContext = {}, options = {}) {
@@ -5214,7 +5237,8 @@ function buildRecipeDeploymentProfile(step, workflowContext = {}, options = {}) 
   const deploymentLevel = needsKnowledge || targetSurface === "customGPT" || targetSurface === "copilotStudio"
     ? "knowledgeBasedAssistant"
     : "promptOnly";
-  const expectedUser = targetSurface === "githubCopilot"
+  const developerOriented = isDeveloperOrientedStep(step);
+  const expectedUser = targetSurface === "githubCopilot" || developerOriented
     ? "developer"
     : recipeScope === "transition" ? "reviewer" : needsKnowledge ? "analyst" : "businessUser";
   const profile = {
@@ -5229,6 +5253,7 @@ function buildRecipeDeploymentProfile(step, workflowContext = {}, options = {}) 
     dataSensitivity,
     needsKnowledge,
     needsHumanApproval,
+    developerOriented,
     workflowStability: inferWorkflowStability(step),
     expectedUser,
     defaultOutputMode: "recommendedArtifactPlusOptionalBundle",

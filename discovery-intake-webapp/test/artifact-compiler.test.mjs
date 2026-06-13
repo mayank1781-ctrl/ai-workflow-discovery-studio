@@ -39,6 +39,7 @@ function compilerSandbox() {
       "inferRecipeReuseFrequency",
       "inferWorkflowStability",
       "detectTransitionStep",
+      "isDeveloperOrientedStep",
       "recommendArtifactTargetSurface",
       "artifactRecommendationReason",
       "buildRecipeDeploymentProfile",
