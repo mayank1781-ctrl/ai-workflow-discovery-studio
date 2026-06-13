@@ -4480,6 +4480,84 @@ function aiInferredConfirmFields(steps) {
   });
 }
 
+function discoveryActionMetaForCell(key, confirm = false) {
+  if (confirm) {
+    return {
+      lane: "Confirm inferred evidence",
+      treatment: "Confirm inferred",
+      source: "AI-inferred value",
+      improves: "Provenance and artifact confidence",
+      why: "This value already exists, but confirming it upgrades the artifact from inferred to user-trusted evidence.",
+      accent: "#a78bfa",
+      priority: 60
+    };
+  }
+  if (["dataSensitivity", "regulatoryContext", "rulesDecisionLogic", "exceptionBranching"].includes(key)) {
+    return {
+      lane: "Critical for safe recipe",
+      treatment: "Ask now",
+      source: "Missing evidence",
+      improves: "Readiness and human review",
+      why: "This answer changes artifact caveats, human review rules, and what the AI must not decide.",
+      accent: "#f59e0b",
+      priority: 100
+    };
+  }
+  if (["timeTaken", "frequencyVolume", "painFriction"].includes(key)) {
+    return {
+      lane: "Important for value case",
+      treatment: "Ask next",
+      source: "Missing evidence",
+      improves: "Business case and opportunity priority",
+      why: "This answer helps separate valuable, repeatable work from a low-value prompt-only helper.",
+      accent: "#ff4fc8",
+      priority: 82
+    };
+  }
+  return {
+    lane: "Useful for artifact quality",
+    treatment: "Ask next",
+    source: "Missing evidence",
+    improves: "Prompt quality, platform fit, and test pack",
+    why: "This answer makes the recommended artifact clearer, more testable, and easier to review.",
+    accent: "#00d4b4",
+    priority: 74
+  };
+}
+
+function discoveryActionQueueItems(steps, options = {}) {
+  const safeSteps = Array.isArray(steps) ? steps : [];
+  if (!safeSteps.length) return [];
+  const limit = Number.isFinite(options.limit) ? options.limit : 3;
+  const claimedWording = new Set();
+  const gaps = workflowGapFields(safeSteps)
+    .filter((field) => questionStatusForIntent([field.key]) !== "retired")
+    .map((field) => {
+      const phrasing = modelQuestionForCells([field.key], claimedWording) || field.q;
+      const meta = discoveryActionMetaForCell(field.key, false);
+      return {
+        key: field.key,
+        question: phrasing,
+        canonicalQuestion: field.q,
+        confirm: false,
+        ...meta
+      };
+    });
+  const confirms = aiInferredConfirmFields(safeSteps).map((field) => {
+    const meta = discoveryActionMetaForCell(field.key, true);
+    return {
+      key: field.key,
+      question: `Confirm: ${field.q}`,
+      canonicalQuestion: field.q,
+      confirm: true,
+      ...meta
+    };
+  });
+  return [...gaps, ...confirms]
+    .sort((a, b) => b.priority - a.priority)
+    .slice(0, Math.max(0, limit));
+}
+
 // PR 29 fix: a tapped key question becomes the "Answering:" context above the
 // composer; the answer box itself stays empty + focused for the user's reply,
 // and the composer scrolls into view (the box is otherwise off-screen when many
@@ -4539,26 +4617,10 @@ function renderInlineKeyQuestions() {
   if (container.previousElementSibling !== anchor) anchor.insertAdjacentElement("afterend", container);
 
   const steps = Array.isArray(state.workflowGrid?.steps) ? state.workflowGrid.steps : [];
-  // Slice 2: true gaps first (minus retired intents), then the deprioritized
-  // "confirm" lane — ai-inferred-only fields that were never retired.
-  const gaps = steps.length
-    ? workflowGapFields(steps).filter((field) => questionStatusForIntent([field.key]) !== "retired")
-    : [];
-  const confirms = steps.length ? aiInferredConfirmFields(steps) : [];
-  // Slice 4a: a doc-extraction follow-up that maps onto a gap's cell supplies
-  // the WORDING for that slot (data-gap-key keeps the canonical intent, so
-  // dedupe/retirement are unchanged). Confirm-lane wording stays canonical —
-  // those confirm an ai-inferred value, not re-ask the document's question.
-  // `claimedWording` keeps one doc question from filling two slots (gaps map in
-  // render order, so the first to claim a phrasing keeps it).
-  const claimedWording = new Set();
-  const top3 = [
-    ...gaps.map((field) => ({ ...field, confirm: false, q: modelQuestionForCells([field.key], claimedWording) || field.q })),
-    ...confirms.map((field) => ({ ...field, confirm: true, q: `Confirm: ${field.q}` }))
-  ].slice(0, 3);
+  const top3 = steps.length ? discoveryActionQueueItems(steps, { limit: 3 }) : [];
   // The signature includes the wording so a late-arriving artifact's phrasing
   // still repaints a slot whose key/lane did not change.
-  const sig = top3.map((field) => `${field.key}${field.confirm ? "*" : ""}:${field.q}`).join("|");
+  const sig = top3.map((field) => `${field.key}${field.confirm ? "*" : ""}:${field.question}:${field.lane}`).join("|");
   if (container.dataset.sig === sig) return; // avoid rebuild/flicker when unchanged
   container.dataset.sig = sig;
 
@@ -4567,8 +4629,25 @@ function renderInlineKeyQuestions() {
     return;
   }
   container.innerHTML = `
-    <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:#5b7186;text-transform:uppercase;margin-bottom:8px;">Key questions to fill gaps</div>
-    ${top3.map((field) => `<div data-gap-question="${escapeHtml(field.q)}" data-gap-key="${escapeHtml(field.key)}" role="button" tabindex="0" style="background:#0d1b2a;border:1px solid #1e3350;border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;font-size:13px;color:${field.confirm ? "#8aa0b8" : "#cfe0f0"};line-height:1.4;transition:border-color 0.15s ease;">${escapeHtml(field.q)}</div>`).join("")}`;
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-end;margin-bottom:8px;flex-wrap:wrap;">
+      <div>
+        <div class="ds-micro">Action queue</div>
+        <strong style="display:block;color:#e8f4ff;font-size:13px;margin-top:2px;">Next-best confirmations</strong>
+      </div>
+      <span class="ds-badge ds-badge-dim">${top3.length} active</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;min-width:0;">
+      ${top3.map((field) => `
+        <button data-gap-question="${escapeHtml(field.question)}" data-gap-key="${escapeHtml(field.key)}" data-action-lane="${escapeHtml(field.lane)}" type="button" style="width:100%;min-width:0;text-align:left;background:#0d1b2a;border:1px solid #1e3350;border-left:3px solid ${field.accent};border-radius:8px;padding:10px 12px;cursor:pointer;color:#cfe0f0;line-height:1.4;transition:border-color 0.15s ease;">
+          <span style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:7px;">
+            <span style="font-size:10px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:${field.accent};">${escapeHtml(field.lane)}</span>
+            <span style="font-size:10px;color:#5b7186;">${escapeHtml(field.treatment)}</span>
+          </span>
+          <span style="display:block;font-size:13px;color:${field.confirm ? "#aebbd0" : "#e8f4ff"};">${escapeHtml(field.question)}</span>
+          <span style="display:block;margin-top:7px;font-size:11px;color:#8aa0b8;"><strong style="color:#c8d8e8;">Why this matters:</strong> ${escapeHtml(field.why)}</span>
+          <span style="display:block;margin-top:5px;font-size:11px;color:#5b7186;"><strong>Improves:</strong> ${escapeHtml(field.improves)} · ${escapeHtml(field.source)}</span>
+        </button>`).join("")}
+    </div>`;
   container.querySelectorAll("[data-gap-question]").forEach((el) => {
     const choose = () => {
       // Asked-question memory: tapping IS asking. Dedupe lives on intent.
@@ -5690,14 +5769,14 @@ function workflowIntelligenceSummaryHtml() {
   const futureLine = futureCandidates.length ? futureCandidates.join(" · ") : "";
   return `
     <section id="workflowIntelligenceSummary" class="ds-panel" style="padding:14px 16px;margin-bottom:14px;border-left:3px solid #00d4b4;">
-      <div style="display:grid;grid-template-columns:minmax(260px,1.4fr) minmax(240px,1fr);gap:14px;align-items:start;">
-        <div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;align-items:start;min-width:0;">
+        <div style="min-width:0;">
           <div class="ds-micro" style="margin-bottom:5px;">Workflow package summary</div>
           <h3 style="margin:0;color:#e8f4ff;font-size:16px;line-height:1.35;">Best fit: ${escapeHtml(first.recommendedArtifact.label)}</h3>
           <p style="margin:6px 0 0;color:#8aa0b8;font-size:12px;line-height:1.45;">${escapeHtml(first.recommendationReason)}</p>
           <p style="margin:6px 0 0;color:#5b7186;font-size:11px;line-height:1.45;">${escapeHtml(NO_INTEGRATION_MVP_NOTE)}</p>
         </div>
-        <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-start;">
+        <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-start;min-width:0;">
           <div style="display:flex;gap:7px;flex-wrap:wrap;">${summaryPills}</div>
           <div style="font-size:12px;color:#c8d8e8;line-height:1.45;"><strong style="color:#e8f4ff;">Next:</strong> ${escapeHtml(nextAction)}</div>
           ${blockerLine ? `<div style="font-size:11px;color:#f5c451;line-height:1.45;"><strong>Confirm:</strong> ${escapeHtml(blockerLine)}</div>` : ""}
@@ -11287,7 +11366,7 @@ function specStackCockpitHtml(next) {
           <div style="font-size:12px;color:#8aa0b8;line-height:1.45;">${escapeHtml(latestIntakeChangeText())}</div>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(124px,1fr));gap:8px;margin-top:12px;min-width:0;">
         ${metrics.map((metric) => `
           <div class="ds-card-inner" style="padding:8px 10px;">
             <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;color:#8aa0b8;"><span>${escapeHtml(metric.label)}</span><strong style="color:#00d4b4;">${metric.score}%</strong></div>

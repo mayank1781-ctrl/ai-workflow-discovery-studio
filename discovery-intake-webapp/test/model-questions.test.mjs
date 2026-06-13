@@ -143,10 +143,13 @@ test("no duplicate visible wording: a doc question is claimed by at most one slo
 test("builder pins: both reachable surfaces substitute wording, intents stay canonical, slots stay <=3", () => {
   // Slice 4a re-landed carry-item 3 on the two surfaces that actually render —
   // the dead per-artifact evidence list is gone (ghost-host lesson from PR 33).
+  const queue = extractFunction(source, "discoveryActionQueueItems");
+  assert.ok(queue.includes("modelQuestionForCells([field.key], claimedWording) || field.q"), "key-questions helper takes the doc's wording, threading a claim set");
+  assert.ok(queue.includes(".slice(0, Math.max(0, limit))"), "slot count remains bounded by the caller limit");
+
   const inline = extractFunction(source, "renderInlineKeyQuestions");
-  assert.ok(inline.includes("modelQuestionForCells([field.key], claimedWording) || field.q"), "key-questions slot takes the doc's wording, threading a claim set");
   assert.ok(inline.includes('data-gap-key="${escapeHtml(field.key)}"'), "intent stays the canonical cell key");
-  assert.ok(inline.includes(".slice(0, 3)"), "slot count unchanged");
+  assert.ok(inline.includes("discoveryActionQueueItems(steps, { limit: 3 })"), "rendered key-question surface still caps at three slots");
 
   const gatePanel = extractFunction(source, "renderRecipeGatePanel");
   assert.ok(gatePanel.includes("modelQuestionForCells(gap.cells, claimedWording) || gap.q"), "gate slot takes the doc's wording, threading a claim set");

@@ -12647,3 +12647,124 @@ body[data-discovery-entry="upload"] .main-turn-actions {
   font-size: 0.95rem;
   color: var(--future-muted);
 }
+
+/* v2 continuation: keep the Discovery cockpit inside narrow mobile viewports. */
+@media (max-width: 860px) {
+  .session-topbar,
+  body[data-app-mode="interview"] .session-topbar,
+  body[data-app-mode="analysis"] .session-topbar {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 10px;
+    padding-inline: 12px;
+  }
+
+  .session-brand,
+  .mode-switch,
+  .topbar-actions {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    justify-self: stretch;
+  }
+
+  .mode-switch {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mode-tab {
+    min-width: 0;
+  }
+
+  .topbar-trio {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .topbar-trio-button {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    padding-inline: 10px;
+  }
+
+  .topbar-trio-help .help-popover {
+    position: fixed;
+    top: 92px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-width: none;
+    transform: none;
+  }
+
+  body[data-app-mode="analysis"] .analysis-studio,
+  body[data-app-mode="analysis"] #workflowIntelligenceSummaryHost,
+  body[data-app-mode="analysis"] .analysis-tab-bar,
+  body[data-app-mode="analysis"] .analysis-tab-panel {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  body[data-app-mode="analysis"] .analysis-studio {
+    padding: 14px;
+    overflow-x: hidden;
+  }
+
+  body[data-app-mode="analysis"] #workflowIntelligenceSummaryHost .ds-panel {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  body[data-app-mode="analysis"] .analysis-tab-bar {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 10px 0 0;
+  }
+
+  body[data-app-mode="analysis"] .analysis-tab-btn {
+    flex: 1 1 150px;
+    min-width: 0;
+  }
+
+  body[data-app-mode="analysis"] .analysis-tab-panel {
+    padding: 12px 0;
+    overflow-x: auto;
+  }
+
+  body[data-app-mode="interview"] .discovery-question-area,
+  body[data-app-mode="interview"] .current-question-card,
+  body[data-app-mode="interview"] .question-lens-bar,
+  body[data-app-mode="interview"] #inlineKeyQuestions,
+  body[data-app-mode="interview"] .embedded-transcript-card {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  body[data-app-mode="interview"] .question-lens-bar > *,
+  body[data-app-mode="interview"] #inlineKeyQuestions > * {
+    min-width: 0;
+  }
+
+  body[data-app-mode="interview"] .main-turn-actions,
+  body[data-app-mode="interview"] .support-actions,
+  body[data-app-mode="interview"] .transcript-composer .chat-composer .voice-actions {
+    grid-template-columns: minmax(0, 1fr) !important;
+    max-width: 100%;
+  }
+
+  body[data-app-mode="interview"] .main-turn-actions .primary-button,
+  body[data-app-mode="interview"] .main-turn-actions .secondary-button,
+  body[data-app-mode="interview"] .main-turn-actions .main-attachment-button {
+    min-width: 0;
+    width: 100%;
+  }
+}

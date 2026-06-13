@@ -10,6 +10,7 @@ const source = readAppSource();
 const NO_INTEGRATION_CONTRACT = "This artifact assumes no live system integrations, no API actions, no writeback, and no automated external tool use.";
 
 function compilerSandbox() {
+  const sandboxState = { questionHistory: [], evidenceArtifacts: [] };
   const fns = buildSandbox(source, {
     consts: [
       "ARTIFACT_TARGET_SURFACES",
@@ -21,12 +22,15 @@ function compilerSandbox() {
       "CELL_PLAIN_NAMES",
       "GRID_CELL_KEYS",
       "GRID_SOURCE_RANK",
-      "GRID_CELL_LAYER"
+      "GRID_CELL_LAYER",
+      "KEY_QUESTION_FIELDS",
+      "MODEL_QUESTION_INTENT_RULES"
     ],
     functions: [
       "artifactSurfaceLabel",
       "normalizeArtifactTargetSurface",
       "normalizeRecipeScope",
+      "gridCellValue",
       "compilerCellText",
       "compilerCellSnapshot",
       "compilerEvidenceSummary",
@@ -53,6 +57,16 @@ function compilerSandbox() {
       "artifactActionFromGap",
       "artifactActionItems",
       "artifactTestCasesByPath",
+      "workflowGapFields",
+      "questionIntentId",
+      "questionStatusForIntent",
+      "fieldEditNormalize",
+      "modelQuestionIntent",
+      "modelQuestionForCells",
+      "aiInferredConfirmFields",
+      "discoveryActionMetaForCell",
+      "discoveryActionQueueItems",
+      "isCapturedValue",
       "getField",
       "patchField",
       "deriveLegacyCellSource",
@@ -62,6 +76,7 @@ function compilerSandbox() {
       "makeId"
     ],
     globals: {
+      state: sandboxState,
       console: { info: () => {}, warn: () => {}, error: () => {} },
       currentGridStep: () => null
     }
@@ -69,7 +84,7 @@ function compilerSandbox() {
   const step = fns.newGridStep();
   const fill = (key, value, sourceName = "user-stated", confidence = 0.9, options = {}) =>
     fns.patchField(step, null, key, value, sourceName, confidence, options);
-  return { ...fns, step, fill };
+  return { ...fns, state: sandboxState, step, fill };
 }
 
 test("profile builder defaults to hybrid confidence, no integrations, and recommends M365 surfaces", () => {
@@ -224,6 +239,12 @@ test("UI hierarchy mounts compact package summary, accordions, and implementatio
   assert.ok(engineeringSource.includes("implementation-package-section"));
   assert.ok(engineeringSource.includes("Implementation Package"));
   assert.ok(engineeringSource.includes("engineeringImplementationTestPlanHtml(packages)"));
+
+  const discoveryQueueSource = extractFunction(source, "renderInlineKeyQuestions");
+  assert.ok(discoveryQueueSource.includes("discoveryActionQueueItems"));
+  assert.ok(discoveryQueueSource.includes("Next-best confirmations"));
+  assert.ok(discoveryQueueSource.includes("Why this matters"));
+  assert.ok(discoveryQueueSource.includes("data-action-lane"));
 });
 
 test("UI gap helper dedupes known gaps and turns them into actions", () => {
@@ -254,4 +275,29 @@ test("UI gap helper dedupes known gaps and turns them into actions", () => {
     { name: "Happy path" }
   ]);
   assert.deepEqual(grouped.map((item) => item.label), ["Happy path", "Missing input", "Exception path"]);
+});
+
+test("Discovery action queue explains next-best confirmations with provenance posture", () => {
+  const { step, fill, state, discoveryActionQueueItems } = compilerSandbox();
+  fill("name", "Review exception packet");
+  fill("dataSensitivity", "Client confidential", "ai-inferred", 0.64);
+  fill("systemsTools", "Excel, Outlook", "user-stated", 1);
+  state.evidenceArtifacts = [{
+    followUpQuestions: ["Does any regulatory rule govern this workflow?"]
+  }];
+
+  const queue = discoveryActionQueueItems([step], { limit: 20 });
+  const regulatory = queue.find((item) => item.key === "regulatoryContext");
+  assert.ok(regulatory);
+  assert.equal(regulatory.question, "Does any regulatory rule govern this workflow?");
+  assert.equal(regulatory.lane, "Critical for safe recipe");
+  assert.match(regulatory.why, /human review rules/i);
+  assert.match(regulatory.improves, /Readiness and human review/i);
+
+  const confirm = queue.find((item) => item.key === "dataSensitivity");
+  assert.ok(confirm);
+  assert.equal(confirm.lane, "Confirm inferred evidence");
+  assert.equal(confirm.treatment, "Confirm inferred");
+  assert.equal(confirm.source, "AI-inferred value");
+  assert.match(confirm.why, /user-trusted evidence/i);
 });
