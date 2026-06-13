@@ -183,6 +183,145 @@ function deleteSession(userId, sessionId) {
   db.prepare("DELETE FROM sessions WHERE id = ? AND user_id = ?").run(sessionId, sessionOwnerKey(userId));
 }
 
+// === V3-1: local usage telemetry (privacy-preserving) =======================
+// Captures behavioural/flow events and the four-signal/readiness VALUES only -
+// never free-text content (no descriptions, field values, artifact text, or
+// policy text). Stored locally in SQLite; the server hard-validates every field
+// against allowlists before insert (client input is never trusted). Read-only
+// observation: recording never reads-modifies or recomputes a relied-on value,
+// snapshot, or provenance, and never changes a pipeline response.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS telemetry_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    session_key TEXT,
+    label_a TEXT,
+    label_b TEXT,
+    count_a INTEGER,
+    count_b INTEGER,
+    value_num REAL,
+    duration_ms INTEGER,
+    source TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_telemetry_type ON telemetry_events(event_type);
+  CREATE INDEX IF NOT EXISTS idx_telemetry_session ON telemetry_events(session_key);
+`);
+
+const TELEMETRY_EVENT_TYPES = new Set([
+  "intake_method_chosen", "workflow_extracted", "opportunity_computed",
+  "business_case_computed", "artifact_recommended", "bundle_built",
+  "readiness_label_produced", "regeneration", "snapshot_saved", "export_generated"
+]);
+
+// Every value that may legitimately land in label_a/label_b. Anything outside
+// this set is dropped to NULL, so a label can never smuggle free text into the
+// store. (Enum tokens only: intake methods, opportunity tiers, business-case
+// mode, artifact surfaces, readiness labels, snapshot/regeneration/export kinds.)
+const TELEMETRY_LABEL_ALLOWLIST = new Set([
+  "interview", "dictation", "paste", "upload", "dump", "pattern-interview",
+  "quick-win", "strategic", "speculative", "compliance",
+  "role", "project",
+  "chatgptPrompt", "customGPT", "microsoft365Copilot", "copilotStudio",
+  "githubCopilot", "genericEnterpriseCopilot", "wholeWorkflowOrchestrator",
+  "transitionArtifact", "recommend",
+  "Ready for controlled use", "Usable with caveats", "Draft until confirmed", "Not enough information",
+  "compiled", "bundle", "recipe-prompt", "recipe-book", "engineering-doc", "business-case", "engineering-pdf"
+]);
+
+// The app's existing non-personal session key (sessionMeta.id, e.g. makeId()).
+// Pattern-checked so a session_key can never carry free text either.
+const TELEMETRY_SESSION_KEY_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+function telemetryLabel(value) {
+  return typeof value === "string" && TELEMETRY_LABEL_ALLOWLIST.has(value) ? value : null;
+}
+
+function telemetryInt(value, min, max) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  const r = Math.round(n);
+  return r < min || r > max ? null : r;
+}
+
+function telemetryNum(value, min, max) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return n < min || n > max ? null : n;
+}
+
+// PURE privacy gatekeeper: returns a clean typed event or null. Never trusts the
+// caller - only allowlisted, type-checked fields survive; everything else is
+// dropped. Unknown event_type => null (the event is rejected entirely).
+function sanitizeTelemetryEvent(raw, source) {
+  if (!raw || typeof raw !== "object") return null;
+  const event_type = typeof raw.event_type === "string" ? raw.event_type : "";
+  if (!TELEMETRY_EVENT_TYPES.has(event_type)) return null;
+  return {
+    event_type,
+    session_key: typeof raw.session_key === "string" && TELEMETRY_SESSION_KEY_RE.test(raw.session_key)
+      ? raw.session_key
+      : null,
+    label_a: telemetryLabel(raw.label_a),
+    label_b: telemetryLabel(raw.label_b),
+    count_a: telemetryInt(raw.count_a, 0, 1_000_000),
+    count_b: telemetryInt(raw.count_b, 0, 1_000_000),
+    value_num: telemetryNum(raw.value_num, -1e12, 1e12),
+    duration_ms: telemetryInt(raw.duration_ms, 0, 86_400_000),
+    source: source === "server" ? "server" : "client"
+  };
+}
+
+// Record one event. Sanitizes first; swallows all errors so instrumentation can
+// never break a request path. Returns true only when a row was inserted.
+function recordTelemetry(raw, source) {
+  try {
+    const e = sanitizeTelemetryEvent(raw, source);
+    if (!e) return false;
+    db.prepare(`
+      INSERT INTO telemetry_events
+        (ts, event_type, session_key, label_a, label_b, count_a, count_b, value_num, duration_ms, source)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      new Date().toISOString(), e.event_type, e.session_key, e.label_a, e.label_b,
+      e.count_a, e.count_b, e.value_num, e.duration_ms, e.source
+    );
+    return true;
+  } catch (error) {
+    console.warn("Telemetry write failed:", error.message);
+    return false;
+  }
+}
+
+// Privacy-safe aggregates so usage/signal-effectiveness is measurable. Returns
+// only counts and label distributions of the typed columns - there is no
+// content to leak.
+function summarizeTelemetry(limit = 1000) {
+  const cap = telemetryInt(limit, 1, 100_000) || 1000;
+  const byType = {};
+  for (const row of db.prepare("SELECT event_type, COUNT(*) AS n FROM telemetry_events GROUP BY event_type").all()) {
+    byType[row.event_type] = row.n;
+  }
+  const labelDist = (type) => {
+    const out = {};
+    for (const row of db.prepare("SELECT label_a, COUNT(*) AS n FROM telemetry_events WHERE event_type = ? AND label_a IS NOT NULL GROUP BY label_a").all(type)) {
+      out[row.label_a] = row.n;
+    }
+    return out;
+  };
+  const total = db.prepare("SELECT COUNT(*) AS n FROM telemetry_events").get().n;
+  return {
+    total,
+    byType,
+    readinessDistribution: labelDist("readiness_label_produced"),
+    recommendedSurfaceDistribution: labelDist("artifact_recommended"),
+    intakeMethodDistribution: labelDist("intake_method_chosen"),
+    opportunityTierDistribution: labelDist("opportunity_computed"),
+    cap
+  };
+}
+// === end V3-1 telemetry =====================================================
+
 // One-time migration: import any pre-existing flat JSON session files so an
 // upgrade doesn't lose data. Only inserts when no row already exists for that id.
 function migrateJsonSessionsToSqlite() {
@@ -1287,6 +1426,14 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && requestUrl.pathname === "/api/audit") {
       return await handleGetAudit(req, res);
+    }
+
+    if (req.method === "POST" && requestUrl.pathname === "/api/telemetry") {
+      return await handleTelemetryRecord(req, res);
+    }
+
+    if (req.method === "GET" && requestUrl.pathname === "/api/telemetry/summary") {
+      return handleTelemetrySummary(req, res);
     }
 
     if (req.method === "GET" && requestUrl.pathname === "/api/connectors/jira/auth") {
@@ -2454,6 +2601,15 @@ async function handleBusinessCase(req, res) {
     typeof body.userRole === "string" ? body.userRole : ""
   );
   snapshot.computedAt = new Date().toISOString();
+  // V3-1: record the business-case event (mode + step count + computed value).
+  // Read-only: reads the just-computed snapshot; the response is unchanged.
+  recordTelemetry({
+    event_type: "business_case_computed",
+    session_key: typeof body.sessionId === "string" ? body.sessionId : null,
+    label_a: snapshot.workflowMode,
+    count_a: steps.length,
+    value_num: snapshot.results?.annualValue ?? snapshot.results?.projectValue ?? null
+  }, "server");
   return sendJson(res, 200, { snapshot });
 }
 
@@ -4075,6 +4231,30 @@ async function handleGetAudit(req, res) {
 }
 // === end Phase 5e audit trail ===============================================
 
+// === V3-1 telemetry HTTP handlers ==========================================
+// POST /api/telemetry — record one client flow/signal event. The body is hard-
+// validated by recordTelemetry(); a 400 means nothing valid was supplied (the
+// client fire-and-forgets, so it ignores the response either way).
+async function handleTelemetryRecord(req, res) {
+  let body;
+  try {
+    body = await readJson(req);
+  } catch (error) {
+    return sendJson(res, 400, { error: error.message || "Invalid request body" });
+  }
+  const ok = recordTelemetry(body, "client");
+  return ok ? sendJson(res, 200, { ok: true }) : sendJson(res, 400, { error: "Invalid telemetry event" });
+}
+
+// GET /api/telemetry/summary — privacy-safe aggregates (counts + label
+// distributions of the typed columns). There is no content to expose.
+function handleTelemetrySummary(req, res) {
+  const url = new URL(req.url, `http://localhost:${PORT}`);
+  const limit = Number(url.searchParams.get("limit")) || 1000;
+  return sendJson(res, 200, summarizeTelemetry(limit));
+}
+// === end V3-1 telemetry HTTP handlers ======================================
+
 // === Phase 6a: Jira connector (Atlassian Cloud OAuth2 3LO) ==================
 // Minimal HTTPS client (Node built-ins only). Resolves { status, body }; body
 // is parsed JSON when possible, otherwise the raw string.
@@ -4578,6 +4758,7 @@ async function handleRecipeBookExport(req, res) {
     const body = await readJson(req);
     const { workflowName = "Workflow", steps = [] } = body;
     appendAudit(req, "export_generated", { detail: "recipe-book-docx", content: { workflowName, steps } });
+    recordTelemetry({ event_type: "export_generated", session_key: typeof body.sessionId === "string" ? body.sessionId : null, label_a: "recipe-book", count_a: Array.isArray(steps) ? steps.length : null }, "server");
     const safeName = String(workflowName).replace(/[^a-z0-9]/gi, "-").replace(/-{2,}/g, "-").replace(/^-|-$/, "");
     const children = [];
 
@@ -4722,6 +4903,7 @@ async function handleEngineeringDocExport(req, res) {
     const body = await readJson(req);
     const { workflowName = "Workflow", steps = [] } = body;
     appendAudit(req, "export_generated", { detail: "engineering-doc-docx", content: { workflowName, steps } });
+    recordTelemetry({ event_type: "export_generated", session_key: typeof body.sessionId === "string" ? body.sessionId : null, label_a: "engineering-doc", count_a: Array.isArray(steps) ? steps.length : null }, "server");
     const safeName = String(workflowName).replace(/[^a-z0-9]/gi, "-").replace(/-{2,}/g, "-").replace(/^-|-$/, "");
     const children = [];
 
@@ -4979,6 +5161,7 @@ async function handlePdfExport(req, res) {
     appendAudit(req, "export_generated", { detail: `pdf-${kind}`, content: body });
     const workflowName = typeof body.workflowName === "string" && body.workflowName.trim() ? body.workflowName.trim() : "Workflow";
     const steps = Array.isArray(body.steps) ? body.steps : [];
+    recordTelemetry({ event_type: "export_generated", session_key: typeof body.sessionId === "string" ? body.sessionId : null, label_a: kind === "engineering" ? "engineering-doc" : "recipe-book", count_a: steps.length }, "server");
     const safeName = String(workflowName).replace(/[^a-z0-9]/gi, "-").replace(/-{2,}/g, "-").replace(/^-|-$/g, "") || "workflow";
     const docTitle = `${workflowName} — ${kind === "engineering" ? "Engineering Doc" : "Recipe Book"}`;
 
