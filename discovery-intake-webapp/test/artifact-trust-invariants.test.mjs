@@ -29,7 +29,7 @@ function compilerSandbox() {
   const fns = buildSandbox(source, {
     consts: [
       "ARTIFACT_TARGET_SURFACES", "ARTIFACT_SCOPE_OPTIONS", "NO_INTEGRATION_MVP_NOTE",
-      "FUTURE_INTEGRATION_NOTE", "ARTIFACT_CRITICAL_CELLS", "TRANSITION_SIGNAL_RULES",
+      "FUTURE_INTEGRATION_NOTE", "ARTIFACT_CRITICAL_CELLS", "ARTIFACT_CAUTION_AREAS", "TRANSITION_SIGNAL_RULES",
       "CELL_PLAIN_NAMES", "GRID_CELL_KEYS", "GRID_SOURCE_RANK", "GRID_CELL_LAYER"
     ],
     functions: [
@@ -38,7 +38,7 @@ function compilerSandbox() {
       "inferRecipeDataSensitivity", "inferRecipeReuseFrequency", "inferWorkflowStability",
       "detectTransitionStep", "recommendArtifactTargetSurface", "artifactRecommendationReason",
       "buildRecipeDeploymentProfile", "scoreRecipeReadiness", "buildAgentRecipeIr",
-      "artifactBullets", "renderChatGptPrompt", "renderCustomGptConfig", "renderMicrosoftCopilotConfig",
+      "artifactBullets", "artifactCautionSection", "renderChatGptPrompt", "renderCustomGptConfig", "renderMicrosoftCopilotConfig",
       "renderGithubCopilotDeveloperPack", "renderGenericEnterpriseCopilotSpec",
       "renderWholeWorkflowOrchestrator", "renderTransitionArtifact", "renderPlatformArtifact",
       "buildRecommendedArtifactPackage", "buildFullArtifactBundle",
@@ -197,6 +197,80 @@ test("Q5: engineering-doc and business-case exports serialize saved snapshots an
     "the Word export must not trigger a fresh business-case computation");
   assert.ok(!businessCase.includes("computeBusinessCaseNow"),
     "the Word export must not call the business-case compute path");
+});
+
+test("Q2: the recommended MAIN artifact forces a visible caution when data-handling and regulatory info are AI-inferred", () => {
+  const { step, fill, buildRecommendedArtifactPackage } = compilerSandbox();
+  // Non-transition, knowledge-backed M365 step; data handling + regulatory are inferred (uncertain).
+  fill("name", "Summarise client portfolio changes");
+  fill("description", "Produce a written summary of portfolio changes for the relationship manager.");
+  fill("systemsTools", "Excel, Outlook");
+  fill("output", "Portfolio summary document");
+  fill("dataProcessing", "Client account holdings and personal data", "ai-inferred", 0.5);
+  fill("regulatoryContext", "Possibly MNPI / regulated", "ai-inferred", 0.5);
+
+  const pkg = buildRecommendedArtifactPackage(step, {}, { targetSurface: "recommend" });
+  const content = pkg.recommendedArtifact.content;
+  const caution = sectionBody(content, "Caution - Confirm Before Use");
+  assert.ok(caution !== null, "main artifact must contain a visible caution section");
+  assert.match(caution, /data handling/, "caution names the uncertain data-handling area");
+  assert.match(caution, /regulatory or compliance risk/, "caution names the uncertain regulatory area");
+  assert.match(caution, /AI-inferred at 50% confidence/, "caution states the inferred confidence");
+});
+
+test("Q2: a fully evidence-backed step yields no caution section (stays polished)", () => {
+  const { step, fill, buildRecommendedArtifactPackage } = compilerSandbox();
+  fill("name", "Summarise client portfolio changes");
+  fill("description", "Produce a written summary of portfolio changes for the relationship manager.");
+  fill("systemsTools", "Excel, Outlook");
+  fill("output", "Portfolio summary document");
+  // All six caution-relevant areas captured as user-stated evidence (no transition wording).
+  fill("dataProcessing", "Only the changed holdings table");
+  fill("dataSensitivity", "Internal only");
+  fill("rulesDecisionLogic", "Summarise only holdings that changed since last week");
+  fill("humanCheckpoint", "Relationship manager confirms the summary before sending");
+  fill("exceptionBranching", "If a holding is missing data, mark that line as draft");
+  fill("regulatoryContext", "No specific regulation; internal reference only");
+
+  const pkg = buildRecommendedArtifactPackage(step, {}, { targetSurface: "recommend" });
+  assert.equal(pkg.ir.cautionFlags.length, 0, "no caution flags when every relevant area is evidence-backed");
+  assert.equal(sectionBody(pkg.recommendedArtifact.content, "Caution - Confirm Before Use"), null,
+    "polished artifact has no caution section when nothing is uncertain");
+});
+
+test("Q2: the caution is forced across every business-user surface", () => {
+  const { step, fill, buildAgentRecipeIr, renderPlatformArtifact } = compilerSandbox();
+  fill("name", "Summarise client portfolio changes");
+  fill("description", "Produce a written summary of portfolio changes for the relationship manager.");
+  fill("output", "Portfolio summary document");
+  fill("dataProcessing", "Client account holdings and personal data", "ai-inferred", 0.5);
+  const ir = buildAgentRecipeIr(step);
+  for (const surface of ["chatgptPrompt", "customGPT", "microsoft365Copilot", "copilotStudio"]) {
+    const content = renderPlatformArtifact(ir, surface).content;
+    assert.ok(sectionBody(content, "Caution - Confirm Before Use") !== null,
+      `${surface}: business-user surface must force the caution when info is uncertain`);
+  }
+});
+
+test("bundle: each surface is titled with its OWN label, not the recommended surface's", () => {
+  const { step, fill, buildFullArtifactBundle, artifactSurfaceLabel } = compilerSandbox();
+  fill("name", "Summarise client portfolio changes");
+  fill("description", "Produce a written summary of portfolio changes for the relationship manager.");
+  fill("systemsTools", "Excel, Outlook"); // recommends copilotStudio
+  fill("output", "Portfolio summary document");
+
+  const bundle = buildFullArtifactBundle(step, {}, { targetSurface: "recommend" });
+  const recommendedLabel = artifactSurfaceLabel(bundle.profile.targetSurface);
+  for (const [surface, artifact] of Object.entries(bundle.artifacts)) {
+    const ownLabel = artifactSurfaceLabel(surface);
+    const h1 = artifact.content.split("\n").find(Boolean);
+    assert.ok(h1.includes(ownLabel), `${surface}: H1 carries its own label "${ownLabel}"`);
+    assert.ok(artifact.title.includes(ownLabel), `${surface}: title carries its own label`);
+    if (ownLabel !== recommendedLabel) {
+      assert.ok(!h1.includes(recommendedLabel),
+        `${surface}: H1 must not be mislabeled with the recommended surface "${recommendedLabel}"`);
+    }
+  }
 });
 
 test("Q5: the server embeds saved artifact snapshots and defines no compiler of its own", () => {

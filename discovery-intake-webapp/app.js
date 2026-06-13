@@ -5014,6 +5014,18 @@ const ARTIFACT_CRITICAL_CELLS = [
   "regulatoryContext"
 ];
 
+// Hybrid confidence mode (CLAUDE.md): when missing/uncertain info affects any of
+// these areas, a visible caution is forced into the MAIN artifact. Maps the
+// trust-critical cells to the plain-English risk area named in the caution line.
+const ARTIFACT_CAUTION_AREAS = {
+  dataProcessing: "data handling",
+  dataSensitivity: "data sensitivity",
+  rulesDecisionLogic: "rules and decisions",
+  humanCheckpoint: "approvals and human review",
+  exceptionBranching: "exception handling",
+  regulatoryContext: "regulatory or compliance risk"
+};
+
 const TRANSITION_SIGNAL_RULES = [
   { key: "approval", label: "Approval", re: /\b(approval|approve|approved|review|checkpoint|sign[ -]?off|signoff)\b/i },
   { key: "waiting", label: "Waiting", re: /\b(wait|waiting|pending|await|hold|blocked|dependency)\b/i },
@@ -5263,6 +5275,7 @@ function buildAgentRecipeIr(step, workflowContext = {}, options = {}) {
   const profile = buildRecipeDeploymentProfile(step, workflowContext, options);
   const transition = detectTransitionStep(step);
   const readiness = scoreRecipeReadiness(step, profile);
+  const baseName = compilerCellText(step, "name") || "Workflow step";
   const facts = [];
   const assumptions = [];
   const knownGaps = [];
@@ -5284,6 +5297,22 @@ function buildAgentRecipeIr(step, workflowContext = {}, options = {}) {
     }
     assumptions.push(`${cell.label}: treat "${cell.value}" as tentative because it is ${cell.source || "unproven"}${cell.confidence !== null ? ` at ${Math.round(cell.confidence * 100)}% confidence` : ""}.`);
   });
+
+  // Hybrid caution: deterministic flags for the trust-critical areas that are
+  // missing or AI-inferred/low-confidence. Surfaces the LABEL + risk area (not a
+  // value treated as fact), so the main artifact visibly cautions without
+  // promoting an unconfirmed value. Never empty-flags an evidence-backed cell.
+  const cautionFlags = cells
+    .filter((cell) => cell.key in ARTIFACT_CAUTION_AREAS)
+    .map((cell) => {
+      const area = ARTIFACT_CAUTION_AREAS[cell.key];
+      if (!cell.value) return `${cell.label} (${area}) is not captured - confirm it before relying on this artifact.`;
+      if (cell.inferredOnly || cell.lowConfidence) {
+        return `${cell.label} (${area}) is AI-inferred${cell.confidence !== null ? ` at ${Math.round(cell.confidence * 100)}% confidence` : ""} - confirm it before relying on this artifact.`;
+      }
+      return "";
+    })
+    .filter(Boolean);
 
   const factValue = (key) => facts.find((item) => item.field === key)?.value || "";
   const rules = [];
@@ -5364,7 +5393,8 @@ function buildAgentRecipeIr(step, workflowContext = {}, options = {}) {
     targetSurface: profile.targetSurface,
     deploymentLevel: profile.deploymentLevel,
     integrationMode: profile.integrationMode,
-    artifactName: `${compilerCellText(step, "name") || "Workflow step"} - ${artifactSurfaceLabel(profile.targetSurface)}`,
+    baseName,
+    artifactName: `${baseName} - ${artifactSurfaceLabel(profile.targetSurface)}`,
     purpose: compilerCellText(step, "description") || "Support the workflow step with controlled AI assistance.",
     trigger: compilerCellText(step, "trigger") || "User starts the task with available context.",
     inputs,
@@ -5387,6 +5417,7 @@ function buildAgentRecipeIr(step, workflowContext = {}, options = {}) {
     ],
     testCases,
     doNotAutomateNotes,
+    cautionFlags,
     futureIntegrationCandidates,
     provenanceSummary: readiness.summary,
     readinessScore: readiness,
@@ -5401,10 +5432,26 @@ function artifactBullets(items, fallback = "Not captured yet.") {
   return list.length ? list.map((item) => `- ${typeof item === "string" ? item : JSON.stringify(item)}`).join("\n") : `- ${fallback}`;
 }
 
+// Hybrid confidence mode: forces a visible caution near the top of the MAIN
+// business artifact when missing/uncertain info affects data handling,
+// decisions, approvals, exception handling, rules, or regulatory risk. Returns
+// the lines to splice in, or [] when nothing is uncertain (stay polished).
+function artifactCautionSection(ir) {
+  const flags = Array.isArray(ir.cautionFlags) ? ir.cautionFlags : [];
+  if (!flags.length) return [];
+  return [
+    "## Caution - Confirm Before Use",
+    "The items below are missing or AI-inferred and affect data handling, decisions, approvals, exceptions, rules, or regulatory risk. Confirm them before relying on this artifact.",
+    artifactBullets(flags),
+    ""
+  ];
+}
+
 function renderChatGptPrompt(ir) {
   return [
     `# ${ir.artifactName}`,
     "",
+    ...artifactCautionSection(ir),
     "## Role",
     "You are a careful workflow assistant. Use only the provided context and ask before filling gaps.",
     "",
@@ -5434,6 +5481,7 @@ function renderCustomGptConfig(ir) {
   return [
     `# ${ir.artifactName}`,
     "",
+    ...artifactCautionSection(ir),
     "## Instructions",
     `Purpose: ${ir.purpose}`,
     "Use the knowledge sources listed below. Ask for missing inputs instead of inventing them.",
@@ -5460,6 +5508,7 @@ function renderMicrosoftCopilotConfig(ir) {
   return [
     `# ${ir.artifactName}`,
     "",
+    ...artifactCautionSection(ir),
     "## Microsoft 365 / Copilot Studio Guidance",
     `Recommended surface: ${artifactSurfaceLabel(ir.targetSurface)}.`,
     "Use inside the approved Microsoft 365 work surface or as a Copilot Studio topic with knowledge-only behavior.",
@@ -5579,23 +5628,27 @@ function renderTransitionArtifact(ir) {
 
 function renderPlatformArtifact(ir, targetSurface = ir.targetSurface) {
   const surface = normalizeArtifactTargetSurface(targetSurface === "recommend" ? ir.targetSurface : targetSurface);
+  // Title each surface with ITS OWN label so a bundle never mislabels (e.g. a
+  // ChatGPT prompt carrying the recommended surface's name). baseName is the
+  // raw step name; artifactName is rebuilt for the surface being rendered.
+  const surfaceIr = ir.baseName ? { ...ir, artifactName: `${ir.baseName} - ${artifactSurfaceLabel(surface)}` } : ir;
   const content = surface === "customGPT"
-    ? renderCustomGptConfig(ir)
+    ? renderCustomGptConfig(surfaceIr)
     : surface === "microsoft365Copilot" || surface === "copilotStudio"
-      ? renderMicrosoftCopilotConfig(ir)
+      ? renderMicrosoftCopilotConfig(surfaceIr)
       : surface === "githubCopilot"
-        ? renderGithubCopilotDeveloperPack(ir)
+        ? renderGithubCopilotDeveloperPack(surfaceIr)
         : surface === "genericEnterpriseCopilot"
-          ? renderGenericEnterpriseCopilotSpec(ir)
+          ? renderGenericEnterpriseCopilotSpec(surfaceIr)
           : surface === "wholeWorkflowOrchestrator"
-            ? renderWholeWorkflowOrchestrator(ir)
+            ? renderWholeWorkflowOrchestrator(surfaceIr)
             : surface === "transitionArtifact"
-              ? renderTransitionArtifact(ir)
-              : renderChatGptPrompt(ir);
+              ? renderTransitionArtifact(surfaceIr)
+              : renderChatGptPrompt(surfaceIr);
   return {
     targetSurface: surface,
     label: artifactSurfaceLabel(surface),
-    title: `${artifactSurfaceLabel(surface)} - ${ir.artifactName}`,
+    title: `${artifactSurfaceLabel(surface)} - ${ir.baseName || ir.artifactName}`,
     content
   };
 }
