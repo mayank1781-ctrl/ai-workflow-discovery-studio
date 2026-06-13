@@ -5014,6 +5014,18 @@ const ARTIFACT_CRITICAL_CELLS = [
   "regulatoryContext"
 ];
 
+// Hybrid confidence mode (CLAUDE.md): when missing/uncertain info affects any of
+// these areas, a visible caution is forced into the MAIN artifact. Maps the
+// trust-critical cells to the plain-English risk area named in the caution line.
+const ARTIFACT_CAUTION_AREAS = {
+  dataProcessing: "data handling",
+  dataSensitivity: "data sensitivity",
+  rulesDecisionLogic: "rules and decisions",
+  humanCheckpoint: "approvals and human review",
+  exceptionBranching: "exception handling",
+  regulatoryContext: "regulatory or compliance risk"
+};
+
 const TRANSITION_SIGNAL_RULES = [
   { key: "approval", label: "Approval", re: /\b(approval|approve|approved|review|checkpoint|sign[ -]?off|signoff)\b/i },
   { key: "waiting", label: "Waiting", re: /\b(wait|waiting|pending|await|hold|blocked|dependency)\b/i },
@@ -5156,13 +5168,29 @@ function detectTransitionStep(step) {
   };
 }
 
+// Developer-implementation signals. The GitHub Copilot pack is developer-facing
+// (CLAUDE.md), so this flag drives WHERE the pack is surfaced (Engineering Doc +
+// full bundle) and the recommendation reason - it never makes the pack the main
+// business artifact.
+function isDeveloperOrientedStep(step) {
+  const text = [
+    compilerCellText(step, "systemsTools"),
+    compilerCellText(step, "description"),
+    compilerCellText(step, "dataProcessing"),
+    compilerCellText(step, "output")
+  ].join(" ").toLowerCase();
+  return /\b(github|repo|code|pull request|developer|test automation|ci|cd|implementation)\b/.test(text);
+}
+
 function recommendArtifactTargetSurface(step, profileSeed = {}, transition = detectTransitionStep(step)) {
   if (transition.isTransition) return "transitionArtifact";
   const systems = compilerCellText(step, "systemsTools").toLowerCase();
   const description = [compilerCellText(step, "description"), compilerCellText(step, "dataProcessing"), compilerCellText(step, "output")].join(" ").toLowerCase();
   const reuse = inferRecipeReuseFrequency(step);
   const needsKnowledge = /\b(sharepoint|teams|outlook|excel|word|powerpoint|m365|microsoft 365|file|folder|policy|knowledge|sop|document|reference)\b/.test(`${systems} ${description}`);
-  if (/\b(github|repo|code|pull request|developer|test automation|ci|cd|implementation)\b/.test(`${systems} ${description}`)) return "githubCopilot";
+  // GitHub Copilot is developer-facing and is surfaced in the Engineering Doc and
+  // the full bundle - never as the recommended MAIN business artifact. So a
+  // developer-signal step still resolves to the best business surface below.
   if (/\b(sharepoint|teams|outlook|excel|word|powerpoint|m365|microsoft 365)\b/.test(systems)) {
     return needsKnowledge || reuse === "recurring" || reuse === "operationalized" ? "copilotStudio" : "microsoft365Copilot";
   }
@@ -5173,12 +5201,19 @@ function recommendArtifactTargetSurface(step, profileSeed = {}, transition = det
 
 function artifactRecommendationReason(profile, transition = null) {
   if (transition?.isTransition) return "This step is primarily a handoff, waiting, routing, approval, or decision moment, so the artifact supports the human transition instead of pretending an agent should decide.";
-  if (profile.targetSurface === "copilotStudio") return "The workflow appears to use Microsoft 365 knowledge or files, repeatable steps, and human review, so Copilot Studio is the best controlled artifact.";
-  if (profile.targetSurface === "microsoft365Copilot") return "The work appears to happen inside Microsoft 365 apps, so a Microsoft 365 Copilot prompt/configuration is the closest user surface.";
-  if (profile.targetSurface === "customGPT") return "The step appears recurring or knowledge-backed, so a reusable Custom GPT configuration is more durable than a one-off prompt.";
-  if (profile.targetSurface === "githubCopilot") return "The evidence points to developer implementation work, so GitHub Copilot belongs in the developer package rather than the main business-user artifact.";
-  if (profile.targetSurface === "genericEnterpriseCopilot") return "The data posture or platform context calls for a generic enterprise copilot specification with explicit controls and review.";
-  return "The step is bounded enough for a prompt-based artifact and does not require live integrations.";
+  let reason;
+  if (profile.targetSurface === "copilotStudio") reason = "The workflow appears to use Microsoft 365 knowledge or files, repeatable steps, and human review, so Copilot Studio is the best controlled artifact.";
+  else if (profile.targetSurface === "microsoft365Copilot") reason = "The work appears to happen inside Microsoft 365 apps, so a Microsoft 365 Copilot prompt/configuration is the closest user surface.";
+  else if (profile.targetSurface === "customGPT") reason = "The step appears recurring or knowledge-backed, so a reusable Custom GPT configuration is more durable than a one-off prompt.";
+  else if (profile.targetSurface === "githubCopilot") reason = "You selected the GitHub Copilot developer pack; it is developer-facing implementation context rather than a business-user artifact.";
+  else if (profile.targetSurface === "genericEnterpriseCopilot") reason = "The data posture or platform context calls for a generic enterprise copilot specification with explicit controls and review.";
+  else reason = "The step is bounded enough for a prompt-based artifact and does not require live integrations.";
+  // Developer signals never promote the GitHub pack to the main business artifact;
+  // point the user to where the pack actually lives instead.
+  if (profile.developerOriented && profile.targetSurface !== "githubCopilot") {
+    reason += " Developer signals were detected, so the GitHub Copilot developer pack is provided in the Engineering Doc and the full bundle rather than as the main business artifact.";
+  }
+  return reason;
 }
 
 function buildRecipeDeploymentProfile(step, workflowContext = {}, options = {}) {
@@ -5202,7 +5237,8 @@ function buildRecipeDeploymentProfile(step, workflowContext = {}, options = {}) 
   const deploymentLevel = needsKnowledge || targetSurface === "customGPT" || targetSurface === "copilotStudio"
     ? "knowledgeBasedAssistant"
     : "promptOnly";
-  const expectedUser = targetSurface === "githubCopilot"
+  const developerOriented = isDeveloperOrientedStep(step);
+  const expectedUser = targetSurface === "githubCopilot" || developerOriented
     ? "developer"
     : recipeScope === "transition" ? "reviewer" : needsKnowledge ? "analyst" : "businessUser";
   const profile = {
@@ -5217,6 +5253,7 @@ function buildRecipeDeploymentProfile(step, workflowContext = {}, options = {}) 
     dataSensitivity,
     needsKnowledge,
     needsHumanApproval,
+    developerOriented,
     workflowStability: inferWorkflowStability(step),
     expectedUser,
     defaultOutputMode: "recommendedArtifactPlusOptionalBundle",
@@ -5263,6 +5300,7 @@ function buildAgentRecipeIr(step, workflowContext = {}, options = {}) {
   const profile = buildRecipeDeploymentProfile(step, workflowContext, options);
   const transition = detectTransitionStep(step);
   const readiness = scoreRecipeReadiness(step, profile);
+  const baseName = compilerCellText(step, "name") || "Workflow step";
   const facts = [];
   const assumptions = [];
   const knownGaps = [];
@@ -5284,6 +5322,22 @@ function buildAgentRecipeIr(step, workflowContext = {}, options = {}) {
     }
     assumptions.push(`${cell.label}: treat "${cell.value}" as tentative because it is ${cell.source || "unproven"}${cell.confidence !== null ? ` at ${Math.round(cell.confidence * 100)}% confidence` : ""}.`);
   });
+
+  // Hybrid caution: deterministic flags for the trust-critical areas that are
+  // missing or AI-inferred/low-confidence. Surfaces the LABEL + risk area (not a
+  // value treated as fact), so the main artifact visibly cautions without
+  // promoting an unconfirmed value. Never empty-flags an evidence-backed cell.
+  const cautionFlags = cells
+    .filter((cell) => cell.key in ARTIFACT_CAUTION_AREAS)
+    .map((cell) => {
+      const area = ARTIFACT_CAUTION_AREAS[cell.key];
+      if (!cell.value) return `${cell.label} (${area}) is not captured - confirm it before relying on this artifact.`;
+      if (cell.inferredOnly || cell.lowConfidence) {
+        return `${cell.label} (${area}) is AI-inferred${cell.confidence !== null ? ` at ${Math.round(cell.confidence * 100)}% confidence` : ""} - confirm it before relying on this artifact.`;
+      }
+      return "";
+    })
+    .filter(Boolean);
 
   const factValue = (key) => facts.find((item) => item.field === key)?.value || "";
   const rules = [];
@@ -5364,7 +5418,8 @@ function buildAgentRecipeIr(step, workflowContext = {}, options = {}) {
     targetSurface: profile.targetSurface,
     deploymentLevel: profile.deploymentLevel,
     integrationMode: profile.integrationMode,
-    artifactName: `${compilerCellText(step, "name") || "Workflow step"} - ${artifactSurfaceLabel(profile.targetSurface)}`,
+    baseName,
+    artifactName: `${baseName} - ${artifactSurfaceLabel(profile.targetSurface)}`,
     purpose: compilerCellText(step, "description") || "Support the workflow step with controlled AI assistance.",
     trigger: compilerCellText(step, "trigger") || "User starts the task with available context.",
     inputs,
@@ -5387,6 +5442,7 @@ function buildAgentRecipeIr(step, workflowContext = {}, options = {}) {
     ],
     testCases,
     doNotAutomateNotes,
+    cautionFlags,
     futureIntegrationCandidates,
     provenanceSummary: readiness.summary,
     readinessScore: readiness,
@@ -5401,10 +5457,26 @@ function artifactBullets(items, fallback = "Not captured yet.") {
   return list.length ? list.map((item) => `- ${typeof item === "string" ? item : JSON.stringify(item)}`).join("\n") : `- ${fallback}`;
 }
 
+// Hybrid confidence mode: forces a visible caution near the top of the MAIN
+// business artifact when missing/uncertain info affects data handling,
+// decisions, approvals, exception handling, rules, or regulatory risk. Returns
+// the lines to splice in, or [] when nothing is uncertain (stay polished).
+function artifactCautionSection(ir) {
+  const flags = Array.isArray(ir.cautionFlags) ? ir.cautionFlags : [];
+  if (!flags.length) return [];
+  return [
+    "## Caution - Confirm Before Use",
+    "The items below are missing or AI-inferred and affect data handling, decisions, approvals, exceptions, rules, or regulatory risk. Confirm them before relying on this artifact.",
+    artifactBullets(flags),
+    ""
+  ];
+}
+
 function renderChatGptPrompt(ir) {
   return [
     `# ${ir.artifactName}`,
     "",
+    ...artifactCautionSection(ir),
     "## Role",
     "You are a careful workflow assistant. Use only the provided context and ask before filling gaps.",
     "",
@@ -5434,6 +5506,7 @@ function renderCustomGptConfig(ir) {
   return [
     `# ${ir.artifactName}`,
     "",
+    ...artifactCautionSection(ir),
     "## Instructions",
     `Purpose: ${ir.purpose}`,
     "Use the knowledge sources listed below. Ask for missing inputs instead of inventing them.",
@@ -5460,6 +5533,7 @@ function renderMicrosoftCopilotConfig(ir) {
   return [
     `# ${ir.artifactName}`,
     "",
+    ...artifactCautionSection(ir),
     "## Microsoft 365 / Copilot Studio Guidance",
     `Recommended surface: ${artifactSurfaceLabel(ir.targetSurface)}.`,
     "Use inside the approved Microsoft 365 work surface or as a Copilot Studio topic with knowledge-only behavior.",
@@ -5579,23 +5653,27 @@ function renderTransitionArtifact(ir) {
 
 function renderPlatformArtifact(ir, targetSurface = ir.targetSurface) {
   const surface = normalizeArtifactTargetSurface(targetSurface === "recommend" ? ir.targetSurface : targetSurface);
+  // Title each surface with ITS OWN label so a bundle never mislabels (e.g. a
+  // ChatGPT prompt carrying the recommended surface's name). baseName is the
+  // raw step name; artifactName is rebuilt for the surface being rendered.
+  const surfaceIr = ir.baseName ? { ...ir, artifactName: `${ir.baseName} - ${artifactSurfaceLabel(surface)}` } : ir;
   const content = surface === "customGPT"
-    ? renderCustomGptConfig(ir)
+    ? renderCustomGptConfig(surfaceIr)
     : surface === "microsoft365Copilot" || surface === "copilotStudio"
-      ? renderMicrosoftCopilotConfig(ir)
+      ? renderMicrosoftCopilotConfig(surfaceIr)
       : surface === "githubCopilot"
-        ? renderGithubCopilotDeveloperPack(ir)
+        ? renderGithubCopilotDeveloperPack(surfaceIr)
         : surface === "genericEnterpriseCopilot"
-          ? renderGenericEnterpriseCopilotSpec(ir)
+          ? renderGenericEnterpriseCopilotSpec(surfaceIr)
           : surface === "wholeWorkflowOrchestrator"
-            ? renderWholeWorkflowOrchestrator(ir)
+            ? renderWholeWorkflowOrchestrator(surfaceIr)
             : surface === "transitionArtifact"
-              ? renderTransitionArtifact(ir)
-              : renderChatGptPrompt(ir);
+              ? renderTransitionArtifact(surfaceIr)
+              : renderChatGptPrompt(surfaceIr);
   return {
     targetSurface: surface,
     label: artifactSurfaceLabel(surface),
-    title: `${artifactSurfaceLabel(surface)} - ${ir.artifactName}`,
+    title: `${artifactSurfaceLabel(surface)} - ${ir.baseName || ir.artifactName}`,
     content
   };
 }
