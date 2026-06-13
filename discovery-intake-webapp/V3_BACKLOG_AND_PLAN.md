@@ -3,16 +3,31 @@
 > V3 is a refinement-and-extension release on top of the now-complete v2 compiler. The
 > theme is: **make the existing depth legible, surface the trust model as a visible product
 > value, and add the enterprise pieces a finance firm needs to treat this as a system of
-> record** — measured against real usage data, not instinct.
+> record** — measured against real usage data, not instinct. A late addition (V3-10) extends
+> this to **durability over time**: an artifact's acceptance criteria only stay meaningful if
+> they remain re-checkable as the underlying model changes (see "Strategic context" below).
 >
 > Every item inherits the binding guardrails in `CLAUDE.md` (trust model, provenance,
 > explicit-action generation, snapshot exports, vanilla JS SPA / raw Node, deterministic
 > tests with no live LLM, no firm names, banned phrase absent). Those are not repeated in
 > each item's criteria — they are the universal definition of done below.
 
+## Strategic context (added 2026-06-13)
+
+An external synthesis on the AI-augmented workforce (two talks; see
+`STRATEGIC_INPUT_workforce-AI.md` for the full analysis and source caveats) reinforced this
+app's core thesis — the durable skill is **precise specification of intent** (context,
+explicit acceptance criteria, articulated constraints, decomposition, evals), and the Studio
+*is* a spec-compiler for people who can't yet write that spec. The synthesis surfaced exactly
+one genuine capability gap against the current roadmap: **evals as a living, recurring layer,
+not a one-time artifact** — because models change underneath you and silently regress. That
+gap is now captured as **V3-10**. The synthesis is positioning/validation for everything else
+and changes no other item's scope; it does add a deck/brief framing recommendation and a
+`CLAUDE.md` rule ("track, don't execute"), both recorded as follow-ups, not built here.
+
 ## Universal definition of done (applies to every item)
 
-- The test gate stays green and the pass count never drops (currently 130; it should grow).
+- The test gate stays green and the pass count never drops (currently 162; it should grow).
 - New tests are deterministic and require no live LLM or external API.
 - No relied-on value is silently invented, dropped, changed, recomputed, or overwritten;
   provenance is preserved; generation happens only on explicit user action; prior versions
@@ -20,7 +35,9 @@
 - Architecture/content guardrails intact (raw Node server not Express, `getField`/`patchField`,
   `toast()` not `showToast()`, no hard-disabled buttons, no invented server scoring endpoint,
   USD/en-US, no firm names anywhere, banned phrase "work with your development team" absent).
-- Each item ships as its own pushed branch + PR for manual review/merge in the GitHub web UI.
+- Each item ships as its own pushed branch for review/merge. (Operational note: V3-2 ran
+  autonomous git-level merge under the autonomy contract; from V3-3 onward the posture is
+  **push-only** — Claude Code pushes the branch, a human reviews and merges. See the handoff.)
 
 ## Effort & time scale
 
@@ -37,12 +54,15 @@ longer because of the review/merge checkpoint between sprints.
 | V3-3 | AI-policy ingestion | P1 | M–H | ~8–14h | — |
 | V3-4 | Review/sign-off + cross-session audit trail | P1 | M | ~6–10h | — |
 | V3-5 | Spec → importable/deployable config outputs | P1 | M | ~5–9h | — |
+| V3-10 | Living eval suite (versioned tests + regression tracking) | P1 | M | ~6–10h | persisted sessions, V3-1, existing test-case generation |
 | V3-6 | Portfolio intelligence + business-case scenarios | P2 | M | ~6–10h | persisted sessions |
 | V3-7 | Shared, versioned knowledge library | P2 | M | ~5–8h | — |
 | V3-8 | IR-level version diff | P2 | S–M | ~3–5h | — |
 | V3-9 | Guided first-run / sample workflow | P2 | S–M | ~2–4h | V3-1 |
 
-Total active build time: **~43–73h**. See the phased plan at the end for wall-clock.
+Total active build time: **~49–83h** (was ~43–73h; +~6–10h for V3-10). See the phased plan
+at the end for wall-clock. To keep total scope roughly flat, consider deferring one P2 polish
+item (V3-7 or V3-8) in exchange for V3-10, since V3-10 is higher-value for a finance context.
 
 ---
 
@@ -68,6 +88,10 @@ Acceptance criteria:
 - Tests: each emit fires on the correct user action; the scrubber strips disallowed content;
   the disable flag suppresses every emit; aggregates compute correctly on fixtures.
 
+> Status: SHIPPED + reconciled to this canonical 8-event spec, verified at `main` `b41ba30`,
+> gate 162. The business-case dollar figure is NOT telemetered (`value_num` carries only the
+> readiness score 0–100). See the handoff for the verified receipts.
+
 ### V3-2 — Trust-legibility UX pass
 
 **Why:** Your trust model and four-concept rigor (extraction confidence / opportunity /
@@ -90,6 +114,10 @@ Acceptance criteria:
 - Tests: indicators render from stored provenance/confidence sources (assert no recompute path
   is invoked); the trust panel renders; Overview surfaces the three key fields.
 
+> Status: IN FLIGHT on branch `feat/v3-2-trust-legibility` (telemetry YES — adds a single
+> `why_panel_opened` event through the existing sanitizer; canonical set 8 → 9). Awaiting
+> build report; verify gate + SHA on landing.
+
 ---
 
 ## P1 — Enterprise value (the items that move this toward a system of record)
@@ -102,6 +130,11 @@ policy, which is what makes the output defensible internally.
 
 **What:** Upload an AI policy document; extract its clauses with provenance; let generated
 artifacts ground their caution/review language in those clauses.
+
+> Framing note (added 2026-06-13): the workforce synthesis frames "context" more broadly than
+> a policy document — decision frameworks, escalation rules, institutional standards. Keep V3-3
+> tight (policy-doc ingestion only); the broader organizational-context capability is real but
+> lives closer to V3-7's territory, not here.
 
 Acceptance criteria:
 - A policy document can be uploaded through the existing upload mechanism.
@@ -155,6 +188,49 @@ Acceptance criteria:
   the prior version.
 - Tests: config validity (shape/schema assertions per surface); no-integration clause present;
   no fake-integration claims; copy block present; prior version preserved on regeneration.
+
+### V3-10 — Living eval suite (versioned tests + regression tracking)
+
+**Why:** The app already *generates* test cases, but they're a one-time deliverable in the
+bundle. The external workforce synthesis (and, more concretely, finance-firm model risk) makes
+the operational point: an artifact's acceptance criteria only stay meaningful if they remain
+**re-checkable over time**, because the vendor can swap the underlying model and behavior drifts
+silently. "We generated test cases" must become "we can show this artifact still meets its
+acceptance criteria across versions and model changes" — which is what makes the output
+defensible to a risk committee. This reuses substrate you already have (generated test cases +
+versioned snapshots + V3-1 telemetry) rather than inventing new machinery.
+
+**What:** Promote an artifact's generated test cases into a **named, versioned eval suite**, plus
+a surface to **record and track** pass/fail results over time and across artifact/model versions.
+**Track, do not execute** — the app never calls a live model to run an eval; it structures the
+suite and records outcomes a user (or an external process) supplies. This preserves the
+no-integration boundary and the "deterministic tests, no live LLM" rule exactly.
+
+Acceptance criteria:
+- An artifact's generated test cases can be saved as a named, versioned eval suite,
+  snapshot-backed and provenance-tagged like any artifact; regeneration preserves the prior
+  suite version.
+- Each eval case supports a known-good expectation **and** at least one negative / anti-goal case
+  (the "plausible but wrong" failure the spec must guard against — the lesson of the 2.3M-
+  conversation cautionary tale in the synthesis).
+- A results log records pass / fail / not-applicable per case per run, with the artifact version,
+  a user-supplied model/version label, and a timestamp; the log is append-only and
+  snapshot-backed (no silent edit or delete path).
+- The app **never** calls a live model to run the eval — results are recorded, not executed; the
+  no-integration assumption is stated on the suite, and no fake "auto-run" or live endpoint
+  appears.
+- A regression view shows, for a suite, how results changed across runs/versions (read-only diff
+  over stored results; identical runs produce an empty diff).
+- With no results recorded, the suite shows "not yet evaluated" and never fabricates a pass.
+- Tests (deterministic, no live LLM): suite save + version preserved on regeneration; negative-
+  case structure present; results log is append-only (assert no edit/delete path exists);
+  regression diff computed from stored results only and read-only; absent-results renders
+  "not yet evaluated" and never a fabricated pass; no live-model-call path exists anywhere in the
+  eval flow.
+
+> Build note: when this ships, add the **"track, don't execute — the app never calls a live model
+> to run an eval"** rule to `CLAUDE.md` as a binding guardrail. Posture: push-only (trust-critical;
+> touches append-only records, same family as V3-4).
 
 ---
 
@@ -223,30 +299,30 @@ Acceptance criteria:
 
 ## Phased project plan
 
-Run one sprint per autonomous Claude Code session. Because merges happen manually in the GitHub
-web UI, each sprint already has a natural review checkpoint — review the PR, merge, start the
-next sprint. Sprints are ordered by leverage and dependency.
+Run one sprint per autonomous Claude Code session. Each sprint has a natural review checkpoint —
+review the branch, merge, start the next sprint. Sprints are ordered by leverage and dependency.
 
 | Sprint | Items | Active build time | Notes |
 |--------|-------|-------------------|-------|
-| 0 — Measure | V3-1 | ~3–5h | Do first. Instrument before refining. |
-| 1 — Make trust visible | V3-2 | ~5–8h | Display-only; low risk; high perceived value. |
-| 2 — Policy grounding | V3-3 | ~8–14h | Largest single item; review the PR carefully. |
-| 3 — Governance | V3-4 | ~6–10h | Touches snapshots/audit — review before merge. |
-| 4 — Deployable outputs | V3-5 | ~5–9h | Review config shapes against target surfaces. |
-| 5 — Executive view | V3-6 | ~6–10h | Needs persisted sessions; verify in Sprint 0/1. |
-| 6 — Polish | V3-7, V3-8, V3-9 | ~10–17h | Can be one combined session or three small PRs. |
+| 0 — Measure | V3-1 | ~3–5h | Done. Instrument before refining. |
+| 1 — Make trust visible | V3-2 | ~5–8h | Display-only; low risk; high perceived value. In flight. |
+| 2 — Policy grounding | V3-3 | ~8–14h | Largest single item; review the branch carefully. Push-only. |
+| 3 — Governance | V3-4 | ~6–10h | Touches snapshots/audit — review before merge. Push-only. |
+| 4 — Deployable outputs | V3-5 | ~5–9h | Review config shapes against target surfaces. Push-only. |
+| 5 — Living evals | V3-10 | ~6–10h | Track-don't-execute; append-only results. Push-only. Pairs with Sprint 3. |
+| 6 — Executive view | V3-6 | ~6–10h | Needs persisted sessions; verify in Sprint 0/1. |
+| 7 — Polish | V3-7, V3-8, V3-9 | ~10–17h | Can be one combined session or three small PRs. Consider deferring one to offset V3-10. |
 
-**Total active build time: ~43–73h.**
+**Total active build time: ~49–83h.**
 
-Wall-clock depends almost entirely on how fast you review and merge each PR. If you turn PRs
-around same-day, V3 compresses to roughly **2–3 weeks** of light-touch involvement. If reviews
-are spread out, it stretches to **4–6 weeks**. The build time itself is not the bottleneck — the
-trust-critical sprints (2, 3, 4) are where I'd spend real review attention, and the rest can run
-nearly hands-off.
+Wall-clock depends almost entirely on how fast you review and merge each branch. If you turn
+reviews around same-day, V3 compresses to roughly **2–3 weeks** of light-touch involvement. If
+reviews are spread out, it stretches to **4–6 weeks**. The build time itself is not the
+bottleneck — the trust-critical sprints (2, 3, 4, 5) are where I'd spend real review attention,
+and the rest can run nearly hands-off.
 
-A note on autonomy: Sprints 0, 1, and 6 are safe to run fully autonomous and skim afterward.
-Sprints 2–5 touch policy grounding, audit, snapshots, and exports — your trust-critical surface —
-so even running autonomously, read those PRs before merging. A green gate at a higher test count
-is your primary safety signal; if any sprint's test count drops or leaves the gate red, do not
-merge.
+A note on autonomy: Sprints 1, 6, and 7 are the lowest-risk. Sprints 2–5 touch policy grounding,
+audit, snapshots, exports, and eval records — your trust-critical surface — so from V3-3 onward
+the posture is **push-only**: Claude Code pushes the branch, a human reviews the diff and merges.
+A green gate at a higher test count is your primary safety signal; if any sprint's test count
+drops or leaves the gate red, do not merge.
