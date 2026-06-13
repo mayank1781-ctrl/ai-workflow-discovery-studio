@@ -4596,6 +4596,8 @@ async function handleRecipeBookExport(req, res) {
       const prompt = String(step.prompt || "");
       const personaActors = String(step.personaActors || "—");
       const systemsTools = String(step.systemsTools || "—");
+      const artifactSnapshot = step.artifactSnapshot ? artifactSnapshotExportMeta(step.artifactSnapshot) : null;
+      const bundleSnapshot = step.fullBundleSnapshot ? artifactSnapshotExportMeta(step.fullBundleSnapshot) : null;
 
       children.push(new Paragraph({
         heading: HeadingLevel.HEADING_1,
@@ -4609,6 +4611,37 @@ async function handleRecipeBookExport(req, res) {
           new TextRun({ text: aiPattern, size: 24, font: "Arial" })
         ]
       }));
+      if (artifactSnapshot) {
+        children.push(new Paragraph({
+          spacing: { before: 120, after: 80 },
+          children: [
+            new TextRun({ text: "Recommended artifact snapshot:  ", bold: true, size: 22, font: "Arial" }),
+            new TextRun({ text: artifactSnapshot.label, size: 22, font: "Arial" })
+          ]
+        }));
+        children.push(new Paragraph({
+          spacing: { before: 60, after: 80 },
+          children: [
+            new TextRun({ text: "Readiness:  ", bold: true, size: 20, font: "Arial" }),
+            new TextRun({ text: `${artifactSnapshot.readinessLabel}${artifactSnapshot.readinessScore !== null ? ` (${artifactSnapshot.readinessScore}/100)` : ""}`, size: 20, font: "Arial" })
+          ]
+        }));
+        for (const line of artifactSnapshot.content.split("\n").slice(0, 80)) {
+          children.push(new Paragraph({
+            spacing: { before: 40, after: 40 },
+            children: [new TextRun({ text: line, size: 20, font: "Arial" })]
+          }));
+        }
+      }
+      if (bundleSnapshot) {
+        children.push(new Paragraph({
+          spacing: { before: 80, after: 80 },
+          children: [
+            new TextRun({ text: "Full bundle snapshot:  ", bold: true, size: 20, font: "Arial" }),
+            new TextRun({ text: `${bundleSnapshot.label}${bundleSnapshot.generatedAt ? ` (${bundleSnapshot.generatedAt})` : ""}`, size: 20, font: "Arial" })
+          ]
+        }));
+      }
       for (const line of prompt.split("\n")) {
         children.push(new Paragraph({
           spacing: { before: 60, after: 60 },
@@ -4665,6 +4698,20 @@ async function handleRecipeBookExport(req, res) {
   }
 }
 
+function artifactSnapshotExportMeta(snapshot = {}) {
+  const pkg = snapshot?.package || {};
+  const readiness = pkg.readiness || pkg.ir?.readinessScore || {};
+  const artifact = pkg.recommendedArtifact || {};
+  const profile = pkg.profile || {};
+  return {
+    label: artifact.label || profile.targetSurface || "Recommended artifact",
+    readinessLabel: readiness.label || "Not compiled",
+    readinessScore: Number.isFinite(Number(readiness.score)) ? Number(readiness.score) : null,
+    generatedAt: snapshot.generatedAt || snapshot.compiledAt || "",
+    content: String(artifact.content || "")
+  };
+}
+
 async function handleEngineeringDocExport(req, res) {
   try {
     // Loaded lazily so a missing/broken `docx` install can never crash server
@@ -4699,11 +4746,34 @@ async function handleEngineeringDocExport(req, res) {
 
     for (const step of steps) {
       const name = String(step.name || "Unnamed Step");
+      const artifactSnapshot = step.artifactSnapshot ? artifactSnapshotExportMeta(step.artifactSnapshot) : null;
+      const bundleSnapshot = step.fullBundleSnapshot ? artifactSnapshotExportMeta(step.fullBundleSnapshot) : null;
 
       children.push(new Paragraph({
         heading: HeadingLevel.HEADING_1,
         spacing: { before: 480, after: 120 },
         children: [new TextRun({ text: name, font: "Arial", bold: true, size: 32 })]
+      }));
+      children.push(new Paragraph({
+        spacing: { before: 80, after: 80 },
+        children: [
+          new TextRun({ text: "Recommended artifact:  ", bold: true, size: 22, font: "Arial" }),
+          new TextRun({ text: artifactSnapshot ? artifactSnapshot.label : "Not compiled", size: 22, font: "Arial" })
+        ]
+      }));
+      children.push(new Paragraph({
+        spacing: { before: 60, after: 80 },
+        children: [
+          new TextRun({ text: "Readiness:  ", bold: true, size: 20, font: "Arial" }),
+          new TextRun({ text: artifactSnapshot ? `${artifactSnapshot.readinessLabel}${artifactSnapshot.readinessScore !== null ? ` (${artifactSnapshot.readinessScore}/100)` : ""}` : "Not compiled", size: 20, font: "Arial" })
+        ]
+      }));
+      children.push(new Paragraph({
+        spacing: { before: 60, after: 120 },
+        children: [
+          new TextRun({ text: "Full bundle:  ", bold: true, size: 20, font: "Arial" }),
+          new TextRun({ text: bundleSnapshot ? "Saved" : "Not generated", size: 20, font: "Arial" })
+        ]
       }));
       for (const [label, key] of fields) {
         const value = String(step[key] || "—");
@@ -4935,9 +5005,18 @@ async function handlePdfExport(req, res) {
 
     if (kind === "recipe") {
       for (const step of steps) {
+        const artifactSnapshot = step.artifactSnapshot ? artifactSnapshotExportMeta(step.artifactSnapshot) : null;
+        const bundleSnapshot = step.fullBundleSnapshot ? artifactSnapshotExportMeta(step.fullBundleSnapshot) : null;
         doc.font("Helvetica-Bold").fontSize(15).fillColor("#0d1b2e").text(String(step.name || "Unnamed Step"));
         doc.moveDown(0.3);
         labelLine("AI Pattern", step.aiPattern);
+        if (artifactSnapshot) {
+          labelLine("Recommended artifact snapshot", artifactSnapshot.label);
+          labelLine("Readiness", `${artifactSnapshot.readinessLabel}${artifactSnapshot.readinessScore !== null ? ` (${artifactSnapshot.readinessScore}/100)` : ""}`);
+          doc.moveDown(0.3);
+          doc.font("Helvetica").fontSize(10).fillColor("#1a2330").text(artifactSnapshot.content || "", { height: 220, ellipsis: true });
+        }
+        if (bundleSnapshot) labelLine("Full bundle snapshot", "Saved");
         doc.moveDown(0.3);
         doc.font("Helvetica").fontSize(11).fillColor("#1a2330").text(String(step.prompt || "No prompt generated yet."));
         doc.moveDown(1);
@@ -4952,8 +5031,14 @@ async function handlePdfExport(req, res) {
         ["Human Checkpoint", "humanCheckpoint"]
       ];
       for (const step of steps) {
+        const artifactSnapshot = step.artifactSnapshot ? artifactSnapshotExportMeta(step.artifactSnapshot) : null;
+        const bundleSnapshot = step.fullBundleSnapshot ? artifactSnapshotExportMeta(step.fullBundleSnapshot) : null;
         doc.font("Helvetica-Bold").fontSize(15).fillColor("#0d1b2e").text(String(step.name || "Unnamed Step"));
         doc.moveDown(0.3);
+        labelLine("Recommended artifact", artifactSnapshot ? artifactSnapshot.label : "Not compiled");
+        labelLine("Readiness", artifactSnapshot ? `${artifactSnapshot.readinessLabel}${artifactSnapshot.readinessScore !== null ? ` (${artifactSnapshot.readinessScore}/100)` : ""}` : "Not compiled");
+        labelLine("Full bundle", bundleSnapshot ? "Saved" : "Not generated");
+        doc.moveDown(0.2);
         for (const [label, key] of fields) {
           labelLine(label, step[key]);
           doc.moveDown(0.15);
