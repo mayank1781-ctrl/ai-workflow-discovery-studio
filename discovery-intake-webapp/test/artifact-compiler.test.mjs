@@ -50,6 +50,9 @@ function compilerSandbox() {
       "renderPlatformArtifact",
       "buildRecommendedArtifactPackage",
       "buildFullArtifactBundle",
+      "artifactActionFromGap",
+      "artifactActionItems",
+      "artifactTestCasesByPath",
       "getField",
       "patchField",
       "deriveLegacyCellSource",
@@ -185,4 +188,70 @@ test("Recipe and Engineering surfaces wire artifact studio and snapshot exports"
   assert.ok(exportSource.includes("artifactSnapshot"));
   assert.ok(!exportSource.includes("buildRecommendedArtifactPackage"),
     "export serializes saved snapshots; it must not recompute artifacts");
+});
+
+test("UI hierarchy mounts compact package summary, accordions, and implementation package", () => {
+  const summarySource = extractFunction(source, "workflowIntelligenceSummaryHtml");
+  assert.ok(summarySource.includes("Workflow package summary"));
+  assert.ok(summarySource.includes("Compile the recommended package"));
+  assert.ok(summarySource.includes("hideZero"));
+  assert.ok(!summarySource.includes("Generated assets"));
+
+  const headerSource = extractFunction(source, "artifactStudioHeaderHtml");
+  assert.ok(headerSource.includes("Implementation Package Builder"));
+  assert.ok(headerSource.includes("Use this in"));
+  assert.ok(headerSource.includes("Build for"));
+  assert.ok(headerSource.includes("generated > 0"));
+  assert.ok(headerSource.includes("bundleCount > 0"));
+  assert.ok(headerSource.includes("transitions > 0"));
+  assert.ok(!headerSource.includes("Avg readiness"));
+
+  const cardSource = extractFunction(source, "artifactCompilerCardHtml");
+  assert.ok(cardSource.includes("artifact-package-card"));
+  assert.ok(cardSource.includes("What to confirm next"));
+  assert.ok(cardSource.includes("Happy path / Missing input / Exception path"));
+  assert.ok(cardSource.includes("Evidence and safeguards"));
+  assert.ok(cardSource.includes("Saved package snapshots"));
+  assert.ok(cardSource.includes("Compile recommended package"));
+
+  const testPackSource = extractFunction(source, "artifactTestCasesByPath");
+  assert.ok(testPackSource.includes("Happy path"));
+  assert.ok(testPackSource.includes("Missing input"));
+  assert.ok(testPackSource.includes("Exception path"));
+
+  const engineeringSource = extractFunction(source, "engineeringCommandCenterHtml");
+  assert.ok(engineeringSource.includes("Engineering implementation package"));
+  assert.ok(engineeringSource.includes("implementation-package-section"));
+  assert.ok(engineeringSource.includes("Implementation Package"));
+  assert.ok(engineeringSource.includes("engineeringImplementationTestPlanHtml(packages)"));
+});
+
+test("UI gap helper dedupes known gaps and turns them into actions", () => {
+  const { artifactActionItems, artifactTestCasesByPath } = compilerSandbox();
+  const actions = artifactActionItems({
+    readiness: {
+      blockers: [
+        "Missing Output",
+        "Output is inferred or low-confidence",
+        "Missing Output"
+      ]
+    }
+  }, {
+    knownGaps: ["Data Sensitivity is not captured."],
+    assumptions: ["Rules: tentative."]
+  });
+
+  assert.deepEqual(actions.slice(0, 3), [
+    "Confirm output before using this package.",
+    "Review output and mark it user-confirmed if correct.",
+    "Confirm data sensitivity before using this package."
+  ]);
+  assert.equal(new Set(actions).size, actions.length);
+
+  const grouped = artifactTestCasesByPath([
+    { name: "Missing or ambiguous input" },
+    { name: "Exception path" },
+    { name: "Happy path" }
+  ]);
+  assert.deepEqual(grouped.map((item) => item.label), ["Happy path", "Missing input", "Exception path"]);
 });
