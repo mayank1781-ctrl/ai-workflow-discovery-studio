@@ -1470,8 +1470,6 @@ function bindEvents() {
   document.querySelectorAll("[data-analysis-tab]").forEach((button) => {
     button.addEventListener("click", () => {
       activateAnalysisTab(button.dataset.analysisTab);
-      // V3-1: opportunity signal recorded when the operator opens the view.
-      if (button.dataset.analysisTab === "opportunities") telemetryOpportunitySnapshot();
     });
   });
   document.querySelectorAll("[data-output-action]").forEach((button) => {
@@ -1727,7 +1725,6 @@ function setupBrowserVoices() {
 function startRecording() {
   // A new turn always silences any AI reply that is still playing.
   stopSpeaking();
-  recordTelemetryClient("intake_method_chosen", { label_a: "dictation" });
   if (canUsePostTurnTranscription()) {
     startPostTurnRecording();
     return;
@@ -3932,21 +3929,6 @@ function applyHarvestUpdates(payload = {}) {
     grid.steps.forEach((step, index) => {
       step.nextStepId = index < grid.steps.length - 1 ? grid.steps[index + 1].id : "";
     });
-    // V3-1: workflow_extracted signal (step count + mean extraction confidence).
-    // Read-only over the just-updated grid; guarded so test sandboxes that run
-    // this function without the telemetry helper are unaffected.
-    if (typeof recordTelemetryClient === "function") {
-      let confSum = 0;
-      let confN = 0;
-      for (const s of grid.steps) {
-        const cells = s?.cells || {};
-        for (const key of Object.keys(cells)) {
-          const cell = cells[key];
-          if (cell && typeof cell.confidence === "number" && cell.value) { confSum += cell.confidence; confN += 1; }
-        }
-      }
-      recordTelemetryClient("workflow_extracted", { count_a: grid.steps.length, value_num: confN ? confSum / confN : null });
-    }
   }
   return changed;
 }
@@ -6841,8 +6823,7 @@ async function computeBusinessCaseNow() {
       body: {
         steps,
         conversationText: businessCaseConversationText(),
-        userRole: state.sessionMeta?.userRole || "",
-        sessionId: state.sessionMeta?.id || "" // V3-1: telemetry session_key only
+        userRole: state.sessionMeta?.userRole || ""
       }
     });
     if (!applyBusinessCaseSnapshot(result.snapshot)) throw new Error("No snapshot returned.");
@@ -7412,7 +7393,8 @@ async function exportWorkflowWord(mode = "recipe") {
 
   // V3-1: client-side Word export event (read-only; distinct from the server
   // DOCX endpoints). label by mode; the embedded business case is unchanged.
-  recordTelemetryClient("export_generated", {
+  telemetryMarkExported();
+  recordTelemetryClient("export_performed", {
     label_a: mode === "engineering" ? "engineering-doc" : "recipe-book",
     count_a: steps.length
   });
@@ -7707,20 +7689,30 @@ function compileArtifactForStep(stepId, options = {}) {
     : buildRecommendedArtifactPackage(step, context, compileOptions);
   const hadPrior = rotateArtifactSnapshot(stepId, packagePayload, options.bundle ? "bundle" : "compiled");
   persistState();
-  // V3-1: read-only telemetry over the package/readiness just built and saved.
-  const tProv = packagePayload?.ir?.provenanceSummary || {};
-  const tReadiness = packagePayload?.readiness || {};
-  if (options.bundle) {
-    recordTelemetryClient("bundle_built", { count_a: Object.keys(packagePayload?.artifacts || {}).length });
-  } else {
-    recordTelemetryClient("artifact_recommended", {
-      label_a: packagePayload?.profile?.targetSurface,
-      count_a: tProv.evidenceBackedCells,
-      count_b: tProv.inferredCells
+  // V3-1: read-only telemetry over the package just built and saved. Marks that
+  // an artifact was generated this load (feeds time_to_first_artifact + the
+  // abandoned-on-unload check); never reads-modifies the package or snapshot.
+  _telemetryGeneratedThisLoad = true;
+  if (!_telemetryFirstArtifactDone) {
+    _telemetryFirstArtifactDone = true;
+    const createdAt = Date.parse(state.sessionMeta?.createdAt || "");
+    recordTelemetryClient("time_to_first_artifact", {
+      duration_ms: Number.isFinite(createdAt) ? Math.max(0, Date.now() - createdAt) : null
     });
   }
-  recordTelemetryClient("readiness_label_produced", { label_a: tReadiness.label, value_num: tReadiness.score });
-  recordTelemetryClient("snapshot_saved", { label_a: options.bundle ? "bundle" : "compiled", count_a: hadPrior ? 1 : 0 });
+  if (options.bundle) {
+    recordTelemetryClient("bundle_generated", { count_a: Object.keys(packagePayload?.artifacts || {}).length });
+  } else {
+    const tProv = packagePayload?.ir?.provenanceSummary || {};
+    const tReadiness = packagePayload?.readiness || {};
+    recordTelemetryClient("artifact_generated", {
+      label_a: packagePayload?.profile?.targetSurface,
+      count_a: tProv.evidenceBackedCells,
+      count_b: tProv.inferredCells,
+      value_num: tReadiness.score
+    });
+    recordTelemetryClient("target_surface_used", { label_a: packagePayload?.profile?.targetSurface });
+  }
   renderAnalysisTabRecipe();
   toast(`${options.bundle ? "Full bundle" : "Recommended package"} compiled${hadPrior ? " — prior version preserved." : "."}`);
 }
@@ -9050,8 +9042,6 @@ async function runRecipeGeneration(stepId) {
   if (!step) return;
   const body = document.querySelector(`[data-recipe-body="${stepId}"]`);
   if (!body) return;
-  // V3-1: a prior cached prompt means this run is a regeneration.
-  const hadPriorPrompt = Boolean(state.recipeCache?.[stepId]);
   body.classList.add("open");
   body.innerHTML = `<div style="display:flex;align-items:center;gap:10px;color:#7a93b4;font-size:13px;"><span style="width:16px;height:16px;border:2px solid #1a2a3a;border-top-color:#00d4b4;border-radius:50%;display:inline-block;animation:spin 1.1s linear infinite;"></span>Generating prompt...</div>`;
   try {
@@ -9095,10 +9085,6 @@ async function runRecipeGeneration(stepId) {
       delete state.recipeGateSnapshots[stepId];
     }
     persistState();
-    // V3-1: record a regeneration only when a prior prompt was replaced.
-    if (hadPriorPrompt && typeof recordTelemetryClient === "function") {
-      recordTelemetryClient("regeneration", { label_a: "recipe-prompt", count_a: 1 });
-    }
     // Re-render the whole tab so the "What AI Does Here" blurb, footer, and
     // button label all pick up the freshly generated prompt.
     renderAnalysisTabRecipe();
@@ -9186,6 +9172,7 @@ async function handleRecipeExport() {
   btn.style.opacity = "0.4";
   btn.style.cursor = "not-allowed";
   try {
+    telemetryMarkExported(); // V3-1: an export was performed this load
     const response = await fetch("/api/recipe-book-export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -9851,6 +9838,7 @@ async function handleEngineeringExport() {
   btn.style.opacity = "0.4";
   btn.style.cursor = "not-allowed";
   try {
+    telemetryMarkExported(); // V3-1: an export was performed this load
     const response = await fetch("/api/engineering-doc-export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -10024,7 +10012,6 @@ async function handleDumpExtract() {
     toast("Type or paste a description first.");
     return;
   }
-  recordTelemetryClient("intake_method_chosen", { label_a: "dump" });
   dumpExtracting = true;
   renderDumpMode();
   try {
@@ -10235,6 +10222,7 @@ async function downloadPdf(payload, filename, btn) {
     btn.style.cursor = "not-allowed";
   }
   try {
+    telemetryMarkExported(); // V3-1: an export was performed this load
     const response = await fetch("/api/pdf-export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -10431,7 +10419,6 @@ function wireDocUploadZone(el) {
 // and lands on the Analysis Studio grid tab; multiple workflows open the
 // selection panel. Soft-fails back to the upload zone.
 async function handleDocumentUpload(file, el) {
-  if (file) recordTelemetryClient("intake_method_chosen", { label_a: "upload" });
   // Phase 10a: large documents are sent to OpenAI — confirm before uploading.
   // (Sensitivity isn't known pre-analysis, so size is the available signal.)
   if (file && file.size > 500 * 1024) {
@@ -11326,6 +11313,8 @@ function renderCurrentQuestion(section = getActiveSection()) {
   const question = getDisplayQuestion(section);
   els.currentQuestion.textContent = cleanQuestionLabel(question.text);
   renderQuestionLensBar();
+  // V3-1: intake_step_viewed — deduped to once per distinct section per load.
+  telemetryMarkIntakeStepViewed(section?.id);
 }
 
 const OPENING_DISCOVERY_QUESTION = "What task or workflow do you want to talk about? Briefly describe what happens, the business outcome, and the main output.";
@@ -13795,9 +13784,6 @@ async function aiExtractAnswer(options = {}) {
     const beforeActiveStepIndex = getCurrentStepIndex();
     const askedQuestion = getDisplayQuestion(getActiveSection()).text;
     if (!injected) state.transcript = [state.transcript, answer].filter(Boolean).join("\n\n");
-    // V3-1: a user-typed answer is an interview-intake turn (system-injected
-    // triggers are not user intake and are excluded).
-    if (!injected) recordTelemetryClient("intake_method_chosen", { label_a: "interview" });
     let result = await requestJson("/api/extract", {
       method: "POST",
       body: {
@@ -15231,6 +15217,8 @@ function maybePromptMapCheckpoint(sectionId) {
 function goToNextSection() {
   const visible = getVisibleSections();
   const index = visible.findIndex((section) => section.id === state.activeSection);
+  // V3-1: the skip/next control advances past the current intake question.
+  recordTelemetryClient("intake_question_skipped", { count_a: Math.max(0, index) });
   state.activeSection = visible[Math.min(index + 1, visible.length - 1)].id;
   state.currentQuestionOverride = "";
   state.currentQuestionSource = "Intake guide";
@@ -32141,31 +32129,47 @@ function recordTelemetryClient(eventType, fields = {}) {
   }
 }
 
-// Read-only snapshot of the workflow's opportunity signal for telemetry: the
-// dominant tier across steps + how many were scored. Reads getStepOpportunityMeta
-// (the client scoring source) without mutating anything.
-function telemetryOpportunitySnapshot() {
+// --- session-load-scoped telemetry state (read-only observation) -----------
+const _telemetryViewedSteps = new Set(); // distinct intake steps viewed this load
+let _telemetryFirstArtifactDone = false; // time_to_first_artifact emitted yet?
+let _telemetryGeneratedThisLoad = false; // any artifact generated this load?
+let _telemetryExportedThisLoad = false;  // any export performed this load?
+
+// intake_step_viewed: emit once per distinct intake section per session-load, so
+// the count reflects steps actually seen rather than every re-render.
+function telemetryMarkIntakeStepViewed(sectionId) {
   try {
-    if (typeof recordTelemetryClient !== "function") return;
-    const steps = analysisGridSteps();
-    if (!steps.length) return;
-    const tierCounts = {};
-    let scored = 0;
-    for (const step of steps) {
-      const tier = getStepOpportunityMeta(step)?.tier;
-      if (tier) {
-        tierCounts[tier] = (tierCounts[tier] || 0) + 1;
-        scored += 1;
-      }
-    }
-    let dominant = null;
-    let max = -1;
-    for (const tier of Object.keys(tierCounts)) {
-      if (tierCounts[tier] > max) { max = tierCounts[tier]; dominant = tier; }
-    }
-    recordTelemetryClient("opportunity_computed", { label_a: dominant, count_a: scored });
+    if (!sectionId) return;
+    const key = `${(typeof state !== "undefined" && state?.sessionMeta?.id) || ""}:${sectionId}`;
+    if (_telemetryViewedSteps.has(key)) return;
+    _telemetryViewedSteps.add(key);
+    recordTelemetryClient("intake_step_viewed", { count_a: _telemetryViewedSteps.size });
   } catch (_) {
     /* telemetry must never affect the app */
   }
+}
+
+// An artifact is "abandoned" when one was generated this load but never exported.
+function shouldFlagAbandoned(generated, exported) {
+  return Boolean(generated) && !exported;
+}
+
+// Marked by the export paths; clears the abandoned condition for this load.
+function telemetryMarkExported() { _telemetryExportedThisLoad = true; }
+
+// artifact_abandoned: on unload, record artifacts generated-but-never-exported.
+function telemetryEmitAbandonedIfNeeded() {
+  try {
+    if (!shouldFlagAbandoned(_telemetryGeneratedThisLoad, _telemetryExportedThisLoad)) return;
+    const compiler = (typeof state !== "undefined" && state?.artifactCompiler) || {};
+    const count = Object.keys(compiler.compiled || {}).length + Object.keys(compiler.bundles || {}).length;
+    recordTelemetryClient("artifact_abandoned", { count_a: count });
+  } catch (_) {
+    /* telemetry must never affect the app */
+  }
+}
+
+if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+  window.addEventListener("beforeunload", telemetryEmitAbandonedIfNeeded);
 }
 // === end V3-1 client telemetry =============================================

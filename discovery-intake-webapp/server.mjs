@@ -208,25 +208,29 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_telemetry_session ON telemetry_events(session_key);
 `);
 
+// Single config flag that disables ALL emission (V3-1 acceptance criterion).
+// Default on; set TELEMETRY_ENABLED=false to write zero events. recordTelemetry
+// is the only insert path (both the client POST and the server-side hooks go
+// through it), so this one check guarantees nothing is written when off.
+const TELEMETRY_ENABLED = process.env.TELEMETRY_ENABLED !== "false";
+
+// The canonical V3-1 event set (V3_BACKLOG_AND_PLAN.md). These eight are the
+// only event types accepted; anything else is rejected outright.
 const TELEMETRY_EVENT_TYPES = new Set([
-  "intake_method_chosen", "workflow_extracted", "opportunity_computed",
-  "business_case_computed", "artifact_recommended", "bundle_built",
-  "readiness_label_produced", "regeneration", "snapshot_saved", "export_generated"
+  "intake_step_viewed", "intake_question_skipped", "time_to_first_artifact",
+  "artifact_generated", "artifact_abandoned", "target_surface_used",
+  "export_performed", "bundle_generated"
 ]);
 
 // Every value that may legitimately land in label_a/label_b. Anything outside
 // this set is dropped to NULL, so a label can never smuggle free text into the
-// store. (Enum tokens only: intake methods, opportunity tiers, business-case
-// mode, artifact surfaces, readiness labels, snapshot/regeneration/export kinds.)
+// store. Enum tokens only: artifact/target surfaces and export kinds. (The
+// intake, abandoned, ttfa and bundle events carry counts/durations, no labels.)
 const TELEMETRY_LABEL_ALLOWLIST = new Set([
-  "interview", "dictation", "paste", "upload", "dump", "pattern-interview",
-  "quick-win", "strategic", "speculative", "compliance",
-  "role", "project",
   "chatgptPrompt", "customGPT", "microsoft365Copilot", "copilotStudio",
   "githubCopilot", "genericEnterpriseCopilot", "wholeWorkflowOrchestrator",
   "transitionArtifact", "recommend",
-  "Ready for controlled use", "Usable with caveats", "Draft until confirmed", "Not enough information",
-  "compiled", "bundle", "recipe-prompt", "recipe-book", "engineering-doc", "business-case", "engineering-pdf"
+  "recipe-book", "engineering-doc", "engineering-pdf"
 ]);
 
 // The app's existing non-personal session key (sessionMeta.id, e.g. makeId()).
@@ -276,6 +280,7 @@ function sanitizeTelemetryEvent(raw, source) {
 // never break a request path. Returns true only when a row was inserted.
 function recordTelemetry(raw, source) {
   try {
+    if (!TELEMETRY_ENABLED) return false; // disable flag: zero events written
     const e = sanitizeTelemetryEvent(raw, source);
     if (!e) return false;
     db.prepare(`
@@ -310,13 +315,22 @@ function summarizeTelemetry(limit = 1000) {
     return out;
   };
   const total = db.prepare("SELECT COUNT(*) AS n FROM telemetry_events").get().n;
+  // Mean over a numeric column for one event type (or null when no rows).
+  const meanValue = (type, column) => {
+    const row = db.prepare(`SELECT AVG(${column}) AS a FROM telemetry_events WHERE event_type = ? AND ${column} IS NOT NULL`).get(type);
+    return row && row.a !== null ? row.a : null;
+  };
   return {
     total,
     byType,
-    readinessDistribution: labelDist("readiness_label_produced"),
-    recommendedSurfaceDistribution: labelDist("artifact_recommended"),
-    intakeMethodDistribution: labelDist("intake_method_chosen"),
-    opportunityTierDistribution: labelDist("opportunity_computed"),
+    targetSurfaceDistribution: labelDist("target_surface_used"),
+    exportKindDistribution: labelDist("export_performed"),
+    artifactsGenerated: byType.artifact_generated || 0,
+    bundlesGenerated: byType.bundle_generated || 0,
+    exportsPerformed: byType.export_performed || 0,
+    artifactsAbandoned: byType.artifact_abandoned || 0,
+    meanTimeToFirstArtifactMs: meanValue("time_to_first_artifact", "duration_ms"),
+    meanReadinessScore: meanValue("artifact_generated", "value_num"),
     cap
   };
 }
@@ -2601,15 +2615,6 @@ async function handleBusinessCase(req, res) {
     typeof body.userRole === "string" ? body.userRole : ""
   );
   snapshot.computedAt = new Date().toISOString();
-  // V3-1: record the business-case event (mode + step count + computed value).
-  // Read-only: reads the just-computed snapshot; the response is unchanged.
-  recordTelemetry({
-    event_type: "business_case_computed",
-    session_key: typeof body.sessionId === "string" ? body.sessionId : null,
-    label_a: snapshot.workflowMode,
-    count_a: steps.length,
-    value_num: snapshot.results?.annualValue ?? snapshot.results?.projectValue ?? null
-  }, "server");
   return sendJson(res, 200, { snapshot });
 }
 
@@ -4758,7 +4763,7 @@ async function handleRecipeBookExport(req, res) {
     const body = await readJson(req);
     const { workflowName = "Workflow", steps = [] } = body;
     appendAudit(req, "export_generated", { detail: "recipe-book-docx", content: { workflowName, steps } });
-    recordTelemetry({ event_type: "export_generated", session_key: typeof body.sessionId === "string" ? body.sessionId : null, label_a: "recipe-book", count_a: Array.isArray(steps) ? steps.length : null }, "server");
+    recordTelemetry({ event_type: "export_performed", session_key: typeof body.sessionId === "string" ? body.sessionId : null, label_a: "recipe-book", count_a: Array.isArray(steps) ? steps.length : null }, "server");
     const safeName = String(workflowName).replace(/[^a-z0-9]/gi, "-").replace(/-{2,}/g, "-").replace(/^-|-$/, "");
     const children = [];
 
@@ -4903,7 +4908,7 @@ async function handleEngineeringDocExport(req, res) {
     const body = await readJson(req);
     const { workflowName = "Workflow", steps = [] } = body;
     appendAudit(req, "export_generated", { detail: "engineering-doc-docx", content: { workflowName, steps } });
-    recordTelemetry({ event_type: "export_generated", session_key: typeof body.sessionId === "string" ? body.sessionId : null, label_a: "engineering-doc", count_a: Array.isArray(steps) ? steps.length : null }, "server");
+    recordTelemetry({ event_type: "export_performed", session_key: typeof body.sessionId === "string" ? body.sessionId : null, label_a: "engineering-doc", count_a: Array.isArray(steps) ? steps.length : null }, "server");
     const safeName = String(workflowName).replace(/[^a-z0-9]/gi, "-").replace(/-{2,}/g, "-").replace(/^-|-$/, "");
     const children = [];
 
@@ -5161,7 +5166,7 @@ async function handlePdfExport(req, res) {
     appendAudit(req, "export_generated", { detail: `pdf-${kind}`, content: body });
     const workflowName = typeof body.workflowName === "string" && body.workflowName.trim() ? body.workflowName.trim() : "Workflow";
     const steps = Array.isArray(body.steps) ? body.steps : [];
-    recordTelemetry({ event_type: "export_generated", session_key: typeof body.sessionId === "string" ? body.sessionId : null, label_a: kind === "engineering" ? "engineering-doc" : "recipe-book", count_a: steps.length }, "server");
+    recordTelemetry({ event_type: "export_performed", session_key: typeof body.sessionId === "string" ? body.sessionId : null, label_a: kind === "engineering" ? "engineering-doc" : "recipe-book", count_a: steps.length }, "server");
     const safeName = String(workflowName).replace(/[^a-z0-9]/gi, "-").replace(/-{2,}/g, "-").replace(/^-|-$/g, "") || "workflow";
     const docTitle = `${workflowName} — ${kind === "engineering" ? "Engineering Doc" : "Recipe Book"}`;
 
