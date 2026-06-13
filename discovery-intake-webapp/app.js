@@ -5877,10 +5877,51 @@ function renderWorkflowIntelligenceSummary() {
   host.innerHTML = workflowIntelligenceSummaryHtml();
 }
 
+// V3-2b: plain-language "Why you can trust this" panel. Static display only — no
+// data inputs, nothing recomputed. The four statements restate the trust model
+// the app already enforces.
+function trustPanelHtml() {
+  const points = [
+    "Nothing is recomputed silently — values change only when you act.",
+    "Every relied-on value tracks its source and confidence.",
+    "Generated outputs change only on your explicit action.",
+    "Prior versions are always kept — a new version never overwrites the last."
+  ];
+  return `
+    <details id="whyTrustPanel" class="ds-panel trust-panel" style="padding:12px 16px;margin-bottom:12px;border-left:3px solid #00d4b4;">
+      <summary style="cursor:pointer;font-weight:600;color:#e8f4ff;font-size:13px;">Why you can trust this</summary>
+      <ul style="margin:10px 0 0;padding-left:18px;color:#8aa0b8;font-size:12px;line-height:1.6;">
+        ${points.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}
+      </ul>
+    </details>`;
+}
+
+// Mounts the trust panel into the Analysis Studio (mirrors the intelligence
+// summary host pattern) and emits why_panel_opened when the user expands it.
+function renderTrustPanel() {
+  const analysis = document.querySelector(".analysis-studio");
+  const tabBar = analysis?.querySelector(".analysis-tab-bar");
+  if (!analysis || !tabBar) return;
+  let host = document.getElementById("trustPanelHost");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "trustPanelHost";
+    tabBar.insertAdjacentElement("beforebegin", host);
+  }
+  host.innerHTML = trustPanelHtml();
+  const details = host.querySelector("#whyTrustPanel");
+  if (details) {
+    details.addEventListener("toggle", () => {
+      if (details.open) recordTelemetryClient("why_panel_opened", { count_a: 1 });
+    });
+  }
+}
+
 function renderAnalysisStudio() {
   const active = normalizeAnalysisTab(state.analysisActiveTab);
   if (state.analysisActiveTab !== active) state.analysisActiveTab = active;
   renderWorkflowIntelligenceSummary();
+  renderTrustPanel();
 
   document.querySelectorAll("[data-analysis-tab]").forEach((button) => {
     const selected = button.dataset.analysisTab === active;
@@ -5922,6 +5963,81 @@ const GRID_LAYER_DEF = [
     { label: "Sensitivity", keys: ["dataSensitivity", "regulatoryContext"] }
   ] }
 ];
+
+// V3-2a: inline source + confidence indicator for a merged grid column. DISPLAY
+// ONLY — reads stored provenance/confidence via getField; never calls a scoring
+// function and never writes. Returns "" for an empty column. Shows the most
+// cautious state across the column's underlying cells, with the detail on hover.
+function gridCellTrustIndicator(step, keys = []) {
+  const cells = (Array.isArray(keys) ? keys : []).map((k) => getField(step, null, k)).filter((c) => c && c.value);
+  if (!cells.length) return "";
+  const order = ["unconfirmed", "inferred", "confirmed"];
+  const stateOf = (c) => (c.state === "confirmed" ? "confirmed" : c.state === "inferred" ? "inferred" : "unconfirmed");
+  let worst = "confirmed";
+  let minConf = null;
+  for (const c of cells) {
+    const st = stateOf(c);
+    if (order.indexOf(st) < order.indexOf(worst)) worst = st;
+    const conf = Number(c.confidence);
+    if (Number.isFinite(conf) && conf > 0) minConf = minConf === null ? conf : Math.min(minConf, conf);
+  }
+  const prov = engProvenance(worst);
+  const pctText = minConf !== null ? ` ${Math.round(minConf * 100)}%` : "";
+  const title = `Source: ${prov.label}${minConf !== null ? ` · confidence ${Math.round(minConf * 100)}%` : ""}`;
+  return `<span class="cell-trust" title="${escapeHtml(title)}" style="display:inline-flex;align-items:center;gap:2px;margin-left:6px;vertical-align:middle;"><span style="width:7px;height:7px;border-radius:50%;background:${prov.color};display:inline-block;"></span><span style="font-size:9px;color:${prov.color};">${escapeHtml(pctText.trim())}</span></span>`;
+}
+
+// V3-2d: the four trust dimensions for a step, each from its EXISTING source —
+// extraction confidence + provenance from stored cells (getField), opportunity
+// from getStepOpportunityMeta (the only opportunity source), readiness from
+// scoreRecipeReadiness. Read-only: no writes, no snapshot/business-case recompute.
+function stepTrustSignals(step) {
+  const cells = GRID_CELL_KEYS.map((k) => getField(step, null, k)).filter((c) => c && c.value);
+  let confirmed = 0;
+  let inferred = 0;
+  let unconfirmed = 0;
+  let confSum = 0;
+  let confN = 0;
+  for (const c of cells) {
+    const st = c.state === "confirmed" ? "confirmed" : c.state === "inferred" ? "inferred" : "unconfirmed";
+    if (st === "confirmed") confirmed += 1;
+    else if (st === "inferred") inferred += 1;
+    else unconfirmed += 1;
+    const conf = Number(c.confidence);
+    if (Number.isFinite(conf) && conf > 0) { confSum += conf; confN += 1; }
+  }
+  const opp = getStepOpportunityMeta(step) || {};
+  const readiness = scoreRecipeReadiness(step) || {};
+  return {
+    captured: cells.length,
+    confirmed,
+    inferred,
+    unconfirmed,
+    meanConfidence: confN ? confSum / confN : null,
+    opportunityLabel: opp.label || opp.tier || "Not scored",
+    readinessLabel: readiness.label || "Not enough information",
+    readinessScore: typeof readiness.score === "number" ? readiness.score : null
+  };
+}
+
+// V3-2d: composite per-step state badge. The headline posture is a DISPLAY label
+// derived from the provenance mix (not a new persisted score); the four
+// dimensions are revealed on expand. All values read from existing sources.
+function stepCompositeBadgeHtml(step) {
+  const s = stepTrustSignals(step);
+  const posture = s.captured === 0 || s.unconfirmed > 0
+    ? { label: "Needs confirmation", cls: "ds-badge-amber" }
+    : s.inferred > s.confirmed
+      ? { label: "Partly inferred", cls: "ds-badge-purple" }
+      : { label: "Well-evidenced", cls: "ds-badge-teal" };
+  const dims = [
+    `Extraction confidence: ${s.meanConfidence !== null ? Math.round(s.meanConfidence * 100) + "%" : "n/a"} (${s.confirmed} confirmed · ${s.inferred} inferred · ${s.unconfirmed} unconfirmed)`,
+    `Opportunity: ${s.opportunityLabel}`,
+    `Readiness: ${s.readinessLabel}${s.readinessScore !== null ? ` (${s.readinessScore}/100)` : ""}`,
+    `Provenance: ${s.captured} captured field${s.captured === 1 ? "" : "s"}, each with a tracked source`
+  ];
+  return `<details class="step-trust-badge" style="display:inline-block;margin-left:8px;"><summary style="cursor:pointer;list-style:none;display:inline-block;"><span class="ds-badge ${posture.cls}">${escapeHtml(posture.label)}</span></summary><ul style="margin:6px 0 0;padding-left:16px;color:#8aa0b8;font-size:11px;line-height:1.5;">${dims.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}</ul></details>`;
+}
 
 function renderAnalysisTabGrid() {
   const container = document.getElementById("process-flow-map-full");
@@ -6044,10 +6160,11 @@ function renderAnalysisTabGrid() {
       : 0;
     const color = avgConf >= 80 ? "#00d4b4" : avgConf >= 50 ? "#a855f7" : "#f59e0b";
     return `
-      <div class="ds-bar-row">
+      <div class="ds-bar-row" style="flex-wrap:wrap;">
         <span class="ds-bar-name" style="width:110px;">${escapeHtml(truncate(name, 12))}</span>
         <div class="ds-bar-track"><div class="ds-bar-fill" style="width:${avgConf.toFixed(0)}%;background:${color};"></div></div>
         <span class="ds-bar-val" style="color:${color};">${avgConf.toFixed(0)}%</span>
+        ${stepCompositeBadgeHtml(s)}
       </div>`;
   }).join("");
 
@@ -6083,7 +6200,7 @@ function renderAnalysisTabGrid() {
   const gridRows = steps.map((s, i) =>
     `<tr>${flatFields.map((f, fi) => {
       const v = fieldValue(s, f, i);
-      return `<td data-fedit-step="${escapeHtml(s.id)}" data-fedit-field="${fi}" role="button" tabindex="0" style="padding:6px 10px;border:1px solid #152236;vertical-align:top;font-size:0.72rem;color:${v ? "#c8d8e8" : "#2a3f5f"};cursor:pointer;" title="${escapeHtml(v ? `${v} — click to edit` : "Click to add a value")}">${v ? escapeHtml(truncate(v, 60)) : "—"}<span style="color:#2a3f5f;font-size:10px;margin-left:6px;">✎</span></td>`;
+      return `<td data-fedit-step="${escapeHtml(s.id)}" data-fedit-field="${fi}" role="button" tabindex="0" style="padding:6px 10px;border:1px solid #152236;vertical-align:top;font-size:0.72rem;color:${v ? "#c8d8e8" : "#2a3f5f"};cursor:pointer;" title="${escapeHtml(v ? `${v} — click to edit` : "Click to add a value")}">${v ? escapeHtml(truncate(v, 60)) : "—"}${gridCellTrustIndicator(s, f.keys)}<span style="color:#2a3f5f;font-size:10px;margin-left:6px;">✎</span></td>`;
     }).join("")}</tr>`
   ).join("");
   const matrix = `
@@ -7930,6 +8047,30 @@ function artifactStudioHeaderHtml(steps) {
     </section>`;
 }
 
+// V3-2e: the artifact card's Overview — surfaces the recommended surface,
+// readiness, and top blockers from EXISTING package data (no recompute). Shown
+// first/open so the card opens on the trust-relevant summary.
+function artifactOverviewHtml(pkg) {
+  const readiness = pkg?.readiness || {};
+  const blockers = (readiness.blockers || []).slice(0, 3);
+  const surfaceLabel = pkg?.recommendedArtifact?.label || artifactSurfaceLabel(pkg?.profile?.targetSurface || "recommend");
+  return `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
+      <div class="ds-card-inner" style="padding:10px 12px;">
+        <div class="ds-micro" style="margin-bottom:4px;">Recommended surface</div>
+        <strong style="color:#e8f4ff;font-size:13px;">${escapeHtml(surfaceLabel)}</strong>
+      </div>
+      <div class="ds-card-inner" style="padding:10px 12px;">
+        <div class="ds-micro" style="margin-bottom:4px;">Readiness</div>
+        <span class="ds-badge ${artifactReadinessBadgeClass(readiness.label || "")}">${escapeHtml(readiness.label || "Not enough information")}${typeof readiness.score === "number" ? ` · ${readiness.score}/100` : ""}</span>
+      </div>
+    </div>
+    <div style="margin-top:10px;">
+      <div class="ds-micro" style="margin-bottom:6px;">Top blockers</div>
+      ${artifactList(blockers, "No blockers — ready for controlled use.")}
+    </div>`;
+}
+
 function artifactCompilerCardHtml(step, index) {
   const compiler = ensureArtifactCompilerState();
   const context = artifactWorkflowContext();
@@ -7977,7 +8118,8 @@ function artifactCompilerCardHtml(step, index) {
         </div>
       </div>
       <p style="margin:10px 0 0;color:#5b7186;font-size:11px;line-height:1.45;">${escapeHtml(NO_INTEGRATION_MVP_NOTE)}</p>
-      ${artifactAccordionHtml("What to confirm next", "Actionable gaps and tentative assumptions", actionBody, { open: true, badge: hasOpenActionItems ? `${actions.length} item${actions.length === 1 ? "" : "s"}` : "No blockers", badgeClass: hasOpenActionItems ? "ds-badge-amber" : "ds-badge-teal" })}
+      ${artifactAccordionHtml("Overview", "Recommended surface, readiness, and top blockers", artifactOverviewHtml(pkg), { open: true, badge: `${pkg.readiness.label} · ${pkg.readiness.score}/100`, badgeClass: artifactReadinessBadgeClass(pkg.readiness.label) })}
+      ${artifactAccordionHtml("What to confirm next", "Actionable gaps and tentative assumptions", actionBody, { open: false, badge: hasOpenActionItems ? `${actions.length} item${actions.length === 1 ? "" : "s"}` : "No blockers", badgeClass: hasOpenActionItems ? "ds-badge-amber" : "ds-badge-teal" })}
       ${artifactAccordionHtml("Test cases", "Happy path / Missing input / Exception path", artifactTestCasePackHtml(ir), { badge: "3 paths", badgeClass: "ds-badge-purple" })}
       ${artifactAccordionHtml("Evidence and safeguards", "Provenance, review gates, and future integrations", artifactEvidenceQualityHtml(ir), { badge: pkg.profile.needsHumanApproval ? "Review required" : "Review advised", badgeClass: pkg.profile.needsHumanApproval ? "ds-badge-amber" : "ds-badge-dim" })}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
@@ -11468,26 +11610,29 @@ function specStackCockpitHtml(next) {
   const step = currentGridStep() || analysisGridSteps()[0] || null;
   const profile = step ? buildRecipeDeploymentProfile(step, artifactWorkflowContext(), ensureArtifactCompilerState()) : null;
   const recommendation = step ? artifactSurfaceLabel(profile.targetSurface) : "Waiting for workflow evidence";
+  // V3-2c: the single next-best action is elevated as the headline; the other
+  // cockpit metrics + "What changed" move into a collapsed "Show all signals"
+  // disclosure (same data, reordered). The details stops click propagation so
+  // expanding signals does not trigger the panel's copy-question handler.
   return `
-    <div class="ds-panel ds-border-teal" style="width:100%;box-sizing:border-box;padding:12px 16px;">
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
-        <div style="flex:1;min-width:220px;">
-          <div class="ds-micro" style="margin-bottom:4px;">Suggested next question</div>
-          <div style="font-size:0.9rem;color:#e2e8f0;line-height:1.4;">${escapeHtml(next?.question || "All key areas covered — ready to analyse.")}</div>
-          <div style="margin-top:6px;font-size:12px;color:#8aa0b8;line-height:1.45;">${escapeHtml(next ? questionImpactForField(next.field) : `Recommended artifact: ${recommendation}.`)}</div>
-        </div>
-        <div style="min-width:180px;">
+    <div class="ds-panel ds-border-teal" style="width:100%;box-sizing:border-box;padding:14px 16px;">
+      <div class="ds-micro" style="margin-bottom:4px;">Next best step</div>
+      <div class="cockpit-next-action" style="font-size:1rem;font-weight:600;color:#e2e8f0;line-height:1.4;">${escapeHtml(next?.question || "All key areas covered — ready to analyse.")}</div>
+      <div style="margin-top:6px;font-size:12px;color:#8aa0b8;line-height:1.45;">${escapeHtml(next ? questionImpactForField(next.field) : `Recommended artifact: ${recommendation}.`)}</div>
+      <details class="cockpit-signals" style="margin-top:12px;" onclick="event.stopPropagation()">
+        <summary style="cursor:pointer;font-size:11px;color:#8aa0b8;">Show all signals</summary>
+        <div style="margin-top:10px;">
           <div class="ds-micro" style="margin-bottom:4px;">What changed</div>
           <div style="font-size:12px;color:#8aa0b8;line-height:1.45;">${escapeHtml(latestIntakeChangeText())}</div>
         </div>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(124px,1fr));gap:8px;margin-top:12px;min-width:0;">
-        ${metrics.map((metric) => `
-          <div class="ds-card-inner" style="padding:8px 10px;">
-            <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;color:#8aa0b8;"><span>${escapeHtml(metric.label)}</span><strong style="color:#00d4b4;">${metric.score}%</strong></div>
-            <div class="ds-progress" style="margin-top:6px;"><div class="ds-progress-fill" style="width:${Math.max(4, Math.min(100, metric.score))}%;"></div></div>
-          </div>`).join("")}
-      </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(124px,1fr));gap:8px;margin-top:12px;min-width:0;">
+          ${metrics.map((metric) => `
+            <div class="ds-card-inner" style="padding:8px 10px;">
+              <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;color:#8aa0b8;"><span>${escapeHtml(metric.label)}</span><strong style="color:#00d4b4;">${metric.score}%</strong></div>
+              <div class="ds-progress" style="margin-top:6px;"><div class="ds-progress-fill" style="width:${Math.max(4, Math.min(100, metric.score))}%;"></div></div>
+            </div>`).join("")}
+        </div>
+      </details>
     </div>`;
 }
 

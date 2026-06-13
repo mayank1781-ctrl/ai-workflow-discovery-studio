@@ -214,12 +214,14 @@ db.exec(`
 // through it), so this one check guarantees nothing is written when off.
 const TELEMETRY_ENABLED = process.env.TELEMETRY_ENABLED !== "false";
 
-// The canonical V3-1 event set (V3_BACKLOG_AND_PLAN.md). These eight are the
-// only event types accepted; anything else is rejected outright.
+// The canonical V3-1 event set (V3_BACKLOG_AND_PLAN.md) plus the V3-2 trust-panel
+// event. These are the only event types accepted; anything else is rejected.
 const TELEMETRY_EVENT_TYPES = new Set([
   "intake_step_viewed", "intake_question_skipped", "time_to_first_artifact",
   "artifact_generated", "artifact_abandoned", "target_surface_used",
-  "export_performed", "bundle_generated"
+  "export_performed", "bundle_generated",
+  // V3-2: trust-panel engagement (metadata only — no labels/content).
+  "why_panel_opened"
 ]);
 
 // Every value that may legitimately land in label_a/label_b. Anything outside

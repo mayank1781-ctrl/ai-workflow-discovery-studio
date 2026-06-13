@@ -144,6 +144,15 @@ test("scrubber: numerics are coerced and out-of-range/garbage becomes null; sour
   assert.equal(sanitizeTelemetryEvent({ event_type: "bundle_generated" }, "whatever").source, "client");
 });
 
+test("scrubber: the V3-2 why_panel_opened event is accepted, metadata-only", () => {
+  const { sanitizeTelemetryEvent } = sanitizerSandbox();
+  const e = sanitizeTelemetryEvent({ event_type: "why_panel_opened", session_key: "session-x", count_a: 1, label_a: "leak this" }, "client");
+  assert.ok(e, "why_panel_opened is an allowlisted event type");
+  assert.equal(e.event_type, "why_panel_opened");
+  assert.equal(e.count_a, 1);
+  assert.equal(e.label_a, null, "no free-text/label content is stored for the trust-panel event");
+});
+
 // ============================================================================
 // Acceptance: client recorder forwards only typed fields (kept tests).
 // ============================================================================
@@ -239,12 +248,14 @@ test("e2e aggregates: canonical events are recorded and summarized correctly on 
     { event_type: "target_surface_used", session_key: "s2", label_a: "chatgptPrompt" },
     { event_type: "bundle_generated", session_key: "s2", count_a: 6 },
     { event_type: "export_performed", session_key: "s2", label_a: "engineering-doc", count_a: 3 },
-    { event_type: "artifact_abandoned", session_key: "s3", count_a: 2 }
+    { event_type: "artifact_abandoned", session_key: "s3", count_a: 2 },
+    { event_type: "why_panel_opened", session_key: "s1", count_a: 1 } // V3-2
   ];
   for (const f of fixtures) assert.equal((await postTo(server.base, f)).status, 200, `${f.event_type} accepted`);
 
   const s = await summaryOf(server.base);
-  assert.ok(s.total >= 10);
+  assert.ok(s.total >= 11);
+  assert.equal(s.byType.why_panel_opened, 1);
   assert.equal(s.byType.artifact_generated, 2);
   assert.equal(s.byType.target_surface_used, 2);
   assert.equal(s.targetSurfaceDistribution.customGPT, 1);
