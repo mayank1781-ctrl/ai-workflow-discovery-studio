@@ -5679,37 +5679,29 @@ function workflowIntelligenceSummaryHtml() {
     : "Not computed";
   const nextAction = blockers[0]
     ? `Confirm ${blockers[0].replace(/^Missing\s+/i, "")}.`
-    : generatedAssets ? "Review preserved artifact snapshots and export." : "Compile the recommended artifact.";
-  const chip = (label, valueText, cls = "ds-badge-dim") => `
-    <div class="ds-card" style="padding:12px 14px;">
-      <div class="ds-micro" style="margin-bottom:5px;">${escapeHtml(label)}</div>
-      <strong style="display:block;color:#e8f4ff;font-size:13px;line-height:1.35;">${escapeHtml(valueText)}</strong>
-      <span class="ds-badge ${cls}" style="margin-top:8px;">${escapeHtml(label)}</span>
-    </div>`;
+    : generatedAssets ? "Review preserved package snapshots and export." : "Compile the recommended package.";
+  const summaryPills = [
+    artifactMetricPill("Readiness", `${readinessAvg}/100 avg`, artifactReadinessBadgeClass(first.readiness.label)),
+    artifactMetricPill("Estimated value", value, "ds-badge-amber", { hideZero: value === "Not computed", numericValue: value === "Not computed" ? 0 : 1 }),
+    artifactMetricPill("Saved packages", generatedAssets, "ds-badge-teal", { hideZero: true, numericValue: generatedAssets }),
+    artifactMetricPill("Handoffs to watch", transitions, "ds-badge-amber", { hideZero: true, numericValue: transitions })
+  ].filter(Boolean).join("");
+  const blockerLine = blockers.length ? blockers.map(artifactActionFromGap).join(" · ") : "";
+  const futureLine = futureCandidates.length ? futureCandidates.join(" · ") : "";
   return `
-    <section id="workflowIntelligenceSummary" class="ds-panel" style="padding:16px 18px;margin-bottom:14px;border-left:3px solid #00d4b4;">
-      <div style="display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap;margin-bottom:12px;">
+    <section id="workflowIntelligenceSummary" class="ds-panel" style="padding:14px 16px;margin-bottom:14px;border-left:3px solid #00d4b4;">
+      <div style="display:grid;grid-template-columns:minmax(260px,1.4fr) minmax(240px,1fr);gap:14px;align-items:start;">
         <div>
-          <div class="ds-micro" style="margin-bottom:6px;">Workflow Intelligence Summary</div>
-          <h3 style="margin:0;color:#e8f4ff;font-size:17px;">${escapeHtml(first.recommendedArtifact.label)}</h3>
-          <p style="margin:7px 0 0;color:#8aa0b8;font-size:13px;line-height:1.5;">${escapeHtml(first.recommendationReason)}</p>
+          <div class="ds-micro" style="margin-bottom:5px;">Workflow package summary</div>
+          <h3 style="margin:0;color:#e8f4ff;font-size:16px;line-height:1.35;">Best fit: ${escapeHtml(first.recommendedArtifact.label)}</h3>
+          <p style="margin:6px 0 0;color:#8aa0b8;font-size:12px;line-height:1.45;">${escapeHtml(first.recommendationReason)}</p>
+          <p style="margin:6px 0 0;color:#5b7186;font-size:11px;line-height:1.45;">${escapeHtml(NO_INTEGRATION_MVP_NOTE)}</p>
         </div>
-        <span class="ds-badge ${artifactReadinessBadgeClass(first.readiness.label)}">${escapeHtml(first.readiness.label)} · ${readinessAvg}/100 avg</span>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;">
-        ${chip("Current-session value", value, "ds-badge-amber")}
-        ${chip("Generated assets", String(generatedAssets), generatedAssets ? "ds-badge-teal" : "ds-badge-dim")}
-        ${chip("Transition warnings", String(transitions), transitions ? "ds-badge-amber" : "ds-badge-teal")}
-        ${chip("Best next action", nextAction, blockers.length ? "ds-badge-amber" : "ds-badge-teal")}
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
-        <div class="ds-card-inner" style="padding:11px 13px;">
-          <div class="ds-micro" style="margin-bottom:5px;">Top blockers</div>
-          <div style="font-size:12px;color:#8aa0b8;line-height:1.5;">${escapeHtml(blockers.join(" · ") || "No major blockers detected.")}</div>
-        </div>
-        <div class="ds-card-inner" style="padding:11px 13px;">
-          <div class="ds-micro" style="margin-bottom:5px;">Future integration candidates</div>
-          <div style="font-size:12px;color:#8aa0b8;line-height:1.5;">${escapeHtml(futureCandidates.join(" · ") || FUTURE_INTEGRATION_NOTE)}</div>
+        <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-start;">
+          <div style="display:flex;gap:7px;flex-wrap:wrap;">${summaryPills}</div>
+          <div style="font-size:12px;color:#c8d8e8;line-height:1.45;"><strong style="color:#e8f4ff;">Next:</strong> ${escapeHtml(nextAction)}</div>
+          ${blockerLine ? `<div style="font-size:11px;color:#f5c451;line-height:1.45;"><strong>Confirm:</strong> ${escapeHtml(blockerLine)}</div>` : ""}
+          ${futureLine ? `<div style="font-size:11px;color:#8aa0b8;line-height:1.45;"><strong>Later:</strong> ${escapeHtml(futureLine)}</div>` : ""}
         </div>
       </div>
     </section>`;
@@ -7533,7 +7525,7 @@ function compileArtifactForStep(stepId, options = {}) {
   const hadPrior = rotateArtifactSnapshot(stepId, packagePayload, options.bundle ? "bundle" : "compiled");
   persistState();
   renderAnalysisTabRecipe();
-  toast(`${options.bundle ? "Full bundle" : "Recommended artifact"} compiled${hadPrior ? " — prior version preserved." : "."}`);
+  toast(`${options.bundle ? "Full bundle" : "Recommended package"} compiled${hadPrior ? " — prior version preserved." : "."}`);
 }
 
 function artifactReadinessBadgeClass(label = "") {
@@ -7546,6 +7538,137 @@ function artifactReadinessBadgeClass(label = "") {
 function shortArtifactPreview(text) {
   const clean = String(text || "").replace(/\s+/g, " ").trim();
   return clean.length > 280 ? `${clean.slice(0, 280)}...` : clean;
+}
+
+function artifactDeploymentLabel(level = "") {
+  if (level === "knowledgeBasedAssistant") return "Knowledge-backed assistant";
+  if (level === "promptOnly") return "Prompt-only package";
+  return level ? level.replace(/([a-z])([A-Z])/g, "$1 $2") : "Draft package";
+}
+
+function artifactMetricPill(label, value, cls = "ds-badge-dim", options = {}) {
+  const numeric = Number(options.numericValue ?? value);
+  if (options.hideZero && (!Number.isFinite(numeric) || numeric <= 0)) return "";
+  return `<span class="ds-badge ${cls}" style="white-space:nowrap;">${escapeHtml(label)}${value !== "" ? `: ${escapeHtml(String(value))}` : ""}</span>`;
+}
+
+function artifactList(items, fallback = "Nothing critical to show yet.") {
+  const list = (Array.isArray(items) ? items : []).filter(Boolean);
+  if (!list.length) return `<p style="margin:0;color:#8aa0b8;font-size:12px;line-height:1.5;">${escapeHtml(fallback)}</p>`;
+  return `<ul style="margin:0;padding-left:18px;color:#8aa0b8;font-size:12px;line-height:1.55;">${list.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+}
+
+function artifactActionFromGap(item = "") {
+  const text = String(item || "").trim();
+  const missing = text.match(/^Missing\s+(.+)$/i) || text.match(/^(.+?)\s+is not captured\.$/i);
+  if (missing) return `Confirm ${missing[1].trim().toLowerCase()} before using this package.`;
+  const inferred = text.match(/^(.+?)\s+is inferred or low-confidence$/i);
+  if (inferred) return `Review ${inferred[1].trim().toLowerCase()} and mark it user-confirmed if correct.`;
+  return text;
+}
+
+function artifactActionItems(pkg, ir) {
+  const seen = new Set();
+  const actions = [];
+  const add = (item) => {
+    const action = artifactActionFromGap(item);
+    const key = action.toLowerCase();
+    if (!action || seen.has(key)) return;
+    seen.add(key);
+    actions.push(action);
+  };
+  (pkg?.readiness?.blockers || []).forEach(add);
+  (ir?.knownGaps || []).forEach(add);
+  if (!actions.length && (ir?.assumptions || []).length) {
+    add("Review tentative assumptions before sharing output.");
+  }
+  if (!actions.length) {
+    actions.push("No critical setup questions detected; run the test cases before sharing output.");
+  }
+  return actions.slice(0, 5);
+}
+
+function artifactTestCasesByPath(testCases = []) {
+  const pick = (matcher) => testCases.find((test) => matcher.test(test?.name || ""));
+  return [
+    { key: "happy", label: "Happy path", test: pick(/happy/i) || testCases[0] },
+    { key: "missing", label: "Missing input", test: pick(/missing|ambiguous/i) || testCases[1] },
+    { key: "exception", label: "Exception path", test: pick(/exception/i) || testCases[2] }
+  ].filter((item) => item.test);
+}
+
+function artifactTestCasePackHtml(ir) {
+  const primary = artifactTestCasesByPath(ir?.testCases || []);
+  const extra = (ir?.testCases || []).filter((test) => !primary.some((item) => item.test === test));
+  return `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;">
+      ${primary.map(({ label, test }) => `
+        <div style="background:#0a1422;border:1px solid #16263a;border-radius:8px;padding:10px 12px;">
+          <div class="ds-micro" style="margin-bottom:6px;">${escapeHtml(label)}</div>
+          <p style="margin:0 0 6px;color:#c8d8e8;font-size:12px;line-height:1.45;"><strong>Given:</strong> ${escapeHtml(test.given || "Representative input is available.")}</p>
+          <p style="margin:0 0 6px;color:#8aa0b8;font-size:12px;line-height:1.45;"><strong>Expect:</strong> ${escapeHtml(test.expected || "Output is ready for review.")}</p>
+          <p style="margin:0;color:#5b7186;font-size:11px;line-height:1.45;"><strong>Reviewer:</strong> ${escapeHtml(test.reviewer || "Human reviewer confirms before use.")}</p>
+        </div>`).join("")}
+    </div>
+    ${extra.length ? `<div style="margin-top:10px;">${artifactList(extra.map((test) => `${test.name}: ${test.expected}`), "No additional control tests.")}</div>` : ""}`;
+}
+
+function artifactEvidenceQualityHtml(ir) {
+  const summary = ir?.provenanceSummary || {};
+  const chips = [
+    artifactMetricPill("Evidence-backed", summary.evidenceBackedCells ?? 0, "ds-badge-teal", { hideZero: true, numericValue: summary.evidenceBackedCells ?? 0 }),
+    artifactMetricPill("Needs review", summary.inferredCells ?? 0, "ds-badge-amber", { hideZero: true, numericValue: summary.inferredCells ?? 0 }),
+    artifactMetricPill("Still missing", summary.missingCells?.length ?? 0, "ds-badge-dim", { hideZero: true, numericValue: summary.missingCells?.length ?? 0 })
+  ].filter(Boolean).join("");
+  const future = (ir?.futureIntegrationCandidates || []).slice(0, 3);
+  return `
+    <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px;">${chips || `<span class="ds-badge ds-badge-dim">Evidence not confirmed yet</span>`}</div>
+    <div class="ds-micro" style="margin-bottom:6px;">Human review</div>
+    ${artifactList(ir?.humanReview || [], "Human review rule not captured yet.")}
+    <div class="ds-micro" style="margin:12px 0 6px;">Do not automate</div>
+    ${artifactList(ir?.doNotAutomateNotes || [], "No automation limits captured yet.")}
+    <div style="margin-top:10px;background:#160d24;border:1px solid #a78bfa44;border-radius:8px;padding:10px 12px;color:#c4b5fd;font-size:12px;line-height:1.5;">${escapeHtml(ir?.noIntegrationNote || NO_INTEGRATION_MVP_NOTE)}</div>
+    <div style="margin-top:10px;">
+      <div class="ds-micro" style="margin-bottom:6px;">Future integrations</div>
+      ${artifactList(future, FUTURE_INTEGRATION_NOTE)}
+    </div>`;
+}
+
+function artifactAccordionHtml(title, subtitle, body, options = {}) {
+  const badge = options.badge ? `<span class="ds-badge ${options.badgeClass || "ds-badge-dim"}">${escapeHtml(options.badge)}</span>` : "";
+  return `
+    <details class="artifact-accordion" ${options.open ? "open" : ""} style="border:1px solid #16263a;border-radius:8px;background:#0a1422;margin-top:8px;overflow:hidden;">
+      <summary style="display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;padding:10px 12px;color:#e8f4ff;font-size:13px;font-weight:700;list-style:none;">
+        <span style="display:flex;flex-direction:column;gap:3px;min-width:0;">
+          <span>${escapeHtml(title)}</span>
+          ${subtitle ? `<span style="color:#5b7186;font-size:11px;font-weight:600;line-height:1.35;">${escapeHtml(subtitle)}</span>` : ""}
+        </span>
+        ${badge}
+      </summary>
+      <div style="border-top:1px solid #16263a;padding:12px;">${body}</div>
+    </details>`;
+}
+
+function engineeringImplementationTestPlanHtml(packages = []) {
+  const groups = {
+    "Happy path": [],
+    "Missing input": [],
+    "Exception path": []
+  };
+  packages.forEach(({ pkg, index }) => {
+    artifactTestCasesByPath(pkg.ir.testCases).forEach(({ label, test }) => {
+      if (!groups[label]) return;
+      groups[label].push(`Step ${index + 1}: ${test.expected}`);
+    });
+  });
+  return `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;">
+      ${Object.entries(groups).map(([label, items]) => `
+        <div style="background:#0a1422;border:1px solid #16263a;border-radius:8px;padding:10px 12px;">
+          <div class="ds-micro" style="margin-bottom:6px;">${escapeHtml(label)}</div>
+          ${artifactList(items.slice(0, 4), `Add a ${label.toLowerCase()} test after a package is available.`)}
+        </div>`).join("")}
+    </div>`;
 }
 
 function artifactSnapshotHtml(snapshot, prior, emptyText) {
@@ -7587,29 +7710,33 @@ function artifactStudioHeaderHtml(steps) {
   const scopeOptions = Object.entries(ARTIFACT_SCOPE_OPTIONS)
     .map(([value, label]) => `<option value="${escapeHtml(value)}" ${compiler.recipeScope === value ? "selected" : ""}>${escapeHtml(label)}</option>`)
     .join("");
+  const metrics = [
+    `<div class="ds-card ds-accent-teal" style="padding:12px;"><div class="ds-micro">Package readiness</div><div class="ds-num-teal" style="font-size:1.35rem;font-weight:800;">${avgReadiness}/100</div></div>`,
+    `<div class="ds-card ds-accent-purple" style="padding:12px;"><div class="ds-micro">Steps in scope</div><div class="ds-num-purple" style="font-size:1.35rem;font-weight:800;">${steps.length}</div></div>`,
+    generated > 0 ? `<div class="ds-card ds-accent-purple" style="padding:12px;"><div class="ds-micro">Saved packages</div><div class="ds-num-purple" style="font-size:1.35rem;font-weight:800;">${generated}</div></div>` : "",
+    bundleCount > 0 ? `<div class="ds-card ds-accent-pink" style="padding:12px;"><div class="ds-micro">Saved bundles</div><div class="ds-num-pink" style="font-size:1.35rem;font-weight:800;">${bundleCount}</div></div>` : "",
+    transitions > 0 ? `<div class="ds-card ds-accent-amber" style="padding:12px;"><div class="ds-micro">Handoffs to watch</div><div class="ds-num-amber" style="font-size:1.35rem;font-weight:800;">${transitions}</div></div>` : ""
+  ].filter(Boolean).join("");
   return `
     <section class="ds-panel" style="padding:18px 20px;margin:14px 0 16px;border-left:3px solid #a855f7;">
       <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap;">
         <div style="flex:1;min-width:260px;">
-          <div class="ds-micro" style="margin-bottom:6px;">Artifact Studio</div>
-          <h3 style="margin:0;color:#e8f4ff;font-size:18px;">${escapeHtml(first?.recommendedArtifact?.label || "Recommended artifact")}</h3>
+          <div class="ds-micro" style="margin-bottom:6px;">Implementation Package Builder</div>
+          <h3 style="margin:0;color:#e8f4ff;font-size:18px;">Best starting point: ${escapeHtml(first?.recommendedArtifact?.label || "Recommended package")}</h3>
           <p style="margin:8px 0 0;color:#8aa0b8;font-size:13px;line-height:1.55;">${escapeHtml(first?.recommendationReason || "Capture a workflow step to see the recommended artifact.")}</p>
           <p style="margin:8px 0 0;color:#5b7186;font-size:12px;line-height:1.45;">${escapeHtml(NO_INTEGRATION_MVP_NOTE)}</p>
         </div>
         <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
-          <label style="display:flex;flex-direction:column;gap:5px;font-size:11px;color:#5b7186;text-transform:uppercase;letter-spacing:0.06em;">Target surface
+          <label style="display:flex;flex-direction:column;gap:5px;font-size:11px;color:#5b7186;text-transform:uppercase;letter-spacing:0.06em;">Use this in
             <select id="artifactTargetSurfaceSelect" style="background:#0a1525;color:#e8f4ff;border:1px solid #1e3350;border-radius:7px;padding:8px 10px;font-size:13px;min-width:220px;">${surfaceOptions}</select>
           </label>
-          <label style="display:flex;flex-direction:column;gap:5px;font-size:11px;color:#5b7186;text-transform:uppercase;letter-spacing:0.06em;">Scope
+          <label style="display:flex;flex-direction:column;gap:5px;font-size:11px;color:#5b7186;text-transform:uppercase;letter-spacing:0.06em;">Build for
             <select id="artifactScopeSelect" style="background:#0a1525;color:#e8f4ff;border:1px solid #1e3350;border-radius:7px;padding:8px 10px;font-size:13px;min-width:160px;">${scopeOptions}</select>
           </label>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:16px;">
-        <div class="ds-card ds-accent-teal" style="padding:14px;"><div class="ds-micro">Avg readiness</div><div class="ds-num-teal" style="font-size:1.5rem;font-weight:800;">${avgReadiness}</div></div>
-        <div class="ds-card ds-accent-purple" style="padding:14px;"><div class="ds-micro">Generated assets</div><div class="ds-num-purple" style="font-size:1.5rem;font-weight:800;">${generated}</div></div>
-        <div class="ds-card ds-accent-pink" style="padding:14px;"><div class="ds-micro">Full bundles</div><div class="ds-num-pink" style="font-size:1.5rem;font-weight:800;">${bundleCount}</div></div>
-        <div class="ds-card ds-accent-amber" style="padding:14px;"><div class="ds-micro">Transitions</div><div class="ds-num-amber" style="font-size:1.5rem;font-weight:800;">${transitions}</div></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:16px;">
+        ${metrics}
       </div>
     </section>`;
 }
@@ -7626,63 +7753,49 @@ function artifactCompilerCardHtml(step, index) {
   const prior = compiler.compiledPrior?.[step.id];
   const bundle = compiler.bundles?.[step.id];
   const bundlePrior = compiler.bundlePrior?.[step.id];
-  const blockerHtml = pkg.readiness.blockers.length
-    ? pkg.readiness.blockers.slice(0, 4).map((item) => `<li>${escapeHtml(item)}</li>`).join("")
-    : `<li>No critical readiness blocker detected.</li>`;
-  const testHtml = ir.testCases.slice(0, 3).map((test) =>
-    `<li><strong>${escapeHtml(test.name)}:</strong> ${escapeHtml(test.expected)}</li>`
-  ).join("");
-  const futureHtml = ir.futureIntegrationCandidates.length
-    ? ir.futureIntegrationCandidates.slice(0, 3).map((item) => `<li>${escapeHtml(item)}</li>`).join("")
-    : `<li>${escapeHtml(FUTURE_INTEGRATION_NOTE)}</li>`;
-  const provenance = ir.provenanceSummary;
+  const actions = artifactActionItems(pkg, ir);
+  const hasOpenActionItems = Boolean(pkg.readiness.blockers.length || ir.knownGaps.length || ir.assumptions.length);
+  const assumptions = (ir.assumptions || []).slice(0, 3);
+  const actionBody = `
+    ${artifactList(actions)}
+    ${assumptions.length ? `
+      <div style="margin-top:10px;">
+        <div class="ds-micro" style="margin-bottom:6px;">Tentative assumptions</div>
+        ${artifactList(assumptions)}
+      </div>` : ""}`;
+  const snapshotBody = `
+    ${artifactSnapshotHtml(saved, prior, "No saved package snapshot yet. Click Compile recommended package to preserve the current version.")}
+    <details style="margin-top:10px;">
+      <summary style="font-size:11px;color:#8aa0b8;cursor:pointer;">Optional full bundle snapshot</summary>
+      <div style="margin-top:8px;">${artifactSnapshotHtml(bundle, bundlePrior, "No full bundle snapshot yet. Click Generate full bundle to preserve the multi-surface package.")}</div>
+    </details>`;
+  const badgeRow = [
+    artifactMetricPill("Readiness", `${pkg.readiness.label} · ${pkg.readiness.score}/100`, artifactReadinessBadgeClass(pkg.readiness.label)),
+    artifactMetricPill("Package type", artifactDeploymentLabel(pkg.profile.deploymentLevel), "ds-badge-dim"),
+    pkg.profile.needsHumanApproval ? artifactMetricPill("Human review", "Required", "ds-badge-amber") : "",
+    artifactMetricPill("Integration mode", "No integrations", "ds-badge-teal")
+  ].filter(Boolean).join("");
   return `
-    <div style="margin-top:16px;background:#09131f;border:1px solid #1e3350;border-radius:10px;padding:14px 16px;">
+    <div class="artifact-package-card" style="margin-top:16px;background:#09131f;border:1px solid #1e3350;border-radius:10px;padding:14px 16px;">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
         <div style="min-width:240px;flex:1;">
-          <div class="ds-micro" style="margin-bottom:5px;">Recommended artifact</div>
+          <div class="ds-micro" style="margin-bottom:5px;">Best starting package</div>
           <strong style="display:block;color:#e8f4ff;font-size:14px;">${escapeHtml(pkg.recommendedArtifact.label)}</strong>
           <p style="margin:6px 0 0;color:#8aa0b8;font-size:12px;line-height:1.5;">${escapeHtml(pkg.recommendationReason)}</p>
         </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <span class="ds-badge ${artifactReadinessBadgeClass(pkg.readiness.label)}">${escapeHtml(pkg.readiness.label)} · ${pkg.readiness.score}/100</span>
-          <span class="ds-badge ds-badge-dim">${escapeHtml(pkg.profile.deploymentLevel)}</span>
-          <span class="ds-badge ds-badge-dim">No integrations</span>
+        <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;">
+          ${badgeRow}
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:12px;margin-top:12px;">
-        <div class="ds-card-inner" style="padding:12px;">
-          <div class="ds-micro" style="margin-bottom:6px;">Assumptions and known gaps</div>
-          <ul style="margin:0;padding-left:18px;color:#8aa0b8;font-size:12px;line-height:1.5;">${blockerHtml}</ul>
-        </div>
-        <div class="ds-card-inner" style="padding:12px;">
-          <div class="ds-micro" style="margin-bottom:6px;">Test case pack</div>
-          <ul style="margin:0;padding-left:18px;color:#8aa0b8;font-size:12px;line-height:1.5;">${testHtml}</ul>
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;">
-        <div class="ds-card-inner" style="padding:12px;">
-          <div class="ds-micro" style="margin-bottom:6px;">Review and risk</div>
-          <p style="margin:0;color:#8aa0b8;font-size:12px;line-height:1.5;">${escapeHtml(ir.humanReview[0] || "Human review is required before use.")}</p>
-          <p style="margin:8px 0 0;color:#f5c451;font-size:12px;line-height:1.5;">${escapeHtml(ir.doNotAutomateNotes[0])}</p>
-        </div>
-        <div class="ds-card-inner" style="padding:12px;">
-          <div class="ds-micro" style="margin-bottom:6px;">Provenance</div>
-          <p style="margin:0;color:#8aa0b8;font-size:12px;line-height:1.5;">${provenance.evidenceBackedCells} evidence-backed · ${provenance.inferredCells} inferred · ${provenance.missingCells.length} missing</p>
-          <p style="margin:8px 0 0;color:#8aa0b8;font-size:12px;line-height:1.5;">Future candidates: ${futureHtml.replace(/<\/?li>/g, "").slice(0, 160)}</p>
-        </div>
-      </div>
+      <p style="margin:10px 0 0;color:#5b7186;font-size:11px;line-height:1.45;">${escapeHtml(NO_INTEGRATION_MVP_NOTE)}</p>
+      ${artifactAccordionHtml("What to confirm next", "Actionable gaps and tentative assumptions", actionBody, { open: true, badge: hasOpenActionItems ? `${actions.length} item${actions.length === 1 ? "" : "s"}` : "No blockers", badgeClass: hasOpenActionItems ? "ds-badge-amber" : "ds-badge-teal" })}
+      ${artifactAccordionHtml("Test cases", "Happy path / Missing input / Exception path", artifactTestCasePackHtml(ir), { badge: "3 paths", badgeClass: "ds-badge-purple" })}
+      ${artifactAccordionHtml("Evidence and safeguards", "Provenance, review gates, and future integrations", artifactEvidenceQualityHtml(ir), { badge: pkg.profile.needsHumanApproval ? "Review required" : "Review advised", badgeClass: pkg.profile.needsHumanApproval ? "ds-badge-amber" : "ds-badge-dim" })}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
-        <button type="button" class="primary-button compact" data-artifact-compile="${escapeHtml(step.id)}">Compile recommended artifact</button>
+        <button type="button" class="primary-button compact" data-artifact-compile="${escapeHtml(step.id)}">Compile recommended package</button>
         <button type="button" class="secondary-button compact" data-artifact-bundle="${escapeHtml(step.id)}">Generate full bundle</button>
       </div>
-      <div style="margin-top:12px;">
-        ${artifactSnapshotHtml(saved, prior, "No compiled artifact snapshot yet. Click Compile recommended artifact to preserve the current package.")}
-      </div>
-      <details style="margin-top:10px;">
-        <summary style="font-size:11px;color:#8aa0b8;cursor:pointer;">Optional full bundle snapshot</summary>
-        <div style="margin-top:8px;">${artifactSnapshotHtml(bundle, bundlePrior, "No full bundle snapshot yet. Click Generate full bundle to preserve the multi-surface package.")}</div>
-      </details>
+      ${artifactAccordionHtml("Saved package snapshots", "Compiled output and preserved prior versions", snapshotBody, { badge: saved ? "Saved" : "Not saved", badgeClass: saved ? "ds-badge-teal" : "ds-badge-dim" })}
     </div>`;
 }
 
@@ -9138,6 +9251,8 @@ function engineeringCommandCenterHtml(steps) {
     saved: compiler.compiled?.[step.id],
     bundle: compiler.bundles?.[step.id]
   }));
+  const compiledCount = packages.filter(({ saved }) => saved).length;
+  const bundleCount = packages.filter(({ bundle }) => bundle).length;
   const packageRows = packages.map(({ step, index, pkg, saved, bundle }) => {
     const savedMeta = artifactSnapshotMeta(saved);
     return `
@@ -9145,12 +9260,11 @@ function engineeringCommandCenterHtml(steps) {
         <td style="padding:7px 10px;border-bottom:1px solid #152236;color:#c8d8e8;">${escapeHtml(stepDisplayName(step, index))}</td>
         <td style="padding:7px 10px;border-bottom:1px solid #152236;color:#8aa0b8;">${escapeHtml(pkg.recommendedArtifact.label)}</td>
         <td style="padding:7px 10px;border-bottom:1px solid #152236;"><span class="ds-badge ${artifactReadinessBadgeClass(pkg.readiness.label)}">${escapeHtml(pkg.readiness.label)} · ${pkg.readiness.score}/100</span></td>
-        <td style="padding:7px 10px;border-bottom:1px solid #152236;color:#8aa0b8;">${saved ? `Compiled ${escapeHtml(savedMeta.when || "")}` : "Not compiled"}</td>
-        <td style="padding:7px 10px;border-bottom:1px solid #152236;color:#8aa0b8;">${bundle ? "Full bundle saved" : "Recommended only"}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid #152236;color:#8aa0b8;">${saved ? `Saved ${escapeHtml(savedMeta.when || "")}` : "Ready to compile"}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid #152236;color:#8aa0b8;">${bundle ? "Full bundle saved" : "Recommended package"}</td>
       </tr>`;
   }).join("");
   const future = packages.flatMap(({ pkg }) => pkg.ir.futureIntegrationCandidates).slice(0, 6);
-  const tests = packages.flatMap(({ pkg, index }) => pkg.ir.testCases.slice(0, 2).map((test) => `Step ${index + 1} - ${test.name}: ${test.expected}`)).slice(0, 8);
   const githubPack = packages
     .map(({ pkg }) => pkg.ir)
     .find((ir) => ir.targetSurface === "githubCopilot")
@@ -9162,20 +9276,36 @@ function engineeringCommandCenterHtml(steps) {
     "Exports include saved artifact snapshots when available.",
     "No live integration, writeback, automated approval, or hidden tool use is claimed."
   ];
+  const implementationStats = [
+    artifactMetricPill("Step packages", packages.length, "ds-badge-purple"),
+    artifactMetricPill("Saved snapshots", compiledCount, "ds-badge-teal", { hideZero: true, numericValue: compiledCount }),
+    artifactMetricPill("Full bundles", bundleCount, "ds-badge-pink", { hideZero: true, numericValue: bundleCount }),
+    artifactMetricPill("Integration mode", "No integrations", "ds-badge-teal")
+  ].filter(Boolean).join("");
   return `
     <section class="ds-panel" style="padding:18px 20px;margin-bottom:16px;border-left:3px solid #ff4fc8;">
       <div class="ds-section-head">
-        <div class="ds-section-title"><span class="ds-grad-bar-v" style="height:14px;background:linear-gradient(180deg,#ff4fc8,#a855f7);"></span>Implementation command center</div>
-        <div class="ds-section-meta">artifact package index, tests, controls</div>
+        <div class="ds-section-title"><span class="ds-grad-bar-v" style="height:14px;background:linear-gradient(180deg,#ff4fc8,#a855f7);"></span>Engineering implementation package</div>
+        <div class="ds-section-meta">build packet, tests, controls</div>
+      </div>
+      <div class="implementation-package-section" style="background:#09131f;border:1px solid #16263a;border-radius:8px;padding:13px 14px;margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+          <div style="min-width:250px;flex:1;">
+            <div class="ds-micro" style="margin-bottom:6px;">Implementation Package</div>
+            <p style="margin:0;color:#c8d8e8;font-size:13px;line-height:1.5;">Engineering receives one recommended package per workflow step, saved snapshots when compiled, grouped test cases, acceptance criteria, provenance notes, and explicit no-integration boundaries.</p>
+            <p style="margin:8px 0 0;color:#5b7186;font-size:12px;line-height:1.45;">${escapeHtml(NO_INTEGRATION_MVP_NOTE)}</p>
+          </div>
+          <div style="display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end;">${implementationStats}</div>
+        </div>
       </div>
       <div style="overflow-x:auto;">
         <table style="width:100%;border-collapse:collapse;min-width:760px;font-size:12px;">
           <thead>
             <tr style="background:#09131f;">
               <th style="padding:7px 10px;color:#5b7186;text-align:left;border-bottom:1px solid #152236;">Step</th>
-              <th style="padding:7px 10px;color:#5b7186;text-align:left;border-bottom:1px solid #152236;">Recommended artifact</th>
+              <th style="padding:7px 10px;color:#5b7186;text-align:left;border-bottom:1px solid #152236;">Best starting package</th>
               <th style="padding:7px 10px;color:#5b7186;text-align:left;border-bottom:1px solid #152236;">Readiness</th>
-              <th style="padding:7px 10px;color:#5b7186;text-align:left;border-bottom:1px solid #152236;">Snapshot</th>
+              <th style="padding:7px 10px;color:#5b7186;text-align:left;border-bottom:1px solid #152236;">Saved package</th>
               <th style="padding:7px 10px;color:#5b7186;text-align:left;border-bottom:1px solid #152236;">Bundle</th>
             </tr>
           </thead>
@@ -9209,7 +9339,7 @@ function engineeringCommandCenterHtml(steps) {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;">
         <div class="ds-card-inner" style="padding:12px;">
           <div class="ds-micro" style="margin-bottom:6px;">Test plan</div>
-          <ul style="margin:0;padding-left:18px;color:#8aa0b8;font-size:12px;line-height:1.5;">${tests.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+          ${engineeringImplementationTestPlanHtml(packages)}
         </div>
         <div class="ds-card-inner" style="padding:12px;">
           <div class="ds-micro" style="margin-bottom:6px;">Acceptance criteria</div>
