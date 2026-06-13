@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Workflow Discovery Studio
 
-> Drop this file at the repo root (`discovery-intake-webapp/CLAUDE.md`). Claude Code
+> Keep this file at `discovery-intake-webapp/CLAUDE.md` (the app folder). Claude Code
 > loads it automatically every turn. It is the durable source of truth for guardrails
 > so they don't have to be re-pasted. The numbered `CC_0x_*.md` prompts reference it.
 
@@ -128,7 +128,7 @@ node --check server.mjs
 npm test
 ```
 
-Baseline is roughly a 120-test gate (confirm against the actual repo). Tests are deterministic
+Baseline is a 130-test gate (confirm against the actual repo). Tests are deterministic
 and must not depend on live LLM calls or external APIs. Do not weaken the auth/storage/
 business-case paths.
 
