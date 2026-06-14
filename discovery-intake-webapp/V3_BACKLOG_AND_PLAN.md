@@ -297,6 +297,66 @@ Acceptance criteria:
 
 ---
 
+## Design refresh (post-telemetry) — design track (added 2026-06-13)
+
+> A future **design track**, sequenced **after V3 completes and the V3-1 telemetry is read**, so the refresh follows where users actually stall rather than guessing. **Not part of current V3 scope** — these are write-ups for later (V3-11+ territory); nothing here is built and none of it touches `app.js` until scheduled. Deliberately kept out of the effort table and the phased plan above until then. Each entry inherits the Universal definition of done plus the design-integrity rule below.
+
+**The design-integrity rule (binding for this track):**
+- **Gradients are chrome/action only** — the brand-signature hairline, the primary Generate button, the active segmented tab, the readiness-*progress* fill bar, the recipe-header signature.
+- **Meaning-bearing UI stays flat, single-hue** — a reviewer must read a signal at a glance (the readiness *badge* "Usable with caveats", a category accent, an event-type dot). A gradient there muddies the signal.
+- **Signal STRENGTH is a shade ramp within ONE hue — not a gradient.** Hue = the signal *type*; shade = the *level* (high ≈600–800, medium ≈200–400, low ≈50–100), same hue throughout.
+- **Category accents (architecture-page family):** teal = experience/grid, purple = logic/recipe, pink = data/governance, amber = business-case.
+- Reference (the design inspiration mock): gradient on the top signature bar, "Generate artifact", the active "Overview" tab, and the 72/100 readiness-progress fill; flat single colors on the category-accent cards, the event-type status dots, and the green "Usable with caveats" badge.
+
+### V3-11 — Analysis-tab consolidation (read-only activity feed + consolidated recipe view)
+
+**Why:** The analysis tab is where a reviewer lands to judge a recipe, but the trust signals it already stores — who reviewed, what was exported, when policy was cited, when something was generated or recomputed — are scattered and under-surfaced. One consolidated view makes the recipe's history and current output legible at a glance: the same "make stored rigor visible" goal as V3-2, extended to the recipe surface.
+
+**What:** A two-pane restyle of the analysis tab — a left-rail **read-only activity feed** rendering already-stored audit/telemetry events, and a right-side **consolidated recipe output view** restyling the existing artifact card/overview. Mounts in `renderAnalysisTabRecipe`; **augments** the tab and does **not** replace or alter the intake flow.
+
+Acceptance criteria:
+- The left rail renders a chronological feed of events **already stored** on the session blob (review / export / generate / recompute / policy-citation / ingest). It is a **pure view**: reads stored events via the existing accessor, **recomputes nothing**, writes nothing, triggers no generation.
+- Each row uses a flat, single-hue event-type dot — reviewed = teal · exported = blue · generated = purple · policy = pink · recomputed = amber — flat color encoding event *type*; no gradient on a meaning-bearing dot.
+- The right pane restyles `artifactCompilerCardHtml` / `artifactOverviewHtml` only — same fields, same readiness label, same chips ("Provenance tracked", the config block, "N audit events"); the recipe-header signature hairline may carry the brand gradient (chrome), the readiness *badge* stays flat.
+- Nothing is recomputed, re-fetched, or re-derived to populate either pane; an absent event or field renders an explicit empty / "none recorded" state and never a fabricated one.
+- Display-only: the IR, snapshots, provenance, and event log are untouched; the seven existing renderers' output contracts are unaffected except for styling.
+- Tests (deterministic, no live LLM): the feed renders from stored events only and **asserts no recompute/generation path is invoked** (the same no-recompute guarantee the rest of the app carries); absent events → explicit empty state, never a fabricated event; the right pane surfaces the same readiness/provenance fields as the current overview; no write/generate path exists in the tab's render flow.
+
+> Sequencing: best **after the V3-1 telemetry is read** — the feed's event vocabulary and ordering should follow what reviewers actually look for. Lowest-risk of the three (additive, display-only). Push-only.
+
+### V3-12 — Brighter design-language refresh (readiness badges · four-signal vocabulary · category accents)
+
+**Why:** The app's rigor — the four independent signals and the readiness vocabulary — is its best asset and currently reads as flat and muted. A brighter, consistent visual language makes that rigor feel like the premium, legible product it is, without changing any underlying logic or scoring.
+
+**What:** A display-only refresh of the readiness badges, the four-signal indicators, and the per-domain category accents, applying the design-integrity rule consistently across the render surface.
+
+Acceptance criteria:
+- Readiness **badges** (Ready / Usable with caveats / Draft until confirmed / Not enough information) render as flat, single-color chips — one fixed color per label, read from the existing readiness value; never a gradient, never recomputed.
+- Each of the four signals (extraction confidence / opportunity / readiness / provenance) gets a fixed hue; **strength** within a signal is a **shade ramp in that one hue** (high ≈600–800 / medium ≈200–400 / low ≈50–100) — a flat fill chosen from the stored value, explicitly **not a gradient**.
+- Category accents follow the architecture-page family (teal = experience/grid, purple = logic/recipe, pink = data/governance, amber = business-case), applied as flat accents (e.g. the category-card top borders in the mock).
+- The four signals stay visually distinct and are never collapsed into one combined color or score.
+- Purely presentational: no `getField` / provenance / readiness value is altered, recomputed, or re-derived; readiness label text and thresholds are unchanged.
+- Tests (deterministic, no live LLM): each readiness label maps to its fixed flat color; the strength→shade mapping picks the correct stop per band from a stored value (and is asserted to be a single-hue flat fill, not a gradient); the four signals remain distinguishable; **no recompute path is touched** by any badge/indicator render.
+
+> Risk + sequencing: **largest surface area** and the most cautious of the three — it touches many render functions guarded by the "seven distinct renderers" / trust-invariant tests, so a styling change must not alter any renderer's output contract or collapse the four signals. Schedule **after V3-1 telemetry is read** and review the diff against those guard tests carefully. Push-only.
+
+### V3-13 — Gradient palette as a brand-and-action layer
+
+**Why:** A single, recognizable gradient identity (teal → blue → purple → pink → amber) gives the product a branded, premium feel and a consistent way to mark "this is an action / this is brand chrome" — without ever bleeding into the flat colors that carry meaning.
+
+**What:** Introduce the brand gradient as a thin chrome/action layer over the flat signal colors: the brand-signature hairline, the primary Generate action, the active segmented tab, and the readiness-progress fill.
+
+Acceptance criteria:
+- The gradient appears **only** on chrome/action surfaces: the top brand-signature hairline, the recipe-header signature, the primary **Generate artifact** button, the active segmented tab, and the readiness-*progress* fill bar (0–100). Secondary actions (e.g. **Copy config**) and all meaning-bearing surfaces stay flat.
+- No meaning-bearing element (readiness badge, category accent, event-type dot, signal-strength indicator) ever receives the gradient.
+- Presentation only — it encodes nothing, reads no value, changes no logic; the readiness-progress *fill width* still comes from the stored readiness score (e.g. 72/100), only its color treatment is the gradient.
+- A single source-of-truth gradient token is reused everywhere it appears (no ad-hoc per-component gradients drifting out of sync).
+- Tests (deterministic, no live LLM): the gradient token is present on the designated chrome/action surfaces and **absent** on every meaning-bearing surface (badge / accent / dot / strength indicator); the readiness-progress fill width still derives from the stored score; no value/recompute path is touched by applying the gradient.
+
+> Sequencing: pairs naturally with V3-12 (same refresh) but is smaller and lower-risk, being confined to chrome. **After V3-1 telemetry is read.** Push-only.
+
+---
+
 ## Phased project plan
 
 Run one sprint per autonomous Claude Code session. Each sprint has a natural review checkpoint —
