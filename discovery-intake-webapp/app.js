@@ -1100,6 +1100,13 @@ const defaultState = {
   // the background. Each entry: { name, snapshot, prior, computedAt, level,
   // customRate }. normalizeLoadedState backfills [] on older sessions.
   businessCaseScenarios: [],
+  // V3-7: knowledge-library entries applied to THIS workflow (per-workflow,
+  // explicit). Each is a deepFreeze'd reference snapshot of the exact library
+  // entry version applied, with provenance back to the entry + its original
+  // source. Editing the library never mutates these; only an explicit re-apply
+  // upgrades. normalizeLoadedState backfills [] so older sessions stay
+  // byte-identical (no applied knowledge → no IR/grid change).
+  appliedKnowledge: [],
   // V3-3: uploaded AI policy (a relied-on value). Shape:
   // { fileName, uploadedAt, clauses:[{id,ref,heading,text,source,confidence}] }.
   // null = no policy → artifacts use the generic advisory caution. Read-only at
@@ -1360,6 +1367,7 @@ document.addEventListener("DOMContentLoaded", () => {
   window.setInterval(checkAiStatus, 30000); // Change 3: live AI status every 30s
   syncSessionsFromServer();
   syncPackagesFromServer();
+  syncKnowledgeFromServer();
   render();
   loadSessionFromUrlParam();
 });
@@ -5442,6 +5450,11 @@ function buildAgentRecipeIr(step, workflowContext = {}, options = {}) {
     && Array.isArray(workflowContext.policy.clauses) && workflowContext.policy.clauses.length)
     ? workflowContext.policy : null;
   const policyFileName = policy && policy.fileName ? String(policy.fileName) : "the uploaded policy";
+  // V3-7: knowledge-library entries applied to this workflow. Gated: null unless
+  // refs are present → the no-knowledge IR is BYTE-IDENTICAL to baseline. Read
+  // only here; applying happens via the explicit apply action elsewhere.
+  const appliedKnowledge = (workflowContext && Array.isArray(workflowContext.knowledge) && workflowContext.knowledge.length)
+    ? workflowContext.knowledge : null;
   const baseName = compilerCellText(step, "name") || "Workflow step";
   const facts = [];
   const assumptions = [];
@@ -5615,6 +5628,22 @@ function buildAgentRecipeIr(step, workflowContext = {}, options = {}) {
     doNotAutomateNotes,
     cautionFlags,
     policyCitations,
+    // V3-7: provenance-tagged applied knowledge. Always present; [] when none →
+    // byte-identical to baseline, mirroring policyCitations. Each item carries the
+    // distinct "knowledge-library" source + provenance back to the entry version.
+    appliedKnowledge: appliedKnowledge
+      ? appliedKnowledge.map((ref) => ({
+          name: String((ref && ref.name) || ""),
+          kind: String((ref && ref.kind) || "reference"),
+          version: ref && ref.version,
+          source: "knowledge-library",
+          provenance: {
+            entryId: String((ref && ref.entryId) || ""),
+            version: ref && ref.version,
+            originalSource: String((ref && ref.originalSource) || "")
+          }
+        }))
+      : [],
     futureIntegrationCandidates,
     provenanceSummary: readiness.summary,
     readinessScore: readiness,
@@ -6338,6 +6367,130 @@ function stepCompositeBadgeHtml(step) {
   return `<details class="step-trust-badge" style="display:inline-block;margin-left:8px;"><summary style="cursor:pointer;list-style:none;display:inline-block;"><span class="ds-badge ${posture.cls}">${escapeHtml(posture.label)}</span></summary><ul style="margin:6px 0 0;padding-left:16px;color:#8aa0b8;font-size:11px;line-height:1.5;">${dims.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}</ul></details>`;
 }
 
+// V3-7: knowledge-library panel for the grid tab. Shows (1) the entries applied
+// to THIS workflow — each a distinct "Library" provenance source — and (2) the
+// shared, versioned library with explicit apply / edit / delete. Pure render over
+// state.appliedKnowledge + serverKnowledge; the only writes are the explicit
+// apply/remove/save actions wired below. No model call, no recompute.
+function knowledgeLibraryPanelHtml() {
+  const applied = Array.isArray(state.appliedKnowledge) ? state.appliedKnowledge : [];
+  const library = Array.isArray(serverKnowledge) ? serverKnowledge : [];
+  const esc = escapeHtml;
+
+  const appliedRows = applied.length
+    ? applied.map((ref) => {
+        const src = ref.originalSource ? ` · source: ${esc(ref.originalSource)}` : "";
+        return `
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#0a1422;border:1px solid #1a2a3a;border-radius:8px;">
+            <span style="flex:1;min-width:0;">
+              <span style="color:#e8f4ff;font-size:13px;font-weight:600;">${esc(ref.name)}</span>
+              <span style="color:#7a93b4;font-size:11px;"> v${ref.version} · ${esc(ref.kind)}${src}</span>
+            </span>
+            ${provenanceBadgeHtml("knowledge-library")}
+            <button type="button" data-knowledge-remove="${esc(ref.entryId)}" title="Remove from this workflow" style="background:none;border:none;color:#5b7186;cursor:pointer;font-size:15px;line-height:1;">×</button>
+          </div>`;
+      }).join("")
+    : `<p style="margin:6px 0 0;color:#5b7186;font-size:12px;">No knowledge applied to this workflow yet. Apply a library entry below — it grounds this workflow's artifacts with provenance, and never changes a captured value.</p>`;
+
+  const appliedIds = new Set(applied.map((r) => r.entryId));
+  const libraryRows = library.length
+    ? library.map((entry) => {
+        const cur = knowledgeEntryCurrent(entry) || {};
+        const applyLabel = appliedIds.has(entry.id) ? "Re-apply (upgrade)" : "Apply";
+        return `
+          <div style="padding:10px 12px;background:#0d1b2e;border:1px solid #1e3350;border-radius:8px;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <strong style="color:#e8f4ff;font-size:13px;">${esc(entry.name)}</strong>
+              <span class="ds-badge ds-badge-dim">${esc(cur.kind || entry.kind || "reference")}</span>
+              <span style="color:#5b7186;font-size:11px;">v${cur.version || (Array.isArray(entry.versions) ? entry.versions.length : 1)}</span>
+              <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;">
+                <button type="button" data-knowledge-apply="${esc(entry.id)}" style="background:#a855f7;color:#0d1b2e;border:none;border-radius:6px;padding:5px 12px;font-weight:600;font-size:12px;cursor:pointer;">${applyLabel}</button>
+                <button type="button" data-knowledge-edit="${esc(entry.id)}" class="secondary-button compact">Edit</button>
+                <button type="button" data-knowledge-delete="${esc(entry.id)}" class="secondary-button compact">Delete</button>
+              </span>
+            </div>
+            ${cur.originalSource ? `<div style="margin-top:4px;color:#7a93b4;font-size:11px;">Original source: ${esc(cur.originalSource)}</div>` : ""}
+            ${cur.body ? `<p style="margin:6px 0 0;color:#9fb3c8;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word;">${esc(policyClip(cur.body, 240))}</p>` : ""}
+          </div>`;
+      }).join("")
+    : `<p style="margin:6px 0 0;color:#5b7186;font-size:12px;">The shared library is empty. Create a reusable entry below — a decision framework, standard, or policy-derived context you want to apply across workflows.</p>`;
+
+  const kindOptions = KNOWLEDGE_KINDS.map((k) => `<option value="${k}">${k}</option>`).join("");
+  const form = `
+    <details data-knowledge-form style="margin-top:10px;">
+      <summary style="cursor:pointer;font-size:12px;color:#a855f7;font-weight:600;">+ New knowledge entry</summary>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
+        <input data-knowledge-name type="text" placeholder="Name (e.g. Credit decision framework)" style="background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:8px 10px;color:#dde8f5;font-size:13px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <select data-knowledge-kind style="background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:8px 10px;color:#dde8f5;font-size:13px;">${kindOptions}</select>
+          <input data-knowledge-source type="text" placeholder="Original source (e.g. Risk Policy section 4)" style="flex:1;min-width:160px;background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:8px 10px;color:#dde8f5;font-size:13px;">
+        </div>
+        <textarea data-knowledge-body rows="3" placeholder="Knowledge content (the framework / standard / context)" style="background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:8px 10px;color:#dde8f5;font-size:13px;resize:vertical;"></textarea>
+        <input type="hidden" data-knowledge-edit-id value="">
+        <button type="button" data-knowledge-save style="align-self:flex-start;background:#a855f7;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Save to library</button>
+      </div>
+    </details>`;
+
+  return `
+    <div class="ds-card" style="margin:0 20px 20px;padding:16px 18px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <strong style="font-size:1rem;color:#e8f4ff;">Knowledge library</strong>
+        <span class="ds-badge" style="background:#a855f722;color:#a855f7;border:1px solid #a855f755;">Shared · versioned</span>
+      </div>
+      <div style="margin-top:6px;color:#8aa0b8;font-size:0.82rem;">Reusable knowledge applied explicitly to a workflow. Editing an entry creates a new version; workflows already using a prior version are never changed.</div>
+      <div style="margin-top:12px;font-size:11px;color:#7a93b4;text-transform:uppercase;letter-spacing:0.05em;">Applied to this workflow</div>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px;">${appliedRows}</div>
+      <div style="margin-top:14px;font-size:11px;color:#7a93b4;text-transform:uppercase;letter-spacing:0.05em;">Shared library</div>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px;">${libraryRows}</div>
+      ${form}
+    </div>`;
+}
+
+function wireKnowledgeLibrary(container) {
+  if (!container) return;
+  container.querySelectorAll("[data-knowledge-apply]").forEach((btn) => {
+    btn.addEventListener("click", () => applyKnowledgeToWorkflow(btn.dataset.knowledgeApply));
+  });
+  container.querySelectorAll("[data-knowledge-remove]").forEach((btn) => {
+    btn.addEventListener("click", () => removeAppliedKnowledge(btn.dataset.knowledgeRemove));
+  });
+  container.querySelectorAll("[data-knowledge-delete]").forEach((btn) => {
+    btn.addEventListener("click", () => deleteKnowledgeEntry(btn.dataset.knowledgeDelete));
+  });
+  container.querySelectorAll("[data-knowledge-edit]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const entry = (serverKnowledge || []).find((e) => e.id === btn.dataset.knowledgeEdit);
+      if (!entry) { toast("Entry not found."); return; }
+      const cur = knowledgeEntryCurrent(entry) || {};
+      const form = container.querySelector("[data-knowledge-form]");
+      if (!form) return;
+      form.open = true;
+      const set = (sel, val) => { const el = form.querySelector(sel); if (el) el.value = val; };
+      set("[data-knowledge-name]", entry.name || "");
+      set("[data-knowledge-kind]", cur.kind || "reference");
+      set("[data-knowledge-source]", cur.originalSource || "");
+      set("[data-knowledge-body]", cur.body || "");
+      set("[data-knowledge-edit-id]", entry.id);
+    });
+  });
+  const saveBtn = container.querySelector("[data-knowledge-save]");
+  if (saveBtn) {
+    saveBtn.addEventListener("click", () => {
+      const root = saveBtn.closest("[data-knowledge-form]") || container;
+      const val = (sel) => (root.querySelector(sel)?.value || "").trim();
+      const name = val("[data-knowledge-name]");
+      if (!name) { toast("Name the knowledge entry first."); return; }
+      const editId = root.querySelector("[data-knowledge-edit-id]")?.value || "";
+      saveKnowledgeEntry({
+        name,
+        kind: root.querySelector("[data-knowledge-kind]")?.value || "reference",
+        originalSource: val("[data-knowledge-source]"),
+        body: val("[data-knowledge-body]")
+      }, editId || undefined);
+    });
+  }
+}
+
 function renderAnalysisTabGrid() {
   const container = document.getElementById("process-flow-map-full");
   if (!container) return;
@@ -6514,8 +6667,9 @@ function renderAnalysisTabGrid() {
       </table>
     </div>`;
 
-  container.innerHTML = header + tierChangeNoticeHtml() + stats + panels + matrix;
+  container.innerHTML = header + tierChangeNoticeHtml() + stats + panels + matrix + knowledgeLibraryPanelHtml();
   wireGridCellEditors(container);
+  wireKnowledgeLibrary(container);
 }
 
 // --- TAB 2: AI Opportunities --------------------------------------------------
@@ -7854,7 +8008,11 @@ function provenanceBadgeHtml(source, confidence) {
     "user-stated": { label: "User", color: "#00d4b4" },
     "user-edited": { label: "Edited", color: "#06b6d4" },
     "doc-extracted": { label: "Doc", color: "#f59e0b" },
-    "ai-inferred": { label: "AI", color: "#5b7186" }
+    "ai-inferred": { label: "AI", color: "#5b7186" },
+    // V3-7: applied knowledge-library entries show as a DISTINCT provenance
+    // source here (display only). Deliberately NOT in GRID_SOURCE_RANK — it never
+    // participates in cell-write precedence and never overwrites a captured value.
+    "knowledge-library": { label: "Library", color: "#a855f7" }
   }[source] || { label: "—", color: "#3f5878" };
   const tip = typeof confidence === "number" ? `confidence ${Math.round(confidence * 100)}%` : "no confidence recorded";
   return `<span title="${escapeHtml(tip)}" style="flex-shrink:0;display:inline-block;background:${meta.color}22;color:${meta.color};border:1px solid ${meta.color}55;border-radius:99px;padding:1px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;cursor:default;">${meta.label}</span>`;
@@ -8466,8 +8624,163 @@ function artifactWorkflowContext() {
     steps: analysisGridSteps(),
     // V3-3: the uploaded AI policy (read-only at generation time). Null unless a
     // policy with clauses is loaded → artifacts use the generic advisory caution.
-    policy: state.aiPolicy && Array.isArray(state.aiPolicy.clauses) && state.aiPolicy.clauses.length ? state.aiPolicy : null
+    policy: state.aiPolicy && Array.isArray(state.aiPolicy.clauses) && state.aiPolicy.clauses.length ? state.aiPolicy : null,
+    // V3-7: knowledge-library entries applied to this workflow (read-only at
+    // generation time). Null when none applied → IR is byte-identical to baseline.
+    knowledge: appliedKnowledgeForWorkflow()
   };
+}
+
+// === V3-7: shared, versioned knowledge library (client) =====================
+// The library lives in the additive server `knowledge` table (shared across
+// workflows). Versioning is built HERE via deepFreeze + an append-only versions[]
+// — the same freeze/append primitive as the audit log and eval suite (no new
+// scheme). Applying an entry to a workflow stores a deepFreeze'd REFERENCE
+// snapshot of the exact version on state.appliedKnowledge[], with provenance back
+// to the entry + its original source. Editing the library never mutates an
+// applied reference; only an explicit re-apply upgrades it. Nothing here calls a
+// model or recomputes a relied-on value.
+const KNOWLEDGE_KINDS = ["framework", "standard", "policy-derived", "reference"];
+let serverKnowledge = [];
+
+function normalizeKnowledgeKind(kind) {
+  return KNOWLEDGE_KINDS.includes(kind) ? kind : "reference";
+}
+
+// Build the next version of an entry (or a brand-new entry) by APPENDING a frozen
+// version — priors are never mutated. Pure + deterministic (ts is passed in).
+function buildKnowledgeEntryVersion(existingEntry, fields, ts) {
+  const versions = existingEntry && Array.isArray(existingEntry.versions) ? existingEntry.versions.slice() : [];
+  const version = versions.length + 1;
+  const frozenVersion = deepFreeze({
+    version,
+    name: String((fields && fields.name) || "").trim(),
+    body: String((fields && fields.body) || "").trim(),
+    originalSource: String((fields && fields.originalSource) || "").trim(),
+    kind: normalizeKnowledgeKind(fields && fields.kind),
+    updatedAt: String(ts || "")
+  });
+  versions.push(frozenVersion);
+  return {
+    id: existingEntry && existingEntry.id ? existingEntry.id : makeId("knowledge"),
+    name: frozenVersion.name,
+    kind: frozenVersion.kind,
+    versions,
+    createdAt: existingEntry && existingEntry.createdAt ? existingEntry.createdAt : String(ts || ""),
+    updatedAt: String(ts || "")
+  };
+}
+
+// The current (newest) version of an entry.
+function knowledgeEntryCurrent(entry) {
+  const versions = entry && Array.isArray(entry.versions) ? entry.versions : [];
+  return versions.length ? versions[versions.length - 1] : null;
+}
+
+// A deepFreeze'd reference snapshot capturing the EXACT applied version +
+// provenance back to the entry and its original source.
+function buildAppliedKnowledgeRef(entry, ts, actor) {
+  const current = knowledgeEntryCurrent(entry);
+  if (!entry || !current) return null;
+  return deepFreeze({
+    entryId: entry.id,
+    version: current.version,
+    name: current.name,
+    body: current.body,
+    kind: current.kind,
+    originalSource: current.originalSource,
+    appliedAt: String(ts || ""),
+    appliedBy: { name: String((actor && actor.name) || ""), email: String((actor && actor.email) || "") }
+  });
+}
+
+// Apply (or explicitly re-apply/upgrade) a library entry to THIS workflow. One
+// ref per entryId; re-applying replaces it with the current version (explicit
+// upgrade). Returns true when state.appliedKnowledge changed.
+function applyKnowledgeRefToState(entry, ts, actor) {
+  const ref = buildAppliedKnowledgeRef(entry, ts, actor);
+  if (!ref) return false;
+  if (!Array.isArray(state.appliedKnowledge)) state.appliedKnowledge = [];
+  const idx = state.appliedKnowledge.findIndex((r) => r && r.entryId === ref.entryId);
+  if (idx >= 0) state.appliedKnowledge[idx] = ref;
+  else state.appliedKnowledge.push(ref);
+  return true;
+}
+
+// Remove an applied reference (explicit). Returns true when it changed.
+function removeAppliedKnowledgeFromState(entryId) {
+  if (!Array.isArray(state.appliedKnowledge)) return false;
+  const before = state.appliedKnowledge.length;
+  state.appliedKnowledge = state.appliedKnowledge.filter((r) => !r || r.entryId !== entryId);
+  return state.appliedKnowledge.length !== before;
+}
+
+// The applied-knowledge list for the workflow context — null when empty so the
+// IR/grid output is byte-identical to baseline (gated exactly like V3-3 policy).
+function appliedKnowledgeForWorkflow() {
+  return Array.isArray(state.appliedKnowledge) && state.appliedKnowledge.length ? state.appliedKnowledge : null;
+}
+
+async function syncKnowledgeFromServer() {
+  try {
+    const payload = await requestJson("/api/knowledge");
+    serverKnowledge = Array.isArray(payload.entries) ? payload.entries : [];
+    if (state.appMode === "analysis") renderAnalysisStudio();
+  } catch (error) {
+    console.warn("Knowledge library sync unavailable", error.message);
+  }
+}
+
+// Create or edit a library entry — explicit. Appends a frozen version (priors
+// preserved), persists to the shared additive table, never touches applied refs.
+async function saveKnowledgeEntry(fields, existingId) {
+  const name = String((fields && fields.name) || "").trim();
+  if (!name) { toast("Name the knowledge entry first."); return; }
+  const existing = existingId ? serverKnowledge.find((e) => e.id === existingId) : null;
+  const entry = buildKnowledgeEntryVersion(existing || null, fields, new Date().toISOString());
+  try {
+    const result = await requestJson("/api/knowledge", { method: "POST", body: { entry } });
+    const saved = result.entry || entry;
+    serverKnowledge = [saved, ...serverKnowledge.filter((e) => e.id !== saved.id)];
+    const v = knowledgeEntryCurrent(saved);
+    toast(existing ? `Knowledge "${name}" updated (v${v ? v.version : 1}).` : `Knowledge "${name}" saved to the library.`);
+    if (state.appMode === "analysis") renderAnalysisStudio();
+  } catch (error) {
+    toast(String(error.message || error));
+  }
+}
+
+async function deleteKnowledgeEntry(entryId) {
+  try {
+    await requestJson(`/api/knowledge/${encodeURIComponent(entryId)}`, { method: "DELETE" });
+    serverKnowledge = serverKnowledge.filter((e) => e.id !== entryId);
+    toast("Knowledge entry deleted from the library.");
+    if (state.appMode === "analysis") renderAnalysisStudio();
+  } catch (error) {
+    toast(String(error.message || error));
+  }
+}
+
+// Explicit application of a library entry to the current workflow.
+function applyKnowledgeToWorkflow(entryId) {
+  const entry = serverKnowledge.find((e) => e.id === entryId);
+  if (!entry) { toast("Knowledge entry not found."); return; }
+  if (!applyKnowledgeRefToState(entry, new Date().toISOString(), currentActor())) {
+    toast("Could not apply this entry."); return;
+  }
+  const cur = knowledgeEntryCurrent(entry);
+  recordEngagementAudit("changed", { kind: "knowledge-applied", entryId, version: cur ? cur.version : null }, auditChainHash(JSON.stringify({ entryId, version: cur ? cur.version : null })));
+  persistState();
+  render();
+  toast(`Applied "${entry.name}" (v${cur ? cur.version : 1}) to this workflow.`);
+}
+
+function removeAppliedKnowledge(entryId) {
+  if (!removeAppliedKnowledgeFromState(entryId)) return;
+  recordEngagementAudit("changed", { kind: "knowledge-removed", entryId }, auditChainHash(String(entryId || "")));
+  persistState();
+  render();
+  toast("Removed applied knowledge from this workflow.");
 }
 
 function artifactSnapshotMeta(snapshot) {
@@ -32749,6 +33062,10 @@ function normalizeLoadedState(parsed = {}) {
   const merged = {
     ...structuredClone(defaultState),
     ...parsed,
+    // V3-7: backfill applied-knowledge refs so sessions persisted before this
+    // feature load with an empty list — the no-knowledge IR/grid stays
+    // byte-identical to baseline. A frozen ref is added only on explicit apply.
+    appliedKnowledge: Array.isArray(parsed.appliedKnowledge) ? parsed.appliedKnowledge : [],
     sessionMeta: {
       ...structuredClone(defaultState.sessionMeta),
       ...(parsed.sessionMeta || {})

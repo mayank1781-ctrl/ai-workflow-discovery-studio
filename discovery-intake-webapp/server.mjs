@@ -148,6 +148,23 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 `);
 
+// === V3-7: shared, versioned knowledge library ==============================
+// An additive, per-user table (same shape + ownership model as `sessions`). Each
+// row's `data` blob is a versioned entry { id, name, kind, versions:[...] } whose
+// version history is built client-side via the existing deepFreeze/append
+// primitive — the server is dumb storage, exactly like saveSession. Empty/unused
+// → no effect on any other path (byte-identical baseline). No scoring here.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS knowledge (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    data TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_knowledge_user_id ON knowledge(user_id);
+`);
+
 // A falsy userId (auth disabled / no session — the current default) maps to a
 // shared "anon" owner so the NOT NULL column is satisfied and the no-auth case
 // still lists every session, mirroring the old file behaviour.
@@ -181,6 +198,30 @@ function listSessions(userId) {
 
 function deleteSession(userId, sessionId) {
   db.prepare("DELETE FROM sessions WHERE id = ? AND user_id = ?").run(sessionId, sessionOwnerKey(userId));
+}
+
+// V3-7 knowledge-library accessors — mirror the session accessors exactly,
+// including the "anon" owner mapping when auth is off (the current default).
+function listKnowledge(userId) {
+  const rows = db.prepare("SELECT data FROM knowledge WHERE user_id = ? ORDER BY updated_at DESC").all(sessionOwnerKey(userId));
+  return rows.map((row) => JSON.parse(row.data));
+}
+
+function saveKnowledge(userId, id, data) {
+  const now = new Date().toISOString();
+  const existing = db.prepare("SELECT created_at FROM knowledge WHERE id = ?").get(id);
+  const createdAt = existing?.created_at || now;
+  db.prepare("INSERT OR REPLACE INTO knowledge (id, user_id, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+    .run(id, sessionOwnerKey(userId), JSON.stringify(data), createdAt, now);
+}
+
+function knowledgeRowOwner(id) {
+  const row = db.prepare("SELECT user_id FROM knowledge WHERE id = ?").get(id);
+  return row ? row.user_id : null;
+}
+
+function deleteKnowledge(userId, id) {
+  db.prepare("DELETE FROM knowledge WHERE id = ? AND user_id = ?").run(id, sessionOwnerKey(userId));
 }
 
 // === V3-1: local usage telemetry (privacy-preserving) =======================
@@ -1525,6 +1566,16 @@ const server = http.createServer(async (req, res) => {
       const sessionId = requestUrl.pathname.split("/").pop();
       if (req.method === "GET") return await handleGetSession(req, res, sessionId);
       if (req.method === "DELETE") return await handleDeleteSession(req, res, sessionId);
+    }
+
+    // V3-7: shared, versioned knowledge library (additive storage; no scoring).
+    if (requestUrl.pathname === "/api/knowledge") {
+      if (req.method === "GET") return await handleListKnowledge(req, res);
+      if (req.method === "POST") return await handleSaveKnowledge(req, res);
+    }
+    if (requestUrl.pathname.startsWith("/api/knowledge/")) {
+      const knowledgeId = requestUrl.pathname.split("/").pop();
+      if (req.method === "DELETE") return await handleDeleteKnowledge(req, res, knowledgeId);
     }
 
     if (requestUrl.pathname === "/api/packages" && req.method === "POST") {
@@ -2902,6 +2953,51 @@ async function handleTextToSpeech(req, res) {
     "Cache-Control": "no-store"
   });
   return res.end(audioBuffer);
+}
+
+// V3-7 knowledge-library endpoints. Storage only — the versioned entry (with its
+// frozen version history) is built client-side via the deepFreeze/append
+// primitive; the server validates id/name and stores the blob, exactly like
+// saveSession. Ownership matches the session model. No scoring, no model call.
+async function handleListKnowledge(req, res) {
+  const userId = currentUserId(req);
+  return sendJson(res, 200, { entries: listKnowledge(userId) });
+}
+
+async function handleSaveKnowledge(req, res) {
+  let body;
+  try {
+    body = await readJson(req);
+  } catch (error) {
+    return sendJson(res, 400, { error: error.message || "Invalid request body" });
+  }
+  const entry = body && typeof body.entry === "object" ? body.entry : null;
+  const id = entry ? safeIdentifier(entry.id) : "";
+  if (!entry || !id) return sendJson(res, 400, { error: "Knowledge entry id is required" });
+  if (typeof entry.name !== "string" || !entry.name.trim()) {
+    return sendJson(res, 400, { error: "Knowledge entry name is required" });
+  }
+  const userId = currentUserId(req);
+  // Block overwriting an entry owned by a different real user (404, no leak);
+  // "anon" rows are unclaimed and may be claimed on save.
+  const existingOwner = knowledgeRowOwner(id);
+  if (userId && existingOwner && existingOwner !== "anon" && existingOwner !== sessionOwnerKey(userId)) {
+    return sendJson(res, 404, { error: "Knowledge entry not found" });
+  }
+  saveKnowledge(userId, id, entry);
+  return sendJson(res, 200, { ok: true, entry });
+}
+
+async function handleDeleteKnowledge(req, res, id) {
+  const safeId = safeIdentifier(id);
+  if (!safeId) return sendJson(res, 400, { error: "Invalid knowledge id" });
+  const userId = currentUserId(req);
+  const existingOwner = knowledgeRowOwner(safeId);
+  if (userId && existingOwner && existingOwner !== "anon" && existingOwner !== sessionOwnerKey(userId)) {
+    return sendJson(res, 404, { error: "Knowledge entry not found" });
+  }
+  deleteKnowledge(userId, safeId);
+  return sendJson(res, 200, { ok: true });
 }
 
 async function handleListSessions(req, res) {
