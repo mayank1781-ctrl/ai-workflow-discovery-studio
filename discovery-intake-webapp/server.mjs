@@ -2585,7 +2585,7 @@ function bcStepCellValue(step, key) {
   return typeof value === "string" ? value : "";
 }
 
-function computeBusinessCase(steps, conversationText, userRole = "") {
+function computeBusinessCase(steps, conversationText, userRole = "", options = {}) {
   const workflowMode = bcDetectWorkflowMode(conversationText);
   let instances = 0;
   let mins = 0;
@@ -2604,7 +2604,19 @@ function computeBusinessCase(steps, conversationText, userRole = "") {
   const role = String(userRole || "").toLowerCase();
   // Phase 9c: a Settings rate override wins over the role-based table.
   const rateOverride = settingsRateOverride();
-  const blendedRate = rateOverride != null ? rateOverride : blendedRateForRole(role);
+  // V3-6: a named business-case scenario pins its OWN rate ABOVE the Settings
+  // override, so a later Settings change can never silently move a saved
+  // scenario's figure. Two equivalent forms: an explicit custom rate
+  // (scenarioRate) or the picked level's table rate (pinRole). Either is labeled
+  // rateSource "scenario". When options is absent (every pre-V3-6 caller), both
+  // resolve to null and this is byte-identical to the prior override?-role logic.
+  const opts = options && typeof options === "object" ? options : {};
+  const customRate = Number.isFinite(opts.scenarioRate) && opts.scenarioRate > 0 ? opts.scenarioRate : null;
+  const pinnedRoleRate = customRate == null && opts.pinRole ? blendedRateForRole(role) : null;
+  const scenarioRate = customRate != null ? customRate : pinnedRoleRate;
+  const blendedRate = scenarioRate != null
+    ? scenarioRate
+    : rateOverride != null ? rateOverride : blendedRateForRole(role);
   const results = {
     hoursPerWeek: null, annualHours: null, annualValue: null,
     totalHours: null, projectValue: null,
@@ -2621,7 +2633,7 @@ function computeBusinessCase(steps, conversationText, userRole = "") {
   return {
     // PR 32 snapshot fields — the full context the figure was computed from.
     rate: blendedRate,
-    rateSource: rateOverride != null ? "override" : "role",
+    rateSource: scenarioRate != null ? "scenario" : rateOverride != null ? "override" : "role",
     instancesPerWeek: instances_per_week,
     minsPerInstance: mins_per_instance,
     durationWeeks: project_duration_weeks,
@@ -2656,7 +2668,10 @@ async function handleBusinessCase(req, res) {
   const snapshot = computeBusinessCase(
     steps,
     typeof body.conversationText === "string" ? body.conversationText : "",
-    typeof body.userRole === "string" ? body.userRole : ""
+    typeof body.userRole === "string" ? body.userRole : "",
+    // V3-6: optional scenario rate pinning. Absent on the normal compute, so
+    // that path is byte-identical to pre-V3-6.
+    { scenarioRate: body.scenarioRate, pinRole: body.pinRole === true }
   );
   snapshot.computedAt = new Date().toISOString();
   return sendJson(res, 200, { snapshot });

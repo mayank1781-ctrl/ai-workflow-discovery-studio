@@ -1094,6 +1094,12 @@ const defaultState = {
   // recompute so a changed figure is visibly a change (Invariant 2).
   businessCaseSnapshot: null,
   businessCaseSnapshotPrior: null,
+  // V3-6: named business-case scenarios (rate/level), each an explicit-compute
+  // snapshot the user can compare side by side. Append-only by name; an explicit
+  // recompute keeps the prior figure (Invariant 2 parity); never recomputed in
+  // the background. Each entry: { name, snapshot, prior, computedAt, level,
+  // customRate }. normalizeLoadedState backfills [] on older sessions.
+  businessCaseScenarios: [],
   // V3-3: uploaded AI policy (a relied-on value). Shape:
   // { fileName, uploadedAt, clauses:[{id,ref,heading,text,source,confidence}] }.
   // null = no policy → artifacts use the generic advisory caution. Read-only at
@@ -6856,6 +6862,216 @@ function opportunityPortfolioStripHtml() {
     </div>`;
 }
 
+// === V3-6: Portfolio intelligence (value × readiness across saved workflows) ==
+// Reads PERSISTED session data via getCombinedSessionLibrary(). The VALUE axis
+// comes ONLY from each session's stored businessCaseSnapshot (an explicit user
+// compute) — never telemetry, never a recompute. READINESS is the canonical
+// client scorer (scoreRecipeReadiness) aggregated per workflow. The current
+// session is flagged and held OUT of the portfolio aggregates (no blending).
+
+// Readiness label thresholds, mirrored from scoreRecipeReadiness so the portfolio
+// aggregate reads the same bands. Kept standalone on purpose: scoreRecipeReadiness
+// is extracted byte-for-byte by several guard tests, so it is left untouched.
+function readinessLabelForScore(score) {
+  const s = Number(score) || 0;
+  return s >= 80 ? "Ready for controlled use"
+    : s >= 60 ? "Usable with caveats"
+    : s >= 35 ? "Draft until confirmed"
+    : "Not enough information";
+}
+
+// Normalized system / knowledge tokens for clustering. Pure string work over the
+// session's systems collection and grid systemsTools cells — no recompute.
+function portfolioSessionTokens(sessionState) {
+  const set = new Set();
+  const add = (raw) => String(raw == null ? "" : raw)
+    .split(/[,;/\n]|\band\b/i)
+    .map((t) => t.trim().toLowerCase())
+    .filter((t) => t.length > 1)
+    .forEach((t) => set.add(t));
+  (sessionState?.systems || []).forEach((sys) => add(sys && sys.name));
+  const steps = sessionState?.workflowGrid?.steps || [];
+  steps.forEach((step) => add(step?.cells?.systemsTools?.value));
+  return [...set];
+}
+
+// One portfolio item from a session-library entry. Value = stored snapshot only
+// (valueComputed:false when absent — NEVER fabricated as $0). Readiness = mean of
+// scoreRecipeReadiness over the steps. No business-case engine call, no telemetry.
+function portfolioItemFromSession(entry, currentSessionId) {
+  const st = entry && entry.state ? entry.state : null;
+  const id = (entry && (entry.sessionId || entry.id)) || "";
+  const name = (entry && (entry.workflowName || entry.name)) || "Untitled workflow";
+  const isCurrent = Boolean(currentSessionId) && id === currentSessionId;
+  const steps = Array.isArray(st?.workflowGrid?.steps) ? st.workflowGrid.steps : [];
+
+  // VALUE — read the explicit business-case snapshot; never recompute it here.
+  const bc = st && st.businessCaseSnapshot ? st.businessCaseSnapshot : null;
+  const valueComputed = Boolean(bc && bc.results);
+  const value = valueComputed
+    ? (bc.results.annualValue || 0) + (bc.results.projectValue || 0)
+    : null;
+
+  // READINESS — canonical client scorer, aggregated. Null when there are no steps.
+  let readinessScore = null;
+  let readinessLabel = "Not enough information";
+  if (steps.length) {
+    const total = steps.reduce((sum, step) => sum + (scoreRecipeReadiness(step).score || 0), 0);
+    readinessScore = Math.round(total / steps.length);
+    readinessLabel = readinessLabelForScore(readinessScore);
+  }
+
+  let tier = "";
+  try { tier = steps.length ? (getStepOpportunityMeta(steps[0]).tier || "") : ""; } catch { tier = ""; }
+
+  return {
+    id, name, isCurrent,
+    value, valueComputed,
+    readinessScore, readinessLabel,
+    tier,
+    tokens: st ? portfolioSessionTokens(st) : [],
+    hasState: Boolean(st),
+    stepCount: steps.length
+  };
+}
+
+// Rank key: value × readiness. Items without an explicit value are never treated
+// as $0 — they sort last (negative key) and are surfaced separately in the UI.
+function portfolioRankScore(item) {
+  if (!item || !item.valueComputed || !Number.isFinite(item.value)) return -1;
+  const readiness = Number.isFinite(item.readinessScore) ? item.readinessScore : 0;
+  return item.value * (readiness / 100);
+}
+
+// Cluster sessions that SHARE a normalized system/knowledge token (>= 2 sessions
+// per cluster). Deterministic order: largest cluster first, then alphabetical.
+function buildPortfolioClusters(items) {
+  const byToken = new Map();
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    (item.tokens || []).forEach((tok) => {
+      if (!byToken.has(tok)) byToken.set(tok, []);
+      byToken.get(tok).push(item.id);
+    });
+  });
+  const clusters = [];
+  for (const [token, ids] of byToken) {
+    if (ids.length >= 2) clusters.push({ key: token, label: token, sessionIds: ids });
+  }
+  clusters.sort((a, b) => b.sessionIds.length - a.sessionIds.length || a.key.localeCompare(b.key));
+  return clusters;
+}
+
+// The portfolio model: ranked persisted workflows + clusters + aggregates, with
+// the current session held SEPARATE (never folded into portfolio totals).
+function buildPortfolioModel(items, currentSessionId) {
+  const all = Array.isArray(items) ? items : [];
+  const current = all.find((item) => item.isCurrent || (currentSessionId && item.id === currentSessionId)) || null;
+  const portfolio = all.filter((item) => item !== current);
+  const ranked = [...portfolio].sort((a, b) => portfolioRankScore(b) - portfolioRankScore(a));
+  const valued = portfolio.filter((item) => item.valueComputed);
+  const totals = {
+    sessionCount: portfolio.length,
+    valuedCount: valued.length,
+    unvaluedCount: portfolio.length - valued.length,
+    totalValue: valued.reduce((sum, item) => sum + (item.value || 0), 0),
+    avgReadiness: portfolio.length
+      ? Math.round(portfolio.reduce((sum, item) => sum + (item.readinessScore || 0), 0) / portfolio.length)
+      : 0
+  };
+  return { ranked, clusters: buildPortfolioClusters(portfolio), totals, current };
+}
+
+// Portfolio section for the AI Opportunities tab. Returns "" until at least one
+// OTHER saved workflow exists to compare against (so a fresh single session sees
+// nothing extra). Pure render over the model — no compute, no fetch, no write.
+function portfolioIntelligenceHtml() {
+  const currentId = state.sessionMeta?.id || "";
+  const items = getCombinedSessionLibrary().map((entry) => portfolioItemFromSession(entry, currentId));
+  const model = buildPortfolioModel(items, currentId);
+  if (!model.ranked.length) return "";
+
+  const usd = (n) => "$" + Math.round(n || 0).toLocaleString("en-US");
+  const valued = model.ranked.filter((it) => it.valueComputed && Number.isFinite(it.value));
+  const maxValue = valued.reduce((m, it) => Math.max(m, it.value), 0) || 1;
+
+  // Value × readiness scatter (X = readiness 0–100, Y = value, normalized to max).
+  const W = 380, H = 240, padL = 40, padR = 16, padT = 16, padB = 28;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const dots = valued.map((it) => {
+    const x = padL + (Math.max(0, Math.min(100, it.readinessScore || 0)) / 100) * plotW;
+    const y = padT + plotH - (it.value / maxValue) * plotH;
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="7" fill="${opportunityTierColor(it.tier)}" opacity="0.85" stroke="#0d1b2e" stroke-width="1.5"><title>${escapeHtml(it.name)} · ${usd(it.value)} · readiness ${it.readinessScore}</title></circle>`;
+  }).join("");
+  const scatter = valued.length
+    ? `<svg viewBox="0 0 ${W} ${H}" width="100%" style="background:#111e2e;border-radius:8px;">
+         <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + plotH}" stroke="#2a3f5f"></line>
+         <line x1="${padL}" y1="${padT + plotH}" x2="${padL + plotW}" y2="${padT + plotH}" stroke="#2a3f5f"></line>
+         <text x="${padL + plotW / 2}" y="${H - 6}" text-anchor="middle" font-size="10" fill="#556677">Readiness →</text>
+         <text x="12" y="${padT + plotH / 2}" text-anchor="middle" font-size="10" fill="#556677" transform="rotate(-90 12 ${padT + plotH / 2})">Value ↑</text>
+         ${dots}
+       </svg>`
+    : `<div style="color:#8aa0b8;font-size:0.82rem;padding:10px 0;">No workflow in the portfolio has an explicit business case yet — compute one to place it on the value axis.</div>`;
+
+  const rankRow = (it, idx) => {
+    const valueCell = it.valueComputed
+      ? `<span class="ds-num-amber" style="font-size:13px;font-weight:700;">${usd(it.value)}</span>`
+      : `<span style="font-size:12px;color:#5b7186;">value not computed</span>`;
+    const readyCell = it.readinessScore == null ? "—" : `${it.readinessScore} · ${escapeHtml(it.readinessLabel)}`;
+    return `
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:#0d1b2e;border:1px solid #1a2a3a;border-radius:8px;">
+        <span style="color:#5b7186;font-size:12px;width:18px;text-align:right;">${idx + 1}</span>
+        <span style="flex:1;color:#dde8f5;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(it.name)}</span>
+        ${valueCell}
+        <span style="font-size:11px;color:#8aa0b8;width:150px;text-align:right;">${readyCell}</span>
+      </div>`;
+  };
+  const rankedList = model.ranked.map(rankRow).join("");
+
+  const clusterHtml = model.clusters.length
+    ? model.clusters.slice(0, 8).map((c) => `
+        <div style="display:flex;gap:8px;align-items:baseline;font-size:12px;color:#8aa0b8;padding:4px 0;">
+          <span style="color:#00d4b4;font-weight:600;">${escapeHtml(c.label)}</span>
+          <span>${c.sessionIds.length} workflows</span>
+        </div>`).join("")
+    : `<div style="color:#5b7186;font-size:12px;">No shared systems or knowledge across saved workflows yet.</div>`;
+
+  const currentNote = model.current
+    ? `<span style="font-size:11px;color:#8aa0b8;">This session (<strong>${escapeHtml(model.current.name)}</strong>) is shown separately and is not counted in these portfolio figures.</span>`
+    : `<span style="font-size:11px;color:#8aa0b8;">Portfolio reads your saved workflows; the current session is counted only once it is saved.</span>`;
+
+  const totals = model.totals;
+  const totalsStrip = `
+    <div style="display:flex;gap:18px;flex-wrap:wrap;margin:10px 0;">
+      <div><span class="ds-num-teal" style="font-size:1.3rem;font-weight:800;">${totals.sessionCount}</span> <span style="font-size:11px;color:#5b7186;">workflows</span></div>
+      <div><span class="ds-num-amber" style="font-size:1.3rem;font-weight:800;">${usd(totals.totalValue)}</span> <span style="font-size:11px;color:#5b7186;">portfolio value (${totals.valuedCount} computed)</span></div>
+      <div><span class="ds-num-teal" style="font-size:1.3rem;font-weight:800;">${totals.avgReadiness}</span> <span style="font-size:11px;color:#5b7186;">avg readiness</span></div>
+    </div>`;
+
+  return `
+    <div class="ds-panel" style="padding:16px 18px;margin-bottom:20px;border:1px solid #1e3350;border-radius:10px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+        <strong style="font-size:1rem;color:#e8f4ff;">Portfolio intelligence</strong>
+        <span class="ds-badge ds-badge-teal">Across saved workflows</span>
+      </div>
+      ${currentNote}
+      ${totalsStrip}
+      <div style="display:flex;gap:18px;flex-wrap:wrap;">
+        <div style="flex:1.1;min-width:280px;">
+          <div style="font-size:0.8rem;color:#8899aa;margin-bottom:8px;">Value × readiness</div>
+          ${scatter}
+        </div>
+        <div style="flex:1;min-width:240px;">
+          <div style="font-size:0.8rem;color:#8899aa;margin-bottom:8px;">Ranked workflows</div>
+          <div style="display:flex;flex-direction:column;gap:6px;max-height:240px;overflow:auto;">${rankedList}</div>
+        </div>
+      </div>
+      <div style="margin-top:14px;">
+        <div style="font-size:0.8rem;color:#8899aa;margin-bottom:6px;">Shared systems &amp; knowledge (clusters)</div>
+        ${clusterHtml}
+      </div>
+    </div>`;
+}
+
 function renderAnalysisTabOpportunities() {
   const container = document.getElementById("analysis-tab-opportunities");
   if (!container) return;
@@ -7011,7 +7227,14 @@ function renderAnalysisTabOpportunities() {
        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">${cards}</div>`
     : `<div style="text-align:center;padding:60px 20px;color:#445566;font-size:0.9rem;">No AI opportunities identified yet. Complete the workflow grid to generate opportunities.</div>`;
 
-  container.innerHTML = opportunityPortfolioStripHtml() + statsRow + sectionTwo + sectionThree;
+  // V3-6: portfolio (cross-workflow) section sits above the current-workflow
+  // sections, with a divider, so portfolio and current-session metrics stay
+  // visually separated and are never read as one blended view.
+  const portfolioHtml = portfolioIntelligenceHtml();
+  const thisWorkflowHeading = portfolioHtml
+    ? `<h3 style="font-size:1rem;font-weight:600;color:#e2e8f0;margin:0 0 14px;">This workflow</h3>`
+    : "";
+  container.innerHTML = opportunityPortfolioStripHtml() + portfolioHtml + thisWorkflowHeading + statsRow + sectionTwo + sectionThree;
 }
 
 // --- TAB 3: Recipe Book -------------------------------------------------------
@@ -7205,10 +7428,117 @@ function businessCaseBlockForCurrentWorkflow() {
   return businessCaseBlockHtml(snapshot).replace(/<\/div>\s*$/, footer + "</div>");
 }
 
+// V3-6: named business-case scenarios, compared side by side with a min–max
+// range. Pure render over the stored snapshots — never computes. The form is the
+// only entry point and routes through the single explicit compute action.
+function businessCaseScenariosBlockForCurrentWorkflow() {
+  const steps = analysisGridSteps();
+  if (!steps.length) return "";
+  const scenarios = Array.isArray(state.businessCaseScenarios) ? state.businessCaseScenarios : [];
+  const usd = (n) => "$" + Math.round(n || 0).toLocaleString("en-US");
+  const levelOptions = [
+    ["", "Current level / default"],
+    ["analyst", "Analyst"],
+    ["consultant", "Consultant"],
+    ["manager", "Manager"],
+    ["principal", "Principal"]
+  ].map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
+
+  // Explicit-compute form. Buttons are never hard-disabled — the handler
+  // toast-guards a missing name. The rate input pins a custom rate when given.
+  const form = `
+    <div data-bc-scenario-form style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px;">
+      <input data-bc-scenario-name type="text" placeholder="Scenario name (e.g. Conservative)" style="flex:1;min-width:160px;background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:8px 10px;color:#dde8f5;font-size:13px;">
+      <select data-bc-scenario-level style="background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:8px 10px;color:#dde8f5;font-size:13px;">${levelOptions}</select>
+      <input data-bc-scenario-rate type="number" min="1" placeholder="Rate $ (optional)" style="width:140px;background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:8px 10px;color:#dde8f5;font-size:13px;">
+      <button type="button" data-bc-scenario-compute style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Compute scenario</button>
+    </div>`;
+
+  const header = `
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <strong style="font-size:1rem;color:#e8f4ff;">Business-case scenarios</strong>
+      <span class="ds-badge ds-badge-teal">Computed on request</span>
+    </div>`;
+
+  if (!scenarios.length) {
+    return `
+      <div class="ds-card" style="padding:18px 20px;margin-top:16px;">
+        ${header}
+        <div style="margin-top:6px;color:#8aa0b8;font-size:0.82rem;">Name a scenario and compute it to compare rate/level assumptions side by side. Each scenario is a saved snapshot — never recomputed on its own.</div>
+        ${form}
+      </div>`;
+  }
+
+  const range = businessCaseScenarioRange(scenarios);
+  const rangeLine = range.count >= 2
+    ? `<div style="margin-top:6px;color:#00d4b4;font-size:0.82rem;">Range across ${range.count} scenarios: <strong>${usd(range.min)}</strong> – <strong>${usd(range.max)}</strong>${range.mode === "role" ? " / year" : " project value"}</div>`
+    : `<div style="margin-top:6px;color:#8aa0b8;font-size:0.82rem;">Add another scenario to see a comparison range.</div>`;
+
+  const cols = scenarios.map((entry) => {
+    const s = entry.snapshot || {};
+    const r = s.results || {};
+    const value = businessCaseScenarioValue(s);
+    const isRole = s.workflowMode === "role";
+    const hours = isRole ? r.hoursPerWeek : r.totalHours;
+    const hoursLabel = isRole ? "hrs/week" : "total hrs";
+    const rateLabel = entry.customRate
+      ? `$${entry.customRate}/hr (custom)`
+      : entry.level
+        ? `$${s.blendedRate}/hr (${BC_ROLE_LABELS[entry.level] || entry.level})`
+        : `$${s.blendedRate}/hr`;
+    const priorLine = entry.prior
+      ? `<div style="font-size:10px;color:#5b7186;margin-top:6px;">Prev: ${usd(businessCaseScenarioValue(entry.prior))}</div>`
+      : "";
+    return `
+      <div style="flex:1;min-width:150px;background:#0d1b2e;border:1px solid #1e3350;border-radius:8px;padding:12px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+          <strong style="font-size:13px;color:#e8f4ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(entry.name)}</strong>
+          <button type="button" data-bc-scenario-remove="${escapeHtml(entry.name)}" title="Remove scenario" style="background:none;border:none;color:#5b7186;cursor:pointer;font-size:15px;line-height:1;">×</button>
+        </div>
+        <div class="ds-num-amber" style="font-size:1.4rem;font-weight:800;margin-top:8px;">${usd(value)}</div>
+        <div style="font-size:10px;color:#5b7186;text-transform:uppercase;letter-spacing:0.05em;">${isRole ? "Annual value" : "Project value"}</div>
+        <div style="font-size:11px;color:#8aa0b8;margin-top:8px;">${Number.isFinite(hours) ? hours.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : "—"} ${hoursLabel}</div>
+        <div style="font-size:11px;color:#8aa0b8;">${escapeHtml(rateLabel)}</div>
+        ${priorLine}
+        <button type="button" data-bc-scenario-recompute="${escapeHtml(entry.name)}" style="margin-top:10px;width:100%;background:#0d1b2e;color:#00d4b4;border:1px solid #1e4a44;border-radius:6px;padding:6px 10px;font-weight:600;font-size:11px;cursor:pointer;">Recompute</button>
+      </div>`;
+  }).join("");
+
+  return `
+    <div class="ds-card" style="padding:18px 20px;margin-top:16px;">
+      ${header}
+      ${rangeLine}
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;">${cols}</div>
+      ${form}
+    </div>`;
+}
+
 // The Compute/Recompute button is the ONLY path that calls the server engine.
 function wireBusinessCaseBlock(container) {
   container?.querySelectorAll("[data-bc-compute]").forEach((btn) => {
-    btn.addEventListener("click", computeBusinessCaseNow);
+    btn.addEventListener("click", () => computeBusinessCaseNow());
+  });
+  // V3-6 scenario controls — explicit compute / recompute / remove only.
+  container?.querySelectorAll("[data-bc-scenario-compute]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const root = btn.closest("[data-bc-scenario-form]") || container;
+      const name = (root?.querySelector("[data-bc-scenario-name]")?.value || "").trim();
+      const level = root?.querySelector("[data-bc-scenario-level]")?.value || "";
+      const rateRaw = root?.querySelector("[data-bc-scenario-rate]")?.value || "";
+      const customRate = rateRaw ? Number(rateRaw) : null;
+      if (!name) { toast("Name the scenario before computing."); return; }
+      computeBusinessCaseNow({ scenario: { name, level, customRate } });
+    });
+  });
+  container?.querySelectorAll("[data-bc-scenario-recompute]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const sc = (state.businessCaseScenarios || []).find((entry) => entry.name === btn.dataset.bcScenarioRecompute);
+      if (!sc) { toast("Scenario not found."); return; }
+      computeBusinessCaseNow({ scenario: { name: sc.name, level: sc.level || "", customRate: Number.isFinite(sc.customRate) ? sc.customRate : null } });
+    });
+  });
+  container?.querySelectorAll("[data-bc-scenario-remove]").forEach((btn) => {
+    btn.addEventListener("click", () => removeBusinessCaseScenario(btn.dataset.bcScenarioRemove));
   });
 }
 
@@ -7221,21 +7551,42 @@ function applyBusinessCaseSnapshot(snapshot) {
   return true;
 }
 
-async function computeBusinessCaseNow() {
+// The ONLY caller of the business-case engine endpoint in the client (asserted
+// by business-case-client.test.mjs). Both the main compute AND V3-6 scenarios
+// route through this single explicit action — a scenario just pins its own rate
+// and lands in state.businessCaseScenarios instead of the main snapshot. There
+// is no automatic/background compute path anywhere.
+async function computeBusinessCaseNow(options = {}) {
   const steps = analysisGridSteps();
   if (!steps.length) {
     toast("Capture workflow steps before computing the business case.");
     return;
   }
+  const scenario = options && options.scenario ? options.scenario : null;
   try {
-    const result = await requestJson("/api/business-case", {
-      method: "POST",
-      body: {
-        steps,
-        conversationText: businessCaseConversationText(),
-        userRole: state.sessionMeta?.userRole || ""
+    const body = {
+      steps,
+      conversationText: businessCaseConversationText(),
+      userRole: scenario && scenario.level ? scenario.level : (state.sessionMeta?.userRole || "")
+    };
+    if (scenario) {
+      // V3-6: a named scenario pins its own rate above any Settings override —
+      // an explicit custom rate when given, otherwise the picked level's rate.
+      if (Number.isFinite(scenario.customRate) && scenario.customRate > 0) body.scenarioRate = scenario.customRate;
+      else body.pinRole = true;
+    }
+    const result = await requestJson("/api/business-case", { method: "POST", body });
+    if (scenario) {
+      if (!applyBusinessCaseScenario(scenario.name, result.snapshot, { level: scenario.level || "", customRate: Number.isFinite(scenario.customRate) ? scenario.customRate : null })) {
+        throw new Error("No snapshot returned.");
       }
-    });
+      // V3-4: an explicit scenario compute is a "changed" event in the trail.
+      recordEngagementAudit("changed", { kind: "business-case-scenario", name: scenario.name }, auditChainHash(JSON.stringify(result.snapshot ?? "")));
+      persistState();
+      render();
+      toast(`Scenario "${scenario.name}" computed.`);
+      return;
+    }
     if (!applyBusinessCaseSnapshot(result.snapshot)) throw new Error("No snapshot returned.");
     // V3-4: an explicit business-case compute is a "changed" event in the trail.
     recordEngagementAudit("changed", { kind: "business-case" }, auditChainHash(JSON.stringify(state.businessCaseSnapshot ?? "")));
@@ -7245,6 +7596,69 @@ async function computeBusinessCaseNow() {
   } catch (error) {
     toast(String(error.message || error));
   }
+}
+
+// V3-6 scenario store. Append-only by name; an explicit recompute of an existing
+// scenario preserves its prior figure (Invariant 2 parity) and never silently
+// overwrites. Nothing here recomputes — the snapshot is produced only by the
+// explicit computeBusinessCaseNow({ scenario }) action above.
+function applyBusinessCaseScenario(name, snapshot, meta = {}) {
+  if (!snapshot || typeof snapshot !== "object") return false;
+  const cleanName = String(name || "").trim();
+  if (!cleanName) return false;
+  if (!Array.isArray(state.businessCaseScenarios)) state.businessCaseScenarios = [];
+  const existing = state.businessCaseScenarios.find((entry) => entry.name === cleanName);
+  if (existing) {
+    existing.prior = existing.snapshot;
+    existing.snapshot = snapshot;
+    existing.computedAt = snapshot.computedAt || existing.computedAt || "";
+    if (meta.level !== undefined) existing.level = meta.level;
+    if (meta.customRate !== undefined) existing.customRate = meta.customRate;
+  } else {
+    state.businessCaseScenarios.push({
+      name: cleanName,
+      snapshot,
+      prior: null,
+      computedAt: snapshot.computedAt || "",
+      level: meta.level || "",
+      customRate: meta.customRate ?? null
+    });
+  }
+  return true;
+}
+
+// Explicit removal only — there is no auto-prune path.
+function removeBusinessCaseScenario(name) {
+  if (!Array.isArray(state.businessCaseScenarios)) return false;
+  const before = state.businessCaseScenarios.length;
+  state.businessCaseScenarios = state.businessCaseScenarios.filter((entry) => entry.name !== name);
+  if (state.businessCaseScenarios.length === before) return false;
+  recordEngagementAudit("changed", { kind: "business-case-scenario-removed", name }, auditChainHash(String(name || "")));
+  persistState();
+  render();
+  toast(`Scenario "${name}" removed.`);
+  return true;
+}
+
+// The headline value of a scenario snapshot in its mode (role → annual, project
+// → engagement). Pure read of the stored snapshot — never recomputes.
+function businessCaseScenarioValue(snapshot) {
+  const r = (snapshot && snapshot.results) || {};
+  return snapshot && snapshot.workflowMode === "role"
+    ? (r.annualValue || 0)
+    : (r.projectValue || 0);
+}
+
+// Min–max range across the saved scenarios (all scenarios of one workflow share
+// a mode, so the values are apples-to-apples). Read-only over stored snapshots.
+function businessCaseScenarioRange(scenarios) {
+  const list = Array.isArray(scenarios) ? scenarios : [];
+  const values = list
+    .map((entry) => businessCaseScenarioValue(entry && entry.snapshot))
+    .filter((v) => Number.isFinite(v));
+  if (!values.length) return { count: 0, min: null, max: null, mode: "" };
+  const mode = (list.find((entry) => entry && entry.snapshot)?.snapshot?.workflowMode) || "";
+  return { count: values.length, min: Math.min(...values), max: Math.max(...values), mode };
 }
 
 // === Scoring transparency card (PR 9) ======================================
@@ -9162,6 +9576,7 @@ function renderAnalysisTabRecipe() {
     renderAuditPanelHtml() +
     cards +
     businessCaseBlockForCurrentWorkflow() +
+    businessCaseScenariosBlockForCurrentWorkflow() +
     scoringTransparencyBlockForCurrentWorkflow() +
     `<div style="margin-top:16px;"><button class="secondary-button compact" type="button" id="downloadRecipeBookBtn">Download Recipe Book</button><button type="button" id="recipe-export-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download DOCX</button><button type="button" id="recipe-pdf-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download PDF</button></div>`;
 
@@ -10853,7 +11268,7 @@ async function renderAnalysisTabEngineering() {
       ${cards}
     </div>`;
 
-  container.innerHTML = jiraBar + confluenceBar + section1 + toolbar + engineeringCommandCenterHtml(steps) + section2 + section3 + section4 + businessCaseBlockForCurrentWorkflow() + scoringTransparencyBlockForCurrentWorkflow();
+  container.innerHTML = jiraBar + confluenceBar + section1 + toolbar + engineeringCommandCenterHtml(steps) + section2 + section3 + section4 + businessCaseBlockForCurrentWorkflow() + businessCaseScenariosBlockForCurrentWorkflow() + scoringTransparencyBlockForCurrentWorkflow();
   if (jiraStatus.connected) populateJiraProjects();
 
   container.querySelector("#exportEngineeringDocBtn")?.addEventListener("click", exportEngineeringDoc);
