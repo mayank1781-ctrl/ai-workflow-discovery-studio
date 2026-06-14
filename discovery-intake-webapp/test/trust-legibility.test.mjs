@@ -79,8 +79,11 @@ test("d: per-step composite badge surfaces the four dimensions and never writes"
       // exact). The real stepTypologyHtml is covered by test/step-typology.test.mjs.
       stepTypologyHtml: () => "",
       // V3-16: same for the handoff/decision controls — stubbed here; the real
-      // stepStructuralHtml is covered by test/structural-nodes.test.mjs.
-      stepStructuralHtml: () => ""
+      // stepStructuralHtml is covered by test/handoffs-decisions.test.mjs.
+      stepStructuralHtml: () => "",
+      // V3-17: same for the friction-lens controls — stubbed here; the real
+      // stepFrictionHtml is covered by test/friction-lens.test.mjs.
+      stepFrictionHtml: () => ""
     }
   );
   fill("name", "Reconcile balances", "user-stated", 0.9);
