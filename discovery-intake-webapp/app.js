@@ -884,7 +884,12 @@ const defaultState = {
     workflowName: "",
     engagementContext: "",
     userRole: "",
-    namingPromptDone: false
+    namingPromptDone: false,
+    // V3-14: an explicit, provenance-carrying department tag for the capacity view.
+    // null until the user assigns one. Shape: { value, source, confidence }. An
+    // AI-suggested tag is source "ai-inferred" + low confidence and never hardens
+    // to asserted. Rides the existing sessionMeta deep-merge in normalizeLoadedState.
+    departmentTag: null
   },
   pilotControls: {
     enterpriseReadinessMode: "Local test",
@@ -1111,6 +1116,13 @@ const defaultState = {
   // upgrades. normalizeLoadedState backfills [] so older sessions stay
   // byte-identical (no applied knowledge → no IR/grid change).
   appliedKnowledge: [],
+  // V3-14: portfolio capacity assumptions — explicitly user-supplied, never inferred.
+  // `bands` is keyed by normalized persona label → { fullyLoadedCost, billRate }; a
+  // blank rate means that persona's cost is "not computed" (never fabricated). FTE
+  // denominator is ANNUAL HOURS = workingWeeks(48) × weeklyHoursBasis(40) = 1920,
+  // both editable. Empty `bands` + no department tags ⇒ the capacity view is unused
+  // and renders nothing (byte-identical baseline). normalizeLoadedState backfills it.
+  capacityBands: { bands: {}, hoursPerFteYear: 1920, weeklyHoursBasis: 40 },
   // V3-3: uploaded AI policy (a relied-on value). Shape:
   // { fileName, uploadedAt, clauses:[{id,ref,heading,text,source,confidence}] }.
   // null = no policy → artifacts use the generic advisory caution. Read-only at
@@ -7156,6 +7168,309 @@ function buildPortfolioModel(items, currentSessionId) {
 // Portfolio section for the AI Opportunities tab. Returns "" until at least one
 // OTHER saved workflow exists to compare against (so a fresh single session sees
 // nothing extra). Pure render over the model — no compute, no fetch, no write.
+// === V3-14: Portfolio dimensions & capacity ================================
+// An executive capacity lens over the SAME persisted-session portfolio (V3-6).
+// Pure/derived/read-only: value & hours come ONLY from each session's explicit
+// businessCaseSnapshot (never telemetry; valueComputed:false contributes nothing,
+// never $0); persona-band rates are user-supplied (blank ⇒ "not computed", never
+// fabricated); recurring run-rate (role mode) is kept SEPARATE from one-off project
+// savings (project mode); shared persona+step work is de-duplicated. No grid write,
+// no scoring endpoint, no model call.
+
+// Mirrors BC_CONFIG.workingWeeks (server). FTE denominator = 48 weeks × weekly basis.
+const CAPACITY_WORKING_WEEKS = 48;
+
+function normalizeCapacityPersona(label) {
+  return String(label == null ? "" : label).trim().toLowerCase();
+}
+
+// Read-only adapter: one flat capacity item from a session-library entry. Reads the
+// stored business-case snapshot (value/hours), the personaActors cell (persona +
+// its provenance), and the explicit sessionMeta.departmentTag. Never recomputes.
+function capacityItemFromSession(entry, currentSessionId) {
+  const st = entry && entry.state ? entry.state : null;
+  const id = (entry && (entry.sessionId || entry.id)) || "";
+  const name = (entry && (entry.workflowName || entry.name)) || "Untitled workflow";
+  const isCurrent = Boolean(currentSessionId) && id === currentSessionId;
+  const isSample = Boolean(st && st.sessionMeta && st.sessionMeta.isSample);
+  const steps = Array.isArray(st?.workflowGrid?.steps) ? st.workflowGrid.steps : [];
+
+  const bc = st && st.businessCaseSnapshot ? st.businessCaseSnapshot : null;
+  const valueComputed = Boolean(bc && bc.results);
+  const isRole = bc && (bc.workflowMode || bc.mode) === "role";
+  const mode = valueComputed ? (isRole ? "recurring" : "project") : "";
+  const r = (bc && bc.results) || {};
+  const recurringHours = valueComputed && mode === "recurring" ? (r.annualHours || 0) : null;
+  const recurringValue = valueComputed && mode === "recurring" ? (r.annualValue || 0) : null;
+  const projectHours = valueComputed && mode === "project" ? (r.totalHours || 0) : null;
+  const projectValue = valueComputed && mode === "project" ? (r.projectValue || 0) : null;
+
+  const primaryCell = steps.length && steps[0].cells ? steps[0].cells.personaActors : null;
+  const personaRaw = primaryCell && primaryCell.value ? String(primaryCell.value).split(/[,;/]| and /i)[0].trim() : "";
+  const personaProvenance = { source: (primaryCell && primaryCell.source) || "", confidence: primaryCell ? primaryCell.confidence : "" };
+
+  const dt = st && st.sessionMeta && st.sessionMeta.departmentTag ? st.sessionMeta.departmentTag : null;
+  const department = dt && dt.value ? String(dt.value).trim() : "";
+  const departmentProvenance = { source: (dt && dt.source) || "", confidence: dt ? dt.confidence : "" };
+
+  // De-dup token-set: normalized (persona|stepName) across steps. Identical sets in
+  // two sessions = the same work mapped twice → counted once (see the model).
+  const tokens = [...new Set(steps.map((s) => {
+    const p = normalizeCapacityPersona(s.cells && s.cells.personaActors ? s.cells.personaActors.value : "");
+    const nm = normalizeCapacityPersona(s.cells && s.cells.name ? s.cells.name.value : "");
+    return `${p}|${nm}`;
+  }).filter((t) => t !== "|"))].sort();
+
+  return {
+    id, name, isCurrent, isSample, valueComputed, mode,
+    recurringHours, recurringValue, projectHours, projectValue,
+    persona: personaRaw, personaKey: normalizeCapacityPersona(personaRaw), personaProvenance,
+    department, departmentProvenance,
+    dedupKey: tokens.join("¦")
+  };
+}
+
+// PURE capacity model over flat items. Excludes current + sample. Recurring and
+// project totals are NEVER blended. Blank persona band ⇒ cost/bill null ("not
+// computed"), never fabricated. Returns usable:false (empty figures) when no band
+// rate and no department tag exist → callers render nothing (byte-identical unused).
+function buildPortfolioCapacityModel(items, capacityBands) {
+  const cb = capacityBands && typeof capacityBands === "object" ? capacityBands : {};
+  const bands = cb.bands && typeof cb.bands === "object" ? cb.bands : {};
+  const hoursPerFteYear = Number(cb.hoursPerFteYear) > 0 ? Number(cb.hoursPerFteYear) : 1920;
+  const all = (Array.isArray(items) ? items : []).filter((it) => it && !it.isCurrent && !it.isSample);
+
+  const bandFor = (personaKey) => {
+    const b = bands[personaKey];
+    if (!b || typeof b !== "object") return null;
+    const fl = Number(b.fullyLoadedCost);
+    const bill = Number(b.billRate);
+    return {
+      fullyLoadedCost: Number.isFinite(fl) && fl > 0 ? fl : null,
+      billRate: Number.isFinite(bill) && bill > 0 ? bill : null
+    };
+  };
+
+  // De-dup: identical (persona|step) token-sets are the same work mapped twice.
+  const seen = new Set();
+  let dedupedCount = 0;
+  const counted = [];
+  for (const it of all) {
+    if (!it.valueComputed) continue; // explicit-compute only — contributes nothing, never $0
+    if (it.dedupKey && seen.has(it.dedupKey)) { dedupedCount += 1; continue; }
+    if (it.dedupKey) seen.add(it.dedupKey);
+    counted.push(it);
+  }
+
+  const deptMap = new Map();
+  const recurringTotals = { hours: 0, fte: 0, cost: 0, bill: 0, costComputed: true, billComputed: true };
+  const projectTotals = { hours: 0, value: 0, count: 0 };
+  const notComputed = [];
+
+  for (const it of counted) {
+    if (it.mode === "project") {
+      // One-off — kept strictly separate from the recurring run-rate.
+      projectTotals.hours += it.projectHours || 0;
+      projectTotals.value += it.projectValue || 0;
+      projectTotals.count += 1;
+      continue;
+    }
+    if (it.mode !== "recurring") continue;
+    const dept = it.department || "Unassigned";
+    const personaKey = it.personaKey || "unassigned";
+    if (!deptMap.has(dept)) deptMap.set(dept, new Map());
+    const personas = deptMap.get(dept);
+    if (!personas.has(personaKey)) {
+      personas.set(personaKey, {
+        personaKey, persona: it.persona || "Unassigned", hours: 0, fte: 0, cost: null, bill: null,
+        band: bandFor(personaKey), personaProvenance: it.personaProvenance, departmentProvenance: it.departmentProvenance
+      });
+    }
+    personas.get(personaKey).hours += it.recurringHours || 0;
+  }
+
+  const departments = [];
+  for (const [dept, personas] of deptMap) {
+    const rows = [];
+    for (const p of personas.values()) {
+      p.fte = hoursPerFteYear > 0 ? p.hours / hoursPerFteYear : 0;
+      p.cost = p.band && p.band.fullyLoadedCost != null ? p.hours * p.band.fullyLoadedCost : null;
+      p.bill = p.band && p.band.billRate != null ? p.hours * p.band.billRate : null;
+      recurringTotals.hours += p.hours;
+      recurringTotals.fte += p.fte;
+      if (p.cost == null) { recurringTotals.costComputed = false; notComputed.push({ department: dept, persona: p.persona, missing: "fully-loaded cost" }); }
+      else recurringTotals.cost += p.cost;
+      if (p.bill == null) { recurringTotals.billComputed = false; }
+      else recurringTotals.bill += p.bill;
+      rows.push(p);
+    }
+    rows.sort((a, b) => b.hours - a.hours || a.persona.localeCompare(b.persona));
+    departments.push({ department: dept, personas: rows });
+  }
+  departments.sort((a, b) => a.department.localeCompare(b.department));
+
+  const anyBand = Object.values(bands).some((b) => b && (Number(b.fullyLoadedCost) > 0 || Number(b.billRate) > 0));
+  const anyTag = all.some((it) => it.department);
+  const usable = (anyBand || anyTag) && counted.length > 0;
+  return { usable, departments, recurringTotals, projectTotals, notComputed, dedupedCount, hoursPerFteYear, weeklyHoursBasis: Number(cb.weeklyHoursBasis) || 40 };
+}
+
+// Collapsible, user-supplied assumptions editor (persona bands + weekly-hours basis).
+// Inputs only — nothing is inferred or auto-derived.
+function renderCapacityAssumptionsEditorHtml(capacityBands, personaKeys) {
+  const cb = capacityBands && typeof capacityBands === "object" ? capacityBands : {};
+  const bands = cb.bands && typeof cb.bands === "object" ? cb.bands : {};
+  const weekly = Number(cb.weeklyHoursBasis) || 40;
+  const hpy = Number(cb.hoursPerFteYear) || (CAPACITY_WORKING_WEEKS * weekly);
+  const keys = [...new Set([...(Array.isArray(personaKeys) ? personaKeys : []), ...Object.keys(bands)].filter(Boolean))].sort();
+  const inputCss = "background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:6px 8px;color:#dde8f5;font-size:12px;width:110px;";
+  const rows = keys.length
+    ? keys.map((k) => {
+        const b = bands[k] || {};
+        return `
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;" data-capacity-band="${escapeHtml(k)}">
+            <span style="flex:1;min-width:120px;color:#cfe0f2;font-size:12px;">${escapeHtml(k)}</span>
+            <label style="font-size:10px;color:#7a93b4;">Fully-loaded $/hr<input type="number" min="1" data-capacity-fl placeholder="—" value="${b.fullyLoadedCost != null ? escapeHtml(String(b.fullyLoadedCost)) : ""}" style="${inputCss}display:block;"></label>
+            <label style="font-size:10px;color:#7a93b4;">Bill $/hr<input type="number" min="1" data-capacity-bill placeholder="—" value="${b.billRate != null ? escapeHtml(String(b.billRate)) : ""}" style="${inputCss}display:block;"></label>
+          </div>`;
+      }).join("")
+    : `<div style="color:#5b7186;font-size:12px;margin-top:6px;">No personas captured in the portfolio yet — capture <em>Persona / Actors</em> in the grid first.</div>`;
+  return `
+    <details data-capacity-editor style="margin-top:10px;">
+      <summary style="cursor:pointer;font-size:12px;color:#a855f7;font-weight:600;">Capacity assumptions (persona bands — required to estimate)</summary>
+      <div style="margin-top:8px;">
+        <div style="color:#8aa0b8;font-size:11px;">Persona-band rates only — never individual salaries. Leave a rate blank to keep that persona "not computed."</div>
+        ${rows}
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;padding-top:8px;border-top:1px solid #16263a;">
+          <label style="font-size:10px;color:#7a93b4;">Weekly hours basis<input type="number" min="1" max="80" data-capacity-weekly value="${escapeHtml(String(weekly))}" style="${inputCss}display:block;"></label>
+          <span style="font-size:11px;color:#8aa0b8;">1.0 FTE = ${CAPACITY_WORKING_WEEKS} weeks × ${escapeHtml(String(weekly))} hrs = <strong>${escapeHtml(String(hpy))}</strong> hrs/yr</span>
+          <button type="button" data-capacity-save style="margin-left:auto;background:#a855f7;color:#0d1b2e;border:none;border-radius:6px;padding:7px 14px;font-weight:600;font-size:12px;cursor:pointer;">Save assumptions</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;">
+          <span style="font-size:11px;color:#7a93b4;">Tag this session's department:</span>
+          <input type="text" data-capacity-dept placeholder="e.g. Operations" value="${escapeHtml(state.sessionMeta?.departmentTag?.value || "")}" style="${inputCss}width:160px;">
+          <button type="button" data-capacity-dept-save style="background:#0d1b2e;color:#a855f7;border:1px solid #3a2a5a;border-radius:6px;padding:6px 12px;font-weight:600;font-size:11px;cursor:pointer;">Tag department</button>
+        </div>
+      </div>
+    </details>`;
+}
+
+const usdRound = (n) => "$" + Math.round(n || 0).toLocaleString("en-US");
+
+// Rollup of the capacity model. Returns "" when the model is not usable (no band
+// rate, no tag) so the section adds no figures when the feature is unused.
+function renderPortfolioCapacityRollupHtml(model) {
+  if (!model || !model.usable) return "";
+  const fte = (n) => (Number(n) || 0).toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const cell = (v) => v == null ? `<span style="color:#5b7186;">not computed</span>` : usdRound(v);
+  const deptRows = model.departments.map((d) => {
+    const personaRows = d.personas.map((p) => `
+      <tr style="border-top:1px solid #16263a;">
+        <td style="padding:5px 8px;color:#cfe0f2;">${escapeHtml(p.persona)} ${provenanceBadgeHtml(p.personaProvenance.source, p.personaProvenance.confidence)}</td>
+        <td style="padding:5px 8px;text-align:right;color:#8aa0b8;">${fte(p.fte)}</td>
+        <td style="padding:5px 8px;text-align:right;" class="ds-num-amber">${cell(p.cost)}</td>
+        <td style="padding:5px 8px;text-align:right;" class="ds-num-teal">${cell(p.bill)}</td>
+      </tr>`).join("");
+    return `
+      <tbody>
+        <tr><td colspan="4" style="padding:8px 8px 2px;color:#7a93b4;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;">${escapeHtml(d.department)} ${provenanceBadgeHtml(d.personas[0]?.departmentProvenance?.source, d.personas[0]?.departmentProvenance?.confidence)}</td></tr>
+        ${personaRows}
+      </tbody>`;
+  }).join("");
+  const t = model.recurringTotals;
+  const dedupNote = model.dedupedCount ? ` · ${model.dedupedCount} duplicate-mapped workflow${model.dedupedCount === 1 ? "" : "s"} de-duplicated` : "";
+  const projectLine = model.projectTotals.count
+    ? `<div style="margin-top:10px;color:#8aa0b8;font-size:12px;">One-off project savings (kept separate from run-rate): <strong>${fte(model.projectTotals.hours)} hrs</strong> · <span class="ds-num-amber">${usdRound(model.projectTotals.value)}</span> across ${model.projectTotals.count} project workflow${model.projectTotals.count === 1 ? "" : "s"}.</div>`
+    : "";
+  return `
+    <div style="margin-top:12px;">
+      <div style="font-size:11px;color:#7a93b4;margin-bottom:6px;">Recurring run-rate by department / persona (estimated)${dedupNote}</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead><tr style="color:#5b7186;font-size:10px;text-transform:uppercase;letter-spacing:0.05em;">
+          <th style="text-align:left;padding:4px 8px;">Department / persona</th>
+          <th style="text-align:right;padding:4px 8px;">FTE-equiv</th>
+          <th style="text-align:right;padding:4px 8px;">Fully-loaded cost/yr</th>
+          <th style="text-align:right;padding:4px 8px;">Bill value/yr</th>
+        </tr></thead>
+        ${deptRows}
+        <tfoot><tr style="border-top:2px solid #1e3350;font-weight:700;">
+          <td style="padding:6px 8px;color:#e8f4ff;">Run-rate total · ${fte(t.fte)} FTE</td>
+          <td style="padding:6px 8px;text-align:right;color:#8aa0b8;">${fte(t.fte)}</td>
+          <td style="padding:6px 8px;text-align:right;" class="ds-num-amber">${t.costComputed ? usdRound(t.cost) : `${usdRound(t.cost)} +`}</td>
+          <td style="padding:6px 8px;text-align:right;" class="ds-num-teal">${t.billComputed ? usdRound(t.bill) : `${usdRound(t.bill)} +`}</td>
+        </tr></tfoot>
+      </table>
+      ${!t.costComputed || !t.billComputed ? `<div style="margin-top:4px;color:#5b7186;font-size:11px;">"+" = partial: some personas have no rate and are "not computed" (never assumed $0).</div>` : ""}
+      ${projectLine}
+    </div>`;
+}
+
+// Opportunities-tab mount. Returns "" when the portfolio is empty (nothing to
+// estimate) — byte-identical baseline. When a portfolio exists, shows the
+// (collapsed) user-supplied assumptions editor + the rollup (rollup is "" until a
+// band rate or a department tag exists).
+function renderPortfolioCapacityHtml() {
+  const currentId = state.sessionMeta?.id || "";
+  const items = getCombinedSessionLibrary().map((entry) => capacityItemFromSession(entry, currentId));
+  const portfolio = items.filter((it) => !it.isCurrent && !it.isSample);
+  if (!portfolio.length) return "";
+  const model = buildPortfolioCapacityModel(items, state.capacityBands);
+  const personaKeys = portfolio.filter((it) => it.valueComputed && it.mode === "recurring").map((it) => it.personaKey).filter(Boolean);
+  const rollup = renderPortfolioCapacityRollupHtml(model);
+  const inputsNeeded = rollup ? "" : `<div style="margin-top:10px;color:#8aa0b8;font-size:12px;">Add at least one persona-band rate (or tag a department) below to estimate capacity. Values are estimates, drawn only from workflows whose business case you computed.</div>`;
+  return `
+    <div class="ds-panel" style="padding:16px 18px;margin-bottom:20px;border:1px solid #1e3350;border-radius:10px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+        <strong style="font-size:1rem;color:#e8f4ff;">Capacity (estimated)</strong>
+        <span class="ds-badge ds-badge-amber">Estimate · explicit compute only</span>
+      </div>
+      <div style="font-size:11px;color:#8aa0b8;">Recurring run-rate vs one-off project savings, by department and persona — using only workflows whose business case you computed, and persona-band rates you supply.</div>
+      ${rollup}${inputsNeeded}
+      ${renderCapacityAssumptionsEditorHtml(state.capacityBands, personaKeys)}
+    </div>`;
+}
+
+function wireCapacitySection(container) {
+  if (!container) return;
+  const editor = container.querySelector("[data-capacity-editor]");
+  container.querySelector("[data-capacity-save]")?.addEventListener("click", () => {
+    const root = editor || container;
+    const bands = {};
+    root.querySelectorAll("[data-capacity-band]").forEach((row) => {
+      const key = row.dataset.capacityBand;
+      const fl = Number(row.querySelector("[data-capacity-fl]")?.value);
+      const bill = Number(row.querySelector("[data-capacity-bill]")?.value);
+      const band = {};
+      if (Number.isFinite(fl) && fl > 0) band.fullyLoadedCost = fl;
+      if (Number.isFinite(bill) && bill > 0) band.billRate = bill;
+      if (Object.keys(band).length) bands[key] = band;
+    });
+    const weekly = Number(root.querySelector("[data-capacity-weekly]")?.value);
+    const weeklyHoursBasis = Number.isFinite(weekly) && weekly > 0 ? weekly : 40;
+    if (!state.capacityBands || typeof state.capacityBands !== "object") state.capacityBands = { bands: {}, hoursPerFteYear: 1920, weeklyHoursBasis: 40 };
+    state.capacityBands.bands = bands;
+    state.capacityBands.weeklyHoursBasis = weeklyHoursBasis;
+    state.capacityBands.hoursPerFteYear = CAPACITY_WORKING_WEEKS * weeklyHoursBasis;
+    persistState();
+    render();
+    toast("Capacity assumptions saved (estimates).");
+  });
+  container.querySelector("[data-capacity-dept-save]")?.addEventListener("click", () => {
+    const value = (container.querySelector("[data-capacity-dept]")?.value || "").trim();
+    ensureSessionMeta();
+    if (!value) {
+      state.sessionMeta.departmentTag = null;
+    } else {
+      // Explicit user assignment → user-stated, full confidence. (An AI suggestion
+      // would be source "ai-inferred" + low confidence and never auto-promoted.)
+      state.sessionMeta.departmentTag = { value, source: "user-stated", confidence: 1 };
+    }
+    persistState();
+    render();
+    toast(value ? `Department tagged: ${value}` : "Department tag cleared.");
+  });
+}
+
 function portfolioIntelligenceHtml() {
   const currentId = state.sessionMeta?.id || "";
   const items = getCombinedSessionLibrary().map((entry) => portfolioItemFromSession(entry, currentId));
@@ -7403,10 +7718,14 @@ function renderAnalysisTabOpportunities() {
   // sections, with a divider, so portfolio and current-session metrics stay
   // visually separated and are never read as one blended view.
   const portfolioHtml = portfolioIntelligenceHtml();
-  const thisWorkflowHeading = portfolioHtml
+  // V3-14: capacity (estimated) sits with the cross-workflow portfolio content,
+  // above the current-workflow sections. Returns "" when there is no portfolio.
+  const capacityHtml = renderPortfolioCapacityHtml();
+  const thisWorkflowHeading = (portfolioHtml || capacityHtml)
     ? `<h3 style="font-size:1rem;font-weight:600;color:#e2e8f0;margin:0 0 14px;">This workflow</h3>`
     : "";
-  container.innerHTML = opportunityPortfolioStripHtml() + portfolioHtml + thisWorkflowHeading + statsRow + sectionTwo + sectionThree;
+  container.innerHTML = opportunityPortfolioStripHtml() + portfolioHtml + capacityHtml + thisWorkflowHeading + statsRow + sectionTwo + sectionThree;
+  wireCapacitySection(container);
 }
 
 // --- TAB 3: Recipe Book -------------------------------------------------------
@@ -33371,6 +33690,14 @@ function normalizeLoadedState(parsed = {}) {
     // feature load with an empty list — the no-knowledge IR/grid stays
     // byte-identical to baseline. A frozen ref is added only on explicit apply.
     appliedKnowledge: Array.isArray(parsed.appliedKnowledge) ? parsed.appliedKnowledge : [],
+    // V3-14: backfill capacity assumptions so sessions persisted before this feature
+    // load with the defaults (empty bands ⇒ capacity view stays unused/byte-identical).
+    capacityBands: {
+      ...structuredClone(defaultState.capacityBands),
+      ...(parsed.capacityBands && typeof parsed.capacityBands === "object" ? parsed.capacityBands : {}),
+      bands: (parsed.capacityBands && parsed.capacityBands.bands && typeof parsed.capacityBands.bands === "object")
+        ? parsed.capacityBands.bands : {}
+    },
     // V3-9: backfill the guided first-run flag so sessions persisted before this
     // feature load cleanly (default: not yet dismissed → first-run can offer).
     onboarding: {
