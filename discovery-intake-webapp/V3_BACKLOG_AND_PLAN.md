@@ -12,6 +12,45 @@
 > tests with no live LLM, no firm names, banned phrase absent). Those are not repeated in
 > each item's criteria — they are the universal definition of done below.
 
+## ✅ Shipped status (updated 2026-06-14) — V3 BUILD COMPLETE
+
+All of **V3-1 → V3-10 are shipped and merged to `main`** (`main` @ `c309225`, gate **272 tests
+/ 0 fail**). The P0 foundation (V3-1, V3-2), the P1 enterprise tier (V3-3, V3-4, V3-5, V3-10),
+and the **entire P2 tier (V3-6, V3-7, V3-8, V3-9)** are done. Gate-count lineage:
+`130 → 149 → 170 → 185 → 199 → 210 → 221 → 237 → 250 → 262 → 272`. The per-item sections below
+are the as-built specs of record.
+
+| ID | Item | Priority | Status |
+|----|------|----------|--------|
+| V3-1 | Product instrumentation / telemetry | P0 | ✅ shipped |
+| V3-2 | Trust-legibility UX pass | P0 | ✅ shipped |
+| V3-3 | AI-policy ingestion | P1 | ✅ shipped |
+| V3-4 | Review/sign-off + cross-session audit trail | P1 | ✅ shipped |
+| V3-5 | Spec → importable/deployable configs | P1 | ✅ shipped |
+| V3-10 | Living eval suite (track, don't execute) | P1 | ✅ shipped |
+| V3-6 | Portfolio intelligence + business-case scenarios | P2 | ✅ shipped (`1c9592c`) |
+| V3-7 | Shared, versioned knowledge library | P2 | ✅ shipped (`fa47ddb`) |
+| V3-8 | IR-level version diff | P2 | ✅ shipped (`2f8078c`) |
+| V3-9 | Guided first-run / sample workflow | P2 | ✅ shipped (`c309225`) — **P2 tier complete** |
+
+## ▶ Forward backlog (post-V3 — specs of record, build only when scheduled)
+
+The next items are written as standalone kickoff specs under `docs/roadmap/` (not built):
+
+- **V3-14 — Portfolio dimensions & capacity** → [`docs/roadmap/V3-14-portfolio-capacity.md`](docs/roadmap/V3-14-portfolio-capacity.md).
+  Departments · personas · FTE-equivalent · project-vs-recurring, built on V3-6. Value is
+  explicit-compute only (never telemetry); persona-band rates (never PII / individual salaries);
+  fully-loaded cost **and** bill rate side by side; recurring run-rate kept separate from one-off
+  project savings; provenance + confidence on every tag; additive/derived, byte-identical when unused.
+- **V3 design track (V3-11 / V3-12 / V3-13)** → [`docs/roadmap/V3-design-track.md`](docs/roadmap/V3-design-track.md).
+  Display-only refresh — analysis-tab consolidation, design-language refresh, gradient brand layer —
+  bound by the design-integrity rule (gradient = chrome/actions only; meaning-bearing UI flat
+  single-hue; signal strength = a shade ramp within ONE hue; category accents teal=experience/grid,
+  purple=logic/recipe, pink=data/governance, amber=business-case). **Sequenced to FOLLOW the V3-1
+  telemetry, not precede it.**
+
+Both inherit the universal definition of done below and the push-only + plan-then-stop posture.
+
 ## Strategic context (added 2026-06-13)
 
 An external synthesis on the AI-augmented workforce (two talks; see
