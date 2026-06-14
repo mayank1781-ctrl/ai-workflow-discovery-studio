@@ -1080,7 +1080,12 @@ const defaultState = {
     compiled: {},
     compiledPrior: {},
     bundles: {},
-    bundlePrior: {}
+    bundlePrior: {},
+    // V3-4: snapshots marked "Reviewed for controlled use", keyed by the reviewed
+    // snapshot id. Each holds a frozen deep copy + review meta and is NEVER touched
+    // by rotateArtifactSnapshot, so regeneration creates a new version and the
+    // reviewed one is preserved/locked.
+    reviewed: {}
   },
   // PR 32: session schema version (distinct from workflowGrid.schemaVersion).
   // v2 = snapshot-only business case. Migration hook: migrateSessionState().
@@ -1094,6 +1099,10 @@ const defaultState = {
   // null = no policy → artifacts use the generic advisory caution. Read-only at
   // generation time; replacing or removing it is always an explicit user action.
   aiPolicy: null,
+  // V3-4: engagement-scoped, append-only, hash-chained audit trail. Persists on
+  // the session blob (NOT a new store). Written ONLY by recordAuditEvent (push of
+  // a frozen entry); verifyAuditTrail makes any edit/delete/reorder detectable.
+  auditTrail: [],
   // PR 30 Slice 2: per-session asked-question memory. Entries are deduped on
   // intent (target cell keys), never exact text. See recordAskedQuestion().
   questionHistory: [],
@@ -7118,6 +7127,8 @@ async function computeBusinessCaseNow() {
       }
     });
     if (!applyBusinessCaseSnapshot(result.snapshot)) throw new Error("No snapshot returned.");
+    // V3-4: an explicit business-case compute is a "changed" event in the trail.
+    recordEngagementAudit("changed", { kind: "business-case" }, auditChainHash(JSON.stringify(state.businessCaseSnapshot ?? "")));
     persistState();
     render();
     toast("Business case computed.");
@@ -7913,7 +7924,9 @@ function ensureArtifactCompilerState() {
     compiled: { ...(state.artifactCompiler?.compiled || {}) },
     compiledPrior: { ...(state.artifactCompiler?.compiledPrior || {}) },
     bundles: { ...(state.artifactCompiler?.bundles || {}) },
-    bundlePrior: { ...(state.artifactCompiler?.bundlePrior || {}) }
+    bundlePrior: { ...(state.artifactCompiler?.bundlePrior || {}) },
+    // V3-4: preserve reviewed (locked) snapshots across every rebuild.
+    reviewed: { ...(state.artifactCompiler?.reviewed || {}) }
   };
   state.artifactCompiler.targetSurface = normalizeArtifactTargetSurface(state.artifactCompiler.targetSurface);
   state.artifactCompiler.recipeScope = normalizeRecipeScope(state.artifactCompiler.recipeScope);
@@ -7982,6 +7995,13 @@ function compileArtifactForStep(stepId, options = {}) {
     ? buildFullArtifactBundle(step, context, compileOptions)
     : buildRecommendedArtifactPackage(step, context, compileOptions);
   const hadPrior = rotateArtifactSnapshot(stepId, packagePayload, options.bundle ? "bundle" : "compiled");
+  // V3-4: record generate/regenerate in the append-only, snapshot-backed audit
+  // trail BEFORE persistState so the entry is saved alongside the new snapshot.
+  const _auditKind = options.bundle ? "bundle" : "compiled";
+  const _newSnap = ensureArtifactCompilerState()[_auditKind === "bundle" ? "bundles" : "compiled"][stepId];
+  recordEngagementAudit(hadPrior ? "regenerated" : "generated",
+    { stepId, snapshotId: _newSnap?.id || "", kind: _auditKind },
+    _newSnap ? auditChainHash(JSON.stringify(_newSnap.package)) : "");
   persistState();
   // V3-1: read-only telemetry over the package just built and saved. Marks that
   // an artifact was generated this load (feeds time_to_first_artifact + the
@@ -8009,6 +8029,168 @@ function compileArtifactForStep(stepId, options = {}) {
   }
   renderAnalysisTabRecipe();
   toast(`${options.bundle ? "Full bundle" : "Recommended package"} compiled${hadPrior ? " — prior version preserved." : "."}`);
+}
+
+// ===========================================================================
+// V3-4: Review/sign-off + engagement audit trail.
+//
+// SELF-CONTAINED PRIMITIVE (a later sprint reuses it). The audit trail is an
+// append-only, HASH-CHAINED array on the session blob. The ONLY writer is
+// recordAuditEvent (it pushes a frozen entry); verifyAuditTrail recomputes the
+// chain so any edit / delete / reorder is DETECTABLE (tamper-EVIDENT, not
+// tamper-proof — the client owns its blob; the server file-audit is the
+// security boundary). No function edits or deletes entries; there is no such path.
+// ===========================================================================
+
+// Deterministic, synchronous, non-crypto hash (two FNV-1a passes → 16 hex).
+// Used only for tamper-evidence + snapshot-backing of the chain.
+function auditChainHash(input) {
+  const text = typeof input === "string" ? input : JSON.stringify(input ?? "");
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
+    h2 = Math.imul(h2 ^ c, 0x811c9dc5) >>> 0;
+  }
+  return (h1 >>> 0).toString(16).padStart(8, "0") + (h2 >>> 0).toString(16).padStart(8, "0");
+}
+
+// Recursively freeze an object graph (so a stored value snapshot cannot be
+// mutated in place after the fact).
+function deepFreeze(obj) {
+  if (obj && typeof obj === "object" && !Object.isFrozen(obj)) {
+    Object.freeze(obj);
+    for (const key of Object.keys(obj)) deepFreeze(obj[key]);
+  }
+  return obj;
+}
+
+// The ONE writer. Appends a frozen, hash-chained entry to `trail` and returns it.
+// Never edits or removes an existing entry.
+function recordAuditEvent(trail, { actor, action, target = {}, contentHash = "", ts } = {}) {
+  if (!Array.isArray(trail)) throw new Error("audit trail must be an array");
+  const seq = trail.length + 1;
+  const prevHash = trail.length ? trail[trail.length - 1].entryHash : "";
+  const safeActor = Object.freeze({ name: String(actor?.name || "Unknown"), email: String(actor?.email || "") });
+  const safeTarget = Object.freeze(target && typeof target === "object" ? { ...target } : {});
+  const ts2 = String(ts || "");
+  const action2 = String(action || "");
+  const contentHash2 = String(contentHash || "");
+  const entryHash = auditChainHash(JSON.stringify([seq, ts2, safeActor, action2, safeTarget, contentHash2, prevHash]));
+  const entry = Object.freeze({
+    seq, ts: ts2, actor: safeActor, action: action2, target: safeTarget, contentHash: contentHash2, prevHash, entryHash
+  });
+  trail.push(entry);
+  return entry;
+}
+
+// Recompute the chain over STORED entries; returns { ok, brokenAt, reason }.
+// ok === false on any edited field, deleted entry, or reorder.
+function verifyAuditTrail(trail) {
+  if (!Array.isArray(trail)) return { ok: false, brokenAt: 0, reason: "not an array" };
+  let prevHash = "";
+  for (let i = 0; i < trail.length; i += 1) {
+    const e = trail[i];
+    if (!e || e.seq !== i + 1 || e.prevHash !== prevHash) {
+      return { ok: false, brokenAt: i, reason: "chain link mismatch" };
+    }
+    const recomputed = auditChainHash(JSON.stringify([e.seq, e.ts, e.actor, e.action, e.target, e.contentHash, e.prevHash]));
+    if (recomputed !== e.entryHash) return { ok: false, brokenAt: i, reason: "entry hash mismatch" };
+    prevHash = e.entryHash;
+  }
+  return { ok: true, brokenAt: -1, reason: "" };
+}
+
+// state.auditTrail accessor — init-if-missing only; never resets a present trail.
+function ensureAuditTrail() {
+  if (!Array.isArray(state.auditTrail)) state.auditTrail = [];
+  return state.auditTrail;
+}
+
+// Reviewer identity from the Azure AD session (cached from /api/me by
+// hydrateAuthControls). Falls back to a clearly-labeled local actor when the
+// auth gate is off (dev / CI) — honest, never an empty/spoofable blank.
+let _cachedAuthUser = null;
+function currentActor() {
+  if (_cachedAuthUser && (_cachedAuthUser.name || _cachedAuthUser.email)) {
+    return { name: String(_cachedAuthUser.name || _cachedAuthUser.email), email: String(_cachedAuthUser.email || "") };
+  }
+  return { name: "Unauthenticated (local)", email: "" };
+}
+
+// Thin engagement-audit helper used by the generate / change hooks. Does NOT
+// persist (the caller persists in the same flow).
+function recordEngagementAudit(action, target = {}, contentHash = "") {
+  return recordAuditEvent(ensureAuditTrail(), {
+    actor: currentActor(), action, target, contentHash, ts: new Date().toISOString()
+  });
+}
+
+// Export-path audit: records and persists (export flows don't otherwise persist).
+function recordExportAudit(kind) {
+  recordEngagementAudit("exported", { kind: String(kind || "export") }, "");
+  persistState();
+}
+
+// Read STORED entries only (deep copy) — no recompute, no derived fields.
+function exportAuditTrail() {
+  return JSON.parse(JSON.stringify(ensureAuditTrail()));
+}
+
+// PURE review core (testable): locks the EXACT current snapshot for stepId/kind
+// by storing a frozen deep copy under compiler.reviewed[snapshotId] + appending a
+// "reviewed" audit entry. Returns { ok, reason, ... }. Does not touch globals.
+function reviewSnapshotInCompiler(compiler, auditTrail, stepId, kind, actor, reviewedAt) {
+  if (!compiler || typeof compiler !== "object") return { ok: false, reason: "no compiler" };
+  const currentKey = kind === "bundle" ? "bundles" : "compiled";
+  const snapshot = compiler[currentKey] && compiler[currentKey][stepId];
+  if (!snapshot || !snapshot.id) return { ok: false, reason: "no snapshot" };
+  if (!compiler.reviewed || typeof compiler.reviewed !== "object") compiler.reviewed = {};
+  if (compiler.reviewed[snapshot.id]) return { ok: false, reason: "already reviewed" };
+  const reviewer = Object.freeze({ name: String(actor?.name || "Unknown"), email: String(actor?.email || "") });
+  const contentHash = auditChainHash(JSON.stringify(snapshot.package ?? ""));
+  const frozenSnapshot = deepFreeze(structuredClone(snapshot));
+  const review = Object.freeze({
+    reviewer,
+    reviewedAt: String(reviewedAt || ""),
+    label: "Reviewed for controlled use",
+    snapshotId: snapshot.id,
+    stepId,
+    kind: currentKey === "bundles" ? "bundle" : "compiled",
+    contentHash
+  });
+  compiler.reviewed[snapshot.id] = Object.freeze({ snapshot: frozenSnapshot, review });
+  const entry = recordAuditEvent(auditTrail, {
+    actor: reviewer,
+    action: "reviewed",
+    target: { stepId, snapshotId: snapshot.id, kind: review.kind },
+    contentHash,
+    ts: reviewedAt
+  });
+  return { ok: true, reason: "", review, entry, snapshotId: snapshot.id };
+}
+
+// UI wrapper: explicit user action → review + persist + re-render + toast.
+function markSnapshotReviewed(stepId, kind = "compiled") {
+  const compiler = ensureArtifactCompilerState();
+  const result = reviewSnapshotInCompiler(compiler, ensureAuditTrail(), stepId, kind, currentActor(), new Date().toISOString());
+  if (!result.ok) {
+    toast(result.reason === "already reviewed"
+      ? "This snapshot is already marked Reviewed for controlled use."
+      : "Compile a package snapshot before marking it reviewed.");
+    return;
+  }
+  persistState();
+  renderAnalysisTabRecipe();
+  toast("Snapshot marked Reviewed for controlled use — locked and recorded in the audit trail.");
+}
+
+function downloadAuditTrail() {
+  const entries = exportAuditTrail();
+  if (!entries.length) { toast("No audit entries yet to export."); return; }
+  const name = (analysisWorkflowName() || "engagement").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "engagement";
+  downloadTextFile(`${name}-audit-trail.json`, JSON.stringify(entries, null, 2));
 }
 
 function artifactReadinessBadgeClass(label = "") {
@@ -8160,11 +8342,18 @@ function artifactSnapshotHtml(snapshot, prior, emptyText) {
   }
   const meta = artifactSnapshotMeta(snapshot);
   const priorMeta = artifactSnapshotMeta(prior);
+  // V3-4: a 🔒 Reviewed badge when THIS snapshot id was marked reviewed (read
+  // directly from stored state — no recompute, no rebuild).
+  const reviewed = snapshot.id ? state.artifactCompiler?.reviewed?.[snapshot.id] : null;
+  const reviewedBadge = reviewed
+    ? `<span class="ds-badge ds-badge-teal" title="${escapeHtml(`Reviewer: ${reviewed.review.reviewer.name}${reviewed.review.reviewer.email ? ` (${reviewed.review.reviewer.email})` : ""}${reviewed.review.reviewedAt ? ` · ${new Date(Date.parse(reviewed.review.reviewedAt)).toLocaleString("en-US")}` : ""}`)}">🔒 ${escapeHtml(reviewed.review.label)}</span>`
+    : "";
   return `
     <div style="background:#0a1422;border:1px solid #1a2a3a;border-radius:8px;padding:12px 14px;">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
         <span class="ds-badge ds-badge-teal">${escapeHtml(meta.artifactLabel)}</span>
         <span class="ds-badge ${artifactReadinessBadgeClass(meta.readinessLabel)}">${escapeHtml(meta.readinessLabel)}${meta.readinessScore !== null ? ` · ${meta.readinessScore}/100` : ""}</span>
+        ${reviewedBadge}
         ${meta.when ? `<span style="font-size:11px;color:#5b7186;">Compiled ${escapeHtml(meta.when)}</span>` : ""}
       </div>
       <div style="font-size:12px;color:#8aa0b8;line-height:1.55;">${escapeHtml(shortArtifactPreview(meta.content))}</div>
@@ -8270,8 +8459,17 @@ function artifactCompilerCardHtml(step, index) {
         <div class="ds-micro" style="margin-bottom:6px;">Tentative assumptions</div>
         ${artifactList(assumptions)}
       </div>` : ""}`;
+  // V3-4: review/sign-off controls for the CURRENT saved snapshot. Reviewing locks
+  // a frozen copy; regenerating afterward creates a new version and preserves it.
+  const reviewedSaved = saved?.id ? compiler.reviewed?.[saved.id] : null;
+  const reviewControls = saved
+    ? (reviewedSaved
+        ? `<div style="margin-top:10px;font-size:11px;color:#5fb8a8;line-height:1.5;">🔒 Reviewed for controlled use by ${escapeHtml(reviewedSaved.review.reviewer.name)}${reviewedSaved.review.reviewedAt ? ` · ${escapeHtml(new Date(Date.parse(reviewedSaved.review.reviewedAt)).toLocaleString("en-US"))}` : ""}. Locked — regenerating creates a new version; this one is preserved.</div>`
+        : `<button type="button" class="secondary-button compact" data-artifact-review="${escapeHtml(step.id)}" style="margin-top:10px;">Mark Reviewed for controlled use</button>`)
+    : "";
   const snapshotBody = `
     ${artifactSnapshotHtml(saved, prior, "No saved package snapshot yet. Click Compile recommended package to preserve the current version.")}
+    ${reviewControls}
     <details style="margin-top:10px;">
       <summary style="font-size:11px;color:#8aa0b8;cursor:pointer;">Optional full bundle snapshot</summary>
       <div style="margin-top:8px;">${artifactSnapshotHtml(bundle, bundlePrior, "No full bundle snapshot yet. Click Generate full bundle to preserve the multi-surface package.")}</div>
@@ -8361,6 +8559,60 @@ function wirePolicyPanel(container) {
   container.querySelector("#policyRemoveBtn")?.addEventListener("click", removeAiPolicy);
 }
 
+// V3-4: engagement-level audit trail panel (read-only). Lists recent append-only
+// entries with a live integrity check (verifyAuditTrail). "Download audit" reads
+// STORED entries only. Tamper-EVIDENT, never a compliance approval.
+function renderAuditPanelHtml() {
+  const trail = Array.isArray(state.auditTrail) ? state.auditTrail : [];
+  const reviewedCount = state.artifactCompiler?.reviewed ? Object.keys(state.artifactCompiler.reviewed).length : 0;
+  if (!trail.length) {
+    return `
+      <div class="artifact-package-card" style="margin-top:16px;background:#09131f;border:1px solid #1e3350;border-radius:10px;padding:14px 16px;">
+        <div class="ds-micro" style="margin-bottom:5px;">Engagement audit trail</div>
+        <strong style="display:block;color:#e8f4ff;font-size:14px;">No audit events yet</strong>
+        <p style="margin:6px 0 0;color:#8aa0b8;font-size:12px;line-height:1.5;">Generating, regenerating, reviewing, exporting, or computing the business case records an append-only, tamper-evident entry here. A record of activity — never a compliance approval.</p>
+      </div>`;
+  }
+  const integrity = verifyAuditTrail(trail);
+  const integrityBadge = integrity.ok
+    ? `<span class="ds-badge ds-badge-teal">Integrity verified · ${trail.length} entr${trail.length === 1 ? "y" : "ies"}</span>`
+    : `<span class="ds-badge ds-badge-amber">Integrity check failed at #${integrity.brokenAt + 1}</span>`;
+  const actionLabels = { generated: "Generated", regenerated: "Regenerated", reviewed: "Reviewed", exported: "Exported", changed: "Changed" };
+  const rows = trail.slice(-12).reverse().map((e) => {
+    const when = Number.isNaN(Date.parse(e.ts || "")) ? "" : new Date(Date.parse(e.ts)).toLocaleString("en-US");
+    const what = [e.target?.kind, e.target?.stepId ? `step ${String(e.target.stepId).slice(0, 12)}` : ""].filter(Boolean).join(" · ");
+    return `<tr style="border-top:1px solid #16263a;">
+      <td style="padding:6px 8px;color:#5b7186;font-size:11px;">#${e.seq}</td>
+      <td style="padding:6px 8px;color:#cfe0f2;font-size:11px;">${escapeHtml(actionLabels[e.action] || e.action)}</td>
+      <td style="padding:6px 8px;color:#9fb3c8;font-size:11px;">${escapeHtml(what || "—")}</td>
+      <td style="padding:6px 8px;color:#9fb3c8;font-size:11px;">${escapeHtml(e.actor?.name || "—")}</td>
+      <td style="padding:6px 8px;color:#5b7186;font-size:11px;white-space:nowrap;">${escapeHtml(when)}</td>
+    </tr>`;
+  }).join("");
+  return `
+    <div class="artifact-package-card" style="margin-top:16px;background:#09131f;border:1px solid #1e3350;border-radius:10px;padding:14px 16px;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <div style="min-width:240px;flex:1;">
+          <div class="ds-micro" style="margin-bottom:5px;">Engagement audit trail</div>
+          <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;">${integrityBadge}${reviewedCount ? `<span class="ds-badge ds-badge-dim">${reviewedCount} reviewed snapshot${reviewedCount === 1 ? "" : "s"}</span>` : ""}</div>
+        </div>
+        <button type="button" class="secondary-button compact" id="auditDownloadBtn">Download audit (JSON)</button>
+      </div>
+      <div style="margin-top:10px;overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead><tr style="text-align:left;color:#5b7186;font-size:10px;text-transform:uppercase;letter-spacing:0.05em;"><th style="padding:0 8px;">#</th><th style="padding:0 8px;">Action</th><th style="padding:0 8px;">What</th><th style="padding:0 8px;">Who</th><th style="padding:0 8px;">When</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p style="margin:10px 0 0;color:#5b7186;font-size:11px;line-height:1.45;">Append-only and tamper-evident (any edit or deletion breaks the integrity check). Showing the latest ${Math.min(12, trail.length)} of ${trail.length}. Export reads stored entries only. A record of activity — not a compliance approval.</p>
+    </div>`;
+}
+
+function wireAuditPanel(container) {
+  if (!container) return;
+  container.querySelector("#auditDownloadBtn")?.addEventListener("click", downloadAuditTrail);
+}
+
 function renderAnalysisTabRecipe() {
   const container = document.getElementById("analysis-tab-recipe");
   if (!container) return;
@@ -8368,8 +8620,9 @@ function renderAnalysisTabRecipe() {
   if (!steps.length) {
     // V3-3: the policy panel is engagement-level, so it stays available even
     // before any step is captured.
-    container.innerHTML = renderPolicyPanelHtml() + `<div class="summary-item">No workflow steps yet. Capture a process to build the recipe book.</div>`;
+    container.innerHTML = renderPolicyPanelHtml() + renderAuditPanelHtml() + `<div class="summary-item">No workflow steps yet. Capture a process to build the recipe book.</div>`;
     wirePolicyPanel(container);
+    wireAuditPanel(container);
     return;
   }
   state.recipeCache = state.recipeCache || {};
@@ -8485,6 +8738,7 @@ function renderAnalysisTabRecipe() {
     recipeWorkflowHeaderHtml() +
     artifactStudioHeaderHtml(steps) +
     renderPolicyPanelHtml() +
+    renderAuditPanelHtml() +
     cards +
     businessCaseBlockForCurrentWorkflow() +
     scoringTransparencyBlockForCurrentWorkflow() +
@@ -8533,6 +8787,12 @@ function renderAnalysisTabRecipe() {
       compileArtifactForStep(btn.dataset.artifactBundle, { bundle: true });
     });
   });
+  container.querySelectorAll("[data-artifact-review]").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      markSnapshotReviewed(btn.dataset.artifactReview);
+    });
+  });
 
   const recipeExportBtn = container.querySelector("#recipe-export-btn");
   recipeExportBtn?.addEventListener("click", handleRecipeExport);
@@ -8543,6 +8803,7 @@ function renderAnalysisTabRecipe() {
   wireClassificationChips(container);
   wireRecipeMetaEditors(container);
   wirePolicyPanel(container);
+  wireAuditPanel(container);
   container.querySelector("#exportWordRecipeBtn")?.addEventListener("click", () => exportWorkflowWord("recipe"));
 }
 
@@ -9520,6 +9781,7 @@ function downloadRecipeBook() {
     toast("Generate a prompt or compile at least one artifact before downloading.");
     return;
   }
+  recordExportAudit("recipe-book-txt"); // V3-4: log the export in the audit trail
   const safeName = workflowName.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "workflow";
   downloadTextFile(`${safeName}-recipe-book.txt`, parts.join("\n"));
 }
@@ -9544,6 +9806,7 @@ async function handleRecipeExport() {
     notify("Generate a prompt or compile at least one artifact before exporting.");
     return;
   }
+  recordExportAudit("recipe-docx"); // V3-4: log the export in the audit trail
 
   btn.textContent = "Preparing…";
   btn.disabled = true;
@@ -10650,6 +10913,7 @@ async function handleRecipePdfExport() {
     notify("Generate a prompt or compile at least one artifact before exporting.");
     return;
   }
+  recordExportAudit("recipe-pdf"); // V3-4: log the export in the audit trail
   await downloadPdf(
     { kind: "recipe", workflowName, steps },
     `${pdfSafeName(workflowName)}-recipe-book.pdf`,
@@ -16434,6 +16698,9 @@ async function hydrateAuthControls() {
   } catch {
     return;
   }
+  // V3-4: cache the Azure AD identity so the audit trail / review sign-off can
+  // capture who acted (currentActor). Null when the gate is off → local fallback.
+  _cachedAuthUser = data && data.user ? data.user : null;
   if (!data || !data.authEnabled || !data.user) {
     host.innerHTML = "";
     return;
