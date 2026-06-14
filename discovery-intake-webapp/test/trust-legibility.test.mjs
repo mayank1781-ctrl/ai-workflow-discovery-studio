@@ -73,7 +73,11 @@ test("d: per-step composite badge surfaces the four dimensions and never writes"
     ["stepCompositeBadgeHtml", "stepTrustSignals", "escapeHtml"],
     {
       getStepOpportunityMeta: () => ({ label: "Quick Win", tier: "quick-win" }),
-      scoreRecipeReadiness: () => ({ label: "Usable with caveats", score: 67 })
+      scoreRecipeReadiness: () => ({ label: "Usable with caveats", score: 67 }),
+      // V3-15: the badge now renders the (additive) typology controls; this V3-2
+      // test is not about typology, so stub it to "" (keeps the four-dim assertions
+      // exact). The real stepTypologyHtml is covered by test/step-typology.test.mjs.
+      stepTypologyHtml: () => ""
     }
   );
   fill("name", "Reconcile balances", "user-stated", 0.9);
