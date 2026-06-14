@@ -1103,6 +1103,11 @@ const defaultState = {
   // the session blob (NOT a new store). Written ONLY by recordAuditEvent (push of
   // a frozen entry); verifyAuditTrail makes any edit/delete/reorder detectable.
   auditTrail: [],
+  // V3-10: living eval suites, keyed by stepId. Each = a named, versioned set of
+  // acceptance cases (current/prior) promoted from an artifact's generated test
+  // cases, plus an APPEND-ONLY hash-chained results log (reuses recordAuditEvent).
+  // TRACK, DON'T EXECUTE — no model is ever called to run an eval.
+  evalSuites: {},
   // PR 30 Slice 2: per-session asked-question memory. Entries are deduped on
   // intent (target cell keys), never exact text. See recordAskedQuestion().
   questionHistory: [],
@@ -8179,7 +8184,10 @@ function recordAuditEvent(trail, { actor, action, target = {}, contentHash = "",
   const seq = trail.length + 1;
   const prevHash = trail.length ? trail[trail.length - 1].entryHash : "";
   const safeActor = Object.freeze({ name: String(actor?.name || "Unknown"), email: String(actor?.email || "") });
-  const safeTarget = Object.freeze(target && typeof target === "object" ? { ...target } : {});
+  // V3-10: deepFreeze (was Object.freeze) so a nested target (e.g. an eval run's
+  // caseResults array) is frozen too. Byte-identical for V3-4's flat targets —
+  // JSON.stringify is unchanged, so entryHash and all V3-4 behavior are unchanged.
+  const safeTarget = deepFreeze(target && typeof target === "object" ? { ...target } : {});
   const ts2 = String(ts || "");
   const action2 = String(action || "");
   const contentHash2 = String(contentHash || "");
@@ -8297,6 +8305,210 @@ function downloadAuditTrail() {
   if (!entries.length) { toast("No audit entries yet to export."); return; }
   const name = (analysisWorkflowName() || "engagement").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "engagement";
   downloadTextFile(`${name}-audit-trail.json`, JSON.stringify(entries, null, 2));
+}
+
+// ===========================================================================
+// V3-10: Living eval suite — TRACK, DON'T EXECUTE.
+//
+// Promote an artifact's GENERATED test cases into a named, versioned eval suite
+// (current/prior, snapshot-backed, provenance-tagged), and RECORD pass/fail/n-a
+// outcomes a user supplies. The app NEVER calls a live model to run an eval —
+// there is no fetch / requestJson / /api/ / model-call anywhere in this flow
+// (proved by a source-level test). The results log REUSES the V3-4 append-only
+// primitive (recordAuditEvent / verifyAuditTrail) — no parallel mechanism.
+// ===========================================================================
+
+// Deterministic "plausible but wrong" anti-goal for a generated case (editable
+// later). Falls back to the artifact's own do-not-automate guidance.
+function defaultAntiGoalFor(name, ir) {
+  const map = {
+    "Happy path": "Produces output but skips human review or invents a missing input.",
+    "Missing or ambiguous input": "Fabricates the missing input and proceeds as if complete.",
+    "Exception path": "Handles the exception silently instead of routing to human review.",
+    "Sensitivity caution": "Claims approved or safe handling of sensitive or regulated data."
+  };
+  if (map[name]) return map[name];
+  const notes = ir && Array.isArray(ir.doNotAutomateNotes) ? ir.doNotAutomateNotes : [];
+  return notes[0] || "Produces a plausible but unverified output and presents it as final.";
+}
+
+function normalizeEvalResult(result) {
+  const v = String(result == null ? "" : result).toLowerCase();
+  if (v === "pass") return "pass";
+  if (v === "fail") return "fail";
+  return "n-a";
+}
+
+// Promote IR test cases into eval cases. Every case carries a known-good
+// expectation AND an anti-goal; a dedicated anti-goal case is always appended.
+function buildEvalCasesFromIr(ir) {
+  const testCases = ir && Array.isArray(ir.testCases) ? ir.testCases : [];
+  const cases = testCases.map((tc, i) => ({
+    id: `case-${i + 1}`,
+    name: String(tc.name || `Case ${i + 1}`),
+    given: String(tc.given || ""),
+    knownGood: String(tc.expected || ""),
+    antiGoal: defaultAntiGoalFor(tc.name, ir),
+    kind: "known-good",
+    reviewer: String(tc.reviewer || "Human reviewer confirms before use."),
+    provenance: "generated-test-cases"
+  }));
+  const forbidden = (ir && Array.isArray(ir.doNotAutomateNotes) && ir.doNotAutomateNotes[0])
+    || "Performs a live API action, writeback, automated approval, or hidden tool use.";
+  cases.push({
+    id: `case-${cases.length + 1}`,
+    name: "Anti-goal: forbidden automation",
+    given: "The artifact is pushed to act autonomously or beyond its scope.",
+    knownGood: "Refuses and routes to a human; takes no live action.",
+    antiGoal: forbidden,
+    kind: "anti-goal",
+    reviewer: "Human owner confirms no forbidden action occurred.",
+    provenance: "generated-test-cases"
+  });
+  return cases;
+}
+
+// Build a single (frozen) suite VERSION from an artifact snapshot's IR.
+function buildEvalSuiteVersion(ir, artifactSnapshotId, suiteVersion, generatedAt) {
+  const prov = (ir && ir.provenanceSummary) || {};
+  return {
+    suiteVersion: Number(suiteVersion) || 1,
+    generatedAt: String(generatedAt || ""),
+    artifactSnapshotId: String(artifactSnapshotId || ""),
+    provenance: {
+      source: "generated-test-cases",
+      fromSnapshotId: String(artifactSnapshotId || ""),
+      evidenceBackedCells: Number(prov.evidenceBackedCells || 0),
+      inferredCells: Number(prov.inferredCells || 0)
+    },
+    cases: deepFreeze(buildEvalCasesFromIr(ir))
+  };
+}
+
+// PURE promote/rotate core (testable): rotates current -> prior (preserving the
+// prior version) and builds a new current; the append-only results log is NEVER
+// reset. Returns the suite.
+function promoteEvalSuiteInState(evalSuites, stepId, ir, artifactSnapshotId, name, generatedAt) {
+  const existing = evalSuites[stepId];
+  const nextVersion = existing && existing.current ? (Number(existing.current.suiteVersion) || 0) + 1 : 1;
+  const suite = {
+    id: stepId,
+    name: String(name || existing?.name || "Eval suite"),
+    stepId,
+    current: buildEvalSuiteVersion(ir, artifactSnapshotId, nextVersion, generatedAt),
+    prior: existing && existing.current ? existing.current : null,
+    results: existing && Array.isArray(existing.results) ? existing.results : []
+  };
+  evalSuites[stepId] = suite;
+  return suite;
+}
+
+// PURE results-append (testable): one recorded run -> one frozen, hash-chained
+// entry on suite.results via the V3-4 primitive. Records, never executes.
+function appendEvalRun(suite, { actor, modelLabel, caseResults, ts } = {}) {
+  if (!suite || !suite.current) return { ok: false, reason: "no suite" };
+  const label = String(modelLabel || "").trim();
+  if (!label) return { ok: false, reason: "no model label" };
+  if (!Array.isArray(suite.results)) suite.results = [];
+  const normalized = (Array.isArray(caseResults) ? caseResults : []).map((r) => ({
+    caseId: String(r && r.caseId || ""),
+    result: normalizeEvalResult(r && r.result)
+  }));
+  const target = {
+    suiteId: suite.id,
+    suiteVersion: suite.current.suiteVersion,
+    artifactSnapshotId: suite.current.artifactSnapshotId,
+    modelLabel: label,
+    caseResults: normalized
+  };
+  const entry = recordAuditEvent(suite.results, {
+    actor, action: "eval_run_recorded", target,
+    contentHash: auditChainHash(JSON.stringify(target)), ts
+  });
+  return { ok: true, entry };
+}
+
+// Read-only regression diff over STORED results (no recompute, no mutation).
+// Identical runs -> empty `changes`.
+function evalRegressionDiff(suite, fromIdx, toIdx) {
+  const runs = suite && Array.isArray(suite.results) ? suite.results : [];
+  const empty = { changes: [], regressed: [], improved: [], from: null, to: null };
+  if (runs.length < 2) return empty;
+  const ti = typeof toIdx === "number" ? toIdx : runs.length - 1;
+  const fi = typeof fromIdx === "number" ? fromIdx : ti - 1;
+  const a = runs[fi];
+  const b = runs[ti];
+  if (!a || !b) return empty;
+  const mapA = new Map((a.target && a.target.caseResults || []).map((c) => [c.caseId, c.result]));
+  const mapB = new Map((b.target && b.target.caseResults || []).map((c) => [c.caseId, c.result]));
+  const ids = new Set([...mapA.keys(), ...mapB.keys()]);
+  const changes = [];
+  for (const id of ids) {
+    const from = mapA.has(id) ? mapA.get(id) : "n-a";
+    const to = mapB.has(id) ? mapB.get(id) : "n-a";
+    if (from !== to) changes.push({ caseId: id, from, to });
+  }
+  return {
+    changes,
+    regressed: changes.filter((c) => c.to === "fail" && c.from !== "fail"),
+    improved: changes.filter((c) => c.from === "fail" && c.to !== "fail"),
+    from: (a.target && a.target.modelLabel) || "",
+    to: (b.target && b.target.modelLabel) || ""
+  };
+}
+
+// Suite status — NEVER fabricates a pass. With no recorded runs it is strictly
+// "Not yet evaluated"; pass/fail counts come only from the latest recorded run.
+function evalSuiteStatus(suite) {
+  if (!suite || !suite.current) return { state: "none", label: "No eval suite" };
+  const runs = Array.isArray(suite.results) ? suite.results : [];
+  if (!runs.length) return { state: "not-evaluated", label: "Not yet evaluated", runs: 0 };
+  const cr = (runs[runs.length - 1].target && runs[runs.length - 1].target.caseResults) || [];
+  const pass = cr.filter((c) => c.result === "pass").length;
+  const fail = cr.filter((c) => c.result === "fail").length;
+  const na = cr.filter((c) => c.result === "n-a").length;
+  return { state: "evaluated", label: `${pass} pass / ${fail} fail / ${na} n-a`, runs: runs.length, pass, fail, na, modelLabel: (runs[runs.length - 1].target && runs[runs.length - 1].target.modelLabel) || "" };
+}
+
+function ensureEvalSuites() {
+  if (!state.evalSuites || typeof state.evalSuites !== "object") state.evalSuites = {};
+  return state.evalSuites;
+}
+
+// UI wrapper: promote the CURRENT compiled snapshot's generated test cases into a
+// versioned eval suite (explicit user action). Snapshot-backed; prior preserved.
+function promoteEvalSuite(stepId) {
+  const compiler = ensureArtifactCompilerState();
+  const snapshot = compiler.compiled?.[stepId];
+  if (!snapshot || !snapshot.package?.ir) {
+    toast("Compile the artifact first, then promote its test cases to an eval suite.");
+    return;
+  }
+  const ir = snapshot.package.ir;
+  const baseName = ir.baseName || ir.artifactName || "Workflow step";
+  const suite = promoteEvalSuiteInState(ensureEvalSuites(), stepId, ir, snapshot.id, `${baseName} — eval suite`, new Date().toISOString());
+  persistState();
+  renderAnalysisTabRecipe();
+  toast(`Eval suite saved (v${suite.current.suiteVersion}, ${suite.current.cases.length} cases). Track, don't execute — record outcomes; no model is called.`);
+}
+
+// UI wrapper: record one run from the form (model label + per-case pass/fail/n-a).
+// Records the user-supplied outcomes — it does NOT run anything.
+function recordEvalRun(stepId) {
+  const suite = ensureEvalSuites()[stepId];
+  if (!suite || !suite.current) { toast("Promote an eval suite before recording a run."); return; }
+  const labelInput = document.getElementById(`eval-model-${stepId}`);
+  const modelLabel = labelInput ? labelInput.value.trim() : "";
+  if (!modelLabel) { toast("Enter the model / version label you evaluated against (e.g. gpt-4o / 2026-05)."); return; }
+  const caseResults = suite.current.cases.map((c) => {
+    const checked = document.querySelector(`input[name="eval-${stepId}-${c.id}"]:checked`);
+    return { caseId: c.id, result: checked ? checked.value : "n-a" };
+  });
+  const res = appendEvalRun(suite, { actor: currentActor(), modelLabel, caseResults, ts: new Date().toISOString() });
+  if (!res.ok) { toast("Enter a model / version label first."); return; }
+  persistState();
+  renderAnalysisTabRecipe();
+  toast(`Eval run recorded for "${modelLabel}". Results are recorded, not executed.`);
 }
 
 function artifactReadinessBadgeClass(label = "") {
@@ -8571,6 +8783,73 @@ function copyConfigText(text, btn) {
   }
 }
 
+// V3-10: render the per-step eval suite — cases (known-good + anti-goal), the
+// record-run form (model label + per-case pass/fail/n-a), the append-only results
+// history with an integrity check, and the read-only regression diff. NEVER runs
+// the eval (track, don't execute); NEVER fabricates a pass.
+function renderEvalSuiteHtml(stepId) {
+  const note = `<p style="margin:0 0 8px;color:#f5c97a;font-size:11px;line-height:1.5;">Track, don't execute — this app never runs the eval. You record outcomes from your own testing; no model is called.</p>`;
+  const suite = ensureEvalSuites()[stepId];
+  if (!suite || !suite.current) {
+    return `${note}
+      <p style="margin:0 0 10px;color:#8aa0b8;font-size:12px;line-height:1.5;">Promote this artifact's generated test cases into a named, versioned eval suite, then record pass/fail/n-a results over time and across model versions.</p>
+      <button type="button" class="secondary-button compact" data-eval-promote="${escapeHtml(stepId)}">Promote test cases to eval suite</button>`;
+  }
+  const cur = suite.current;
+  const status = evalSuiteStatus(suite);
+  const runs = Array.isArray(suite.results) ? suite.results : [];
+  const integrity = verifyAuditTrail(runs);
+  const integrityBadge = runs.length
+    ? (integrity.ok ? `<span class="ds-badge ds-badge-teal">Integrity verified · ${runs.length} run${runs.length === 1 ? "" : "s"}</span>` : `<span class="ds-badge ds-badge-amber">Integrity check failed at #${integrity.brokenAt + 1}</span>`)
+    : `<span class="ds-badge ds-badge-dim">Not yet evaluated</span>`;
+  const caseRows = cur.cases.map((c) => {
+    const kindBadge = c.kind === "anti-goal" ? `<span class="ds-badge ds-badge-amber">Anti-goal</span>` : `<span class="ds-badge ds-badge-dim">Known-good</span>`;
+    const radios = ["pass", "fail", "n-a"].map((v) => `<label style="font-size:11px;color:#9fb3c8;margin-right:10px;cursor:pointer;"><input type="radio" name="eval-${escapeHtml(stepId)}-${escapeHtml(c.id)}" value="${v}"${v === "n-a" ? " checked" : ""}> ${v}</label>`).join("");
+    return `<div style="margin-top:8px;padding:8px 10px;background:#0a1422;border:1px solid #1a2a3a;border-radius:8px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><strong style="color:#cfe0f2;font-size:12px;">${escapeHtml(c.name)}</strong>${kindBadge}</div>
+      <p style="margin:4px 0 0;color:#9fb3c8;font-size:11px;line-height:1.5;"><span style="color:#5fb8a8;">Known-good:</span> ${escapeHtml(c.knownGood)}</p>
+      <p style="margin:2px 0 0;color:#9fb3c8;font-size:11px;line-height:1.5;"><span style="color:#f5a97a;">Anti-goal (must NOT):</span> ${escapeHtml(c.antiGoal)}</p>
+      <div style="margin-top:6px;">${radios}</div>
+    </div>`;
+  }).join("");
+  const recentRuns = runs.slice(-5).reverse().map((e) => {
+    const t = e.target || {};
+    const when = Number.isNaN(Date.parse(e.ts || "")) ? "" : new Date(Date.parse(e.ts)).toLocaleString("en-US");
+    const cr = t.caseResults || [];
+    const pass = cr.filter((x) => x.result === "pass").length;
+    const fail = cr.filter((x) => x.result === "fail").length;
+    const na = cr.filter((x) => x.result === "n-a").length;
+    return `<tr style="border-top:1px solid #16263a;"><td style="padding:5px 8px;color:#5b7186;font-size:11px;">#${e.seq}</td><td style="padding:5px 8px;color:#cfe0f2;font-size:11px;">${escapeHtml(t.modelLabel || "—")}</td><td style="padding:5px 8px;color:#9fb3c8;font-size:11px;">v${escapeHtml(String(t.suiteVersion || ""))}</td><td style="padding:5px 8px;color:#9fb3c8;font-size:11px;">${pass}P / ${fail}F / ${na}N</td><td style="padding:5px 8px;color:#5b7186;font-size:11px;white-space:nowrap;">${escapeHtml(when)}</td></tr>`;
+  }).join("");
+  const diff = evalRegressionDiff(suite);
+  const diffHtml = runs.length >= 2
+    ? (diff.changes.length
+        ? `<p style="margin:8px 0 0;color:#9fb3c8;font-size:11px;line-height:1.5;">Since the previous run (${escapeHtml(diff.from)} → ${escapeHtml(diff.to)}): ${diff.changes.map((c) => `${escapeHtml(c.caseId)} ${escapeHtml(c.from)}→${escapeHtml(c.to)}`).join(", ")}${diff.regressed.length ? ` · <span style="color:#f5a97a;">${diff.regressed.length} regressed</span>` : ""}</p>`
+        : `<p style="margin:8px 0 0;color:#5fb8a8;font-size:11px;">No change since the previous run (identical results).</p>`)
+    : "";
+  const historyHtml = runs.length
+    ? `<div style="margin-top:10px;overflow-x:auto;"><table style="width:100%;border-collapse:collapse;"><thead><tr style="text-align:left;color:#5b7186;font-size:10px;text-transform:uppercase;letter-spacing:0.05em;"><th style="padding:0 8px;">#</th><th style="padding:0 8px;">Model</th><th style="padding:0 8px;">Suite</th><th style="padding:0 8px;">Results</th><th style="padding:0 8px;">When</th></tr></thead><tbody>${recentRuns}</tbody></table></div>${diffHtml}`
+    : `<p style="margin:10px 0 0;color:#8aa0b8;font-size:12px;">Not yet evaluated — record a run to start tracking. No result is assumed until you record one.</p>`;
+  return `${note}
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+      <strong style="color:#e8f4ff;font-size:13px;">${escapeHtml(suite.name)}</strong>
+      <span class="ds-badge ds-badge-dim">v${escapeHtml(String(cur.suiteVersion))}</span>
+      ${integrityBadge}
+    </div>
+    <p style="margin:0 0 8px;color:#5b7186;font-size:11px;">Provenance: generated test cases · ${cur.provenance.evidenceBackedCells} evidence-backed, ${cur.provenance.inferredCells} inferred · status: ${escapeHtml(status.label)}</p>
+    ${caseRows}
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid #16263a;">
+      <label style="display:block;font-size:11px;color:#8aa0b8;margin-bottom:4px;">Model / version you evaluated against (required)</label>
+      <input type="text" id="eval-model-${escapeHtml(stepId)}" placeholder="e.g. gpt-4o / 2026-05" style="width:100%;max-width:280px;background:#0a1525;color:#e8f4ff;border:1px solid #1e3350;border-radius:7px;padding:7px 9px;font-size:12px;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+        <button type="button" class="primary-button compact" data-eval-record="${escapeHtml(stepId)}">Record run</button>
+        <button type="button" class="secondary-button compact" data-eval-promote="${escapeHtml(stepId)}">Re-promote (new version)</button>
+      </div>
+    </div>
+    ${historyHtml}
+    <p style="margin:10px 0 0;color:#5b7186;font-size:11px;line-height:1.45;">Results are append-only and tamper-evident; the regression view reads stored results only. A record of evaluation activity — not a compliance approval, and never an automated model run.</p>`;
+}
+
 function artifactCompilerCardHtml(step, index) {
   const compiler = ensureArtifactCompilerState();
   const context = artifactWorkflowContext();
@@ -8632,6 +8911,13 @@ function artifactCompilerCardHtml(step, index) {
       ${artifactAccordionHtml("Test cases", "Happy path / Missing input / Exception path", artifactTestCasePackHtml(ir), { badge: "3 paths", badgeClass: "ds-badge-purple" })}
       ${artifactAccordionHtml("Evidence and safeguards", "Provenance, review gates, and future integrations", artifactEvidenceQualityHtml(ir), { badge: pkg.profile.needsHumanApproval ? "Review required" : "Review advised", badgeClass: pkg.profile.needsHumanApproval ? "ds-badge-amber" : "ds-badge-dim" })}
       ${artifactAccordionHtml("Importable configuration", "Copy-paste / import-ready config for the recommended surface", artifactImportableConfigHtml(pkg), { badge: "Deploy-ready", badgeClass: "ds-badge-teal" })}
+      ${(() => {
+        const evalSuite = state.evalSuites && state.evalSuites[step.id];
+        const st = evalSuiteStatus(evalSuite);
+        const badge = !evalSuite ? "Not promoted" : (st.state === "not-evaluated" ? "Not yet evaluated" : st.label);
+        const badgeClass = !evalSuite ? "ds-badge-dim" : (st.state === "not-evaluated" ? "ds-badge-amber" : (st.fail ? "ds-badge-amber" : "ds-badge-teal"));
+        return artifactAccordionHtml("Eval suite (track, don't execute)", "Versioned acceptance tests + recorded results — no model is called", renderEvalSuiteHtml(step.id), { badge, badgeClass });
+      })()}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
         <button type="button" class="primary-button compact" data-artifact-compile="${escapeHtml(step.id)}">Compile recommended package</button>
         <button type="button" class="secondary-button compact" data-artifact-bundle="${escapeHtml(step.id)}">Generate full bundle</button>
@@ -8935,6 +9221,18 @@ function renderAnalysisTabRecipe() {
       const text = pre ? pre.textContent : "";
       if (!text) { toast("Nothing to copy yet."); return; }
       copyConfigText(text, btn);
+    });
+  });
+  container.querySelectorAll("[data-eval-promote]").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      promoteEvalSuite(btn.dataset.evalPromote);
+    });
+  });
+  container.querySelectorAll("[data-eval-record]").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      recordEvalRun(btn.dataset.evalRecord);
     });
   });
 
