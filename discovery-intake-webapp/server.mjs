@@ -1634,6 +1634,11 @@ const server = http.createServer(async (req, res) => {
       return await handleSuggestStructuralType(req, res);
     }
 
+    // V3-17: descriptive friction-lens classifier (NOT scoring). Additive.
+    if (req.method === "POST" && requestUrl.pathname === "/api/suggest-friction") {
+      return await handleSuggestFriction(req, res);
+    }
+
     if (req.method === "POST" && requestUrl.pathname === "/api/realtime/session") {
       return await handleRealtimeSession(req, res);
     }
@@ -2386,6 +2391,64 @@ async function handleSuggestStructuralType(req, res) {
     const confRaw = Number(parsed && parsed.confidence);
     const confidence = Number.isFinite(confRaw) && confRaw >= 0 && confRaw <= 1 ? confRaw : 0.5;
     return sendJson(res, 200, value ? { value, confidence } : { value: null });
+  } catch (error) {
+    return sendJson(res, 502, { error: error.message || "Suggestion unavailable" });
+  }
+}
+
+// V3-17: friction-lens classifier — a narrow DESCRIPTIVE endpoint (mirrors
+// handleSuggestStepType / handleSuggestStructuralType). Suggests ONE friction KIND
+// (never a numeric pain score / magnitude) plus an optional short note describing
+// what is painful. The USER remains the authority — client-side a suggestion is
+// ai-inferred until an explicit confirm. Validates the kind against the allowed set
+// server-side; returns { value, confidence, note? } or { value: null }. NEVER
+// computes/returns opportunity/ROI; never calls the recipe/scoring paths.
+const FRICTION_VALUES = ["manual-entry", "system-switching", "rework", "waiting", "error-prone"];
+const FRICTION_SUGGEST_SYSTEM_PROMPT = `You classify how slow, painful, or error-prone ONE workflow step is TODAY into exactly one friction kind. Allowed kinds (use these exact lowercase strings): manual-entry, system-switching, rework, waiting, error-prone. Definitions — manual-entry: repetitive manual data entry or re-keying; system-switching: toggling across multiple systems, tools, or programs; rework: corrections, redos, or back-and-forth; waiting: delays waiting on inputs, approvals, or other people; error-prone: fragile or high error rate. You may also return a short note (max ~20 words) naming what is painful. Respond ONLY as JSON: {"kind":"<one allowed kind>","confidence":<number 0..1>,"note":"<short optional note>"}. This is DESCRIPTIVE classification ONLY — never a pain score or magnitude, and never assess value, ROI, opportunity, savings, or automation.`;
+
+async function handleSuggestFriction(req, res) {
+  if (!getOpenAiKey()) {
+    return sendJson(res, 400, { error: "OPENAI_API_KEY is not configured." });
+  }
+  let body;
+  try {
+    body = await readJson(req);
+  } catch {
+    return sendJson(res, 400, { error: "Invalid request body" });
+  }
+  const text = body && typeof body.text === "string" ? body.text : "";
+  if (!text.trim()) return sendJson(res, 200, { value: null });
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${getOpenAiKey()}` },
+      body: JSON.stringify({
+        model: HARVEST_MODEL,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: FRICTION_SUGGEST_SYSTEM_PROMPT },
+          { role: "user", content: text }
+        ]
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      return sendJson(res, 502, { error: data.error?.message || "Suggestion failed" });
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(data.choices?.[0]?.message?.content || "");
+    } catch {
+      return sendJson(res, 200, { value: null });
+    }
+    // Server-side taxonomy validation — an off-set/malformed kind → no suggestion.
+    // A note is optional metadata (string, bounded); it is never a score.
+    const value = parsed && FRICTION_VALUES.includes(parsed.kind) ? parsed.kind : null;
+    const confRaw = Number(parsed && parsed.confidence);
+    const confidence = Number.isFinite(confRaw) && confRaw >= 0 && confRaw <= 1 ? confRaw : 0.5;
+    const note = parsed && typeof parsed.note === "string" ? parsed.note.trim().slice(0, 200) : "";
+    if (!value) return sendJson(res, 200, { value: null });
+    return sendJson(res, 200, note ? { value, confidence, note } : { value, confidence });
   } catch (error) {
     return sendJson(res, 502, { error: error.message || "Suggestion unavailable" });
   }

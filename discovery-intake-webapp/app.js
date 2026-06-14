@@ -1136,6 +1136,14 @@ const defaultState = {
   // ai-inferred never auto-hardens; normalizeLoadedState backfills {} and never promotes.
   handoffTags: {},
   decisionTags: {},
+  // V3-17: friction lens (ANNOTATE-ONLY). Additive sidecar keyed by step.id →
+  // { value, source, confidence, note? }. The USER is the provenance — a friction
+  // flag is user-authored; AI may SUGGEST an ai-inferred flag the user then confirms
+  // or rejects. The value is a descriptive KIND (never a numeric pain score). It is
+  // STRICTLY SEPARATE from the opportunity score. Annotate-only — tagging never edits
+  // step structure. ai-inferred never auto-hardens; normalizeLoadedState backfills {}
+  // and never promotes.
+  frictionTags: {},
   // V3-3: uploaded AI policy (a relied-on value). Shape:
   // { fileName, uploadedAt, clauses:[{id,ref,heading,text,source,confidence}] }.
   // null = no policy → artifacts use the generic advisory caution. Read-only at
@@ -6739,6 +6747,186 @@ function wireStructural(container) {
   });
 }
 
+// === V3-17: Friction lens (ANNOTATE-ONLY) ===================================
+// A user refinement pass at the pre-recipe checkpoint: tag a step with how it is
+// slow / painful / error-prone TODAY, plus an optional "what's painful here" note.
+// The USER is the provenance — a friction flag is user-authored. AI may SUGGEST a
+// friction KIND (+ optional note) as ai-inferred; the user confirms (promotes to
+// user-stated/1) or rejects (clears). The value is a descriptive KIND, NEVER a
+// numeric pain score — friction is never a model-fabricated number.
+//
+// STRICTLY SEPARATE FROM OPPORTUNITY: getStepOpportunityMeta / stepTrustSignals /
+// scoreRecipeReadiness neither read nor receive friction state. ANNOTATE-ONLY —
+// tagging never edits step structure (splitting stays in the grid; a
+// review-and-split friction pass is a documented FUTURE enhancement).
+//
+// Reuses the V3-16 generic provenance-tag core (setStructuralTag /
+// applyStructuralSuggestion / confirmStructuralTag / rejectStructuralTag /
+// structuralTagOf) for value + provenance + promotion — NO new promoter. The
+// optional note is layered on top, so the shared core stays untouched. Additive
+// sidecar (state.frictionTags keyed by step.id); byte-identical when unused. No
+// grid write, no scoring endpoint, no telemetry of the friction value.
+const FRICTION_KINDS = ["manual-entry", "system-switching", "rework", "waiting", "error-prone"];
+
+function ensureFrictionTags() { if (!state.frictionTags || typeof state.frictionTags !== "object") state.frictionTags = {}; return state.frictionTags; }
+
+// Notes are free text but bounded: trimmed and capped. A note is metadata that
+// travels with the tag; it is never a number and never a pain score.
+function sanitizeFrictionNote(note) {
+  if (typeof note !== "string") return "";
+  return note.trim().slice(0, 500);
+}
+
+// Read: null when unset or off-set (never fabricated).
+function frictionTagOf(id) { return structuralTagOf(ensureFrictionTags(), id, FRICTION_KINDS); }
+
+// Manual tag → user-stated (reuses the generic core for validation + write).
+// Invalid/"" clears the key (the note goes with it). The note is layered on only
+// after the core has stored a valid kind. PURE (no persist/render).
+function setFrictionTag(id, value, note) {
+  const map = ensureFrictionTags();
+  if (!setStructuralTag(map, id, value, FRICTION_KINDS)) return false;
+  const n = sanitizeFrictionNote(note);
+  if (n) map[id].note = n;
+  return true;
+}
+
+// AI suggestion → ai-inferred (reuses the generic core's per-set validation:
+// off-set / empty / malformed ⇒ NO key, never a fabricated value). An optional
+// suggested note is layered on only when a valid kind was stored. PURE.
+function applyFrictionSuggestion(id, suggestion) {
+  const map = ensureFrictionTags();
+  if (!applyStructuralSuggestion(map, id, suggestion, FRICTION_KINDS)) return false;
+  const n = sanitizeFrictionNote(suggestion && suggestion.note);
+  if (n) map[id].note = n;
+  return true;
+}
+
+// Confirm → promote ai-inferred to user-stated via the EXISTING promoter
+// (confirmStructuralTag); the note is preserved across the promotion. PURE.
+function confirmFriction(id) {
+  const map = ensureFrictionTags();
+  const note = map[id] && map[id].note;
+  if (!confirmStructuralTag(map, id, FRICTION_KINDS)) return false;
+  if (note) map[id].note = note;
+  return true;
+}
+
+// Reject → delete the key (reuses the generic core). PURE.
+function rejectFriction(id) { return rejectStructuralTag(ensureFrictionTags(), id); }
+
+// Descriptive input for the suggest endpoint — the pain / systems / data signals
+// this intake already surfaces are exactly where a friction read is strongest.
+function frictionSuggestionInput(step) {
+  return [
+    structuralCellText(step, "name"), structuralCellText(step, "description"),
+    structuralCellText(step, "painFriction"), structuralCellText(step, "systemsTools"),
+    structuralCellText(step, "dataProcessing")
+  ].filter(Boolean).join("\n");
+}
+
+// The ONLY model call in the friction flow — the narrow descriptive endpoint
+// (NOT buildAgentRecipeIr / recipe / scoring). Graceful: any non-200 / empty key /
+// network error / off-set result leaves the step UNTAGGED, writes no key, and
+// never throws. The suggestion is stored ai-inferred and renders as a SUGGESTION
+// (never as an asserted user flag) until the user explicitly confirms.
+async function suggestFriction(id) {
+  const steps = analysisGridSteps();
+  const step = steps.find((s) => s && s.id === id);
+  if (!step) return false;
+  const text = frictionSuggestionInput(step);
+  let result;
+  try {
+    result = await requestJson("/api/suggest-friction", { method: "POST", body: { text } });
+  } catch (error) {
+    toast("Suggestion unavailable — left untagged.");
+    return false;
+  }
+  if (!applyFrictionSuggestion(id, result)) {
+    toast("No confident suggestion — left untagged.");
+    return false;
+  }
+  persistState();
+  render();
+  const tag = frictionTagOf(id);
+  toast(`Suggested friction "${tag.value}" — confirm or reject.`);
+  return true;
+}
+
+// --- Render (inside the existing per-step composite-badge <details>) ---
+// The TAG display — returns "" when unset (byte-identical-when-unused, asserted).
+// ai-inferred renders distinct from a confirmed user flag via provenanceBadgeHtml
+// (flat single-hue, no gradient) + "(suggested)" + confirm/reject; the note (if
+// any) is shown as plain annotation text.
+function frictionTagHtml(step) {
+  const id = step && step.id;
+  const tag = frictionTagOf(id);
+  if (!tag) return "";
+  const suggested = tag.source === "ai-inferred";
+  const cr = suggested
+    ? ` <button type="button" data-friction-confirm="${escapeHtml(id)}" style="background:none;border:none;color:#00d4b4;cursor:pointer;font-size:11px;padding:0;">confirm</button> <button type="button" data-friction-reject="${escapeHtml(id)}" style="background:none;border:none;color:#ff4fc8;cursor:pointer;font-size:11px;padding:0;">reject</button>`
+    : "";
+  const noteHtml = tag.note ? ` <span style="color:#9fb3cc;">— ${escapeHtml(tag.note)}</span>` : "";
+  return `Friction: <strong style="color:#cfe0f2;">${escapeHtml(tag.value)}</strong> ${provenanceBadgeHtml(tag.source, tag.confidence)}${suggested ? ` <span style="color:#7a93b4;">(suggested)</span>` : ""}${noteHtml}${cr}`;
+}
+
+// The manual annotation control: friction-kind picker + "what's painful here" note
+// + AI-suggest (additive; always available inside the expandable surface — NOT
+// gated behind a global toggle).
+function frictionPickerHtml(step) {
+  const id = step && step.id;
+  const tag = frictionTagOf(id);
+  const current = tag ? tag.value : "";
+  const note = tag && tag.note ? tag.note : "";
+  const opts = [`<option value="">no friction tag</option>`]
+    .concat(FRICTION_KINDS.map((v) => `<option value="${v}" ${v === current ? "selected" : ""}>${v}</option>`)).join("");
+  return `<span data-friction-row="${escapeHtml(id)}" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
+    <span style="color:#7a93b4;">Friction:</span>
+    <select data-friction-id="${escapeHtml(id)}" style="background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:2px 6px;color:#dde8f5;font-size:11px;">${opts}</select>
+    <input type="text" data-friction-note="${escapeHtml(id)}" value="${escapeHtml(note)}" placeholder="what's painful here (optional)" style="background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:2px 6px;color:#dde8f5;font-size:11px;width:200px;" />
+    <button type="button" data-friction-suggest="${escapeHtml(id)}" style="background:none;border:1px solid #3a2a5a;color:#a855f7;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">Suggest (AI)</button>
+  </span>`;
+}
+
+// Per-step friction block, appended to the composite badge's expanded <details>.
+function stepFrictionHtml(step) {
+  if (!step || !step.id) return "";
+  const tag = frictionTagHtml(step);
+  return `<li style="list-style:none;margin-left:-16px;margin-top:6px;">${tag}${tag ? "<br>" : ""}${frictionPickerHtml(step)}</li>`;
+}
+
+// Wires the friction controls; pure mutators wrapped with persist/render here.
+// The suggest action handles its own persist. Note edits attach only when a kind
+// is already set (a note alone never fabricates a flag).
+function wireFriction(container) {
+  if (!container) return;
+  container.querySelectorAll("[data-friction-id]").forEach((sel) => {
+    sel.addEventListener("change", () => {
+      const id = sel.dataset.frictionId;
+      const row = sel.closest("[data-friction-row]");
+      const noteInput = row ? row.querySelector("[data-friction-note]") : null;
+      setFrictionTag(id, sel.value, noteInput ? noteInput.value : "");
+      persistState(); render();
+    });
+  });
+  container.querySelectorAll("[data-friction-note]").forEach((inp) => {
+    inp.addEventListener("change", () => {
+      const id = inp.dataset.frictionNote;
+      const cur = frictionTagOf(id);
+      if (cur) { setFrictionTag(id, cur.value, inp.value); persistState(); render(); }
+    });
+  });
+  container.querySelectorAll("[data-friction-suggest]").forEach((btn) => {
+    btn.addEventListener("click", () => suggestFriction(btn.dataset.frictionSuggest));
+  });
+  container.querySelectorAll("[data-friction-confirm]").forEach((btn) => {
+    btn.addEventListener("click", () => { if (confirmFriction(btn.dataset.frictionConfirm)) { persistState(); render(); toast("Friction tag confirmed."); } });
+  });
+  container.querySelectorAll("[data-friction-reject]").forEach((btn) => {
+    btn.addEventListener("click", () => { if (rejectFriction(btn.dataset.frictionReject)) { persistState(); render(); toast("Suggestion rejected — untagged."); } });
+  });
+}
+
 // V3-2d: composite per-step state badge. The headline posture is a DISPLAY label
 // derived from the provenance mix (not a new persisted score); the four
 // dimensions are revealed on expand. All values read from existing sources.
@@ -6755,7 +6943,7 @@ function stepCompositeBadgeHtml(step) {
     `Readiness: ${s.readinessLabel}${s.readinessScore !== null ? ` (${s.readinessScore}/100)` : ""}`,
     `Provenance: ${s.captured} captured field${s.captured === 1 ? "" : "s"}, each with a tracked source`
   ];
-  return `<details class="step-trust-badge" style="display:inline-block;margin-left:8px;"><summary style="cursor:pointer;list-style:none;display:inline-block;"><span class="ds-badge ${posture.cls}">${escapeHtml(posture.label)}</span></summary><ul style="margin:6px 0 0;padding-left:16px;color:#8aa0b8;font-size:11px;line-height:1.5;">${dims.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}${stepTypologyHtml(step)}${stepStructuralHtml(step)}</ul></details>`;
+  return `<details class="step-trust-badge" style="display:inline-block;margin-left:8px;"><summary style="cursor:pointer;list-style:none;display:inline-block;"><span class="ds-badge ${posture.cls}">${escapeHtml(posture.label)}</span></summary><ul style="margin:6px 0 0;padding-left:16px;color:#8aa0b8;font-size:11px;line-height:1.5;">${dims.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}${stepTypologyHtml(step)}${stepStructuralHtml(step)}${stepFrictionHtml(step)}</ul></details>`;
 }
 
 // V3-7: knowledge-library panel for the grid tab. Shows (1) the entries applied
@@ -7063,6 +7251,7 @@ function renderAnalysisTabGrid() {
   wireKnowledgeLibrary(container);
   wireStepTypology(container);
   wireStructural(container);
+  wireFriction(container);
 }
 
 // --- TAB 2: AI Opportunities --------------------------------------------------
@@ -34073,6 +34262,10 @@ function normalizeLoadedState(parsed = {}) {
     // ai-inferred tag is never promoted on load (it hardens only on explicit confirm).
     handoffTags: parsed.handoffTags && typeof parsed.handoffTags === "object" ? parsed.handoffTags : {},
     decisionTags: parsed.decisionTags && typeof parsed.decisionTags === "object" ? parsed.decisionTags : {},
+    // V3-17: backfill friction tags. Stored tags pass through UNCHANGED — an
+    // ai-inferred friction flag is never promoted on load (it hardens only on an
+    // explicit confirm); older sessions backfill to {} (byte-identical when unused).
+    frictionTags: parsed.frictionTags && typeof parsed.frictionTags === "object" ? parsed.frictionTags : {},
     // V3-9: backfill the guided first-run flag so sessions persisted before this
     // feature load cleanly (default: not yet dismissed → first-run can offer).
     onboarding: {
