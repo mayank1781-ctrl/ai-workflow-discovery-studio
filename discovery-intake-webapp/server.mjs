@@ -1623,6 +1623,12 @@ const server = http.createServer(async (req, res) => {
       return await handleRecipe(req, res);
     }
 
+    // V3-15: descriptive step-type classifier (NOT scoring). Additive; existing
+    // routes unchanged.
+    if (req.method === "POST" && requestUrl.pathname === "/api/suggest-step-type") {
+      return await handleSuggestStepType(req, res);
+    }
+
     if (req.method === "POST" && requestUrl.pathname === "/api/realtime/session") {
       return await handleRealtimeSession(req, res);
     }
@@ -2261,6 +2267,63 @@ Return ONLY valid JSON — no markdown, no explanation. Example shape (keys in f
 // after each user answer. Failures are intentionally benign — they resolve to
 // an empty update set (HTTP 200) so the frontend can ignore them silently and
 // never interrupt the interview.
+// V3-15: step-type suggestion — a narrow, DESCRIPTIVE classifier. Returns one of
+// the pinned taxonomy values + a confidence, or { value: null }. NEVER computes or
+// returns opportunity/value/ROI; does NOT call the recipe/scoring paths. The model
+// output is validated against the taxonomy server-side (defense in depth — the
+// client validates too); an off-taxonomy result becomes { value: null }.
+const STEP_TYPE_VALUES = ["decision", "handoff", "data-op", "judgment", "review"];
+const STEP_TYPE_SYSTEM_PROMPT = `You classify ONE workflow step into exactly one structural type. Allowed types (use these exact lowercase strings): decision, handoff, data-op, judgment, review. Definitions — decision: a choice or branch is made; handoff: work passes between roles or to/from a system; data-op: repetitive data movement, entry, or formatting; judgment: expert or subjective assessment; review: checking or approving prior work. Respond ONLY as JSON: {"type":"<one allowed type>","confidence":<number 0..1>}. This is descriptive classification ONLY — never assess value, ROI, opportunity, savings, or automation.`;
+
+async function handleSuggestStepType(req, res) {
+  if (!getOpenAiKey()) {
+    return sendJson(res, 400, { error: "OPENAI_API_KEY is not configured." });
+  }
+  let body;
+  try {
+    body = await readJson(req);
+  } catch {
+    return sendJson(res, 400, { error: "Invalid request body" });
+  }
+  const step = body && typeof body.step === "object" && body.step ? body.step : {};
+  const text = ["name", "description", "rulesDecisionLogic", "dataProcessing", "humanCheckpoint", "handoff"]
+    .map((k) => (typeof step[k] === "string" ? step[k] : ""))
+    .filter(Boolean)
+    .join("\n");
+  if (!text.trim()) return sendJson(res, 200, { value: null });
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${getOpenAiKey()}` },
+      body: JSON.stringify({
+        model: HARVEST_MODEL,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: STEP_TYPE_SYSTEM_PROMPT },
+          { role: "user", content: text }
+        ]
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      return sendJson(res, 502, { error: data.error?.message || "Suggestion failed" });
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(data.choices?.[0]?.message?.content || "");
+    } catch {
+      return sendJson(res, 200, { value: null });
+    }
+    // Server-side taxonomy validation — an off-taxonomy/malformed value → no suggestion.
+    const value = parsed && STEP_TYPE_VALUES.includes(parsed.type) ? parsed.type : null;
+    const confRaw = Number(parsed && parsed.confidence);
+    const confidence = Number.isFinite(confRaw) && confRaw >= 0 && confRaw <= 1 ? confRaw : 0.5;
+    return sendJson(res, 200, value ? { value, confidence } : { value: null });
+  } catch (error) {
+    return sendJson(res, 502, { error: error.message || "Suggestion unavailable" });
+  }
+}
+
 async function handleHarvestGrid(req, res) {
   const empty = { stepUpdates: [], newSteps: [] };
   if (!getOpenAiKey()) {

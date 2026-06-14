@@ -1123,6 +1123,11 @@ const defaultState = {
   // both editable. Empty `bands` + no department tags ⇒ the capacity view is unused
   // and renders nothing (byte-identical baseline). normalizeLoadedState backfills it.
   capacityBands: { bands: {}, hoursPerFteYear: 1920, weeklyHoursBasis: 40 },
+  // V3-15: per-step typology (structural axis). Additive sidecar keyed by step.id →
+  // { value, source, confidence }. Descriptive metadata only — NEVER feeds the
+  // opportunity score. An ai-inferred tag never auto-hardens (stays ai-inferred until
+  // an explicit confirm; normalizeLoadedState backfills {} and never promotes).
+  stepTypes: {},
   // V3-3: uploaded AI policy (a relied-on value). Shape:
   // { fileName, uploadedAt, clauses:[{id,ref,heading,text,source,confidence}] }.
   // null = no policy → artifacts use the generic advisory caution. Read-only at
@@ -6373,6 +6378,160 @@ function stepTrustSignals(step) {
   };
 }
 
+// === V3-15: Step typology (structural axis — descriptive metadata) ==========
+// Classify each step's NATURE so the per-step opportunity score is legible. This
+// NEVER feeds or alters opportunity (getStepOpportunityMeta / stepTrustSignals /
+// scoreRecipeReadiness neither read nor receive stepTypes). Additive sidecar
+// (state.stepTypes keyed by step.id); no grid write (no patchField), no scoring
+// endpoint, no telemetry of the type value. Two entry paths: manual pick
+// (user-stated) and AI suggest (ai-inferred → confirm-to-promote). An ai-inferred
+// tag never auto-hardens. The core mutators are pure (state only); the wiring +
+// suggest action persist/render.
+const STEP_TYPE_OPTIONS = ["decision", "handoff", "data-op", "judgment", "review"];
+
+function isValidStepType(value) {
+  return typeof value === "string" && STEP_TYPE_OPTIONS.includes(value);
+}
+
+function ensureStepTypes() {
+  if (!state.stepTypes || typeof state.stepTypes !== "object") state.stepTypes = {};
+  return state.stepTypes;
+}
+
+// The stored tag for a step, or null when untyped ("not classified" — never
+// fabricated). A stored value that is somehow off-taxonomy reads as untyped.
+function stepTypeOf(stepId) {
+  const map = state.stepTypes && typeof state.stepTypes === "object" ? state.stepTypes : {};
+  const tag = stepId ? map[stepId] : null;
+  return tag && isValidStepType(tag.value) ? tag : null;
+}
+
+// Manual pick → user-stated. An invalid/"" value clears the key. PURE (no persist).
+function setStepType(stepId, value) {
+  if (!stepId) return false;
+  const map = ensureStepTypes();
+  if (!isValidStepType(value)) { delete map[stepId]; return false; }
+  map[stepId] = { value, source: "user-stated", confidence: 1 };
+  return true;
+}
+
+// Store an AI suggestion as ai-inferred — ONLY after validating against the pinned
+// taxonomy. Off-taxonomy / empty / malformed ⇒ NO suggestion (no key written, step
+// stays untyped). A fabricated value is never stored. PURE (no persist).
+function applyStepTypeSuggestion(stepId, suggestion) {
+  if (!stepId) return false;
+  const value = suggestion && typeof suggestion === "object" ? suggestion.value : null;
+  if (!isValidStepType(value)) return false;
+  const confRaw = Number(suggestion.confidence);
+  const confidence = Number.isFinite(confRaw) && confRaw >= 0 && confRaw <= 1 ? confRaw : 0.5;
+  ensureStepTypes()[stepId] = { value, source: "ai-inferred", confidence };
+  return true;
+}
+
+// Confirm an ai-inferred tag → promote to user-stated (value preserved). Reuses the
+// established {value,source,confidence} promotion discipline; no new promoter. PURE.
+function confirmStepType(stepId) {
+  const tag = stepTypeOf(stepId);
+  if (!tag) return false;
+  ensureStepTypes()[stepId] = { value: tag.value, source: "user-stated", confidence: 1 };
+  return true;
+}
+
+// Reject → delete the key (back to "not classified"). PURE.
+function rejectStepType(stepId) {
+  const map = ensureStepTypes();
+  if (!map[stepId]) return false;
+  delete map[stepId];
+  return true;
+}
+
+// The minimal step text sent to the classifier (only workflow text the user already
+// captured — no extra PII).
+function stepTypeSuggestionInput(step) {
+  const c = step && step.cells ? step.cells : {};
+  const pick = (k) => (c[k] && typeof c[k].value === "string" ? c[k].value : "");
+  return {
+    name: pick("name"), description: pick("description"),
+    rulesDecisionLogic: pick("rulesDecisionLogic"), dataProcessing: pick("dataProcessing"),
+    humanCheckpoint: pick("humanCheckpoint"), handoff: pick("handoff")
+  };
+}
+
+// The ONLY model call in the typology flow — a narrow, descriptive classifier
+// endpoint (NOT buildAgentRecipeIr, NOT recipe/scoring). Graceful: any non-200 /
+// empty key / network error / off-taxonomy result leaves the step untyped, writes
+// no key, and never throws.
+async function suggestStepType(stepId) {
+  const step = analysisGridSteps().find((s) => s.id === stepId);
+  if (!step) return false;
+  let result;
+  try {
+    result = await requestJson("/api/suggest-step-type", { method: "POST", body: { step: stepTypeSuggestionInput(step) } });
+  } catch (error) {
+    toast("Type suggestion unavailable — left as not classified.");
+    return false;
+  }
+  if (!applyStepTypeSuggestion(stepId, result)) {
+    toast("No confident type suggestion — left as not classified.");
+    return false;
+  }
+  persistState();
+  render();
+  const tag = stepTypeOf(stepId);
+  toast(`Suggested "${tag.value}" — confirm or reject.`);
+  return true;
+}
+
+// Type-tag DISPLAY. Returns "" when untyped (byte-identical-when-unused). ai-inferred
+// renders distinct from user-stated via provenanceBadgeHtml (flat single-hue, no
+// gradient) and offers confirm/reject; user-stated shows no confirm/reject.
+function stepTypeTagHtml(step) {
+  const tag = stepTypeOf(step && step.id);
+  if (!tag) return "";
+  const suggested = tag.source === "ai-inferred";
+  const cr = suggested
+    ? ` <button type="button" data-step-type-confirm="${escapeHtml(step.id)}" style="background:none;border:none;color:#00d4b4;cursor:pointer;font-size:11px;padding:0;">confirm</button> <button type="button" data-step-type-reject="${escapeHtml(step.id)}" style="background:none;border:none;color:#ff4fc8;cursor:pointer;font-size:11px;padding:0;">reject</button>`
+    : "";
+  return `Step type: <strong style="color:#cfe0f2;">${escapeHtml(tag.value)}</strong> ${provenanceBadgeHtml(tag.source, tag.confidence)}${suggested ? ` <span style="color:#7a93b4;">(suggested)</span>` : ""}${cr}`;
+}
+
+// The manual picker + AI-suggest control (additive; always available in the badge).
+function stepTypePickerHtml(step) {
+  const tag = stepTypeOf(step && step.id);
+  const current = tag ? tag.value : "";
+  const opts = [`<option value="">not classified</option>`]
+    .concat(STEP_TYPE_OPTIONS.map((t) => `<option value="${t}" ${t === current ? "selected" : ""}>${t}</option>`))
+    .join("");
+  return `<span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
+    <select data-step-type-id="${escapeHtml(step.id)}" style="background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:2px 6px;color:#dde8f5;font-size:11px;">${opts}</select>
+    <button type="button" data-step-type-suggest="${escapeHtml(step.id)}" style="background:none;border:1px solid #3a2a5a;color:#a855f7;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">Suggest (AI)</button>
+  </span>`;
+}
+
+// Combined typology line for the composite badge's expanded list (tag + picker).
+function stepTypologyHtml(step) {
+  const tag = stepTypeTagHtml(step);
+  return `<li style="list-style:none;margin-left:-16px;margin-top:6px;padding-top:6px;border-top:1px solid #16263a;">${tag}${tag ? "<br>" : ""}${stepTypePickerHtml(step)}</li>`;
+}
+
+// Wires the typology controls inside the grid tab. The pure mutators are wrapped
+// with persistState + render here. The suggest action handles its own persist.
+function wireStepTypology(container) {
+  if (!container) return;
+  container.querySelectorAll("[data-step-type-id]").forEach((sel) => {
+    sel.addEventListener("change", () => { setStepType(sel.dataset.stepTypeId, sel.value); persistState(); render(); });
+  });
+  container.querySelectorAll("[data-step-type-suggest]").forEach((btn) => {
+    btn.addEventListener("click", () => suggestStepType(btn.dataset.stepTypeSuggest));
+  });
+  container.querySelectorAll("[data-step-type-confirm]").forEach((btn) => {
+    btn.addEventListener("click", () => { if (confirmStepType(btn.dataset.stepTypeConfirm)) { persistState(); render(); toast("Step type confirmed."); } });
+  });
+  container.querySelectorAll("[data-step-type-reject]").forEach((btn) => {
+    btn.addEventListener("click", () => { if (rejectStepType(btn.dataset.stepTypeReject)) { persistState(); render(); toast("Suggestion rejected — not classified."); } });
+  });
+}
+
 // V3-2d: composite per-step state badge. The headline posture is a DISPLAY label
 // derived from the provenance mix (not a new persisted score); the four
 // dimensions are revealed on expand. All values read from existing sources.
@@ -6389,7 +6548,7 @@ function stepCompositeBadgeHtml(step) {
     `Readiness: ${s.readinessLabel}${s.readinessScore !== null ? ` (${s.readinessScore}/100)` : ""}`,
     `Provenance: ${s.captured} captured field${s.captured === 1 ? "" : "s"}, each with a tracked source`
   ];
-  return `<details class="step-trust-badge" style="display:inline-block;margin-left:8px;"><summary style="cursor:pointer;list-style:none;display:inline-block;"><span class="ds-badge ${posture.cls}">${escapeHtml(posture.label)}</span></summary><ul style="margin:6px 0 0;padding-left:16px;color:#8aa0b8;font-size:11px;line-height:1.5;">${dims.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}</ul></details>`;
+  return `<details class="step-trust-badge" style="display:inline-block;margin-left:8px;"><summary style="cursor:pointer;list-style:none;display:inline-block;"><span class="ds-badge ${posture.cls}">${escapeHtml(posture.label)}</span></summary><ul style="margin:6px 0 0;padding-left:16px;color:#8aa0b8;font-size:11px;line-height:1.5;">${dims.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}${stepTypologyHtml(step)}</ul></details>`;
 }
 
 // V3-7: knowledge-library panel for the grid tab. Shows (1) the entries applied
@@ -6695,6 +6854,7 @@ function renderAnalysisTabGrid() {
   container.innerHTML = header + tierChangeNoticeHtml() + stats + panels + matrix + knowledgeLibraryPanelHtml();
   wireGridCellEditors(container);
   wireKnowledgeLibrary(container);
+  wireStepTypology(container);
 }
 
 // --- TAB 2: AI Opportunities --------------------------------------------------
@@ -33698,6 +33858,9 @@ function normalizeLoadedState(parsed = {}) {
       bands: (parsed.capacityBands && parsed.capacityBands.bands && typeof parsed.capacityBands.bands === "object")
         ? parsed.capacityBands.bands : {}
     },
+    // V3-15: backfill step typology. Stored tags pass through UNCHANGED — an
+    // ai-inferred tag is never promoted on load (it hardens only on explicit confirm).
+    stepTypes: parsed.stepTypes && typeof parsed.stepTypes === "object" ? parsed.stepTypes : {},
     // V3-9: backfill the guided first-run flag so sessions persisted before this
     // feature load cleanly (default: not yet dismissed → first-run can offer).
     onboarding: {
