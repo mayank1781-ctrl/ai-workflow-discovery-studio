@@ -1057,6 +1057,10 @@ const defaultState = {
   captureStage: "idle",
   appMode: "interview",
   demoCaseId: "strategy-workshop-prep",
+  // V3-9: guided first-run bookkeeping. `dismissed` is the ONLY persisted onboarding
+  // state — it gates whether the first-run overlay auto-opens on a clean start.
+  // normalizeLoadedState backfills it so older sessions load cleanly.
+  onboarding: { dismissed: false },
   activeStepIndex: 0,
   drilldown: {
     enabled: true,
@@ -1379,6 +1383,12 @@ function bindEvents() {
   });
 
   document.getElementById("topbarNewButton")?.addEventListener("click", openDiscoveryModePicker);
+  // V3-9: re-open the guided walkthrough / load the sample at any time (the
+  // first-run overlay also auto-opens once on a clean start).
+  document.getElementById("guidedTourButton")?.addEventListener("click", () => {
+    document.getElementById("guidedTourButton")?.closest("details")?.removeAttribute("open");
+    openGuidedFirstRun();
+  });
   // Phase 9c: inject the Settings button into the top-bar trio (next to Help)
   // and load the current settings so the business case uses any rate override.
   injectSettingsButton();
@@ -3575,7 +3585,10 @@ function render() {
     () => { if (state.appMode === "analysis") renderAnalysisStudio(); },
     () => updateAiTurnStatus(state.captureStage || "idle"),
     updateProgressUi,
-    refreshIcons
+    refreshIcons,
+    // V3-9: auto-open the guided first-run ONCE on a genuinely clean start
+    // (guarded inside; never re-opens, never blocks).
+    maybeShowGuidedFirstRun
   ];
   for (const step of steps) {
     try {
@@ -7057,6 +7070,9 @@ function portfolioItemFromSession(entry, currentSessionId) {
   const id = (entry && (entry.sessionId || entry.id)) || "";
   const name = (entry && (entry.workflowName || entry.name)) || "Untitled workflow";
   const isCurrent = Boolean(currentSessionId) && id === currentSessionId;
+  // V3-9: a guided-sample session carries this flag and is excluded from the
+  // portfolio entirely (see buildPortfolioModel) — it never pollutes real totals.
+  const isSample = Boolean(st && st.sessionMeta && st.sessionMeta.isSample);
   const steps = Array.isArray(st?.workflowGrid?.steps) ? st.workflowGrid.steps : [];
 
   // VALUE — read the explicit business-case snapshot; never recompute it here.
@@ -7079,7 +7095,7 @@ function portfolioItemFromSession(entry, currentSessionId) {
   try { tier = steps.length ? (getStepOpportunityMeta(steps[0]).tier || "") : ""; } catch { tier = ""; }
 
   return {
-    id, name, isCurrent,
+    id, name, isCurrent, isSample,
     value, valueComputed,
     readinessScore, readinessLabel,
     tier,
@@ -7118,7 +7134,9 @@ function buildPortfolioClusters(items) {
 // The portfolio model: ranked persisted workflows + clusters + aggregates, with
 // the current session held SEPARATE (never folded into portfolio totals).
 function buildPortfolioModel(items, currentSessionId) {
-  const all = Array.isArray(items) ? items : [];
+  // V3-9: the guided sample is NEVER part of the portfolio (totals/ranking/
+  // clusters/current detection) — drop it before anything else aggregates.
+  const all = (Array.isArray(items) ? items : []).filter((item) => !(item && item.isSample));
   const current = all.find((item) => item.isCurrent || (currentSessionId && item.id === currentSessionId)) || null;
   const portfolio = all.filter((item) => item !== current);
   const ranked = [...portfolio].sort((a, b) => portfolioRankScore(b) - portfolioRankScore(a));
@@ -17839,6 +17857,9 @@ const SESSION_TIER_ORDER = { "quick-win": 0, strategic: 1, compliance: 2, specul
 // the bulk classification panel's existing zero-step containment. A
 // deliberately saved empty session with a real name stays visible.
 function savedSessionVisibleInList(entry) {
+  // V3-9: the guided sample is never listed as a saved session (belt-and-suspenders;
+  // it is also never written to the server library — see saveSessionToServer).
+  if (entry?.isSample || entry?.state?.sessionMeta?.isSample) return false;
   const stepCount = Number(entry?.stepCount);
   if (Number.isFinite(stepCount) && stepCount > 0) return true;
   const name = String(entry?.workflowName || entry?.name || "").trim();
@@ -18401,6 +18422,173 @@ function normalizeDemoRecords(type, records = []) {
   return (Array.isArray(records) ? records : [])
     .filter(hasMeaningfulValue)
     .map((record) => ({ ...newRecord(type), ...record }));
+}
+
+// === V3-9: Guided first-run / sample workflow ===============================
+// A clearly-labeled sample workflow plus a dismissible walkthrough so a first-time
+// user is not facing a blank page. The sample is a STATIC, neutral fixture fed
+// through the REAL grid builder (buildWorkflowGridFromExtraction) — deterministic,
+// NO model call — so the real downstream pipeline (four signals, opportunity,
+// readiness, IR, recommended artifact) renders genuinely. It is flagged isSample
+// (excluded from the portfolio + saved list, never server-persisted) and is fully
+// cleared on dismiss, leaving a byte-identical clean start.
+// (The demo-console path only fills the legacy state.steps array, not
+// workflowGrid, so a dedicated static fixture through the grid builder is used.)
+const SAMPLE_EXTRACTION = {
+  workflowName: "Sample — Weekly client status report",
+  dataSensitivityBaseline: "Medium",
+  steps: [
+    {
+      cells: {
+        workflowStep: { value: "Collect status inputs", state: "confirmed", confidence: 0.9 },
+        description: { value: "Gather the week's updates from the tracker, email threads, and the shared notes folder.", state: "confirmed", confidence: 0.9 },
+        systemsTools: { value: "Shared drive, email, spreadsheet tracker", state: "confirmed", confidence: 0.85 },
+        dataProcessing: { value: "Read the prior tracker, copy new rows, and normalize status labels.", state: "inferred", confidence: 0.6 },
+        timeTaken: { value: "45 minutes", state: "confirmed", confidence: 0.8 },
+        frequencyVolume: { value: "weekly", state: "confirmed", confidence: 0.9 },
+        painFriction: { value: "Inputs are scattered and inconsistently labeled.", state: "confirmed", confidence: 0.8 },
+        dataSensitivity: { value: "Medium — client names and internal status", state: "inferred", confidence: 0.6 }
+      }
+    },
+    {
+      cells: {
+        workflowStep: { value: "Draft the status summary", state: "confirmed", confidence: 0.9 },
+        description: { value: "Summarize progress, risks, and next steps into the standard status template.", state: "confirmed", confidence: 0.9 },
+        rulesDecisionLogic: { value: "Flag any item slipping more than one week as a risk.", state: "confirmed", confidence: 0.8 },
+        output: { value: "A drafted status summary in the standard template.", state: "confirmed", confidence: 0.85 },
+        humanCheckpoint: { value: "The engagement lead reviews tone and client-safe language before sending.", state: "confirmed", confidence: 0.9 },
+        timeTaken: { value: "1 hour", state: "confirmed", confidence: 0.8 },
+        exceptionBranching: { value: "If a metric is missing, leave a placeholder and note the gap.", state: "inferred", confidence: 0.55 }
+      }
+    },
+    {
+      cells: {
+        workflowStep: { value: "Review and send", state: "confirmed", confidence: 0.9 },
+        description: { value: "The lead reviews the draft, requests edits, and approves it for sending to the client.", state: "confirmed", confidence: 0.9 },
+        handoff: { value: "Approved summary handed to the account owner to send.", state: "confirmed", confidence: 0.8 },
+        humanCheckpoint: { value: "Approval by the engagement lead is required before anything goes to the client.", state: "confirmed", confidence: 0.9 },
+        regulatoryContext: { value: "No regulated data expected; confirm before including any client financials.", state: "inferred", confidence: 0.5 }
+      }
+    }
+  ]
+};
+
+const GUIDED_SAMPLE_CONFIG = { label: "Sample — Weekly client status report", type: "Synthetic / sample" };
+
+let _guidedFirstRunShown = false;
+
+// Load the illustrative sample through the real grid builder. Deterministic, no
+// model call, never server-persisted (isSample); ephemeral and cleared on dismiss.
+function loadGuidedSample() {
+  if (sessionHasContent() && !(state.sessionMeta && state.sessionMeta.isSample)) {
+    persistState(); // save the current real work locally before replacing it
+    if (typeof confirm === "function" && !confirm("Load the illustrative sample? Your current session has been saved locally — reopen it any time from Open.")) return;
+  }
+  const next = normalizeLoadedState({});
+  next.onboarding = { ...next.onboarding, ...(state.onboarding || {}) };
+  next.sessionMeta = {
+    ...next.sessionMeta,
+    id: makeId("sample"),
+    name: GUIDED_SAMPLE_CONFIG.label,
+    workflowName: GUIDED_SAMPLE_CONFIG.label,
+    source: GUIDED_SAMPLE_CONFIG.type,
+    dataClassification: GUIDED_SAMPLE_CONFIG.type,
+    isSample: true
+  };
+  state = next;
+  // Real, deterministic grid construction (writes doc-extracted provenance cells).
+  state.workflowGrid = buildWorkflowGridFromExtraction(SAMPLE_EXTRACTION);
+  state.appMode = "analysis";
+  state.analysisActiveTab = "grid";
+  closeGuidedFirstRun();
+  render();
+  // Structural telemetry only, via the single gated client path (server drops it
+  // when TELEMETRY_ENABLED=false). No workflow content is sent.
+  recordTelemetryClient("first_run_sample_loaded", { label_a: "sample" });
+  toast("Loaded the illustrative sample — explore the grid, the four signals, and the recommended artifact. It is not counted in any real metrics.");
+}
+
+// Dismiss returns the app to a pristine clean start: every workflow-bearing field
+// equals normalizeLoadedState({}); the ONLY retained delta is onboarding.dismissed.
+// No sample residue, no persisted real session.
+function clearGuidedSampleState(currentState) {
+  const clean = normalizeLoadedState({});
+  clean.onboarding = {
+    ...clean.onboarding,
+    ...(currentState && currentState.onboarding ? currentState.onboarding : {}),
+    dismissed: true
+  };
+  return clean;
+}
+
+function dismissGuidedFirstRun() {
+  const wasSample = Boolean(state.sessionMeta && state.sessionMeta.isSample);
+  if (wasSample) {
+    state = clearGuidedSampleState(state);
+  } else {
+    if (!state.onboarding || typeof state.onboarding !== "object") state.onboarding = {};
+    state.onboarding.dismissed = true;
+  }
+  closeGuidedFirstRun();
+  persistState();
+  render();
+}
+
+// Auto-open ONCE on a genuinely clean start (not dismissed, no content, not the
+// sample). Guarded so render() never re-opens it. Never blocks — it is dismissible.
+function maybeShowGuidedFirstRun() {
+  if (_guidedFirstRunShown) return;
+  if (typeof document === "undefined") return;
+  if (state.onboarding && state.onboarding.dismissed) return;
+  if (sessionHasContent()) return;
+  if (state.sessionMeta && state.sessionMeta.isSample) return;
+  if (document.getElementById("guidedFirstRunModal")) return;
+  _guidedFirstRunShown = true;
+  openGuidedFirstRun();
+}
+
+function closeGuidedFirstRun() {
+  if (typeof document === "undefined") return;
+  document.getElementById("guidedFirstRunModal")?.remove();
+}
+
+function guidedFirstRunModalHtml() {
+  return `
+    <div class="ds-card" style="max-width:560px;width:100%;padding:24px;background:#0d1b2e;border:1px solid #1e3350;border-radius:12px;max-height:88vh;overflow:auto;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <strong style="font-size:1.15rem;color:#e8f4ff;">Welcome — start with a sample</strong>
+        <span class="ds-badge" style="background:#a855f722;color:#a855f7;border:1px solid #a855f755;">Illustrative</span>
+      </div>
+      <p style="margin:10px 0 0;color:#8aa0b8;font-size:0.9rem;line-height:1.6;">This studio turns a described workflow into configuration-ready AI artifacts. It keeps four signals separate, and every relied-on value carries its source:</p>
+      <ul style="margin:10px 0 0;padding-left:18px;color:#9fb3c8;font-size:0.86rem;line-height:1.7;">
+        <li><strong style="color:#cfe0f2;">Extraction confidence</strong> — did we capture the workflow correctly.</li>
+        <li><strong style="color:#cfe0f2;">Opportunity</strong> — where AI assistance is most valuable.</li>
+        <li><strong style="color:#cfe0f2;">Readiness</strong> — how usable the generated artifact is.</li>
+        <li><strong style="color:#cfe0f2;">Provenance</strong> — where each value came from.</li>
+      </ul>
+      <p style="margin:12px 0 0;color:#8aa0b8;font-size:0.86rem;line-height:1.6;">Nothing is recomputed or changed silently; generation happens only on your action, and prior versions are kept. Load a clearly-labeled sample to see the grid, the four signals, and a recommended artifact — or start fresh and describe your own in Discovery.</p>
+      <p style="margin:10px 0 0;color:#5b7186;font-size:0.78rem;">The sample is illustrative only — synthetic data, not real measured results, and never counted in portfolio totals.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px;">
+        <button type="button" data-guided-load style="background:#a855f7;color:#0d1b2e;border:none;border-radius:8px;padding:10px 18px;font-weight:700;font-size:14px;cursor:pointer;">Load the sample workflow</button>
+        <button type="button" data-guided-dismiss style="background:#0d1b2e;color:#cfe0f2;border:1px solid #1e3350;border-radius:8px;padding:10px 18px;font-weight:600;font-size:14px;cursor:pointer;">Start fresh</button>
+      </div>
+    </div>`;
+}
+
+function openGuidedFirstRun() {
+  if (typeof document === "undefined") return;
+  closeGuidedFirstRun();
+  const overlay = document.createElement("div");
+  overlay.id = "guidedFirstRunModal";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-label", "Guided first run");
+  overlay.style.cssText = "position:fixed;inset:0;z-index:1000;background:rgba(4,10,18,0.72);display:flex;align-items:center;justify-content:center;padding:24px;";
+  overlay.innerHTML = guidedFirstRunModalHtml();
+  overlay.addEventListener("click", (event) => { if (event.target === overlay) dismissGuidedFirstRun(); });
+  document.body.appendChild(overlay);
+  overlay.querySelector("[data-guided-load]")?.addEventListener("click", loadGuidedSample);
+  overlay.querySelector("[data-guided-dismiss]")?.addEventListener("click", dismissGuidedFirstRun);
+  if (typeof refreshIcons === "function") refreshIcons();
 }
 
 function metricCard(label, value, detail, icon, percent, color) {
@@ -33183,6 +33371,12 @@ function normalizeLoadedState(parsed = {}) {
     // feature load with an empty list — the no-knowledge IR/grid stays
     // byte-identical to baseline. A frozen ref is added only on explicit apply.
     appliedKnowledge: Array.isArray(parsed.appliedKnowledge) ? parsed.appliedKnowledge : [],
+    // V3-9: backfill the guided first-run flag so sessions persisted before this
+    // feature load cleanly (default: not yet dismissed → first-run can offer).
+    onboarding: {
+      ...structuredClone(defaultState.onboarding),
+      ...(parsed.onboarding && typeof parsed.onboarding === "object" ? parsed.onboarding : {})
+    },
     sessionMeta: {
       ...structuredClone(defaultState.sessionMeta),
       ...(parsed.sessionMeta || {})
@@ -33410,6 +33604,9 @@ async function syncPackagesFromServer() {
 }
 
 async function saveSessionToServer(sessionState = state, options = {}) {
+  // V3-9: NEVER persist the guided sample as a real server session — it is
+  // illustrative and must not pollute persisted real sessions or the portfolio.
+  if (sessionState && sessionState.sessionMeta && sessionState.sessionMeta.isSample) return;
   try {
     const response = await requestJson("/api/sessions", {
       method: "POST",
