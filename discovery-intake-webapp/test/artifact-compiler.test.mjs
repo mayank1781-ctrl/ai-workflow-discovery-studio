@@ -55,6 +55,8 @@ function compilerSandbox() {
       "renderWholeWorkflowOrchestrator",
       "renderTransitionArtifact",
       "renderPlatformArtifact",
+      "configProvenanceFooter", "customGptInstructionsText", "customGptConfigText",
+      "m365AgentInstructionsText", "m365AgentManifest", "buildArtifactCopyBlocks",
       "buildRecommendedArtifactPackage",
       "buildFullArtifactBundle",
       "artifactActionFromGap",

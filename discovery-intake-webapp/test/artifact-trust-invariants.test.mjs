@@ -41,6 +41,8 @@ function compilerSandbox() {
       "artifactBullets", "artifactCautionSection", "renderChatGptPrompt", "renderCustomGptConfig", "renderMicrosoftCopilotConfig",
       "renderGithubCopilotDeveloperPack", "renderGenericEnterpriseCopilotSpec",
       "renderWholeWorkflowOrchestrator", "renderTransitionArtifact", "renderPlatformArtifact",
+      "configProvenanceFooter", "customGptInstructionsText", "customGptConfigText",
+      "m365AgentInstructionsText", "m365AgentManifest", "buildArtifactCopyBlocks",
       "buildRecommendedArtifactPackage", "buildFullArtifactBundle",
       "getField", "patchField", "deriveLegacyCellSource", "newGridCell", "newGridStep",
       "newAiPatternEntry", "makeId"

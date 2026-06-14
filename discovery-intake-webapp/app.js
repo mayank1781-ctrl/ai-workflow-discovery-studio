@@ -5708,7 +5708,13 @@ function renderCustomGptConfig(ir) {
       `Help me run ${ir.artifactName}.`,
       "Check whether my input is complete before drafting.",
       "Create a reviewer checklist for this workflow step."
-    ])
+    ]),
+    "",
+    "## Importable Configuration (copy-paste)",
+    "Paste each field into the Custom GPT builder. Actions/integrations are not included (future candidate only).",
+    "```",
+    customGptConfigText(ir),
+    "```"
   ].join("\n");
 }
 
@@ -5730,7 +5736,13 @@ function renderMicrosoftCopilotConfig(ir) {
     "## Human Review",
     artifactBullets(ir.humanReview),
     "",
-    ir.noIntegrationNote
+    ir.noIntegrationNote,
+    "",
+    "## Importable Agent Configuration (JSON)",
+    "Declarative-agent core fields. No actions, plugins, connectors, or API. Validate against your current tenant schema before import.",
+    "```json",
+    JSON.stringify(m365AgentManifest(ir), null, 2),
+    "```"
   ].join("\n");
 }
 
@@ -5834,6 +5846,96 @@ function renderTransitionArtifact(ir) {
   ].join("\n");
 }
 
+// ===========================================================================
+// V3-5: importable / deployable config blocks. Pure builders derived ONLY from
+// the IR (same provenance the artifact already carries). NO live integrations,
+// NO fake API endpoints/schemas/webhooks/writeback. Each block states the
+// no-integration assumption and labels integrations as a future candidate. The
+// builders feed BOTH the rendered markdown (so exports/snapshots carry them) and
+// the structured `copyBlocks` field (so the UI gets one-click Copy buttons).
+// Importable text must contain NO line beginning with "## " (keeps per-surface
+// section signatures distinct).
+// ===========================================================================
+
+function configProvenanceFooter(ir) {
+  const p = ir.provenanceSummary || {};
+  const ev = Number(p.evidenceBackedCells || 0);
+  const inf = Number(p.inferredCells || 0);
+  return `Provenance: ${ev} evidence-backed field${ev === 1 ? "" : "s"}, ${inf} inferred - confirm inferred values before deploying.`;
+}
+
+// Plain-text Custom GPT instructions (no markdown headers, paste-ready).
+function customGptInstructionsText(ir) {
+  const lines = [`Purpose: ${ir.purpose}`, "Use only the provided context and ask before filling gaps. Do not invent values."];
+  if (Array.isArray(ir.rules) && ir.rules.length) { lines.push("Rules:"); ir.rules.forEach((r) => lines.push(`- ${r}`)); }
+  if (Array.isArray(ir.humanReview) && ir.humanReview.length) { lines.push("Human review:"); ir.humanReview.forEach((r) => lines.push(`- ${r}`)); }
+  if (Array.isArray(ir.doNotAutomateNotes) && ir.doNotAutomateNotes.length) { lines.push("Do not automate:"); ir.doNotAutomateNotes.forEach((r) => lines.push(`- ${r}`)); }
+  if (Array.isArray(ir.cautionFlags) && ir.cautionFlags.length) { lines.push("Confirm before relying on this assistant:"); ir.cautionFlags.forEach((r) => lines.push(`- ${r}`)); }
+  lines.push(ir.noIntegrationNote);
+  return lines.join("\n");
+}
+
+// A field-by-field block the user pastes into the Custom GPT builder.
+function customGptConfigText(ir) {
+  const starters = [
+    `Help me run ${ir.artifactName}.`,
+    "Check whether my input is complete before drafting.",
+    "Create a reviewer checklist for this workflow step."
+  ];
+  const knowledge = (Array.isArray(ir.knowledgeSources) && ir.knowledgeSources.length)
+    ? ir.knowledgeSources.join("; ")
+    : "None attached - add approved SOPs, templates, or policy extracts before reuse.";
+  return [
+    `Name: ${ir.artifactName}`,
+    `Description: ${ir.purpose}`,
+    "Instructions:",
+    customGptInstructionsText(ir),
+    "Conversation starters:",
+    ...starters.map((s) => `- ${s}`),
+    `Knowledge: ${knowledge}`,
+    "Capabilities: Web Browsing OFF, DALL-E OFF, Code Interpreter OFF.",
+    `Actions: None. No API actions, schemas, or webhooks. ${FUTURE_INTEGRATION_NOTE}`,
+    configProvenanceFooter(ir)
+  ].join("\n");
+}
+
+// Plain-text instructions for the declarative-agent manifest (single field).
+function m365AgentInstructionsText(ir) {
+  const parts = [ir.purpose];
+  if (Array.isArray(ir.rules) && ir.rules.length) parts.push(`Rules: ${ir.rules.join("; ")}`);
+  if (Array.isArray(ir.humanReview) && ir.humanReview.length) parts.push(`Human review: ${ir.humanReview.join("; ")}`);
+  parts.push(ir.noIntegrationNote);
+  return parts.join(" ");
+}
+
+// Declarative-agent CORE fields only. No actions/plugins/connectors/api/$schema
+// (validate against the current tenant schema before import — see surrounding doc).
+function m365AgentManifest(ir) {
+  return {
+    name: ir.artifactName,
+    description: ir.purpose,
+    instructions: m365AgentInstructionsText(ir),
+    conversation_starters: [
+      { title: `Help me run ${ir.artifactName}` },
+      { title: "Check whether my input is complete before drafting" }
+    ]
+  };
+}
+
+// Structured, one-click-copyable blocks per surface. Every surface returns >=1.
+function buildArtifactCopyBlocks(ir, surface, content) {
+  if (surface === "customGPT") {
+    return [{ id: "customgpt-config", label: "Custom GPT configuration (paste into the GPT builder)", language: "text", text: customGptConfigText(ir) }];
+  }
+  if (surface === "microsoft365Copilot" || surface === "copilotStudio") {
+    return [{ id: "m365-agent-json", label: "Copilot agent configuration (JSON - import)", language: "json", text: JSON.stringify(m365AgentManifest(ir), null, 2) }];
+  }
+  if (surface === "chatgptPrompt") {
+    return [{ id: "chatgpt-prompt", label: "ChatGPT prompt (copy)", language: "markdown", text: content }];
+  }
+  return [{ id: "full-artifact", label: `${artifactSurfaceLabel(surface)} (full artifact)`, language: "markdown", text: content }];
+}
+
 function renderPlatformArtifact(ir, targetSurface = ir.targetSurface) {
   const surface = normalizeArtifactTargetSurface(targetSurface === "recommend" ? ir.targetSurface : targetSurface);
   // Title each surface with ITS OWN label so a bundle never mislabels (e.g. a
@@ -5857,7 +5959,10 @@ function renderPlatformArtifact(ir, targetSurface = ir.targetSurface) {
     targetSurface: surface,
     label: artifactSurfaceLabel(surface),
     title: `${artifactSurfaceLabel(surface)} - ${ir.baseName || ir.artifactName}`,
-    content
+    content,
+    // V3-5: one-click-copyable / importable config blocks for this surface
+    // (snapshot-backed automatically — they ride the package into the snapshot).
+    copyBlocks: buildArtifactCopyBlocks(surfaceIr, surface, content)
   };
 }
 
@@ -7684,6 +7789,7 @@ function implementationGuide(recipeText) {
 async function exportWorkflowWord(mode = "recipe") {
   const steps = analysisGridSteps();
   if (!steps.length) { toast("Nothing to export yet — capture a workflow first."); return; }
+  recordExportAudit(mode === "engineering" ? "engineering-word" : "recipe-word"); // V3-4 fold-in: log the export
 
   let docx;
   try {
@@ -8437,6 +8543,34 @@ function artifactOverviewHtml(pkg) {
     </div>`;
 }
 
+// V3-5: render the recommended surface's importable config block(s) with a
+// one-click Copy button each. Reads the LIVE package's copyBlocks (the current
+// config); the saved snapshot carries the same blocks for export.
+function artifactImportableConfigHtml(pkg) {
+  const blocks = Array.isArray(pkg?.recommendedArtifact?.copyBlocks) ? pkg.recommendedArtifact.copyBlocks : [];
+  if (!blocks.length) return `<div style="color:#5b7186;font-size:12px;">No importable configuration for this surface.</div>`;
+  const intro = `<p style="margin:0 0 8px;color:#8aa0b8;font-size:12px;line-height:1.5;">Copy-paste / import-ready configuration for the recommended surface. No live integrations — actions are a future candidate only.</p>`;
+  return intro + blocks.map((b) => `
+    <div style="margin-top:8px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">
+        <span style="font-size:11px;color:#8aa0b8;">${escapeHtml(b.label)}</span>
+        <button type="button" class="secondary-button compact" data-config-copy="${escapeHtml(b.id)}">Copy</button>
+      </div>
+      <pre data-config-text="${escapeHtml(b.id)}" style="margin:0;background:#0a1422;border:1px solid #1a2a3a;border-radius:8px;padding:10px 12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.5;color:#9fb3c8;white-space:pre-wrap;word-break:break-word;max-height:300px;overflow:auto;">${escapeHtml(b.text)}</pre>
+    </div>`).join("");
+}
+
+// Copy a config block to the clipboard (toast feedback; never hard-disabled).
+function copyConfigText(text, btn) {
+  const restore = btn ? btn.textContent : "";
+  const done = () => { if (btn) { btn.textContent = "Copied!"; window.setTimeout(() => { btn.textContent = restore || "Copy"; }, 1500); } };
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(() => toast("Copy failed — select the block and copy manually."));
+  } else {
+    toast("Copy isn't supported here — select the block and copy manually.");
+  }
+}
+
 function artifactCompilerCardHtml(step, index) {
   const compiler = ensureArtifactCompilerState();
   const context = artifactWorkflowContext();
@@ -8497,6 +8631,7 @@ function artifactCompilerCardHtml(step, index) {
       ${artifactAccordionHtml("What to confirm next", "Actionable gaps and tentative assumptions", actionBody, { open: false, badge: hasOpenActionItems ? `${actions.length} item${actions.length === 1 ? "" : "s"}` : "No blockers", badgeClass: hasOpenActionItems ? "ds-badge-amber" : "ds-badge-teal" })}
       ${artifactAccordionHtml("Test cases", "Happy path / Missing input / Exception path", artifactTestCasePackHtml(ir), { badge: "3 paths", badgeClass: "ds-badge-purple" })}
       ${artifactAccordionHtml("Evidence and safeguards", "Provenance, review gates, and future integrations", artifactEvidenceQualityHtml(ir), { badge: pkg.profile.needsHumanApproval ? "Review required" : "Review advised", badgeClass: pkg.profile.needsHumanApproval ? "ds-badge-amber" : "ds-badge-dim" })}
+      ${artifactAccordionHtml("Importable configuration", "Copy-paste / import-ready config for the recommended surface", artifactImportableConfigHtml(pkg), { badge: "Deploy-ready", badgeClass: "ds-badge-teal" })}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
         <button type="button" class="primary-button compact" data-artifact-compile="${escapeHtml(step.id)}">Compile recommended package</button>
         <button type="button" class="secondary-button compact" data-artifact-bundle="${escapeHtml(step.id)}">Generate full bundle</button>
@@ -8791,6 +8926,15 @@ function renderAnalysisTabRecipe() {
     btn.addEventListener("click", (event) => {
       event.stopPropagation();
       markSnapshotReviewed(btn.dataset.artifactReview);
+    });
+  });
+  container.querySelectorAll("[data-config-copy]").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const pre = container.querySelector(`[data-config-text="${btn.dataset.configCopy}"]`);
+      const text = pre ? pre.textContent : "";
+      if (!text) { toast("Nothing to copy yet."); return; }
+      copyConfigText(text, btn);
     });
   });
 
@@ -10473,6 +10617,7 @@ async function handleEngineeringExport() {
     notify("Capture engineering details (systems, data processing, rules, etc.) before exporting.");
     return;
   }
+  recordExportAudit("engineering-doc"); // V3-4 fold-in: log the export
 
   btn.textContent = "Preparing…";
   btn.disabled = true;
