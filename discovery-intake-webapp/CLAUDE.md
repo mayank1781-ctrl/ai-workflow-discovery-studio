@@ -113,6 +113,14 @@ handoff steps. Do not create a fake AI agent. Generate a transition artifact: wh
 waited on, decision owner, required information, AI role, what AI must not decide,
 reminder/escalation prompt, next-step routing note, human review rule.
 
+**Track, don't execute (eval suites)** — the app **never calls a live model to run an eval.**
+It structures the suite (named, versioned, snapshot-backed acceptance cases with a known-good
+expectation and at least one anti-goal) and **records** the pass/fail/n-a outcomes a user (or an
+external process) supplies. No auto-run, no live endpoint, no model call anywhere in the eval
+flow. The results log is append-only and reuses the audit primitive (hash-chained, frozen, no
+edit/delete path); with no results recorded the suite reads "not yet evaluated" and never
+fabricates a pass.
+
 ## Keep these four concepts separate in code and UI
 
 - **Extraction confidence** — did we capture the workflow correctly.
