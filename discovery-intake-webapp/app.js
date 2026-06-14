@@ -9381,6 +9381,122 @@ function engineeringImplementationTestPlanHtml(packages = []) {
     </div>`;
 }
 
+// === V3-8: IR-level version diff ============================================
+// A read-only, deterministic, STRUCTURAL diff between two STORED Agent Recipe IR
+// snapshots of the same step's compiled artifact (compiledPrior vs compiled).
+// Pure: mutates neither IR, recomputes nothing, calls no model, never re-derives
+// an IR (no buildAgentRecipeIr). The same two versions always produce the same
+// diff — field order is canonical (IR_DIFF_FIELDS) and object comparison is
+// key-order-insensitive (canonicalJson).
+
+// Deterministic serialization with recursively SORTED object keys, so equality
+// and ordering are insensitive to key insertion order. Array order is preserved
+// (a reordered array is a real change). Read-only.
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson(value[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(value === undefined ? null : value);
+}
+
+// The canonical field walk order for the IR diff. Fixed (not Object.keys) so the
+// diff rows are always emitted in the same order. Mirrors the buildAgentRecipeIr
+// return shape. Opportunity score is deliberately ABSENT — it is a separate
+// signal (getStepOpportunityMeta), not part of the IR.
+const IR_DIFF_FIELDS = [
+  "recipeScope", "targetSurface", "deploymentLevel", "integrationMode",
+  "baseName", "artifactName", "purpose", "trigger",
+  "inputs", "outputs", "systemsMentioned", "knowledgeSources", "rules", "exceptions", "humanReview",
+  "dataSensitivity", "regulatoryContext",
+  "evidenceBackedFacts", "designChoices", "assumptions", "knownGaps", "blockedClaims",
+  "testCases", "doNotAutomateNotes", "cautionFlags",
+  "policyCitations", "appliedKnowledge", "futureIntegrationCandidates",
+  "provenanceSummary", "readinessScore", "transition", "recommendationReason"
+];
+
+// Pure structural diff of two stored IRs. Returns { changed, fields:[...] }; an
+// identical pair → { changed:false, fields:[] }. Array fields report sorted
+// added/removed raw items; scalar/object fields report before/after.
+function diffIrVersions(priorIr, currentIr) {
+  const a = priorIr && typeof priorIr === "object" ? priorIr : null;
+  const b = currentIr && typeof currentIr === "object" ? currentIr : null;
+  const fields = [];
+  for (const key of IR_DIFF_FIELDS) {
+    const av = a ? a[key] : undefined;
+    const bv = b ? b[key] : undefined;
+    if (canonicalJson(av) === canonicalJson(bv)) continue; // unchanged → omit
+    const aEmpty = av === undefined || av === null || (Array.isArray(av) && av.length === 0);
+    const bEmpty = bv === undefined || bv === null || (Array.isArray(bv) && bv.length === 0);
+    const kind = aEmpty && !bEmpty ? "added" : !aEmpty && bEmpty ? "removed" : "changed";
+    const entry = { field: key, kind };
+    if (Array.isArray(av) || Array.isArray(bv)) {
+      // Compare by canonical key but surface the RAW items, ordered deterministically.
+      const aMap = new Map();
+      (Array.isArray(av) ? av : []).forEach((v) => aMap.set(canonicalJson(v), v));
+      const bMap = new Map();
+      (Array.isArray(bv) ? bv : []).forEach((v) => bMap.set(canonicalJson(v), v));
+      entry.addedItems = [...bMap.keys()].filter((k) => !aMap.has(k)).sort().map((k) => bMap.get(k));
+      entry.removedItems = [...aMap.keys()].filter((k) => !bMap.has(k)).sort().map((k) => aMap.get(k));
+      entry.beforeCount = aMap.size;
+      entry.afterCount = bMap.size;
+    } else {
+      entry.before = av === undefined ? null : av;
+      entry.after = bv === undefined ? null : bv;
+    }
+    fields.push(entry);
+  }
+  return { changed: fields.length > 0, fields };
+}
+
+// A short, human label for one diff item (string → itself; object → name/ref/
+// field/quote when present, else compact canonical JSON). Display only.
+function irDiffItemLabel(value) {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object") {
+    const pick = value.name || value.ref || value.field || value.title || value.quote || value.id;
+    if (pick) return String(pick);
+    return canonicalJson(value).slice(0, 120);
+  }
+  return String(value);
+}
+
+// Compact display of a scalar/object before/after value.
+function irDiffScalar(value) {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "object") return canonicalJson(value).slice(0, 160);
+  return String(value);
+}
+
+// Read-only render of the IR diff for the version surface. No compute, no fetch.
+function irDiffHtml(priorIr, currentIr) {
+  const diff = diffIrVersions(priorIr, currentIr);
+  if (!diff.changed) {
+    return `<div style="color:#5b7186;font-size:11px;">No IR changes between these versions.</div>`;
+  }
+  const kindColor = { added: "#00d4b4", removed: "#ff4fc8", changed: "#f59e0b" };
+  const rows = diff.fields.map((f) => {
+    const color = kindColor[f.kind] || "#8aa0b8";
+    const badge = `<span style="display:inline-block;background:${color}22;color:${color};border:1px solid ${color}55;border-radius:99px;padding:0 7px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">${f.kind}</span>`;
+    let detail;
+    if (f.addedItems || f.removedItems) {
+      const lines = [
+        ...(f.addedItems || []).map((v) => `<span style="color:#00d4b4;">+ ${escapeHtml(irDiffItemLabel(v))}</span>`),
+        ...(f.removedItems || []).map((v) => `<span style="color:#ff4fc8;">− ${escapeHtml(irDiffItemLabel(v))}</span>`)
+      ];
+      detail = lines.length ? lines.join("<br>") : `<span style="color:#8aa0b8;">order changed (${f.beforeCount} → ${f.afterCount})</span>`;
+    } else {
+      detail = `<span style="color:#8aa0b8;">${escapeHtml(irDiffScalar(f.before))}</span> → <span style="color:#cfe0f2;">${escapeHtml(irDiffScalar(f.after))}</span>`;
+    }
+    return `
+      <div style="padding:6px 0;border-top:1px solid #16263a;">
+        <div style="display:flex;align-items:center;gap:6px;">${badge}<strong style="color:#cfe0f2;font-size:11px;">${escapeHtml(f.field)}</strong></div>
+        <div style="margin-top:3px;font-size:11px;line-height:1.5;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">${detail}</div>
+      </div>`;
+  }).join("");
+  return `<div style="font-size:11px;">${rows}</div>`;
+}
+
 function artifactSnapshotHtml(snapshot, prior, emptyText) {
   if (!snapshot) {
     return `<div style="background:#0a1422;border:1px dashed #1a2a3a;border-radius:8px;padding:12px 14px;color:#5b7186;font-size:12px;line-height:1.5;">${escapeHtml(emptyText)}</div>`;
@@ -9402,6 +9518,7 @@ function artifactSnapshotHtml(snapshot, prior, emptyText) {
         ${meta.when ? `<span style="font-size:11px;color:#5b7186;">Compiled ${escapeHtml(meta.when)}</span>` : ""}
       </div>
       <div style="font-size:12px;color:#8aa0b8;line-height:1.55;">${escapeHtml(shortArtifactPreview(meta.content))}</div>
+      ${(prior && prior.package && prior.package.ir && snapshot.package && snapshot.package.ir) ? `<details style="margin-top:8px;"><summary style="font-size:11px;color:#8aa0b8;cursor:pointer;">IR changes vs previous version</summary><div style="margin-top:6px;">${irDiffHtml(prior.package.ir, snapshot.package.ir)}</div></details>` : ""}
       ${prior ? `<details style="margin-top:8px;"><summary style="font-size:11px;color:#8aa0b8;cursor:pointer;">Previous artifact preserved${priorMeta.when ? ` · ${escapeHtml(priorMeta.when)}` : ""}</summary><div style="margin-top:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.55;color:#8aa0b8;white-space:pre-wrap;">${escapeHtml((priorMeta.content || "").slice(0, 1800))}</div></details>` : ""}
     </div>`;
 }
