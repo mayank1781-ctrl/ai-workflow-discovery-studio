@@ -1089,6 +1089,11 @@ const defaultState = {
   // recompute so a changed figure is visibly a change (Invariant 2).
   businessCaseSnapshot: null,
   businessCaseSnapshotPrior: null,
+  // V3-3: uploaded AI policy (a relied-on value). Shape:
+  // { fileName, uploadedAt, clauses:[{id,ref,heading,text,source,confidence}] }.
+  // null = no policy → artifacts use the generic advisory caution. Read-only at
+  // generation time; replacing or removing it is always an explicit user action.
+  aiPolicy: null,
   // PR 30 Slice 2: per-session asked-question memory. Entries are deduped on
   // intent (target cell keys), never exact text. See recordAskedQuestion().
   questionHistory: [],
@@ -5296,10 +5301,127 @@ function scoreRecipeReadiness(step, profile = buildRecipeDeploymentProfile(step)
   return { score, label, blockers, strengths, summary };
 }
 
+// === V3-3: AI-policy ingestion (deterministic, NO LLM anywhere) =============
+// An uploaded AI policy grounds artifact caution/human-review language in the
+// firm's OWN clauses. Clause text is kept BYTE-VERBATIM (a relied-on value, never
+// invented or rewritten) and carries the existing provenance shape
+// (source:"doc-extracted" + confidence). Segmentation + clause matching are pure
+// and deterministic so the whole path is unit-testable without a live model.
+
+// Keyword cues mapping each trust-critical caution area (ARTIFACT_CAUTION_AREAS
+// keys) to the policy language that typically governs it. Lower-cased substring
+// match only — no regex, no inference.
+const POLICY_AREA_CUES = {
+  dataProcessing: ["data handling", "handle data", "process data", "data processing", "store", "storage", "transmit", "data flow", "data transfer", "input data", "output data"],
+  dataSensitivity: ["sensitiv", "confidential", "classification", "classified", "pii", "personal data", "personal information", "restricted", "mnpi", "non-public", "client data", "proprietary"],
+  rulesDecisionLogic: ["decision", "decide", "rule", "criteria", "logic", "determin", "judgment", "judgement", "policy requires"],
+  humanCheckpoint: ["human review", "human-in-the-loop", "human in the loop", "human oversight", "oversight", "approval", "approve", "sign-off", "sign off", "supervis", "reviewed by", "accountable", "verify"],
+  exceptionBranching: ["exception", "escalat", "edge case", "deviation", "incident", "failure", "error handling"],
+  regulatoryContext: ["regulat", "complian", "legal", "gdpr", "ccpa", "finra", "audit", "retention", "record-keeping", "recordkeeping", "records", "statutory", "law"]
+};
+
+// Truncate for DISPLAY only; the full verbatim clause is preserved in state and
+// in the IR citation's `quote`.
+function policyClip(value, max) {
+  const s = String(value == null ? "" : value);
+  const n = typeof max === "number" ? max : 200;
+  return s.length > n ? `${s.slice(0, n).trimEnd()}…` : s;
+}
+
+// Split raw policy text into VERBATIM clauses, each a contiguous slice of the
+// (newline-normalized) source so `source.includes(clause.text)` always holds.
+// Falls back to blank-line paragraphs when no structural markers are present, so
+// every policy still yields provenance-tagged clauses.
+function extractPolicyClauses(rawText) {
+  const text = String(rawText == null ? "" : rawText).replace(/\r\n?/g, "\n").trim();
+  if (!text) return [];
+  // Matches a numbered ("1", "1.2"), lettered ("(a)", "(3)"), "Section N", or
+  // "§N" clause start. Created fresh per call so there is no shared lastIndex.
+  const marker = /(?:^|\n)([ \t]*)(?:(\d+(?:\.\d+)*)[.)]\s+|\(([0-9]+|[a-zA-Z])\)\s+|(?:Section|SECTION)\s+(\d+(?:\.\d+)*)[:.\s]|§\s*(\d+(?:\.\d+)*)[:.\s])/g;
+  const marks = [];
+  let m;
+  while ((m = marker.exec(text)) !== null) {
+    const lead = m[1] || "";
+    const pos = m.index + (text[m.index] === "\n" ? 1 : 0) + lead.length;
+    let ref;
+    let confidence;
+    if (m[2]) { ref = m[2]; confidence = 0.9; }
+    else if (m[3]) { ref = `(${m[3]})`; confidence = 0.8; }
+    else if (m[4]) { ref = `Section ${m[4]}`; confidence = 0.9; }
+    else { ref = `§${m[5]}`; confidence = 0.9; }
+    marks.push({ pos, ref, confidence });
+    if (marker.lastIndex === m.index) marker.lastIndex += 1;
+  }
+
+  const clauses = [];
+  const push = (ref, slice, confidence) => {
+    const clean = slice.trim();
+    if (!clean) return;
+    clauses.push({
+      id: `clause-${clauses.length + 1}`,
+      ref,
+      heading: clean.split("\n")[0].trim().slice(0, 120),
+      text: clean, // VERBATIM contiguous slice of the normalized source
+      source: "doc-extracted",
+      confidence
+    });
+  };
+
+  if (marks.length) {
+    for (let i = 0; i < marks.length; i += 1) {
+      const start = marks[i].pos;
+      const end = i + 1 < marks.length ? marks[i + 1].pos : text.length;
+      push(marks[i].ref, text.slice(start, end), marks[i].confidence);
+    }
+  } else {
+    text.split(/\n[ \t]*\n/).forEach((para) => push(`¶${clauses.length + 1}`, para, 0.6));
+  }
+  return clauses;
+}
+
+// Returns the best-matching clause for a caution area (cellKey), or null. Highest
+// cue-hit count wins; ties keep the EARLIEST clause (stable + deterministic).
+function matchPolicyClause(policy, cellKey) {
+  const clauses = policy && Array.isArray(policy.clauses) ? policy.clauses : [];
+  const cues = POLICY_AREA_CUES[cellKey] || [];
+  if (!clauses.length || !cues.length) return null;
+  let best = null;
+  let bestScore = 0;
+  for (const clause of clauses) {
+    const hay = `${clause.heading || ""} ${clause.text || ""}`.toLowerCase();
+    let score = 0;
+    for (const cue of cues) if (hay.includes(cue)) score += 1;
+    if (score > bestScore) { bestScore = score; best = clause; }
+  }
+  return bestScore > 0 ? best : null;
+}
+
+// A human-review line grounded in the first matching clause across the given
+// caution areas, or "" when the policy addresses none of them (caller falls back
+// to the existing generic advisory text). Never asserts approval.
+function policyReviewLine(policy, cellKeys) {
+  const keys = Array.isArray(cellKeys) ? cellKeys : [cellKeys];
+  for (const key of keys) {
+    const clause = matchPolicyClause(policy, key);
+    if (clause) {
+      const area = ARTIFACT_CAUTION_AREAS[key] || "data handling";
+      return `Per uploaded policy ${clause.ref}, review ${area} before controlled use: "${policyClip(clause.text, 200)}"`;
+    }
+  }
+  return "";
+}
+
 function buildAgentRecipeIr(step, workflowContext = {}, options = {}) {
   const profile = buildRecipeDeploymentProfile(step, workflowContext, options);
   const transition = detectTransitionStep(step);
   const readiness = scoreRecipeReadiness(step, profile);
+  // V3-3: an uploaded AI policy (with clauses) grounds caution/review language in
+  // the firm's OWN clauses. `policy` stays null unless a real policy is present,
+  // so with no policy every branch below is BYTE-IDENTICAL to pre-V3-3 output.
+  const policy = (workflowContext && workflowContext.policy
+    && Array.isArray(workflowContext.policy.clauses) && workflowContext.policy.clauses.length)
+    ? workflowContext.policy : null;
+  const policyFileName = policy && policy.fileName ? String(policy.fileName) : "the uploaded policy";
   const baseName = compilerCellText(step, "name") || "Workflow step";
   const facts = [];
   const assumptions = [];
@@ -5331,13 +5453,35 @@ function buildAgentRecipeIr(step, workflowContext = {}, options = {}) {
     .filter((cell) => cell.key in ARTIFACT_CAUTION_AREAS)
     .map((cell) => {
       const area = ARTIFACT_CAUTION_AREAS[cell.key];
-      if (!cell.value) return `${cell.label} (${area}) is not captured - confirm it before relying on this artifact.`;
+      // V3-3: ground the caution in a specific uploaded-policy clause when one
+      // governs this area. `cite` is "" with no policy → byte-identical text.
+      const clause = policy ? matchPolicyClause(policy, cell.key) : null;
+      const cite = clause ? ` Per uploaded policy ${clause.ref}.` : "";
+      if (!cell.value) return `${cell.label} (${area}) is not captured - confirm it before relying on this artifact.${cite}`;
       if (cell.inferredOnly || cell.lowConfidence) {
-        return `${cell.label} (${area}) is AI-inferred${cell.confidence !== null ? ` at ${Math.round(cell.confidence * 100)}% confidence` : ""} - confirm it before relying on this artifact.`;
+        return `${cell.label} (${area}) is AI-inferred${cell.confidence !== null ? ` at ${Math.round(cell.confidence * 100)}% confidence` : ""} - confirm it before relying on this artifact.${cite}`;
       }
       return "";
     })
     .filter(Boolean);
+
+  // V3-3: per-area policy citations (provenance-carrying, verbatim quotes). Empty
+  // with no policy, so the IR field is additive and the no-policy IR is unchanged.
+  const policyCitations = policy
+    ? Object.keys(ARTIFACT_CAUTION_AREAS).map((cellKey) => {
+        const clause = matchPolicyClause(policy, cellKey);
+        if (!clause) return null;
+        return {
+          area: ARTIFACT_CAUTION_AREAS[cellKey],
+          field: cellKey,
+          ref: clause.ref,
+          clauseId: clause.id,
+          quote: clause.text,
+          source: clause.source,
+          confidence: clause.confidence
+        };
+      }).filter(Boolean)
+    : [];
 
   const factValue = (key) => facts.find((item) => item.field === key)?.value || "";
   const rules = [];
@@ -5351,7 +5495,10 @@ function buildAgentRecipeIr(step, workflowContext = {}, options = {}) {
     humanReview.push(factValue("humanCheckpoint") || transition.humanReviewRule || "Human review is required before the artifact is used downstream.");
   }
   if (profile.dataSensitivity === "high" || compilerCellText(step, "regulatoryContext")) {
-    humanReview.push("Review data handling, sensitivity, and policy guidance before controlled use.");
+    // V3-3: cite the governing policy clause when present; otherwise the generic
+    // line, byte-identical to pre-V3-3.
+    const grounded = policy ? policyReviewLine(policy, ["dataProcessing", "dataSensitivity", "regulatoryContext"]) : "";
+    humanReview.push(grounded || "Review data handling, sensitivity, and policy guidance before controlled use.");
   }
   if (!humanReview.length) humanReview.push("A person reviews output quality before use.");
 
@@ -5438,11 +5585,16 @@ function buildAgentRecipeIr(step, workflowContext = {}, options = {}) {
     blockedClaims: [
       "No live integrations, API actions, writeback, automated external tool use, or automated approvals are included.",
       "Readiness is not formal compliance approval.",
-      "Policy-specific claims require uploaded policy evidence."
+      // V3-3: gated so the NO-policy array is byte-identical to pre-V3-3. With a
+      // policy, the line states the citations are advisory — never "approved".
+      policy
+        ? `Policy citations are quoted verbatim from ${policyFileName}; they are advisory and require human review, and do not constitute compliance approval.`
+        : "Policy-specific claims require uploaded policy evidence."
     ],
     testCases,
     doNotAutomateNotes,
     cautionFlags,
+    policyCitations,
     futureIntegrationCandidates,
     provenanceSummary: readiness.summary,
     readinessScore: readiness,
@@ -5463,13 +5615,35 @@ function artifactBullets(items, fallback = "Not captured yet.") {
 // the lines to splice in, or [] when nothing is uncertain (stay polished).
 function artifactCautionSection(ir) {
   const flags = Array.isArray(ir.cautionFlags) ? ir.cautionFlags : [];
-  if (!flags.length) return [];
-  return [
-    "## Caution - Confirm Before Use",
-    "The items below are missing or AI-inferred and affect data handling, decisions, approvals, exceptions, rules, or regulatory risk. Confirm them before relying on this artifact.",
-    artifactBullets(flags),
-    ""
-  ];
+  const citations = Array.isArray(ir.policyCitations) ? ir.policyCitations : [];
+  if (!flags.length && !citations.length) return [];
+  const lines = [];
+  if (flags.length) {
+    lines.push(
+      "## Caution - Confirm Before Use",
+      "The items below are missing or AI-inferred and affect data handling, decisions, approvals, exceptions, rules, or regulatory risk. Confirm them before relying on this artifact.",
+      artifactBullets(flags),
+      ""
+    );
+  }
+  // V3-3: ground the caution in the uploaded policy's own clauses (verbatim
+  // quotes, provenance doc-extracted). Advisory only — never compliance approval.
+  if (citations.length) {
+    const byRef = new Map();
+    citations.forEach((c) => {
+      const entry = byRef.get(c.ref) || { ref: c.ref, quote: c.quote, areas: [] };
+      if (!entry.areas.includes(c.area)) entry.areas.push(c.area);
+      byRef.set(c.ref, entry);
+    });
+    const bullets = [...byRef.values()].map((e) => `${e.ref} — ${e.areas.join(", ")}: "${policyClip(e.quote, 240)}"`);
+    lines.push(
+      "## Policy Basis (from uploaded policy)",
+      "These cautions are grounded in the uploaded AI policy. Quotes are verbatim policy text (provenance: doc-extracted); they are advisory and require human review — this is not compliance approval.",
+      artifactBullets(bullets),
+      ""
+    );
+  }
+  return lines;
 }
 
 function renderChatGptPrompt(ir) {
@@ -7751,7 +7925,10 @@ function artifactWorkflowContext() {
     workflowName: analysisWorkflowName() || sessionNameForHeader() || "Workflow",
     targetSurface: ensureArtifactCompilerState().targetSurface,
     recipeScope: ensureArtifactCompilerState().recipeScope,
-    steps: analysisGridSteps()
+    steps: analysisGridSteps(),
+    // V3-3: the uploaded AI policy (read-only at generation time). Null unless a
+    // policy with clauses is loaded → artifacts use the generic advisory caution.
+    policy: state.aiPolicy && Array.isArray(state.aiPolicy.clauses) && state.aiPolicy.clauses.length ? state.aiPolicy : null
   };
 }
 
@@ -8130,12 +8307,69 @@ function artifactCompilerCardHtml(step, index) {
     </div>`;
 }
 
+// V3-3: engagement-level AI-policy panel. Shows the uploaded policy and its
+// clauses WITH provenance (the policy is a relied-on value), or an upload control
+// when none is loaded. Buttons are never hard-disabled (toast-guard + return).
+function renderPolicyPanelHtml() {
+  const policy = state.aiPolicy;
+  const has = policy && Array.isArray(policy.clauses) && policy.clauses.length;
+  if (!has) {
+    return `
+      <div class="artifact-package-card" style="margin-top:16px;background:#09131f;border:1px solid #1e3350;border-radius:10px;padding:14px 16px;">
+        <div class="ds-micro" style="margin-bottom:5px;">AI policy grounding</div>
+        <strong style="display:block;color:#e8f4ff;font-size:14px;">No AI policy uploaded</strong>
+        <p style="margin:6px 0 10px;color:#8aa0b8;font-size:12px;line-height:1.5;">Upload your firm's AI policy to ground artifact caution and human-review language in specific policy clauses. Without one, artifacts use the generic advisory caution.</p>
+        <input type="file" id="policyFileInput" accept=".txt,.md,.pdf,.doc,.docx" style="display:none;">
+        <button type="button" class="secondary-button compact" id="policyUploadBtn">Upload AI policy</button>
+      </div>`;
+  }
+  const when = Number.isNaN(Date.parse(policy.uploadedAt || "")) ? "" : new Date(Date.parse(policy.uploadedAt)).toLocaleString("en-US");
+  const clauseRows = policy.clauses.map((c) => `
+    <div style="margin-top:8px;padding:8px 10px;background:#0a1422;border:1px solid #1a2a3a;border-radius:8px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span style="font-weight:700;color:#cfe0f2;font-size:12px;">${escapeHtml(c.ref)}</span>
+        ${provenanceBadgeHtml(c.source, c.confidence)}
+      </div>
+      <p style="margin:5px 0 0;color:#9fb3c8;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word;">${escapeHtml(policyClip(c.text, 220))}</p>
+    </div>`).join("");
+  return `
+    <div class="artifact-package-card" style="margin-top:16px;background:#09131f;border:1px solid #1e3350;border-radius:10px;padding:14px 16px;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <div style="min-width:240px;flex:1;">
+          <div class="ds-micro" style="margin-bottom:5px;">AI policy grounding</div>
+          <strong style="display:block;color:#e8f4ff;font-size:14px;">${escapeHtml(policy.fileName)}</strong>
+          <p style="margin:6px 0 0;color:#8aa0b8;font-size:12px;line-height:1.5;">${policy.clauses.length} clause${policy.clauses.length === 1 ? "" : "s"} captured${when ? ` · ${escapeHtml(when)}` : ""}. Artifact caution and human-review language cite these clauses; this is advisory, never compliance approval.</p>
+        </div>
+        <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;">
+          <input type="file" id="policyFileInput" accept=".txt,.md,.pdf,.doc,.docx" style="display:none;">
+          <button type="button" class="secondary-button compact" id="policyUploadBtn">Replace</button>
+          <button type="button" class="secondary-button compact" id="policyRemoveBtn">Remove</button>
+        </div>
+      </div>
+      <details style="margin-top:10px;"><summary style="font-size:11px;color:#8aa0b8;cursor:pointer;">Show ${policy.clauses.length} policy clause${policy.clauses.length === 1 ? "" : "s"} (provenance: doc-extracted)</summary>${clauseRows}</details>
+    </div>`;
+}
+
+function wirePolicyPanel(container) {
+  if (!container) return;
+  const input = container.querySelector("#policyFileInput");
+  container.querySelector("#policyUploadBtn")?.addEventListener("click", () => input?.click());
+  input?.addEventListener("change", (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (file) handlePolicyUpload(file);
+  });
+  container.querySelector("#policyRemoveBtn")?.addEventListener("click", removeAiPolicy);
+}
+
 function renderAnalysisTabRecipe() {
   const container = document.getElementById("analysis-tab-recipe");
   if (!container) return;
   const steps = analysisGridSteps();
   if (!steps.length) {
-    container.innerHTML = `<div class="summary-item">No workflow steps yet. Capture a process to build the recipe book.</div>`;
+    // V3-3: the policy panel is engagement-level, so it stays available even
+    // before any step is captured.
+    container.innerHTML = renderPolicyPanelHtml() + `<div class="summary-item">No workflow steps yet. Capture a process to build the recipe book.</div>`;
+    wirePolicyPanel(container);
     return;
   }
   state.recipeCache = state.recipeCache || {};
@@ -8250,6 +8484,7 @@ function renderAnalysisTabRecipe() {
   container.innerHTML =
     recipeWorkflowHeaderHtml() +
     artifactStudioHeaderHtml(steps) +
+    renderPolicyPanelHtml() +
     cards +
     businessCaseBlockForCurrentWorkflow() +
     scoringTransparencyBlockForCurrentWorkflow() +
@@ -8307,6 +8542,7 @@ function renderAnalysisTabRecipe() {
   wireBusinessCaseBlock(container);
   wireClassificationChips(container);
   wireRecipeMetaEditors(container);
+  wirePolicyPanel(container);
   container.querySelector("#exportWordRecipeBtn")?.addEventListener("click", () => exportWorkflowWord("recipe"));
 }
 
@@ -10619,6 +10855,75 @@ async function runDocumentUpload(file, el) {
   docUploadInProgress = false;
   persistState();
   render();
+}
+
+// V3-3: AI-policy upload. Reuses the existing document-upload MECHANISM
+// (multipart POST -> server readMultipartFile + extractDocumentText) but routes
+// to /api/extract-policy, which returns RAW TEXT only. Clause segmentation is
+// deterministic + client-side (extractPolicyClauses), so policy text is verbatim
+// and never passes through an LLM.
+let policyUploadInProgress = false;
+
+async function handlePolicyUpload(file) {
+  if (!file) { toast("Choose a policy document to upload."); return; }
+  // Sensitivity is unknown pre-read; size is the available signal (mirrors the
+  // document-upload confirm modal).
+  if (file.size > 500 * 1024) {
+    showSensitivityConfirmModal(() => runPolicyUpload(file), {
+      heading: "Large policy document",
+      body: "This policy file is large and will be sent to the server for text extraction. Only proceed if this is permitted under your firm's data handling policy."
+    });
+    return;
+  }
+  return runPolicyUpload(file);
+}
+
+async function runPolicyUpload(file) {
+  if (policyUploadInProgress) { toast("A policy upload is already in progress."); return; }
+  policyUploadInProgress = true;
+  toast("Reading AI policy…");
+  let payload;
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await fetch("/api/extract-policy", { method: "POST", body: formData });
+    payload = await response.json();
+  } catch {
+    payload = { success: false, error: "Policy upload failed — try again." };
+  }
+  policyUploadInProgress = false;
+  if (!payload || payload.success !== true || typeof payload.text !== "string") {
+    toast((payload && payload.error) || "Policy upload failed — try again.");
+    return;
+  }
+  const clauses = extractPolicyClauses(payload.text);
+  if (!clauses.length) {
+    toast("No policy clauses could be read from that file. Try a clearer policy document.");
+    return;
+  }
+  setAiPolicy({ fileName: payload.fileName || file.name || "AI policy", clauses });
+  toast(`AI policy loaded — ${clauses.length} clause${clauses.length === 1 ? "" : "s"} captured.`);
+}
+
+// The uploaded policy is a RELIED-ON value: stored with provenance, preserved
+// across regeneration (artifacts read it, never write it). Replacing/removing it
+// is always an explicit user action.
+function setAiPolicy(policy) {
+  state.aiPolicy = {
+    fileName: String((policy && policy.fileName) || "AI policy"),
+    uploadedAt: new Date().toISOString(),
+    clauses: Array.isArray(policy && policy.clauses) ? policy.clauses : []
+  };
+  persistState();
+  renderAnalysisTabRecipe();
+}
+
+function removeAiPolicy() {
+  if (!state.aiPolicy) { toast("No AI policy is loaded."); return; }
+  state.aiPolicy = null;
+  persistState();
+  toast("AI policy removed — artifacts fall back to the generic advisory caution.");
+  renderAnalysisTabRecipe();
 }
 
 // PR 19: tier colours for the 5 Finance/MC workflow families (inline hex only).
