@@ -1128,6 +1128,14 @@ const defaultState = {
   // opportunity score. An ai-inferred tag never auto-hardens (stays ai-inferred until
   // an explicit confirm; normalizeLoadedState backfills {} and never promotes).
   stepTypes: {},
+  // V3-16: handoffs + decisions as first-class structural objects. Two additive
+  // sidecars, each keyed by a STABLE id → { value, source, confidence } (same tag
+  // shape as stepTypes). handoffTags: keyed by "h:<fromStepId>>"<toStepId>" (a
+  // transition derived from the step chain). decisionTags: keyed by step.id (the
+  // decision classification of that step). Descriptive only — NEVER feed opportunity.
+  // ai-inferred never auto-hardens; normalizeLoadedState backfills {} and never promotes.
+  handoffTags: {},
+  decisionTags: {},
   // V3-3: uploaded AI policy (a relied-on value). Shape:
   // { fileName, uploadedAt, clauses:[{id,ref,heading,text,source,confidence}] }.
   // null = no policy → artifacts use the generic advisory caution. Read-only at
@@ -6532,6 +6540,205 @@ function wireStepTypology(container) {
   });
 }
 
+// === V3-16: Handoffs + decisions as first-class structural objects ==========
+// Reuses the V3-15 {value,source,confidence} tag discipline via ONE generic core
+// (not parallel machinery), used for BOTH handoff transitions (derived from the
+// step chain, keyed by "h:<from>>"<to>") and per-step decision classifications
+// (keyed by step.id). Manual pick (user-stated) + AI-suggest (ai-inferred →
+// confirm-to-promote). Descriptive only — NEVER feeds opportunity. ai-inferred
+// never auto-hardens. No grid write, no scoring endpoint, no telemetry of the value.
+const HANDOFF_KINDS = ["role-to-role", "human-to-system", "system-to-human", "system-to-system"];
+const DECISION_KINDS = ["approval", "routing", "prioritization", "exception-handling", "judgment-call"];
+
+function isInAllowedSet(value, allowed) {
+  return typeof value === "string" && Array.isArray(allowed) && allowed.includes(value);
+}
+
+function ensureHandoffTags() { if (!state.handoffTags || typeof state.handoffTags !== "object") state.handoffTags = {}; return state.handoffTags; }
+function ensureDecisionTags() { if (!state.decisionTags || typeof state.decisionTags !== "object") state.decisionTags = {}; return state.decisionTags; }
+
+// --- Generic provenance-tag core (one machinery for both entities) ---
+// Read: null when unset or off-set (never fabricated).
+function structuralTagOf(map, id, allowed) {
+  const m = map && typeof map === "object" ? map : {};
+  const tag = id ? m[id] : null;
+  return tag && isInAllowedSet(tag.value, allowed) ? tag : null;
+}
+// Manual pick → user-stated. Invalid/"" clears. PURE (no persist).
+function setStructuralTag(map, id, value, allowed) {
+  if (!map || !id) return false;
+  if (!isInAllowedSet(value, allowed)) { delete map[id]; return false; }
+  map[id] = { value, source: "user-stated", confidence: 1 };
+  return true;
+}
+// AI suggestion → ai-inferred, ONLY after validating against the allowed set.
+// Off-set / empty / malformed ⇒ no key written (never a fabricated value). PURE.
+function applyStructuralSuggestion(map, id, suggestion, allowed) {
+  if (!map || !id) return false;
+  const value = suggestion && typeof suggestion === "object" ? suggestion.value : null;
+  if (!isInAllowedSet(value, allowed)) return false;
+  const confRaw = Number(suggestion.confidence);
+  const confidence = Number.isFinite(confRaw) && confRaw >= 0 && confRaw <= 1 ? confRaw : 0.5;
+  map[id] = { value, source: "ai-inferred", confidence };
+  return true;
+}
+// Confirm → promote ai-inferred to user-stated (value preserved). Reuses the V3-14/
+// V3-15 promotion discipline; no new promoter. PURE.
+function confirmStructuralTag(map, id, allowed) {
+  const tag = structuralTagOf(map, id, allowed);
+  if (!tag) return false;
+  map[id] = { value: tag.value, source: "user-stated", confidence: 1 };
+  return true;
+}
+// Reject → delete the key. PURE.
+function rejectStructuralTag(map, id) {
+  if (!map || !map[id]) return false;
+  delete map[id];
+  return true;
+}
+
+// --- Handoff candidates (derived from the step chain; stable ids) ---
+function handoffId(fromStepId, toStepId) { return `h:${fromStepId}>${toStepId}`; }
+function buildHandoffCandidates(steps) {
+  const list = Array.isArray(steps) ? steps : [];
+  const out = [];
+  for (let i = 0; i < list.length - 1; i += 1) {
+    const from = list[i];
+    const to = list[i + 1];
+    if (!from || !to || !from.id || !to.id) continue;
+    out.push({
+      id: handoffId(from.id, to.id),
+      fromStepId: from.id, toStepId: to.id,
+      fromName: (from.cells && from.cells.name && from.cells.name.value) || "step",
+      toName: (to.cells && to.cells.name && to.cells.name.value) || "next step"
+    });
+  }
+  return out;
+}
+
+function structuralCellText(step, key) {
+  return step && step.cells && step.cells[key] && typeof step.cells[key].value === "string" ? step.cells[key].value : "";
+}
+function handoffSuggestionInput(steps, fromStepId, toStepId) {
+  const find = (id) => (Array.isArray(steps) ? steps : []).find((s) => s && s.id === id) || null;
+  const from = find(fromStepId);
+  const to = find(toStepId);
+  return `From: ${structuralCellText(from, "name")} — ${structuralCellText(from, "personaActors")} / ${structuralCellText(from, "systemsTools")}\nTo: ${structuralCellText(to, "name")} — ${structuralCellText(to, "personaActors")} / ${structuralCellText(to, "systemsTools")}\nOutput/handoff: ${structuralCellText(from, "output")} ${structuralCellText(from, "handoff")}`.trim();
+}
+function decisionSuggestionInput(step) {
+  return [
+    structuralCellText(step, "name"), structuralCellText(step, "description"),
+    structuralCellText(step, "rulesDecisionLogic"), structuralCellText(step, "humanCheckpoint")
+  ].filter(Boolean).join("\n");
+}
+
+// The ONLY model call in the structural flow — the narrow descriptive endpoint
+// (NOT buildAgentRecipeIr/recipe/scoring). Graceful: any non-200 / empty key /
+// network error / off-set result leaves the object unclassified, writes no key,
+// and never throws.
+async function suggestStructuralTag(kind, id) {
+  const steps = analysisGridSteps();
+  let map = null;
+  let allowed = null;
+  let text = "";
+  if (kind === "handoff") {
+    map = ensureHandoffTags(); allowed = HANDOFF_KINDS;
+    const c = buildHandoffCandidates(steps).find((h) => h.id === id);
+    if (!c) return false;
+    text = handoffSuggestionInput(steps, c.fromStepId, c.toStepId);
+  } else if (kind === "decision") {
+    map = ensureDecisionTags(); allowed = DECISION_KINDS;
+    const step = steps.find((s) => s.id === id);
+    if (!step) return false;
+    text = decisionSuggestionInput(step);
+  } else {
+    return false;
+  }
+  let result;
+  try {
+    result = await requestJson("/api/suggest-structural-type", { method: "POST", body: { kind, text } });
+  } catch (error) {
+    toast("Suggestion unavailable — left unclassified.");
+    return false;
+  }
+  if (!applyStructuralSuggestion(map, id, result, allowed)) {
+    toast("No confident suggestion — left unclassified.");
+    return false;
+  }
+  persistState();
+  render();
+  const tag = structuralTagOf(map, id, allowed);
+  toast(`Suggested "${tag.value}" — confirm or reject.`);
+  return true;
+}
+
+// --- Render (inside the existing per-step composite-badge <details>) ---
+function structuralMapFor(kind) {
+  return kind === "handoff" ? (state.handoffTags || {}) : (state.decisionTags || {});
+}
+// The TAG display — returns "" when unset (byte-identical-when-unused). ai-inferred
+// renders distinct from user-stated via provenanceBadgeHtml (flat single-hue, no
+// gradient) and offers confirm/reject.
+function structuralTagHtml(label, kind, id, allowed) {
+  const tag = structuralTagOf(structuralMapFor(kind), id, allowed);
+  if (!tag) return "";
+  const dataId = `${kind}:${id}`;
+  const suggested = tag.source === "ai-inferred";
+  const cr = suggested
+    ? ` <button type="button" data-struct-confirm="${escapeHtml(dataId)}" style="background:none;border:none;color:#00d4b4;cursor:pointer;font-size:11px;padding:0;">confirm</button> <button type="button" data-struct-reject="${escapeHtml(dataId)}" style="background:none;border:none;color:#ff4fc8;cursor:pointer;font-size:11px;padding:0;">reject</button>`
+    : "";
+  return `${escapeHtml(label)}: <strong style="color:#cfe0f2;">${escapeHtml(tag.value)}</strong> ${provenanceBadgeHtml(tag.source, tag.confidence)}${suggested ? ` <span style="color:#7a93b4;">(suggested)</span>` : ""}${cr}`;
+}
+// The manual picker + AI-suggest control (additive; always available).
+function structuralPickerHtml(label, kind, id, allowed) {
+  const tag = structuralTagOf(structuralMapFor(kind), id, allowed);
+  const current = tag ? tag.value : "";
+  const dataId = `${kind}:${id}`;
+  const opts = [`<option value="">unclassified</option>`]
+    .concat(allowed.map((v) => `<option value="${v}" ${v === current ? "selected" : ""}>${v}</option>`)).join("");
+  return `<span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
+    <span style="color:#7a93b4;">${escapeHtml(label)}:</span>
+    <select data-struct-id="${escapeHtml(dataId)}" style="background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:2px 6px;color:#dde8f5;font-size:11px;">${opts}</select>
+    <button type="button" data-struct-suggest="${escapeHtml(dataId)}" style="background:none;border:1px solid #3a2a5a;color:#a855f7;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">Suggest (AI)</button>
+  </span>`;
+}
+// Per-step structural block: this step's decision classification + the handoff FROM
+// this step to the next. Appended to the composite badge's expanded <details>.
+function stepStructuralHtml(step) {
+  if (!step || !step.id) return "";
+  const steps = state.workflowGrid && Array.isArray(state.workflowGrid.steps) ? state.workflowGrid.steps : [];
+  const decTag = structuralTagHtml("Decision", "decision", step.id, DECISION_KINDS);
+  let html = `<li style="list-style:none;margin-left:-16px;margin-top:6px;">${decTag}${decTag ? "<br>" : ""}${structuralPickerHtml("Decision", "decision", step.id, DECISION_KINDS)}</li>`;
+  const idx = steps.findIndex((s) => s && s.id === step.id);
+  if (idx >= 0 && idx < steps.length - 1) {
+    const to = steps[idx + 1];
+    const hid = handoffId(step.id, to.id);
+    const toName = (to.cells && to.cells.name && to.cells.name.value) || "next step";
+    const hTag = structuralTagHtml(`Handoff → ${toName}`, "handoff", hid, HANDOFF_KINDS);
+    html += `<li style="list-style:none;margin-left:-16px;margin-top:6px;">${hTag}${hTag ? "<br>" : ""}${structuralPickerHtml("Handoff", "handoff", hid, HANDOFF_KINDS)}</li>`;
+  }
+  return html;
+}
+
+// Wires the structural controls; pure mutators wrapped with persist/render here.
+function wireStructural(container) {
+  if (!container) return;
+  const parse = (data) => { const i = String(data || "").indexOf(":"); return [String(data).slice(0, i), String(data).slice(i + 1)]; };
+  const mapAllowed = (kind) => kind === "handoff" ? [ensureHandoffTags(), HANDOFF_KINDS] : [ensureDecisionTags(), DECISION_KINDS];
+  container.querySelectorAll("[data-struct-id]").forEach((sel) => {
+    sel.addEventListener("change", () => { const [kind, id] = parse(sel.dataset.structId); const [m, a] = mapAllowed(kind); setStructuralTag(m, id, sel.value, a); persistState(); render(); });
+  });
+  container.querySelectorAll("[data-struct-suggest]").forEach((btn) => {
+    btn.addEventListener("click", () => { const [kind, id] = parse(btn.dataset.structSuggest); suggestStructuralTag(kind, id); });
+  });
+  container.querySelectorAll("[data-struct-confirm]").forEach((btn) => {
+    btn.addEventListener("click", () => { const [kind, id] = parse(btn.dataset.structConfirm); const [m, a] = mapAllowed(kind); if (confirmStructuralTag(m, id, a)) { persistState(); render(); toast("Confirmed."); } });
+  });
+  container.querySelectorAll("[data-struct-reject]").forEach((btn) => {
+    btn.addEventListener("click", () => { const [kind, id] = parse(btn.dataset.structReject); const [m] = mapAllowed(kind); if (rejectStructuralTag(m, id)) { persistState(); render(); toast("Rejected — unclassified."); } });
+  });
+}
+
 // V3-2d: composite per-step state badge. The headline posture is a DISPLAY label
 // derived from the provenance mix (not a new persisted score); the four
 // dimensions are revealed on expand. All values read from existing sources.
@@ -6548,7 +6755,7 @@ function stepCompositeBadgeHtml(step) {
     `Readiness: ${s.readinessLabel}${s.readinessScore !== null ? ` (${s.readinessScore}/100)` : ""}`,
     `Provenance: ${s.captured} captured field${s.captured === 1 ? "" : "s"}, each with a tracked source`
   ];
-  return `<details class="step-trust-badge" style="display:inline-block;margin-left:8px;"><summary style="cursor:pointer;list-style:none;display:inline-block;"><span class="ds-badge ${posture.cls}">${escapeHtml(posture.label)}</span></summary><ul style="margin:6px 0 0;padding-left:16px;color:#8aa0b8;font-size:11px;line-height:1.5;">${dims.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}${stepTypologyHtml(step)}</ul></details>`;
+  return `<details class="step-trust-badge" style="display:inline-block;margin-left:8px;"><summary style="cursor:pointer;list-style:none;display:inline-block;"><span class="ds-badge ${posture.cls}">${escapeHtml(posture.label)}</span></summary><ul style="margin:6px 0 0;padding-left:16px;color:#8aa0b8;font-size:11px;line-height:1.5;">${dims.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}${stepTypologyHtml(step)}${stepStructuralHtml(step)}</ul></details>`;
 }
 
 // V3-7: knowledge-library panel for the grid tab. Shows (1) the entries applied
@@ -6855,6 +7062,7 @@ function renderAnalysisTabGrid() {
   wireGridCellEditors(container);
   wireKnowledgeLibrary(container);
   wireStepTypology(container);
+  wireStructural(container);
 }
 
 // --- TAB 2: AI Opportunities --------------------------------------------------
@@ -33861,6 +34069,10 @@ function normalizeLoadedState(parsed = {}) {
     // V3-15: backfill step typology. Stored tags pass through UNCHANGED — an
     // ai-inferred tag is never promoted on load (it hardens only on explicit confirm).
     stepTypes: parsed.stepTypes && typeof parsed.stepTypes === "object" ? parsed.stepTypes : {},
+    // V3-16: backfill handoff/decision tags. Stored tags pass through UNCHANGED — an
+    // ai-inferred tag is never promoted on load (it hardens only on explicit confirm).
+    handoffTags: parsed.handoffTags && typeof parsed.handoffTags === "object" ? parsed.handoffTags : {},
+    decisionTags: parsed.decisionTags && typeof parsed.decisionTags === "object" ? parsed.decisionTags : {},
     // V3-9: backfill the guided first-run flag so sessions persisted before this
     // feature load cleanly (default: not yet dismissed → first-run can offer).
     onboarding: {

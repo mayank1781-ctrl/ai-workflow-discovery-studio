@@ -1629,6 +1629,11 @@ const server = http.createServer(async (req, res) => {
       return await handleSuggestStepType(req, res);
     }
 
+    // V3-16: descriptive handoff/decision classifier (NOT scoring). Additive.
+    if (req.method === "POST" && requestUrl.pathname === "/api/suggest-structural-type") {
+      return await handleSuggestStructuralType(req, res);
+    }
+
     if (req.method === "POST" && requestUrl.pathname === "/api/realtime/session") {
       return await handleRealtimeSession(req, res);
     }
@@ -2316,6 +2321,68 @@ async function handleSuggestStepType(req, res) {
     }
     // Server-side taxonomy validation — an off-taxonomy/malformed value → no suggestion.
     const value = parsed && STEP_TYPE_VALUES.includes(parsed.type) ? parsed.type : null;
+    const confRaw = Number(parsed && parsed.confidence);
+    const confidence = Number.isFinite(confRaw) && confRaw >= 0 && confRaw <= 1 ? confRaw : 0.5;
+    return sendJson(res, 200, value ? { value, confidence } : { value: null });
+  } catch (error) {
+    return sendJson(res, 502, { error: error.message || "Suggestion unavailable" });
+  }
+}
+
+// V3-16: handoff/decision classifier — a narrow DESCRIPTIVE endpoint (mirrors
+// handleSuggestStepType). One route, both kinds. Validates the model output against
+// the kind's allowed set server-side; returns { value, confidence } or { value: null }.
+// NEVER computes/returns opportunity/ROI; never calls the recipe/scoring paths.
+const STRUCTURAL_KIND_SETS = {
+  handoff: ["role-to-role", "human-to-system", "system-to-human", "system-to-system"],
+  decision: ["approval", "routing", "prioritization", "exception-handling", "judgment-call"]
+};
+const STRUCTURAL_SYSTEM_PROMPTS = {
+  handoff: `You classify ONE workflow handoff (a transition between two steps) into exactly one type. Allowed types (use these exact lowercase strings): role-to-role, human-to-system, system-to-human, system-to-system. Respond ONLY as JSON: {"type":"<one allowed type>","confidence":<number 0..1>}. Descriptive classification ONLY — never assess value, ROI, opportunity, savings, or automation.`,
+  decision: `You classify ONE workflow decision point into exactly one type. Allowed types (use these exact lowercase strings): approval, routing, prioritization, exception-handling, judgment-call. Respond ONLY as JSON: {"type":"<one allowed type>","confidence":<number 0..1>}. Descriptive classification ONLY — never assess value, ROI, opportunity, savings, or automation.`
+};
+
+async function handleSuggestStructuralType(req, res) {
+  if (!getOpenAiKey()) {
+    return sendJson(res, 400, { error: "OPENAI_API_KEY is not configured." });
+  }
+  let body;
+  try {
+    body = await readJson(req);
+  } catch {
+    return sendJson(res, 400, { error: "Invalid request body" });
+  }
+  const kind = body && typeof body.kind === "string" ? body.kind : "";
+  const allowed = STRUCTURAL_KIND_SETS[kind];
+  const systemPrompt = STRUCTURAL_SYSTEM_PROMPTS[kind];
+  if (!allowed || !systemPrompt) return sendJson(res, 400, { error: "Unknown structural kind" });
+  const text = body && typeof body.text === "string" ? body.text : "";
+  if (!text.trim()) return sendJson(res, 200, { value: null });
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${getOpenAiKey()}` },
+      body: JSON.stringify({
+        model: HARVEST_MODEL,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: text }
+        ]
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      return sendJson(res, 502, { error: data.error?.message || "Suggestion failed" });
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(data.choices?.[0]?.message?.content || "");
+    } catch {
+      return sendJson(res, 200, { value: null });
+    }
+    // Server-side per-kind taxonomy validation — off-set/malformed → no suggestion.
+    const value = parsed && allowed.includes(parsed.type) ? parsed.type : null;
     const confRaw = Number(parsed && parsed.confidence);
     const confidence = Number.isFinite(confRaw) && confRaw >= 0 && confRaw <= 1 ? confRaw : 0.5;
     return sendJson(res, 200, value ? { value, confidence } : { value: null });

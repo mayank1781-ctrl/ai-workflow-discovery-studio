@@ -77,7 +77,10 @@ test("d: per-step composite badge surfaces the four dimensions and never writes"
       // V3-15: the badge now renders the (additive) typology controls; this V3-2
       // test is not about typology, so stub it to "" (keeps the four-dim assertions
       // exact). The real stepTypologyHtml is covered by test/step-typology.test.mjs.
-      stepTypologyHtml: () => ""
+      stepTypologyHtml: () => "",
+      // V3-16: same for the handoff/decision controls — stubbed here; the real
+      // stepStructuralHtml is covered by test/structural-nodes.test.mjs.
+      stepStructuralHtml: () => ""
     }
   );
   fill("name", "Reconcile balances", "user-stated", 0.9);
