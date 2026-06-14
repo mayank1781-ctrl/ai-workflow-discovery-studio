@@ -7111,6 +7111,196 @@ function roleFootprintHtml() {
   </div>`;
 }
 
+// === V3-19: Department heatmap (CLOSES the structural axis) ==================
+// A DERIVED VIEW (not a new primitive): the already-shipped structural lenses —
+// typology (V3-15), handoffs (V3-16), friction (V3-17), role (V3-18) — aggregated
+// BY ROLE across all saved workflows. Built to docs/roadmap/V3-19-uncertainty-
+// language.md. PURE / read-only over the persisted session library — NO new stored
+// state, no patchField, no grid write, no scoring endpoint, no model call; the
+// session blob is byte-identical when unused (the render returns "").
+//
+// It "wears its uncertainty": every value is COMPUTED (tool-derived rollup), STATED
+// (user-confirmed), or INFERRED (AI-suggested), shown via a source-dot. ROLLUP RULE:
+// a cell aggregating mixed provenance renders as the LEAST-ASSERTED state present
+// (inferred < computed < stated) — any inferred content => the cell reads inferred.
+// Tiles: hue = work type, shade = strength (one hue, never a gradient), a TEXT label
+// ALWAYS present. Human-hold (judgment) uses the reserved Human Pink and never
+// implies a role is automatable. LEVERAGE framing only — no headcount / FTE /
+// automatable-%. NEVER feeds opportunity or any scorer. Mints no new color/gradient:
+// every hex below already ships in the locked palette.
+const HEATMAP_STATE_DOTS = { stated: "#00d4b4", computed: "#3b82f6", inferred: "#5b7186" };
+const HUMAN_HOLD_HUE = "#ff4fc8";
+const HEATMAP_WORK_TYPE_HUES = { "decision": "#a855f7", "handoff": "#06b6d4", "data-op": "#00d4b4", "judgment": HUMAN_HOLD_HUE, "review": "#f59e0b" };
+
+// Map a stored provenance source to one of the three heatmap states.
+function provenanceToState(source) {
+  if (source === "ai-inferred") return "inferred";
+  if (source === "user-stated" || source === "user-edited") return "stated";
+  return "computed";
+}
+// The ROLLUP RULE: the least-asserted state present (inferred < computed < stated).
+// Empty => null (no value, no provenance claim).
+function leastAssertedState(states) {
+  const rank = { inferred: 0, computed: 1, stated: 2 };
+  let min = null;
+  (Array.isArray(states) ? states : []).forEach((s) => {
+    if (!(s in rank)) return;
+    if (min === null || rank[s] < rank[min]) min = s;
+  });
+  return min;
+}
+// Strength => a discrete SHADE level (0..3) within one hue. Never a gradient.
+function strengthLevel(count) {
+  if (!count) return 0;
+  if (count >= 5) return 3;
+  if (count >= 3) return 2;
+  return 1;
+}
+
+// Collect every PERSISTED workflow with the structural sidecars the heatmap needs.
+// Read-only; mirrors collectRoleWorkflows (the current session joins once saved).
+function collectStructuralWorkflows() {
+  return getCombinedSessionLibrary().map((entry) => {
+    const st = entry && entry.state ? entry.state : null;
+    return {
+      id: (entry && (entry.sessionId || entry.id)) || "",
+      name: (entry && (entry.workflowName || entry.name)) || "Untitled workflow",
+      steps: Array.isArray(st && st.workflowGrid && st.workflowGrid.steps) ? st.workflowGrid.steps : [],
+      roleTags: st && st.roleTags && typeof st.roleTags === "object" ? st.roleTags : {},
+      stepTypes: st && st.stepTypes && typeof st.stepTypes === "object" ? st.stepTypes : {},
+      frictionTags: st && st.frictionTags && typeof st.frictionTags === "object" ? st.frictionTags : {},
+      handoffTags: st && st.handoffTags && typeof st.handoffTags === "object" ? st.handoffTags : {}
+    };
+  });
+}
+
+// Aggregate the structural axis BY ROLE across workflows. PURE over the workflow
+// array. Only role-tagged steps enter the department view (role is the row key).
+// Each typology / friction cell inherits provenance via the least-asserted rollup;
+// footprint + handoff counts are COMPUTED rollups. No scorer, no opportunity.
+function buildDepartmentHeatmap(workflows) {
+  const list = Array.isArray(workflows) ? workflows : [];
+  const roleSteps = {};
+  const handoffCountByRole = {};
+  list.forEach((wf) => {
+    if (!wf) return;
+    const steps = Array.isArray(wf.steps) ? wf.steps : [];
+    const roleTags = wf.roleTags && typeof wf.roleTags === "object" ? wf.roleTags : {};
+    const stepTypes = wf.stepTypes && typeof wf.stepTypes === "object" ? wf.stepTypes : {};
+    const frictionTags = wf.frictionTags && typeof wf.frictionTags === "object" ? wf.frictionTags : {};
+    const handoffTags = wf.handoffTags && typeof wf.handoffTags === "object" ? wf.handoffTags : {};
+    const stepRole = {};
+    steps.forEach((step) => {
+      if (!step || !step.id) return;
+      const roleTag = structuralTagOf(roleTags, step.id, ROLE_VALUES);
+      if (!roleTag) return;
+      stepRole[step.id] = roleTag.value;
+      const typeTag = structuralTagOf(stepTypes, step.id, STEP_TYPE_OPTIONS);
+      const frictionTag = structuralTagOf(frictionTags, step.id, FRICTION_KINDS);
+      if (!roleSteps[roleTag.value]) roleSteps[roleTag.value] = [];
+      roleSteps[roleTag.value].push({
+        workflowId: wf.id || "",
+        roleSource: roleTag.source,
+        typeValue: typeTag ? typeTag.value : null,
+        typeSource: typeTag ? typeTag.source : null,
+        hasFriction: Boolean(frictionTag),
+        frictionSource: frictionTag ? frictionTag.source : null
+      });
+    });
+    Object.keys(handoffTags).forEach((hid) => {
+      if (!structuralTagOf(handoffTags, hid, HANDOFF_KINDS)) return;
+      const m = /^h:(.+)>(.+)$/.exec(hid);
+      if (!m) return;
+      const roles = new Set([stepRole[m[1]], stepRole[m[2]]].filter(Boolean));
+      roles.forEach((r) => { handoffCountByRole[r] = (handoffCountByRole[r] || 0) + 1; });
+    });
+  });
+  const rows = Object.keys(roleSteps).sort().map((role) => {
+    const owned = roleSteps[role];
+    const tiles = STEP_TYPE_OPTIONS.map((wt) => {
+      const matching = owned.filter((o) => o.typeValue === wt);
+      const count = matching.length;
+      const state = count
+        ? leastAssertedState(matching.flatMap((o) => [provenanceToState(o.roleSource), provenanceToState(o.typeSource)]))
+        : null;
+      return { workType: wt, count, strength: strengthLevel(count), state, humanHeld: wt === "judgment" };
+    });
+    const frictionSteps = owned.filter((o) => o.hasFriction);
+    const friction = {
+      count: frictionSteps.length,
+      state: frictionSteps.length
+        ? leastAssertedState(frictionSteps.flatMap((o) => [provenanceToState(o.roleSource), provenanceToState(o.frictionSource)]))
+        : null
+    };
+    return {
+      role,
+      footprint: { count: owned.length, state: "computed" },
+      workflowCount: new Set(owned.map((o) => o.workflowId)).size,
+      tiles,
+      friction,
+      handoffs: { count: handoffCountByRole[role] || 0, state: "computed" }
+    };
+  });
+  return { workTypes: STEP_TYPE_OPTIONS.slice(), rows };
+}
+
+// --- Render (cross-workflow dashboard view) ---
+// A small source-dot for a provenance state — reuses the locked Signal Glass hues
+// (Cyan Trace stated / Electric Blue computed / Signal Gray inferred). "" when null.
+function heatmapSourceDot(state) {
+  if (!state) return "";
+  const color = HEATMAP_STATE_DOTS[state] || "#5b7186";
+  return `<span class="hm-dot" title="${escapeHtml(state)}" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};margin-left:4px;vertical-align:middle;"></span>`;
+}
+// Always-on legend mapping the three source-dots + human-hold (legible without prior
+// knowledge — the heatmap is never shown without it).
+function heatmapLegendHtml() {
+  const sw = (color, label) => `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:14px;"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${color};"></span><span style="font-size:11px;color:#8aa0b8;">${escapeHtml(label)}</span></span>`;
+  return `<div class="hm-legend" style="display:flex;flex-wrap:wrap;align-items:center;margin:0 0 10px;">${sw(HEATMAP_STATE_DOTS.stated, "stated")}${sw(HEATMAP_STATE_DOTS.computed, "computed")}${sw(HEATMAP_STATE_DOTS.inferred, "inferred (suggestion)")}${sw(HUMAN_HOLD_HUE, "human-hold")}</div>`;
+}
+// One tile: hue = work type (judgment => reserved Human Pink), shade = strength, a
+// TEXT label ALWAYS present (the count + the work-type name), plus the source-dot.
+// An empty cell (no steps) renders muted with a "." label and no provenance claim.
+function heatmapTileHtml(tile) {
+  const hue = tile.humanHeld ? HUMAN_HOLD_HUE : (HEATMAP_WORK_TYPE_HUES[tile.workType] || "#5b7186");
+  const alpha = ["00", "3a", "7a", "b3"][tile.strength] || "00";
+  const bg = tile.strength ? `${hue}${alpha}` : "transparent";
+  const hold = tile.humanHeld ? `<span title="human-hold — a person owns this judgment" style="color:${HUMAN_HOLD_HUE};font-size:9px;display:block;">human-hold</span>` : "";
+  const body = tile.count
+    ? `<span style="color:#e2e8f0;font-weight:600;">${escapeHtml(String(tile.count))}</span>${heatmapSourceDot(tile.state)}`
+    : `<span style="color:#3f5878;">·</span>`;
+  return `<div class="hm-tile" title="${escapeHtml(tile.workType)}" style="min-width:54px;padding:6px 4px;border:1px solid #16263a;border-radius:6px;background:${bg};text-align:center;">${body}<span style="display:block;font-size:9px;color:#7a93b4;">${escapeHtml(tile.workType)}</span>${hold}</div>`;
+}
+// The department heatmap. Returns "" when no role is tagged in any saved workflow
+// (byte-identical-when-unused). LEVERAGE view — never headcount / FTE / automatable-%.
+function departmentHeatmapHtml() {
+  const model = buildDepartmentHeatmap(collectStructuralWorkflows());
+  if (!model.rows.length) return "";
+  const headCols = model.workTypes.map((wt) => `<th style="padding:4px 6px;font-weight:600;color:#8aa0b8;font-size:10px;">${escapeHtml(wt)}</th>`).join("");
+  const body = model.rows.map((row) => {
+    const tiles = row.tiles.map((t) => `<td style="padding:3px;">${heatmapTileHtml(t)}</td>`).join("");
+    const frictionCell = row.friction.count
+      ? `<span style="color:#e2e8f0;">${row.friction.count}</span>${heatmapSourceDot(row.friction.state)}`
+      : `<span style="color:#3f5878;">·</span>`;
+    return `<tr>
+      <th style="text-align:left;padding:4px 8px;color:#cfe0f2;font-weight:600;white-space:nowrap;">${escapeHtml(row.role)}</th>
+      <td style="padding:4px 8px;color:#b8c7da;white-space:nowrap;">${row.footprint.count} steps${heatmapSourceDot(row.footprint.state)}<span style="display:block;font-size:9px;color:#7a93b4;">across ${row.workflowCount} workflow${row.workflowCount === 1 ? "" : "s"}</span></td>
+      ${tiles}
+      <td style="padding:4px 8px;text-align:center;">${frictionCell}</td>
+      <td style="padding:4px 8px;text-align:center;"><span style="color:#b8c7da;">${row.handoffs.count}</span>${heatmapSourceDot(row.handoffs.state)}</td>
+    </tr>`;
+  }).join("");
+  return `<div class="department-heatmap" style="background:#0c1726;border:1px solid #16263a;border-radius:12px;padding:16px 18px;margin:0 0 18px;overflow-x:auto;">
+    <div style="font-size:0.95rem;font-weight:600;color:#e2e8f0;margin:0 0 4px;">Department heatmap</div>
+    <div style="font-size:12px;color:#7a93b4;margin:0 0 10px;">How each role's work concentrates across your saved workflows — a leverage view, with every tile showing where its value came from. The least-asserted source wins: any inferred input makes the tile read as a suggestion.</div>
+    ${heatmapLegendHtml()}
+    <table style="border-collapse:collapse;font-size:11px;color:#b8c7da;">
+      <thead><tr><th style="text-align:left;padding:4px 8px;color:#8aa0b8;font-size:10px;">Role</th><th style="padding:4px 8px;color:#8aa0b8;font-size:10px;">Footprint</th>${headCols}<th style="padding:4px 8px;color:#8aa0b8;font-size:10px;">Friction</th><th style="padding:4px 8px;color:#8aa0b8;font-size:10px;">Handoffs</th></tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+  </div>`;
+}
+
 // Wires the role controls; pure mutators wrapped with persist/render here. The
 // suggest action handles its own persist.
 function wireRole(container) {
@@ -8484,10 +8674,14 @@ function renderAnalysisTabOpportunities() {
   // V3-18: role-across-workflows footprint sits with the cross-workflow portfolio
   // content. Returns "" when no role is tagged in any saved workflow (byte-identical).
   const roleFootprint = roleFootprintHtml();
-  const thisWorkflowHeading = (portfolioHtml || capacityHtml || roleFootprint)
+  // V3-19: the department heatmap closes the structural axis — it sits with the
+  // cross-workflow portfolio content. Returns "" when no role is tagged in any saved
+  // workflow (byte-identical when unused).
+  const departmentHeatmap = departmentHeatmapHtml();
+  const thisWorkflowHeading = (portfolioHtml || capacityHtml || roleFootprint || departmentHeatmap)
     ? `<h3 style="font-size:1rem;font-weight:600;color:#e2e8f0;margin:0 0 14px;">This workflow</h3>`
     : "";
-  container.innerHTML = opportunityPortfolioStripHtml() + portfolioHtml + capacityHtml + roleFootprint + thisWorkflowHeading + statsRow + sectionTwo + sectionThree;
+  container.innerHTML = opportunityPortfolioStripHtml() + portfolioHtml + capacityHtml + roleFootprint + departmentHeatmap + thisWorkflowHeading + statsRow + sectionTwo + sectionThree;
   wireCapacitySection(container);
 }
 
