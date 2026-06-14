@@ -35,21 +35,50 @@ are the as-built specs of record.
 
 ## ▶ Forward backlog (post-V3 — specs of record, build only when scheduled)
 
-The next items are written as standalone kickoff specs under `docs/roadmap/` (not built):
+The next items are written as standalone kickoff specs under `docs/roadmap/` (not built unless
+noted). They organize around two complementary axes over the workflow model: the **economic
+axis** (how much the work is worth) and the **structural axis** (the shape of the work — where
+and why AI helps).
+
+**Forward order (by decision):**
+
+```
+V3-14 portfolio capacity  (SHIPPED — merged 3f2c87f)        ← economic axis
+   → V3-15 … V3-19 structural axis                          ← shape of the work
+   → V3-11 / V3-12 / V3-13 design track                     ← display-only refresh
+   → workforce-reimagination                                ← near-future capstone
+```
 
 - **V3-14 — Portfolio dimensions & capacity** → [`docs/roadmap/V3-14-portfolio-capacity.md`](docs/roadmap/V3-14-portfolio-capacity.md).
-  Departments · personas · FTE-equivalent · project-vs-recurring, built on V3-6. Value is
-  explicit-compute only (never telemetry); persona-band rates (never PII / individual salaries);
-  fully-loaded cost **and** bill rate side by side; recurring run-rate kept separate from one-off
-  project savings; provenance + confidence on every tag; additive/derived, byte-identical when unused.
+  **SHIPPED — merged at `3f2c87f`** (gate 286). The **economic axis**: departments · personas ·
+  FTE-equivalent · project-vs-recurring on V3-6. Value explicit-compute only (never telemetry);
+  persona-band rates (never PII); fully-loaded cost **and** bill rate side by side; run-rate kept
+  separate from project savings; provenance + confidence on every tag; additive/byte-identical-unused.
+- **V3 structural axis (V3-15 → V3-19)** → [`docs/roadmap/V3-structural-axis.md`](docs/roadmap/V3-structural-axis.md).
+  The **structural axis** — the spine for understanding WHERE and WHY AI helps, and the substrate
+  for workforce-reimagination. V3-15 step typology · V3-16 handoffs + decisions as first-class
+  objects (highest-yield) · V3-17 friction lens (annotate-only, user-sourced, separate from
+  opportunity) · V3-18 role-centric pivot · V3-19 department heatmap. Two binding cautions: the
+  heatmap must wear its uncertainty (computed/stated/inferred always distinguished); role framing
+  is leverage / friction-removed, **never** an automatable-% or headcount figure.
 - **V3 design track (V3-11 / V3-12 / V3-13)** → [`docs/roadmap/V3-design-track.md`](docs/roadmap/V3-design-track.md).
   Display-only refresh — analysis-tab consolidation, design-language refresh, gradient brand layer —
   bound by the design-integrity rule (gradient = chrome/actions only; meaning-bearing UI flat
   single-hue; signal strength = a shade ramp within ONE hue; category accents teal=experience/grid,
   purple=logic/recipe, pink=data/governance, amber=business-case). **Sequenced to FOLLOW the V3-1
   telemetry, not precede it.**
+- **Workforce-reimagination** (near-future capstone) → [`docs/roadmap/V3-workforce-reimagination.md`](docs/roadmap/V3-workforce-reimagination.md).
+  Future-state role/workforce design ON TOP of the structural axis. **Hard dependency: requires
+  V3-15 → V3-19**, which is why it is near-future, not current scope. Tool generates defensible
+  inputs; humans do the judgment-heavy reimagining. Framing: capacity created / leverage gained /
+  friction removed — **never** headcount reduction.
 
-Both inherit the universal definition of done below and the push-only + plan-then-stop posture.
+**Sequencing note (by decision):** the **structural axis is sequenced BEFORE the design track**
+— function before polish. A deliberate consequence: the **V3-19 heatmap ships in the current
+design language first** and is design-polished **later by V3-12**. The design track stays gated on
+reading the V3-1 telemetry first.
+
+All inherit the universal definition of done below and the push-only + plan-then-stop posture.
 
 ## Strategic context (added 2026-06-13)
 
