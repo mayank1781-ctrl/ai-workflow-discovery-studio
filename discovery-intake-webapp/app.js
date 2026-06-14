@@ -1144,6 +1144,15 @@ const defaultState = {
   // step structure. ai-inferred never auto-hardens; normalizeLoadedState backfills {}
   // and never promotes.
   frictionTags: {},
+  // V3-18: role-centric pivot (structural axis). Additive sidecar keyed by step.id →
+  // { value, source, confidence }. Role is a firm-defined controlled-vocabulary value
+  // sitting ABOVE job title, assigned PER STEP (exactly ONE primary role per step —
+  // a single value, never a list), NEVER auto-derived from a title string. The USER
+  // is the authority; AI may SUGGEST an ai-inferred role the user then confirms or
+  // rejects. LEVERAGE framing ONLY — never headcount / FTE / automatable-%. STRICTLY
+  // SEPARATE from the opportunity score. ai-inferred never auto-hardens;
+  // normalizeLoadedState backfills {} and never promotes.
+  roleTags: {},
   // V3-3: uploaded AI policy (a relied-on value). Shape:
   // { fileName, uploadedAt, clauses:[{id,ref,heading,text,source,confidence}] }.
   // null = no policy → artifacts use the generic advisory caution. Read-only at
@@ -6927,6 +6936,199 @@ function wireFriction(container) {
   });
 }
 
+// === V3-18: Role-centric pivot ==============================================
+// Built to the locked contract in docs/roadmap/V3-18-role-model.md. A "role" is a
+// firm-defined controlled-vocabulary value (an allowed-set, like the typology and
+// friction sets) that sits ABOVE job title — roughly title-category × workflow-
+// context. Role is assigned PER STEP and is NEVER auto-derived from a title string.
+// EXACTLY ONE primary role per step (a single value, never a list); multi-person work
+// is expressed via existing handoffs (V3-16), never via two roles co-owning one step.
+//
+// A role's FOOTPRINT = the set of steps tagged with that role, ACROSS ALL workflows
+// (buildRoleFootprints) — the role-across-workflows lens and the bridge to workforce.
+//
+// LEVERAGE framing ONLY: every role label expresses where a role's work lives /
+// friction-removed per role — NEVER headcount, FTE, or an automatable-% (binding
+// caution, asserted in tests). STRICTLY SEPARATE from opportunity: the scorers never
+// read role state. Reuses the V3-16 generic provenance-tag core (set / apply /
+// confirm / reject / read) UNCHANGED — no new promoter. Additive sidecar
+// (state.roleTags keyed by step.id); byte-identical when unused; no patchField / no
+// grid write / no scoring endpoint / no telemetry of the role value.
+const ROLE_VALUES = ["operations", "analysis", "review-approval", "client-facing", "project-management", "specialist", "support"];
+
+function ensureRoleTags() { if (!state.roleTags || typeof state.roleTags !== "object") state.roleTags = {}; return state.roleTags; }
+
+// Read: null when unset or off-set (never fabricated). Single value, never a list.
+function roleTagOf(id) { return structuralTagOf(ensureRoleTags(), id, ROLE_VALUES); }
+// Manual assign → user-stated (reuses the generic core). Invalid/"" clears. A second
+// assign REPLACES the single primary role (never appends — no co-ownership). PURE.
+function setRoleTag(id, value) { return setStructuralTag(ensureRoleTags(), id, value, ROLE_VALUES); }
+// AI suggestion → ai-inferred, ONLY after the core validates against the allowed-set:
+// off-set / empty / malformed ⇒ NO key written (never a fabricated value). PURE.
+function applyRoleSuggestion(id, suggestion) { return applyStructuralSuggestion(ensureRoleTags(), id, suggestion, ROLE_VALUES); }
+// Confirm → promote ai-inferred to user-stated via the EXISTING promoter. PURE.
+function confirmRole(id) { return confirmStructuralTag(ensureRoleTags(), id, ROLE_VALUES); }
+// Reject → delete the key (reuses the generic core). PURE.
+function rejectRole(id) { return rejectStructuralTag(ensureRoleTags(), id); }
+
+// Role footprint: { roleValue: [ {workflowId, workflowName, stepId, stepName, source,
+// confidence}, ... ] } — the steps tagged with each role ACROSS all workflows.
+// Provenance preserved per contributing step. Off-set tags never enter the footprint.
+// PURE over an array of workflows; no model call, no scorer, no headcount/FTE/%.
+function buildRoleFootprints(workflows) {
+  const out = {};
+  (Array.isArray(workflows) ? workflows : []).forEach((wf) => {
+    if (!wf) return;
+    const steps = Array.isArray(wf.steps) ? wf.steps : [];
+    const tags = wf.roleTags && typeof wf.roleTags === "object" ? wf.roleTags : {};
+    steps.forEach((step) => {
+      if (!step || !step.id) return;
+      const tag = structuralTagOf(tags, step.id, ROLE_VALUES);
+      if (!tag) return;
+      if (!out[tag.value]) out[tag.value] = [];
+      out[tag.value].push({
+        workflowId: wf.id || "",
+        workflowName: wf.name || "",
+        stepId: step.id,
+        stepName: (step.cells && step.cells.name && step.cells.name.value) || "step",
+        source: tag.source,
+        confidence: tag.confidence
+      });
+    });
+  });
+  return out;
+}
+
+// Collect every PERSISTED workflow (the saved session library) as
+// {id, name, steps, roleTags} for the footprint. Read-only; mirrors
+// portfolioItemFromSession's access. The current session joins once saved (same
+// convention as the rest of the portfolio).
+function collectRoleWorkflows() {
+  return getCombinedSessionLibrary().map((entry) => {
+    const st = entry && entry.state ? entry.state : null;
+    return {
+      id: (entry && (entry.sessionId || entry.id)) || "",
+      name: (entry && (entry.workflowName || entry.name)) || "Untitled workflow",
+      steps: Array.isArray(st && st.workflowGrid && st.workflowGrid.steps) ? st.workflowGrid.steps : [],
+      roleTags: st && st.roleTags && typeof st.roleTags === "object" ? st.roleTags : {}
+    };
+  });
+}
+
+// Descriptive input for the suggest endpoint — workflow CONTEXT (not a title string):
+// what the step is, who acts, what systems it touches. Role is inferred from context,
+// never auto-derived from a title, and stays ai-inferred until the user confirms.
+function roleSuggestionInput(step) {
+  return [
+    structuralCellText(step, "name"), structuralCellText(step, "description"),
+    structuralCellText(step, "personaActors"), structuralCellText(step, "systemsTools")
+  ].filter(Boolean).join("\n");
+}
+
+// The ONLY model call in the role flow — the narrow descriptive endpoint (NOT
+// buildAgentRecipeIr / recipe / scoring). Graceful: any non-200 / empty key / network
+// error / off-set result / unknown step leaves the step UNASSIGNED, writes no key, and
+// never throws. Stored ai-inferred; renders as a SUGGESTION until the user confirms.
+async function suggestRole(id) {
+  const steps = analysisGridSteps();
+  const step = steps.find((s) => s && s.id === id);
+  if (!step) return false;
+  const text = roleSuggestionInput(step);
+  let result;
+  try {
+    result = await requestJson("/api/suggest-role", { method: "POST", body: { text } });
+  } catch (error) {
+    toast("Suggestion unavailable — role left unassigned.");
+    return false;
+  }
+  if (!applyRoleSuggestion(id, result)) {
+    toast("No confident suggestion — role left unassigned.");
+    return false;
+  }
+  persistState();
+  render();
+  const tag = roleTagOf(id);
+  toast(`Suggested role "${tag.value}" — confirm or reject.`);
+  return true;
+}
+
+// --- Render (inside the existing per-step composite-badge <details>) ---
+// The TAG display — returns "" when unset (byte-identical-when-unused). ai-inferred
+// renders distinct from a confirmed role via provenanceBadgeHtml (flat single-hue,
+// no gradient) + "(suggested)" + confirm/reject.
+function roleTagHtml(step) {
+  const id = step && step.id;
+  const tag = roleTagOf(id);
+  if (!tag) return "";
+  const suggested = tag.source === "ai-inferred";
+  const cr = suggested
+    ? ` <button type="button" data-role-confirm="${escapeHtml(id)}" style="background:none;border:none;color:#00d4b4;cursor:pointer;font-size:11px;padding:0;">confirm</button> <button type="button" data-role-reject="${escapeHtml(id)}" style="background:none;border:none;color:#ff4fc8;cursor:pointer;font-size:11px;padding:0;">reject</button>`
+    : "";
+  return `Role: <strong style="color:#cfe0f2;">${escapeHtml(tag.value)}</strong> ${provenanceBadgeHtml(tag.source, tag.confidence)}${suggested ? ` <span style="color:#7a93b4;">(suggested)</span>` : ""}${cr}`;
+}
+
+// The manual assignment control: role picker (single select) + AI-suggest (additive;
+// always available inside the expandable surface — NOT gated behind a global toggle).
+function rolePickerHtml(step) {
+  const id = step && step.id;
+  const tag = roleTagOf(id);
+  const current = tag ? tag.value : "";
+  const opts = [`<option value="">no role assigned</option>`]
+    .concat(ROLE_VALUES.map((v) => `<option value="${v}" ${v === current ? "selected" : ""}>${v}</option>`)).join("");
+  return `<span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
+    <span style="color:#7a93b4;">Role:</span>
+    <select data-role-id="${escapeHtml(id)}" style="background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:2px 6px;color:#dde8f5;font-size:11px;">${opts}</select>
+    <button type="button" data-role-suggest="${escapeHtml(id)}" style="background:none;border:1px solid #3a2a5a;color:#a855f7;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">Suggest (AI)</button>
+  </span>`;
+}
+
+// Per-step role block, appended to the composite badge's expanded <details>.
+function stepRoleHtml(step) {
+  if (!step || !step.id) return "";
+  const tag = roleTagHtml(step);
+  return `<li style="list-style:none;margin-left:-16px;margin-top:6px;">${tag}${tag ? "<br>" : ""}${rolePickerHtml(step)}</li>`;
+}
+
+// Role-across-workflows footprint summary, for the cross-workflow portfolio section.
+// LEVERAGE framing ONLY — "N steps across M workflows" / where the work lives. NEVER
+// a headcount, FTE, or automatable-% figure, and no label implies one. Returns ""
+// when no role is tagged anywhere (byte-identical-when-unused).
+function roleFootprintHtml() {
+  const footprints = buildRoleFootprints(collectRoleWorkflows());
+  const roles = Object.keys(footprints);
+  if (!roles.length) return "";
+  const rows = roles.sort().map((role) => {
+    const hits = footprints[role];
+    const workflowCount = new Set(hits.map((h) => h.workflowId)).size;
+    const inferred = hits.filter((h) => h.source === "ai-inferred").length;
+    const prov = inferred ? ` <span style="color:#7a93b4;font-size:11px;">(${inferred} suggested, unconfirmed)</span>` : "";
+    return `<li style="margin:4px 0;color:#b8c7da;"><strong style="color:#cfe0f2;">${escapeHtml(role)}</strong> — ${hits.length} step${hits.length === 1 ? "" : "s"} across ${workflowCount} workflow${workflowCount === 1 ? "" : "s"}${prov}</li>`;
+  }).join("");
+  return `<div class="role-footprint" style="background:#0c1726;border:1px solid #16263a;border-radius:12px;padding:16px 18px;margin:0 0 18px;">
+    <div style="font-size:0.95rem;font-weight:600;color:#e2e8f0;margin:0 0 4px;">Role across workflows</div>
+    <div style="font-size:12px;color:#7a93b4;margin:0 0 10px;">Where each role's work lives across your saved workflows — a leverage view of the steps each role owns.</div>
+    <ul style="list-style:none;margin:0;padding:0;">${rows}</ul>
+  </div>`;
+}
+
+// Wires the role controls; pure mutators wrapped with persist/render here. The
+// suggest action handles its own persist.
+function wireRole(container) {
+  if (!container) return;
+  container.querySelectorAll("[data-role-id]").forEach((sel) => {
+    sel.addEventListener("change", () => { setRoleTag(sel.dataset.roleId, sel.value); persistState(); render(); });
+  });
+  container.querySelectorAll("[data-role-suggest]").forEach((btn) => {
+    btn.addEventListener("click", () => suggestRole(btn.dataset.roleSuggest));
+  });
+  container.querySelectorAll("[data-role-confirm]").forEach((btn) => {
+    btn.addEventListener("click", () => { if (confirmRole(btn.dataset.roleConfirm)) { persistState(); render(); toast("Role confirmed."); } });
+  });
+  container.querySelectorAll("[data-role-reject]").forEach((btn) => {
+    btn.addEventListener("click", () => { if (rejectRole(btn.dataset.roleReject)) { persistState(); render(); toast("Suggestion rejected — role cleared."); } });
+  });
+}
+
 // V3-2d: composite per-step state badge. The headline posture is a DISPLAY label
 // derived from the provenance mix (not a new persisted score); the four
 // dimensions are revealed on expand. All values read from existing sources.
@@ -6943,7 +7145,7 @@ function stepCompositeBadgeHtml(step) {
     `Readiness: ${s.readinessLabel}${s.readinessScore !== null ? ` (${s.readinessScore}/100)` : ""}`,
     `Provenance: ${s.captured} captured field${s.captured === 1 ? "" : "s"}, each with a tracked source`
   ];
-  return `<details class="step-trust-badge" style="display:inline-block;margin-left:8px;"><summary style="cursor:pointer;list-style:none;display:inline-block;"><span class="ds-badge ${posture.cls}">${escapeHtml(posture.label)}</span></summary><ul style="margin:6px 0 0;padding-left:16px;color:#8aa0b8;font-size:11px;line-height:1.5;">${dims.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}${stepTypologyHtml(step)}${stepStructuralHtml(step)}${stepFrictionHtml(step)}</ul></details>`;
+  return `<details class="step-trust-badge" style="display:inline-block;margin-left:8px;"><summary style="cursor:pointer;list-style:none;display:inline-block;"><span class="ds-badge ${posture.cls}">${escapeHtml(posture.label)}</span></summary><ul style="margin:6px 0 0;padding-left:16px;color:#8aa0b8;font-size:11px;line-height:1.5;">${dims.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}${stepTypologyHtml(step)}${stepStructuralHtml(step)}${stepFrictionHtml(step)}${stepRoleHtml(step)}</ul></details>`;
 }
 
 // V3-7: knowledge-library panel for the grid tab. Shows (1) the entries applied
@@ -7252,6 +7454,7 @@ function renderAnalysisTabGrid() {
   wireStepTypology(container);
   wireStructural(container);
   wireFriction(container);
+  wireRole(container);
 }
 
 // --- TAB 2: AI Opportunities --------------------------------------------------
@@ -8278,10 +8481,13 @@ function renderAnalysisTabOpportunities() {
   // V3-14: capacity (estimated) sits with the cross-workflow portfolio content,
   // above the current-workflow sections. Returns "" when there is no portfolio.
   const capacityHtml = renderPortfolioCapacityHtml();
-  const thisWorkflowHeading = (portfolioHtml || capacityHtml)
+  // V3-18: role-across-workflows footprint sits with the cross-workflow portfolio
+  // content. Returns "" when no role is tagged in any saved workflow (byte-identical).
+  const roleFootprint = roleFootprintHtml();
+  const thisWorkflowHeading = (portfolioHtml || capacityHtml || roleFootprint)
     ? `<h3 style="font-size:1rem;font-weight:600;color:#e2e8f0;margin:0 0 14px;">This workflow</h3>`
     : "";
-  container.innerHTML = opportunityPortfolioStripHtml() + portfolioHtml + capacityHtml + thisWorkflowHeading + statsRow + sectionTwo + sectionThree;
+  container.innerHTML = opportunityPortfolioStripHtml() + portfolioHtml + capacityHtml + roleFootprint + thisWorkflowHeading + statsRow + sectionTwo + sectionThree;
   wireCapacitySection(container);
 }
 
@@ -34266,6 +34472,10 @@ function normalizeLoadedState(parsed = {}) {
     // ai-inferred friction flag is never promoted on load (it hardens only on an
     // explicit confirm); older sessions backfill to {} (byte-identical when unused).
     frictionTags: parsed.frictionTags && typeof parsed.frictionTags === "object" ? parsed.frictionTags : {},
+    // V3-18: backfill role tags. Stored tags pass through UNCHANGED — an ai-inferred
+    // role is never promoted on load (it hardens only on an explicit confirm); older
+    // sessions backfill to {} (byte-identical when the role lens is unused).
+    roleTags: parsed.roleTags && typeof parsed.roleTags === "object" ? parsed.roleTags : {},
     // V3-9: backfill the guided first-run flag so sessions persisted before this
     // feature load cleanly (default: not yet dismissed → first-run can offer).
     onboarding: {

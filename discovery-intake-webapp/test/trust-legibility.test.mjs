@@ -83,7 +83,10 @@ test("d: per-step composite badge surfaces the four dimensions and never writes"
       stepStructuralHtml: () => "",
       // V3-17: same for the friction-lens controls — stubbed here; the real
       // stepFrictionHtml is covered by test/friction-lens.test.mjs.
-      stepFrictionHtml: () => ""
+      stepFrictionHtml: () => "",
+      // V3-18: same for the role controls — stubbed here; the real stepRoleHtml is
+      // covered by test/role-model.test.mjs.
+      stepRoleHtml: () => ""
     }
   );
   fill("name", "Reconcile balances", "user-stated", 0.9);

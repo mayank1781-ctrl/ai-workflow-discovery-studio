@@ -1639,6 +1639,11 @@ const server = http.createServer(async (req, res) => {
       return await handleSuggestFriction(req, res);
     }
 
+    // V3-18: descriptive role classifier (NOT scoring). Additive.
+    if (req.method === "POST" && requestUrl.pathname === "/api/suggest-role") {
+      return await handleSuggestRole(req, res);
+    }
+
     if (req.method === "POST" && requestUrl.pathname === "/api/realtime/session") {
       return await handleRealtimeSession(req, res);
     }
@@ -2449,6 +2454,62 @@ async function handleSuggestFriction(req, res) {
     const note = parsed && typeof parsed.note === "string" ? parsed.note.trim().slice(0, 200) : "";
     if (!value) return sendJson(res, 200, { value: null });
     return sendJson(res, 200, note ? { value, confidence, note } : { value, confidence });
+  } catch (error) {
+    return sendJson(res, 502, { error: error.message || "Suggestion unavailable" });
+  }
+}
+
+// V3-18: role classifier — a narrow DESCRIPTIVE endpoint (mirrors handleSuggestStepType
+// / handleSuggestStructuralType / handleSuggestFriction). Assigns ONE role from a
+// firm-defined allowed-set that sits ABOVE a job title (title-category × workflow-
+// context) — NEVER derived from a title string alone. The USER remains the authority —
+// client-side a suggestion is ai-inferred until an explicit confirm. Validates the
+// role against the allowed-set server-side; returns { value, confidence } or
+// { value: null }. LEVERAGE framing ONLY: NEVER computes/returns opportunity, ROI,
+// headcount, FTE, or an automatable-%; never calls the recipe/scoring paths.
+const ROLE_VALUES_SERVER = ["operations", "analysis", "review-approval", "client-facing", "project-management", "specialist", "support"];
+const ROLE_SUGGEST_SYSTEM_PROMPT = `You assign ONE role to a workflow step. A role is a firm-defined category that sits ABOVE a job title — roughly title-category x workflow-context — describing the KIND of work in this step, NEVER the person's HR title and never derived from a title string alone. Allowed roles (use these exact lowercase strings): operations, analysis, review-approval, client-facing, project-management, specialist, support. Respond ONLY as JSON: {"role":"<one allowed role>","confidence":<number 0..1>}. This is DESCRIPTIVE classification ONLY — never assess value, ROI, opportunity, savings, automation, and never produce a headcount, an FTE count, or any percentage of work that can be automated.`;
+
+async function handleSuggestRole(req, res) {
+  if (!getOpenAiKey()) {
+    return sendJson(res, 400, { error: "OPENAI_API_KEY is not configured." });
+  }
+  let body;
+  try {
+    body = await readJson(req);
+  } catch {
+    return sendJson(res, 400, { error: "Invalid request body" });
+  }
+  const text = body && typeof body.text === "string" ? body.text : "";
+  if (!text.trim()) return sendJson(res, 200, { value: null });
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${getOpenAiKey()}` },
+      body: JSON.stringify({
+        model: HARVEST_MODEL,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: ROLE_SUGGEST_SYSTEM_PROMPT },
+          { role: "user", content: text }
+        ]
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      return sendJson(res, 502, { error: data.error?.message || "Suggestion failed" });
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(data.choices?.[0]?.message?.content || "");
+    } catch {
+      return sendJson(res, 200, { value: null });
+    }
+    // Server-side allowed-set validation — an off-set/malformed role → no suggestion.
+    const value = parsed && ROLE_VALUES_SERVER.includes(parsed.role) ? parsed.role : null;
+    const confRaw = Number(parsed && parsed.confidence);
+    const confidence = Number.isFinite(confRaw) && confRaw >= 0 && confRaw <= 1 ? confRaw : 0.5;
+    return sendJson(res, 200, value ? { value, confidence } : { value: null });
   } catch (error) {
     return sendJson(res, 502, { error: error.message || "Suggestion unavailable" });
   }
