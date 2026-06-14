@@ -1548,6 +1548,10 @@ const server = http.createServer(async (req, res) => {
       return await handleExtractDocument(req, res);
     }
 
+    if (req.method === "POST" && requestUrl.pathname === "/api/extract-policy") {
+      return await handleExtractPolicy(req, res);
+    }
+
     if (req.method === "POST" && requestUrl.pathname === "/api/harvest-grid") {
       return await handleHarvestGrid(req, res);
     }
@@ -2046,6 +2050,38 @@ async function handleExtractDocument(req, res) {
 }
 
 // Parse a single multipart/form-data file field ("file") fully into memory.
+// V3-3: AI-policy upload. Reuses the SAME upload mechanism as document
+// extraction (readMultipartFile + extractDocumentText) but performs NO model
+// call and NO grid extraction — it returns the raw policy text only.
+// Deterministic, verbatim clause segmentation happens client-side
+// (extractPolicyClauses), so policy text is never sent to or rewritten by an LLM.
+async function handleExtractPolicy(req, res) {
+  let upload;
+  try {
+    upload = await readMultipartFile(req);
+  } catch (error) {
+    return sendJson(res, 200, { success: false, error: error.message || "Could not read the uploaded file." });
+  }
+  if (!upload || !upload.buffer?.length) {
+    return sendJson(res, 200, { success: false, error: "No file was received. Please choose a policy document and try again." });
+  }
+  // A policy must be a readable text document — images carry no extractable
+  // clauses, so reject them rather than silently returning empty text.
+  if (isImageUpload(upload)) {
+    return sendJson(res, 200, { success: false, error: "A policy must be a text document (PDF, Word, or text), not an image." });
+  }
+  let text = "";
+  try {
+    text = await extractDocumentText(upload);
+  } catch {
+    return sendJson(res, 200, { success: false, error: "We couldn't read that policy file. Try a PDF, Word, or text document." });
+  }
+  if (!text || !text.trim()) {
+    return sendJson(res, 200, { success: false, error: "That policy document didn't contain readable text." });
+  }
+  return sendJson(res, 200, { success: true, fileName: upload.filename || "AI policy", text });
+}
+
 function readMultipartFile(req, maxBytes = 25_000_000) {
   return new Promise((resolve, reject) => {
     const contentType = req.headers["content-type"] || "";
@@ -2111,6 +2147,12 @@ async function extractDocumentText({ buffer, filename = "", mimeType = "" }) {
       sheets.push(`--- Sheet: ${name} ---\n${csv}`);
     }
     return sheets.join("\n\n");
+  }
+  // Plain text / Markdown: read the buffer as UTF-8 verbatim. Additive branch
+  // (V3-3) so a pasted-as-text AI policy can be ingested through the same
+  // mechanism; the bytes are returned unchanged — no parsing, no model.
+  if (mimeType.toLowerCase().startsWith("text/") || /\.(txt|md|markdown|text)(\s|$)/.test(probe)) {
+    return buffer.toString("utf8");
   }
   throw new Error("Unsupported document type.");
 }
