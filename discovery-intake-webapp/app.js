@@ -11176,6 +11176,163 @@ function wireAuditPanel(container) {
   container.querySelector("#auditDownloadBtn")?.addEventListener("click", downloadAuditTrail);
 }
 
+// === Recipe Book — organized stock of recipes (by step / by status) =========
+// A "recipe" is an AI solution attached to a single workflow step; the recipe book
+// is the stock of recipes for the active workflow, organized by step. This is a
+// READ-ONLY organized overview over the EXISTING recipe data (state.recipeCache +
+// recipeGateCheck) — it invents no content, seeds no samples, and shows the empty
+// state when no recipe has been generated yet. Dark Signal Glass surface.
+//
+// Rails honored IN CODE: DESCRIPTIVE only — it describes how AI assists a step and
+// never quantifies replacement (no headcount / FTE / automation-% / ROI / hours-saved
+// / opportunity language in any label or copy here). Status is a FLAT-hue chip with a
+// text label (never a gradient). Provenance is worn the merged way (the .prov classes
+// from signal-glass.css — reused, not re-implemented); an AI-inferred recipe reads
+// grey until it is trusted, nothing auto-hardens. It writes NOTHING and calls no
+// scorer / suggestion endpoint — the "add a recipe" entry point reuses the existing
+// generate path (generateRecipePrompt).
+
+// Existing lifecycle rail (proposed -> trusted). Derived from recipeGateCheck, not a
+// new persisted status. "trusted" == confirmed/trusted (the rail's end state).
+const RECIPE_STATUS_RAIL = ["proposed", "trusted"];
+const RECIPE_STATUS_META = {
+  proposed: { label: "Proposed", hue: "#FFB454" }, // Caution Amber (flat) — awaiting confirmation
+  trusted: { label: "Trusted", hue: "#30D5A7" }    // Ready Green (flat) — confirmed/trusted
+};
+
+// The recipe attached to a step, derived from EXISTING data. null when none yet.
+function recipeForStep(step) {
+  const prompt = (state.recipeCache?.[step?.id] || "").trim();
+  if (!step || !step.id || !prompt) return null;
+  const gate = recipeGateCheck(step);
+  const status = (gate.gaps.length || gate.p9Unconfirmed) ? "proposed" : "trusted";
+  return {
+    stepId: step.id,
+    pattern: stepPrimaryPattern(step) || "AI assist",
+    status,
+    // Provenance worn the usual way: a proposed recipe still rests on unconfirmed
+    // (AI-inferred) inputs; a trusted recipe rests on user-confirmed inputs.
+    source: status === "trusted" ? "user-stated" : "ai-inferred",
+    openGaps: gate.gaps.length
+  };
+}
+
+// The book for the active workflow: steps in order, each with its recipe (or null).
+function recipeBookByStep(steps = analysisGridSteps()) {
+  return (Array.isArray(steps) ? steps : []).map((step, index) => ({
+    step,
+    index,
+    name: stepDisplayName(step, index),
+    recipe: recipeForStep(step)
+  }));
+}
+
+// Recipes grouped by the status rail (only steps that HAVE a recipe). Order:
+// proposed first, then trusted (the lifecycle direction). Empty groups omitted.
+function recipeBookByStatus(steps = analysisGridSteps()) {
+  const withRecipe = recipeBookByStep(steps).filter((row) => row.recipe);
+  return RECIPE_STATUS_RAIL
+    .map((status) => ({ status, rows: withRecipe.filter((row) => row.recipe.status === status) }))
+    .filter((group) => group.rows.length);
+}
+
+function recipeBookHasAnyRecipe(steps = analysisGridSteps()) {
+  return recipeBookByStep(steps).some((row) => row.recipe);
+}
+
+// Status chip — FLAT single hue + a TEXT label (never a gradient).
+function recipeStatusChipHtml(status) {
+  const meta = RECIPE_STATUS_META[status] || { label: String(status || "—"), hue: "#8C93A7" };
+  return `<span class="recipe-status" data-recipe-status="${escapeHtml(status)}" style="display:inline-flex;align-items:center;gap:6px;background:${meta.hue}1f;border:1px solid ${meta.hue}66;color:${meta.hue};border-radius:999px;padding:2px 10px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;"><span style="width:6px;height:6px;border-radius:50%;background:${meta.hue};"></span>${escapeHtml(meta.label)}</span>`;
+}
+
+// Provenance chip — REUSES the merged Signal Glass .prov classes (not re-implemented).
+function recipeProvChipHtml(source) {
+  const ai = source === "ai-inferred";
+  return `<span class="prov ${ai ? "ai" : "user"}"><span class="pd"></span>${ai ? "AI · inferred" : "User · stated"}</span>`;
+}
+
+// One book card. A step with no recipe shows a clean inline state + an add entry
+// point — never a dead end.
+function recipeBookCardHtml(row) {
+  const num = String(row.index + 1).padStart(2, "0");
+  if (!row.recipe) {
+    return `<div class="recipe-book-card recipe-book-empty-step" data-recipe-book-step="${escapeHtml(row.step.id)}" style="background:var(--deep2,#0b0e1c);border:1px dashed var(--sg-line,rgba(255,255,255,.10));border-radius:12px;padding:14px 16px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+      <div style="min-width:0;"><span style="color:var(--txt-faint,#737A92);font-size:12px;font-weight:700;margin-right:8px;">${num}</span><span style="color:var(--txt-dim,#A6ADC4);font-size:13px;font-weight:600;">${escapeHtml(row.name)}</span><div style="color:var(--txt-faint,#737A92);font-size:11px;margin-top:3px;">No recipe yet — add one to start the book for this step.</div></div>
+      <button type="button" class="primary-button compact" data-recipe-book-add="${escapeHtml(row.step.id)}" style="white-space:nowrap;">Add a recipe</button>
+    </div>`;
+  }
+  const r = row.recipe;
+  return `<div class="recipe-book-card" data-recipe-book-step="${escapeHtml(row.step.id)}" style="background:var(--glass,rgba(255,255,255,.045));border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:12px;padding:14px 16px;margin-bottom:10px;">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <span style="background:var(--deep2,#0b0e1c);color:var(--sg-cyan,#42E8FF);font-weight:700;font-size:12px;padding:3px 8px;border-radius:6px;">${num}</span>
+      <strong style="color:var(--txt,#EAEFFF);font-size:14px;">${escapeHtml(row.name)}</strong>
+      ${recipeStatusChipHtml(r.status)}
+      ${recipeProvChipHtml(r.source)}
+    </div>
+    <div style="margin-top:8px;color:var(--txt-dim,#A6ADC4);font-size:12px;line-height:1.5;">
+      <span style="color:var(--txt-faint,#737A92);">Recipe:</span> ${escapeHtml(r.pattern)} assist, attached to this step.
+    </div>
+  </div>`;
+}
+
+function recipeBookStatusGroupHtml(group) {
+  const meta = RECIPE_STATUS_META[group.status] || { label: String(group.status), hue: "#8C93A7" };
+  return `<div class="recipe-book-status-group" style="margin-bottom:16px;">
+    <div style="display:flex;align-items:center;gap:8px;margin:0 0 8px;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-faint,#737A92);"><span style="width:7px;height:7px;border-radius:50%;background:${meta.hue};"></span>${escapeHtml(meta.label)} · ${group.rows.length}</div>
+    ${group.rows.map(recipeBookCardHtml).join("")}
+  </div>`;
+}
+
+function recipeBookEmptyNoteHtml() {
+  return `<div class="recipe-book-empty" style="background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:12px;padding:16px 18px;margin-bottom:12px;color:var(--txt-dim,#A6ADC4);font-size:13px;line-height:1.55;">No recipes in the book yet. Each workflow step can hold a recipe that describes how AI assists it — add one to a step below to start the recipe book. Nothing is generated until you ask.</div>`;
+}
+
+// The Recipe Book section. Returns "" when there are no steps (the recipe tab shows
+// its own no-steps state). Reads ONLY existing recipe data; renders the empty state
+// when no recipe exists yet.
+function recipeBookHtml() {
+  const steps = analysisGridSteps();
+  if (!steps.length) return "";
+  const view = state.recipeBookView === "status" ? "status" : "byStep";
+  const hasRecipes = recipeBookHasAnyRecipe(steps);
+  const toggleBtn = (id, label) => `<button type="button" data-recipe-book-view="${id}" class="recipe-book-view-btn${view === id ? " on" : ""}" style="background:${view === id ? "var(--glass-2,rgba(255,255,255,.07))" : "transparent"};color:${view === id ? "var(--txt,#EAEFFF)" : "var(--txt-dim,#A6ADC4)"};border:none;border-radius:8px;padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;">${label}</button>`;
+  const header = `<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+    <div><div style="font-size:1rem;font-weight:800;color:var(--txt,#EAEFFF);letter-spacing:-.02em;">Recipe Book</div><div style="font-size:12px;color:var(--txt-faint,#737A92);margin-top:2px;">The stock of AI recipes for this workflow, by step. Each recipe describes how AI assists one step.</div></div>
+    <div class="recipe-book-toggle" role="tablist" aria-label="Recipe Book view" style="display:inline-flex;gap:3px;background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:10px;padding:3px;">${toggleBtn("byStep", "By step")}${toggleBtn("status", "By status")}</div>
+  </div>`;
+  let body;
+  if (!hasRecipes) {
+    body = recipeBookEmptyNoteHtml() + recipeBookByStep(steps).map(recipeBookCardHtml).join("");
+  } else if (view === "status") {
+    body = recipeBookByStatus(steps).map(recipeBookStatusGroupHtml).join("");
+  } else {
+    body = recipeBookByStep(steps).map(recipeBookCardHtml).join("");
+  }
+  return `<section class="recipe-book" aria-label="Recipe Book" style="background:var(--deep,#111425);border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:16px;padding:18px 20px;margin-bottom:18px;">${header}${body}</section>`;
+}
+
+// Wires the Recipe Book controls. View toggle re-renders the tab; "Add a recipe"
+// reuses the EXISTING generate path (no new backend). No grid write, no scorer.
+function wireRecipeBook(container) {
+  if (!container) return;
+  container.querySelectorAll("[data-recipe-book-view]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.recipeBookView = btn.dataset.recipeBookView === "status" ? "status" : "byStep";
+      persistState();
+      renderAnalysisTabRecipe();
+    });
+  });
+  container.querySelectorAll("[data-recipe-book-add]").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const stepId = btn.dataset.recipeBookAdd;
+      if (typeof generateRecipePrompt === "function") generateRecipePrompt(stepId);
+      else toast("Generate this step's recipe from its card below.");
+    });
+  });
+}
+
 function renderAnalysisTabRecipe() {
   const container = document.getElementById("analysis-tab-recipe");
   if (!container) return;
@@ -11300,6 +11457,7 @@ function renderAnalysisTabRecipe() {
   container.innerHTML =
     recipeWorkflowHeaderHtml() +
     artifactStudioHeaderHtml(steps) +
+    recipeBookHtml() +
     renderPolicyPanelHtml() +
     renderAuditPanelHtml() +
     cards +
@@ -11307,6 +11465,8 @@ function renderAnalysisTabRecipe() {
     businessCaseScenariosBlockForCurrentWorkflow() +
     scoringTransparencyBlockForCurrentWorkflow() +
     `<div style="margin-top:16px;"><button class="secondary-button compact" type="button" id="downloadRecipeBookBtn">Download Recipe Book</button><button type="button" id="recipe-export-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download DOCX</button><button type="button" id="recipe-pdf-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download PDF</button></div>`;
+
+  wireRecipeBook(container);
 
   // Fill the prompt-template body for any step that already has a cached prompt.
   steps.forEach((step) => {
