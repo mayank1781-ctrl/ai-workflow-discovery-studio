@@ -1,0 +1,206 @@
+{
+  "_meta": {
+    "artifact": "recipe-library-seed",
+    "version": "0.1",
+    "status": "SEED — illustrative library shapes, NOT confirmed from real captured workflows.",
+    "provenance_warning": "Every entry is confirmed:false on purpose. These are realistic, format-correct mappings whose only job is to let the library-match mechanism (recipeUnitSource) resolve and rank a fitting recipe for a captured unit. They were authored, not derived from a real confirm-pass over actual captured-and-confirmed workflows. BEFORE ANY PILOT: replace this file with the output of a real confirm-pass, and only then set confirmed:true. Do NOT present these to a client as confirmed/trusted recipes — that would misrepresent provenance, which the product forbids.",
+    "framing": "All recipe text is leverage / assist-not-replace. A human-held unit keeps the person approving and wears the reserved Human Pink. The economics-token family is excluded by construction.",
+    "match_vocabulary": "The match signatures key off the SAME shape inputs the Leverage Map detector already reads — they are NOT a parallel vocabulary. For a connection/span unit: 'motivators' is a subset of the detector's seam motivator kinds (shared-tool | manual-channel | system-switching | transition), 'handoff_kind' is one of HANDOFF_KINDS (role-to-role | human-to-system | system-to-human | system-to-system) and requires a 'transition' motivator. For a step unit: 'step_type' is one of STEP_TYPE_OPTIONS, 'friction' of FRICTION_KINDS, 'role' of ROLE_VALUES, 'decision' of DECISION_KINDS. 'human_held' mirrors the seam/step human-hold (held recipes fit held units only). 'tools_any' is a SOFT disambiguator (token overlap with the captured tool text); it never gates a fit, only ranks.",
+    "schema": {
+      "id": "stable identifier for the seed entry",
+      "label": "human-readable name of the workflow shape",
+      "unit_kind": "step | connection | span (Option A — a recipe unit is a step, a handoff, or a short span; a span entry fits a connection unit)",
+      "match": "the captured-shape signature, in the detector's real vocabulary, the matcher compares a unit against",
+      "leverage": "lo | md | hi — the rank used to order fitting recipes (never a percent, never an economics number)",
+      "human_held": "true if the unit involves judgment a person must own; the recipe then keeps the person approving and wears reserved Human Pink (#FF4FD8)",
+      "recipe": "the assist-not-replace recipe text",
+      "source": "always 'example' in this file; becomes 'library' (confirmed) only after a real confirm-pass",
+      "confirmed": "always false in this file"
+    }
+  },
+  "entries": [
+    {
+      "id": "seam-export-reconcile",
+      "label": "Export → manual reconciliation (controller close)",
+      "unit_kind": "connection",
+      "match": {
+        "motivators": ["manual-channel", "system-switching"],
+        "human_held": false,
+        "tools_any": ["erp", "gl", "ledger", "reconcil", "spreadsheet", "excel"]
+      },
+      "leverage": "hi",
+      "human_held": false,
+      "recipe": "AI assembles the reconciliation working file from both sources and surfaces the items that do not tie out, so the person reviews the exceptions instead of building the comparison by hand.",
+      "source": "example",
+      "confirmed": false
+    },
+    {
+      "id": "seam-rekey-ledger",
+      "label": "Spreadsheet → ledger re-key (accounts payable)",
+      "unit_kind": "connection",
+      "match": {
+        "motivators": ["manual-channel"],
+        "human_held": false,
+        "tools_any": ["spreadsheet", "ledger", "erp", "excel"]
+      },
+      "leverage": "hi",
+      "human_held": false,
+      "recipe": "AI drafts the ledger entries from the source export and flags mismatches for review, so the re-keying between the two systems is carried for the person rather than done by hand.",
+      "source": "example",
+      "confirmed": false
+    },
+    {
+      "id": "handoff-invoice-approval",
+      "label": "Invoice routed for approval (accounts payable)",
+      "unit_kind": "connection",
+      "match": {
+        "motivators": ["transition"],
+        "handoff_kind": "role-to-role",
+        "human_held": true,
+        "tools_any": ["invoice", "ap", "payable", "coding"]
+      },
+      "leverage": "md",
+      "human_held": true,
+      "recipe": "AI packages the invoice with its supporting detail and a recommended coding and routes it to the approver; the person approves. Never removes the approval step.",
+      "source": "example",
+      "confirmed": false
+    },
+    {
+      "id": "step-variance-summary",
+      "label": "Package the variance summary for review (controller close)",
+      "unit_kind": "step",
+      "match": {
+        "step_type": "data-op",
+        "human_held": false,
+        "tools_any": ["spreadsheet", "report", "excel", "variance"]
+      },
+      "leverage": "md",
+      "human_held": false,
+      "recipe": "AI drafts the variance summary from the reconciled figures, groups the items for review, and notes what moved, so the person spends their attention on which variances matter.",
+      "source": "example",
+      "confirmed": false
+    },
+    {
+      "id": "seam-forecast-inputs",
+      "label": "Gather forecast inputs into the model (FP&A)",
+      "unit_kind": "connection",
+      "match": {
+        "motivators": ["system-switching"],
+        "human_held": false,
+        "tools_any": ["erp", "warehouse", "model", "forecast", "spreadsheet"]
+      },
+      "leverage": "md",
+      "human_held": false,
+      "recipe": "AI gathers the forecast inputs from the source systems and assembles them into the model's input shape, so the person works on the assumptions rather than the collection.",
+      "source": "example",
+      "confirmed": false
+    },
+    {
+      "id": "seam-collections-outreach",
+      "label": "Flag overdue → collections outreach (accounts receivable)",
+      "unit_kind": "connection",
+      "match": {
+        "motivators": ["manual-channel", "system-switching"],
+        "human_held": false,
+        "tools_any": ["aging", "ar", "receivable", "collection", "email"]
+      },
+      "leverage": "hi",
+      "human_held": false,
+      "recipe": "AI drafts the collections outreach for each overdue item and prepares it for sending, so the person reviews and sends rather than composing each message from scratch.",
+      "source": "example",
+      "confirmed": false
+    },
+    {
+      "id": "step-cash-position",
+      "label": "Assemble the daily cash position (treasury)",
+      "unit_kind": "step",
+      "match": {
+        "step_type": "data-op",
+        "human_held": false,
+        "tools_any": ["bank", "cash", "treasury", "feed"]
+      },
+      "leverage": "md",
+      "human_held": false,
+      "recipe": "AI assembles the daily cash position from the account feeds and highlights anything unusual, so the person reviews a prepared position instead of compiling it.",
+      "source": "example",
+      "confirmed": false
+    },
+    {
+      "id": "step-control-assessment",
+      "label": "Assess a control (SOX compliance)",
+      "unit_kind": "step",
+      "match": {
+        "step_type": "judgment",
+        "human_held": true,
+        "tools_any": ["control", "sox", "evidence", "assessment"]
+      },
+      "leverage": "hi",
+      "human_held": true,
+      "recipe": "AI assembles and routes the control evidence with a draft assessment for review; the person makes the control assessment. Never removes the human assessment.",
+      "source": "example",
+      "confirmed": false
+    },
+    {
+      "id": "seam-pipeline-crosscheck",
+      "label": "Export → cross-check for stale deals (revenue operations)",
+      "unit_kind": "connection",
+      "match": {
+        "motivators": ["manual-channel"],
+        "human_held": true,
+        "tools_any": ["crm", "pipeline", "deal", "stale", "export"]
+      },
+      "leverage": "md",
+      "human_held": true,
+      "recipe": "AI assembles the week-over-week comparison and proposes which deals look stale with the supporting signals; the person decides what counts as stale. Never removes the judgment.",
+      "source": "example",
+      "confirmed": false
+    },
+    {
+      "id": "seam-owner-outreach",
+      "label": "Stale deals → owner messaging and leadership summary (revenue operations)",
+      "unit_kind": "span",
+      "match": {
+        "motivators": ["manual-channel", "system-switching"],
+        "human_held": false,
+        "tools_any": ["crm", "chat", "email", "doc", "outreach"]
+      },
+      "leverage": "hi",
+      "human_held": false,
+      "recipe": "AI drafts owner outreach for each flagged deal and the leadership summary and prepares them for sending, so the person reviews and routes rather than writing each one.",
+      "source": "example",
+      "confirmed": false
+    },
+    {
+      "id": "seam-procurement-intake",
+      "label": "Intake request → route to category (procurement)",
+      "unit_kind": "connection",
+      "match": {
+        "motivators": ["transition"],
+        "handoff_kind": "human-to-system",
+        "human_held": false,
+        "tools_any": ["intake", "procurement", "request", "category"]
+      },
+      "leverage": "md",
+      "human_held": false,
+      "recipe": "AI drafts the intake summary and proposes the routing category from the request detail, so the person confirms and forwards rather than triaging from scratch.",
+      "source": "example",
+      "confirmed": false
+    },
+    {
+      "id": "handoff-approval-routing",
+      "label": "Route an item for sign-off (general)",
+      "unit_kind": "connection",
+      "match": {
+        "motivators": ["transition"],
+        "handoff_kind": "role-to-role",
+        "human_held": true,
+        "tools_any": []
+      },
+      "leverage": "md",
+      "human_held": true,
+      "recipe": "AI packages the item with its supporting detail and routes it to the right approver with a recommended decision; the person approves. Never removes the sign-off.",
+      "source": "example",
+      "confirmed": false
+    }
+  ]
+}
