@@ -1,10 +1,10 @@
 /* ============================================================================
    SIGNAL GLASS — Track A re-skin (PRESENTATION ONLY)
    ----------------------------------------------------------------------------
-   Two surfaces: Discovery = light glass · Analysis Studio = dark glass.
-   Loaded LAST (after design-system.css) so it re-skins existing chrome by
-   cascade. NO behavior / markup / logic / routing / endpoint changes; app.js,
-   server.mjs and the existing CSS files are untouched.
+   One dark system: Discovery (interview) and Analysis Studio (analysis) share the
+   same luminous Signal Glass dark surface. Loaded LAST (after design-system.css)
+   so it re-skins existing chrome by cascade. NO behavior / markup / logic /
+   routing / endpoint changes; server.mjs and the existing CSS files are untouched.
 
    Token note: the locked Signal Glass names --ink/--line/--blue/--cyan/--violet/
    --pink/--amber/--green ALREADY exist in this app as CONTEXTUALLY-scoped tokens
@@ -27,9 +27,6 @@
   --glass:rgba(255,255,255,.045); --glass-2:rgba(255,255,255,.07);
   --txt:#EAEFFF; --txt-dim:#A6ADC4; --txt-faint:#737A92;
   --font:'Inter',system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-  /* ---- Discovery — light surface (the only addition) ---- */
-  --disc-bg:#EFF2FC; --disc-panel:rgba(255,255,255,.74); --disc-raised:rgba(255,255,255,.92);
-  --disc-line:rgba(12,16,36,.10); --disc-ink:#0E1326; --disc-slate:#55607A; --disc-faint:#8A92A8;
 }
 
 /* ---- Type: Inter everywhere; headlines 800, body/UI 450 ---- */
@@ -62,66 +59,45 @@ body[data-app-mode="analysis"] .analysis-tab-btn.active{
 }
 
 /* ============================================================================
-   DISCOVERY — light glass (interview mode)
-   The static chrome flips to light; dynamic, inline-styled content areas stay as
-   dark-glass "data insets" (their inner markup is inline-coloured in app.js and
-   must remain readable — see report).
+   DISCOVERY — dark glass (interview mode)
+   Discovery now shares the Analysis Studio dark surface. The previous light layer
+   is retired: the ground and most static cards fall through to the app's native
+   luminous-dark interview styling (the same dark system Studio uses). This sheet
+   keeps the light-text mapping, re-skins the one card + the one input that are
+   natively light, and frames the inline-styled data panels as deep-glass insets.
    ========================================================================== */
-body[data-app-mode="interview"]{
-  background:
-    radial-gradient(420px 240px at 6% -10%, rgba(123,77,255,.10), transparent 60%),
-    radial-gradient(420px 240px at 97% 4%, rgba(66,232,255,.12), transparent 60%),
-    var(--disc-bg);
-  color:var(--disc-ink);
-}
 
-/* Static Discovery cards → white glass on light. */
-body[data-app-mode="interview"] .question-stage-card{
-  background:var(--disc-raised);
-  border:1px solid var(--disc-line);
-  box-shadow:0 24px 60px -34px rgba(20,30,70,.5);
-  color:var(--disc-ink);
-}
-body[data-app-mode="interview"] .question-stage-card::before{
-  background:
-    radial-gradient(circle at 72% 34%, transparent 0 90px, rgba(46,140,255,.10) 92px, transparent 95px),
-    linear-gradient(180deg, rgba(255,255,255,.45), transparent 44%);
-  opacity:.55;
-}
-body[data-app-mode="interview"] .embedded-transcript-card,
-body[data-app-mode="interview"] .conversation-card,
-body[data-app-mode="interview"] .transcript-composer,
-body[data-app-mode="interview"] .current-question-card,
+/* The step workspace card is the one interview card with a native LIGHT background
+   (the others fall through to native dark) — re-skin it to a deep-glass dark panel
+   so the whole surface reads as one dark system. */
 body[data-app-mode="interview"] .step-workspace-card{
-  background:var(--disc-panel);
-  border:1px solid var(--disc-line);
-  color:var(--disc-ink);
+  background:var(--deep2); border:1px solid var(--sg-line-soft); color:var(--txt);
 }
 
-/* Static Discovery text on light. */
+/* Static Discovery text → light on the dark surface (Signal Glass text tokens). */
 body[data-app-mode="interview"] .current-question-card p,
 body[data-app-mode="interview"] .conversation-heading .eyebrow,
 body[data-app-mode="interview"] .eyebrow,
-body[data-app-mode="interview"] #discoveryCompletionLabel{ color:var(--disc-slate); }
+body[data-app-mode="interview"] #discoveryCompletionLabel{ color:var(--txt-dim); }
 body[data-app-mode="interview"] #currentQuestion,
 body[data-app-mode="interview"] .current-question-card h2,
 body[data-app-mode="interview"] .conversation-heading h2,
-body[data-app-mode="interview"] #workflowHeaderName{ color:var(--disc-ink); }
+body[data-app-mode="interview"] #workflowHeaderName{ color:var(--txt); }
 body[data-app-mode="interview"] .hint,
 body[data-app-mode="interview"] .composer-hint,
 body[data-app-mode="interview"] #questionLensBar,
 body[data-app-mode="interview"] .text-intake-assist,
-body[data-app-mode="interview"] .answer-nudges{ color:var(--disc-faint); }
+body[data-app-mode="interview"] .answer-nudges{ color:var(--txt-faint); }
 
-/* Discovery text inputs → light. */
+/* Discovery text inputs → dark Signal Glass field (#aiChatInput has no native dark
+   background of its own; #answerInput is hidden in interview mode). */
 body[data-app-mode="interview"] textarea#aiChatInput,
 body[data-app-mode="interview"] textarea#answerInput{
-  background:var(--disc-raised); border:1px solid var(--disc-line); color:var(--disc-ink);
+  background:var(--deep2); border:1px solid var(--sg-line); color:var(--txt);
 }
 
-/* Dynamic, inline-styled content → dark-glass insets so app.js-coloured markup
-   stays legible on the light surface (these areas are re-skinned in Track B when
-   their inline styles migrate to tokens). */
+/* Dynamic, inline-styled content → deep-glass insets that frame the app.js-coloured
+   markup on the shared dark surface (their inner hexes are set inline in app.js). */
 body[data-app-mode="interview"] #aiChatLog,
 body[data-app-mode="interview"] #conversationLog,
 body[data-app-mode="interview"] #liveExtractionGrid,
@@ -147,8 +123,6 @@ body[data-app-mode="interview"] #discoveryPatternInterview{
   color:#08111f; background:var(--grad); border-color:transparent;
   box-shadow:0 10px 28px -14px rgba(46,140,255,.55), inset 0 1px 0 rgba(255,255,255,.4);
 }
-body[data-app-mode="interview"] .mode-switch{ background:rgba(255,255,255,.5); border:1px solid var(--disc-line); }
-body[data-app-mode="interview"] .mode-tab{ color:var(--disc-slate); }
 
 /* Buttons — primary is luminous gradient (action); secondary is calm glass. */
 .primary-button, .primary-button.compact{
@@ -156,12 +130,11 @@ body[data-app-mode="interview"] .mode-tab{ color:var(--disc-slate); }
   box-shadow:0 10px 30px -12px rgba(46,140,255,.6), inset 0 1px 0 rgba(255,255,255,.4);
 }
 .secondary-button{ font-family:var(--font); font-weight:600; }
-body[data-app-mode="analysis"] .secondary-button{ background:var(--glass-2); color:var(--txt); border:1px solid var(--sg-line); }
-body[data-app-mode="interview"] .secondary-button{ background:rgba(255,255,255,.62); color:var(--disc-ink); border:1px solid var(--disc-line); }
+body[data-app-mode="analysis"] .secondary-button,
+body[data-app-mode="interview"] .secondary-button{ background:var(--glass-2); color:var(--txt); border:1px solid var(--sg-line); }
 
 /* Readiness / progress fills — gradient (chrome). */
 #discoveryCompletionFill{ background:var(--grad); }
-body[data-app-mode="interview"] .discovery-completion-track{ background:rgba(12,16,36,.10); }
 
 /* Status badges → Signal Glass hues (flat, single-hue; never gradient). */
 .ds-badge{ font-family:var(--font); font-weight:700; }
@@ -178,19 +151,20 @@ body[data-app-mode="interview"] .discovery-completion-track{ background:rgba(12,
 .prov.user .pd{ background:var(--sg-cyan); }
 .prov.ai{ background:rgba(140,147,167,.13); border:1px solid rgba(140,147,167,.36); color:#c2c8d8; }
 .prov.ai .pd{ background:var(--gray); }
-body[data-app-mode="interview"] .prov.user{ color:#0f6fb8; }
-body[data-app-mode="interview"] .prov.ai{ color:#5a6276; }
 
 .toast{ font-family:var(--font); }
 
 /* ============================================================================
    SURFACE GROUNDS — high-specificity so they win over the existing scoped
    .app-shell.session-shell / body[data-app-mode] ground rules. This is what
-   actually flips the two surfaces (body-level rules above are out-specified).
+   actually paints both surfaces (body-level rules above are out-specified).
    ========================================================================== */
-/* Studio — deep Signal Glass ink + luminous glow. */
+/* Both surfaces — deep Signal Glass ink + luminous glow. Discovery shares the
+   exact Studio ground so the two modes read as one dark system. */
 body[data-app-mode="analysis"] .app-shell.session-shell,
-body[data-app-mode="analysis"] .workspace{
+body[data-app-mode="analysis"] .workspace,
+body[data-app-mode="interview"] .app-shell.session-shell,
+body[data-app-mode="interview"] .workspace{
   background:
     radial-gradient(900px 600px at 10% -6%, rgba(123,77,255,.16), transparent 60%),
     radial-gradient(820px 560px at 94% 4%, rgba(66,232,255,.10), transparent 60%),
@@ -198,40 +172,6 @@ body[data-app-mode="analysis"] .workspace{
     var(--sg-ink);
 }
 
-/* Discovery — light porcelain glass ground. */
-body[data-app-mode="interview"] .app-shell.session-shell,
-body[data-app-mode="interview"] .workspace{
-  background:
-    radial-gradient(460px 280px at 4% -8%, rgba(123,77,255,.10), transparent 60%),
-    radial-gradient(460px 280px at 99% 3%, rgba(66,232,255,.13), transparent 60%),
-    var(--disc-bg);
-}
-
-/* Discovery topbar → light glass (keeps the dark app chrome from bleeding into
-   the light surface). Brand mark stays the prism gradient. */
-body[data-app-mode="interview"] .session-topbar{
-  background:rgba(255,255,255,.66);
-  border-bottom:1px solid var(--disc-line);
-}
-body[data-app-mode="interview"] .topbar-trio-button{
-  background:rgba(255,255,255,.62); color:var(--disc-ink); border:1px solid var(--disc-line);
-}
-body[data-app-mode="interview"] .status-pill{
-  background:rgba(255,255,255,.62); color:var(--disc-slate); border:1px solid var(--disc-line);
-}
-
-/* ============================================================================
-   STUDIO — Engineering Doc view (Track B): migrate the inline-styled "data
-   inset" surfaces of #analysis-tab-engineering onto the Signal Glass dark
-   ground. PRESENTATION ONLY — re-skins the existing .ds-* class surfaces by
-   higher-specificity cascade (id + class beats the plain-class base rules in
-   design-system.css; none of these base rules are !important). Reuses locked
-   Signal Glass tokens; introduces no new hex. Gradient stays chrome-only (the
-   section-title accent bars + the header divider); the data surfaces are flat.
-   Human Pink is NOT used here — it is reserved for human-hold. (Companion
-   inline-style swaps live in app.js: renderAnalysisTabEngineering,
-   engineeringCommandCenterHtml, and the Jira/Confluence status bars.)
-   ========================================================================== */
 #analysis-tab-engineering .ds-panel{ background:var(--glass-2); border-color:var(--sg-line); }
 #analysis-tab-engineering .ds-card{ background:var(--glass); border-color:var(--sg-line); }
 #analysis-tab-engineering .ds-card-inner{ background:var(--deep2); border-color:var(--sg-line-soft); }
