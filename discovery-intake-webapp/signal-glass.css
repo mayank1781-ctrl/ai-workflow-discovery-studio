@@ -219,3 +219,31 @@ body[data-app-mode="interview"] .topbar-trio-button{
 body[data-app-mode="interview"] .status-pill{
   background:rgba(255,255,255,.62); color:var(--disc-slate); border:1px solid var(--disc-line);
 }
+
+/* ============================================================================
+   STUDIO — Engineering Doc view (Track B): migrate the inline-styled "data
+   inset" surfaces of #analysis-tab-engineering onto the Signal Glass dark
+   ground. PRESENTATION ONLY — re-skins the existing .ds-* class surfaces by
+   higher-specificity cascade (id + class beats the plain-class base rules in
+   design-system.css; none of these base rules are !important). Reuses locked
+   Signal Glass tokens; introduces no new hex. Gradient stays chrome-only (the
+   section-title accent bars + the header divider); the data surfaces are flat.
+   Human Pink is NOT used here — it is reserved for human-hold. (Companion
+   inline-style swaps live in app.js: renderAnalysisTabEngineering,
+   engineeringCommandCenterHtml, and the Jira/Confluence status bars.)
+   ========================================================================== */
+#analysis-tab-engineering .ds-panel{ background:var(--glass-2); border-color:var(--sg-line); }
+#analysis-tab-engineering .ds-card{ background:var(--glass); border-color:var(--sg-line); }
+#analysis-tab-engineering .ds-card-inner{ background:var(--deep2); border-color:var(--sg-line-soft); }
+#analysis-tab-engineering .ds-chip{ background:var(--glass); border-color:var(--sg-line-soft); color:var(--txt-dim); }
+#analysis-tab-engineering .ds-section-title{ color:var(--txt); }
+#analysis-tab-engineering .ds-section-meta{ color:var(--txt-faint); }
+#analysis-tab-engineering .ds-micro{ color:var(--txt-faint); }
+#analysis-tab-engineering .ds-badge-dim{ background:var(--glass); color:var(--txt-faint); border-color:var(--sg-line); }
+#analysis-tab-engineering .ds-bar-name{ color:var(--txt-dim); }
+#analysis-tab-engineering .ds-bar-track{ background:var(--sg-line-soft); }
+#analysis-tab-engineering .ds-btn-ghost{ color:var(--txt-dim); border-color:var(--sg-line); }
+/* Section-title accent bars + the header divider are the only gradient here —
+   chrome, never a data fill. De-pinked to the locked chrome gradient. */
+#analysis-tab-engineering .ds-grad-bar,
+#analysis-tab-engineering .ds-grad-bar-v{ background:var(--grad); }

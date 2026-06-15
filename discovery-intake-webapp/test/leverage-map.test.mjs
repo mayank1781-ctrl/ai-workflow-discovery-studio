@@ -22,7 +22,7 @@ const source = readAppSource();
 // opportunity family — modeled on recipe-book.test.mjs, NOT discovery-final-sweep
 // (whose FORBIDDEN bans "leverage" because that is descriptive-capture copy).
 const FORBIDDEN = /headcount|\bFTE\b|full-time equivalent|automat|% *automat|\bROI\b|hours saved|time saved|\bopportunity\b/i;
-const LOCKED_HEXES = ["#0c1726", "#16263a", "#e2e8f0", "#7a93b4", "#8aa0b8", "#cfe0f2", "#ff4fc8", "#3f5878", "#3b82f6"];
+const LOCKED_HEXES = ["#0c1726", "#16263a", "#e2e8f0", "#7a93b4", "#8aa0b8", "#cfe0f2", "#ff4fd8", "#3f5878", "#3b82f6"];
 
 const tag = (value, src, confidence) => ({ value, source: src, confidence: confidence != null ? confidence : (src === "user-stated" ? 1 : 0.6) });
 // A shaped step for the PURE builder.
@@ -143,7 +143,7 @@ test("a leverage tile carries one hue + a shade + a lo/md/hi TEXT label (never c
   assert.match(hi, /#3b82f6b3/, "computed-blue hue + hi shade (alpha) — one hue, a discrete shade");
   assert.ok(!/gradient/i.test(hi), "a shade, never a gradient");
   const held = sb.leverageTileHtml("md", "inferred", true);
-  assert.match(held, /#ff4fc8/, "a human-held tile uses the reserved Human Pink");
+  assert.match(held, /#FF4FD8/, "a human-held tile uses the reserved Human Pink");
 });
 
 test("the rendered map shows By step + By connection, the always-on source-dot legend, and the inferred grey dot", () => {

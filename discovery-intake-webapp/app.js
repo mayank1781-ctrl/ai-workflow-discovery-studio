@@ -7134,7 +7134,7 @@ function roleFootprintHtml() {
 // automatable-%. NEVER feeds opportunity or any scorer. Mints no new color/gradient:
 // every hex below already ships in the locked palette.
 const HEATMAP_STATE_DOTS = { stated: "#00d4b4", computed: "#3b82f6", inferred: "#5b7186" };
-const HUMAN_HOLD_HUE = "#ff4fc8";
+const HUMAN_HOLD_HUE = "#FF4FD8";
 const HEATMAP_WORK_TYPE_HUES = { "decision": "#a855f7", "handoff": "#06b6d4", "data-op": "#00d4b4", "judgment": HUMAN_HOLD_HUE, "review": "#f59e0b" };
 
 // Map a stored provenance source to one of the three heatmap states.
@@ -13057,20 +13057,20 @@ async function refreshJiraStatus() {
 function jiraStatusBarHtml() {
   if (!jiraStatus.connected) {
     return `
-      <div style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:#162438;border:1px solid #1e3350;border-radius:8px;margin-bottom:20px;">
-        <span style="color:#8899aa;font-size:13px;">Jira not connected</span>
+      <div style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:var(--deep);border:1px solid var(--sg-line);border-radius:8px;margin-bottom:20px;">
+        <span style="color:var(--txt-dim);font-size:13px;">Jira not connected</span>
         <button onclick="connectJira()" class="ds-btn-teal" style="margin-left:auto;font-size:12px;padding:5px 14px;">Connect Jira</button>
       </div>`;
   }
   return `
-    <div style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:#162438;border:1px solid #1e3350;border-radius:8px;margin-bottom:12px;">
+    <div style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:var(--deep);border:1px solid var(--sg-line);border-radius:8px;margin-bottom:12px;">
       <span class="ds-dot ds-dot-teal ds-dot-pulse"></span>
-      <span style="color:#e8f4ff;font-size:13px;">Jira connected — <strong style="color:#00d4b4;">${escapeHtml(jiraStatus.cloudName || "")}</strong></span>
+      <span style="color:var(--txt);font-size:13px;">Jira connected — <strong style="color:#00d4b4;">${escapeHtml(jiraStatus.cloudName || "")}</strong></span>
       <button onclick="disconnectJira()" class="ds-btn-ghost" style="margin-left:auto;font-size:12px;">Disconnect</button>
     </div>
     <div style="margin-bottom:20px;display:flex;align-items:center;gap:10px;">
-      <label style="color:#8899aa;font-size:12px;white-space:nowrap;">Push to project:</label>
-      <select id="jira-project-select" style="background:#0a1525;color:#e8f4ff;border:1px solid #1e3350;border-radius:6px;padding:5px 10px;font-size:13px;">
+      <label style="color:var(--txt-dim);font-size:12px;white-space:nowrap;">Push to project:</label>
+      <select id="jira-project-select" style="background:var(--deep2);color:var(--txt);border:1px solid var(--sg-line);border-radius:6px;padding:5px 10px;font-size:13px;">
         <option value="">Loading projects…</option>
       </select>
     </div>`;
@@ -13113,20 +13113,20 @@ async function refreshConfluenceStatus() {
 function confluenceStatusBarHtml() {
   if (!confluenceStatus.connected) {
     return `
-      <div style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:#162438;border:1px solid #1e3350;border-radius:8px;margin-bottom:12px;">
-        <span style="color:#8899aa;font-size:13px;">Confluence not connected</span>
+      <div style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:var(--deep);border:1px solid var(--sg-line);border-radius:8px;margin-bottom:12px;">
+        <span style="color:var(--txt-dim);font-size:13px;">Confluence not connected</span>
         <button onclick="connectConfluence()" class="ds-btn-ghost" style="margin-left:auto;font-size:12px;padding:5px 14px;">Connect Confluence</button>
       </div>`;
   }
   return `
-    <div style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:#162438;border:1px solid #1e3350;border-radius:8px;margin-bottom:12px;">
+    <div style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:var(--deep);border:1px solid var(--sg-line);border-radius:8px;margin-bottom:12px;">
       <span class="ds-dot ds-dot-purple ds-dot-pulse"></span>
-      <span style="color:#e8f4ff;font-size:13px;">Confluence connected — <strong style="color:#a855f7;">${escapeHtml(confluenceStatus.cloudName || "")}</strong></span>
+      <span style="color:var(--txt);font-size:13px;">Confluence connected — <strong style="color:#a855f7;">${escapeHtml(confluenceStatus.cloudName || "")}</strong></span>
       <button onclick="disconnectConfluence()" class="ds-btn-ghost" style="margin-left:auto;font-size:12px;">Disconnect</button>
     </div>
     <div style="margin-bottom:20px;display:flex;align-items:center;gap:10px;">
-      <label style="color:#8899aa;font-size:12px;white-space:nowrap;">Push to space:</label>
-      <input id="confluence-space-select" type="text" placeholder="Space key (e.g. AW)" style="background:#0a1525;color:#e8f4ff;border:1px solid #1e3350;border-radius:6px;padding:5px 10px;font-size:13px;width:140px;" />
+      <label style="color:var(--txt-dim);font-size:12px;white-space:nowrap;">Push to space:</label>
+      <input id="confluence-space-select" type="text" placeholder="Space key (e.g. AW)" style="background:var(--deep2);color:var(--txt);border:1px solid var(--sg-line);border-radius:6px;padding:5px 10px;font-size:13px;width:140px;" />
       <button onclick="pushDocToConfluence()" class="ds-btn-ghost" style="font-size:12px;padding:5px 14px;">↑ Push full doc to Confluence</button>
     </div>
     <div id="confluence-page-link" style="margin-bottom:16px;min-height:20px;"></div>`;
@@ -13241,11 +13241,11 @@ function engineeringCommandCenterHtml(steps) {
     const savedMeta = artifactSnapshotMeta(saved);
     return `
       <tr>
-        <td style="padding:7px 10px;border-bottom:1px solid #152236;color:#c8d8e8;">${escapeHtml(stepDisplayName(step, index))}</td>
-        <td style="padding:7px 10px;border-bottom:1px solid #152236;color:#8aa0b8;">${escapeHtml(pkg.recommendedArtifact.label)}</td>
-        <td style="padding:7px 10px;border-bottom:1px solid #152236;"><span class="ds-badge ${artifactReadinessBadgeClass(pkg.readiness.label)}">${escapeHtml(pkg.readiness.label)} · ${pkg.readiness.score}/100</span></td>
-        <td style="padding:7px 10px;border-bottom:1px solid #152236;color:#8aa0b8;">${saved ? `Saved ${escapeHtml(savedMeta.when || "")}` : "Ready to compile"}</td>
-        <td style="padding:7px 10px;border-bottom:1px solid #152236;color:#8aa0b8;">${bundle ? "Full bundle saved" : "Recommended package"}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid var(--sg-line);color:var(--txt);">${escapeHtml(stepDisplayName(step, index))}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid var(--sg-line);color:var(--txt-dim);">${escapeHtml(pkg.recommendedArtifact.label)}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid var(--sg-line);"><span class="ds-badge ${artifactReadinessBadgeClass(pkg.readiness.label)}">${escapeHtml(pkg.readiness.label)} · ${pkg.readiness.score}/100</span></td>
+        <td style="padding:7px 10px;border-bottom:1px solid var(--sg-line);color:var(--txt-dim);">${saved ? `Saved ${escapeHtml(savedMeta.when || "")}` : "Ready to compile"}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid var(--sg-line);color:var(--txt-dim);">${bundle ? "Full bundle saved" : "Recommended package"}</td>
       </tr>`;
   }).join("");
   const future = packages.flatMap(({ pkg }) => pkg.ir.futureIntegrationCandidates).slice(0, 6);
@@ -13267,17 +13267,17 @@ function engineeringCommandCenterHtml(steps) {
     artifactMetricPill("Integration mode", "No integrations", "ds-badge-teal")
   ].filter(Boolean).join("");
   return `
-    <section class="ds-panel" style="padding:18px 20px;margin-bottom:16px;border-left:3px solid #ff4fc8;">
+    <section class="ds-panel" style="padding:18px 20px;margin-bottom:16px;border-left:3px solid var(--sg-violet);">
       <div class="ds-section-head">
-        <div class="ds-section-title"><span class="ds-grad-bar-v" style="height:14px;background:linear-gradient(180deg,#ff4fc8,#a855f7);"></span>Engineering implementation package</div>
+        <div class="ds-section-title"><span class="ds-grad-bar-v" style="height:14px;background:var(--grad);"></span>Engineering implementation package</div>
         <div class="ds-section-meta">build packet, tests, controls</div>
       </div>
-      <div class="implementation-package-section" style="background:#09131f;border:1px solid #16263a;border-radius:8px;padding:13px 14px;margin-bottom:14px;">
+      <div class="implementation-package-section" style="background:var(--deep2);border:1px solid var(--sg-line);border-radius:8px;padding:13px 14px;margin-bottom:14px;">
         <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
           <div style="min-width:250px;flex:1;">
             <div class="ds-micro" style="margin-bottom:6px;">Implementation Package</div>
-            <p style="margin:0;color:#c8d8e8;font-size:13px;line-height:1.5;">Engineering receives one recommended package per workflow step, saved snapshots when compiled, grouped test cases, acceptance criteria, provenance notes, and explicit no-integration boundaries.</p>
-            <p style="margin:8px 0 0;color:#5b7186;font-size:12px;line-height:1.45;">${escapeHtml(NO_INTEGRATION_MVP_NOTE)}</p>
+            <p style="margin:0;color:var(--txt);font-size:13px;line-height:1.5;">Engineering receives one recommended package per workflow step, saved snapshots when compiled, grouped test cases, acceptance criteria, provenance notes, and explicit no-integration boundaries.</p>
+            <p style="margin:8px 0 0;color:var(--txt-faint);font-size:12px;line-height:1.45;">${escapeHtml(NO_INTEGRATION_MVP_NOTE)}</p>
           </div>
           <div style="display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end;">${implementationStats}</div>
         </div>
@@ -13285,12 +13285,12 @@ function engineeringCommandCenterHtml(steps) {
       <div style="overflow-x:auto;">
         <table style="width:100%;border-collapse:collapse;min-width:760px;font-size:12px;">
           <thead>
-            <tr style="background:#09131f;">
-              <th style="padding:7px 10px;color:#5b7186;text-align:left;border-bottom:1px solid #152236;">Step</th>
-              <th style="padding:7px 10px;color:#5b7186;text-align:left;border-bottom:1px solid #152236;">Best starting package</th>
-              <th style="padding:7px 10px;color:#5b7186;text-align:left;border-bottom:1px solid #152236;">Readiness</th>
-              <th style="padding:7px 10px;color:#5b7186;text-align:left;border-bottom:1px solid #152236;">Saved package</th>
-              <th style="padding:7px 10px;color:#5b7186;text-align:left;border-bottom:1px solid #152236;">Bundle</th>
+            <tr style="background:var(--deep2);">
+              <th style="padding:7px 10px;color:var(--txt-faint);text-align:left;border-bottom:1px solid var(--sg-line);">Step</th>
+              <th style="padding:7px 10px;color:var(--txt-faint);text-align:left;border-bottom:1px solid var(--sg-line);">Best starting package</th>
+              <th style="padding:7px 10px;color:var(--txt-faint);text-align:left;border-bottom:1px solid var(--sg-line);">Readiness</th>
+              <th style="padding:7px 10px;color:var(--txt-faint);text-align:left;border-bottom:1px solid var(--sg-line);">Saved package</th>
+              <th style="padding:7px 10px;color:var(--txt-faint);text-align:left;border-bottom:1px solid var(--sg-line);">Bundle</th>
             </tr>
           </thead>
           <tbody>${packageRows}</tbody>
@@ -13299,17 +13299,17 @@ function engineeringCommandCenterHtml(steps) {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;">
         <div class="ds-card-inner" style="padding:12px;">
           <div class="ds-micro" style="margin-bottom:6px;">No-integration MVP note</div>
-          <p style="margin:0;color:#8aa0b8;font-size:12px;line-height:1.5;">${escapeHtml(NO_INTEGRATION_MVP_NOTE)}</p>
+          <p style="margin:0;color:var(--txt-dim);font-size:12px;line-height:1.5;">${escapeHtml(NO_INTEGRATION_MVP_NOTE)}</p>
         </div>
         <div class="ds-card-inner" style="padding:12px;">
           <div class="ds-micro" style="margin-bottom:6px;">Future integration candidates</div>
-          <ul style="margin:0;padding-left:18px;color:#8aa0b8;font-size:12px;line-height:1.5;">
+          <ul style="margin:0;padding-left:18px;color:var(--txt-dim);font-size:12px;line-height:1.5;">
             ${(future.length ? future : [FUTURE_INTEGRATION_NOTE]).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
           </ul>
         </div>
         <div class="ds-card-inner" style="padding:12px;">
           <div class="ds-micro" style="margin-bottom:6px;">Governance and policy review notes</div>
-          <ul style="margin:0;padding-left:18px;color:#8aa0b8;font-size:12px;line-height:1.5;">
+          <ul style="margin:0;padding-left:18px;color:var(--txt-dim);font-size:12px;line-height:1.5;">
             <li>Readiness is not formal compliance approval.</li>
             <li>Policy-specific guidance should come from uploaded policy evidence when that feature is available.</li>
             <li>Human review stays visible for sensitive, uncertain, exception-heavy, or decision-bearing work.</li>
@@ -13317,7 +13317,7 @@ function engineeringCommandCenterHtml(steps) {
         </div>
         <div class="ds-card-inner" style="padding:12px;">
           <div class="ds-micro" style="margin-bottom:6px;">GitHub Copilot developer pack</div>
-          <p style="margin:0;color:#8aa0b8;font-size:12px;line-height:1.5;">${escapeHtml(shortArtifactPreview(renderGithubCopilotDeveloperPack(githubPack || buildAgentRecipeIr(steps[0], context))))}</p>
+          <p style="margin:0;color:var(--txt-dim);font-size:12px;line-height:1.5;">${escapeHtml(shortArtifactPreview(renderGithubCopilotDeveloperPack(githubPack || buildAgentRecipeIr(steps[0], context))))}</p>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;">
@@ -13327,7 +13327,7 @@ function engineeringCommandCenterHtml(steps) {
         </div>
         <div class="ds-card-inner" style="padding:12px;">
           <div class="ds-micro" style="margin-bottom:6px;">Acceptance criteria</div>
-          <ul style="margin:0;padding-left:18px;color:#8aa0b8;font-size:12px;line-height:1.5;">${acceptanceCriteria.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+          <ul style="margin:0;padding-left:18px;color:var(--txt-dim);font-size:12px;line-height:1.5;">${acceptanceCriteria.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
         </div>
       </div>
     </section>`;
@@ -13365,8 +13365,8 @@ async function renderAnalysisTabEngineering() {
     <div class="ds-panel" style="padding:20px;margin-bottom:16px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;">
         <div>
-          <div style="font-size:1.2rem;font-weight:700;color:#e8f4ff;margin-bottom:8px;">${escapeHtml(wf.workflowName || "Workflow Engineering Spec")}</div>
-          <div style="font-size:0.75rem;color:#445566;">AI Engineering Specification · Auto-generated from workflow analysis</div>
+          <div style="font-size:1.2rem;font-weight:700;color:var(--txt);margin-bottom:8px;">${escapeHtml(wf.workflowName || "Workflow Engineering Spec")}</div>
+          <div style="font-size:0.75rem;color:var(--txt-faint);">AI Engineering Specification · Auto-generated from workflow analysis</div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           ${sensBadge}
@@ -13379,7 +13379,7 @@ async function renderAnalysisTabEngineering() {
       <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
         <div style="display:flex;gap:8px;align-items:flex-start;background:rgba(168,85,247,0.06);border:1px solid rgba(168,85,247,0.2);border-radius:8px;padding:10px 14px;">
           <span style="color:#a855f7;font-size:0.8rem;">ⓘ</span>
-          <span style="font-size:0.75rem;color:#8899aa;line-height:1.5;">Fields marked "inferred by AI" were derived from document analysis and pattern matching. Confirm critical fields before implementation.</span>
+          <span style="font-size:0.75rem;color:var(--txt-dim);line-height:1.5;">Fields marked "inferred by AI" were derived from document analysis and pattern matching. Confirm critical fields before implementation.</span>
         </div>
       </div>
     </div>`;
@@ -13426,8 +13426,8 @@ async function renderAnalysisTabEngineering() {
         : { label: "Months", color: "#f59e0b" };
     return `
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-        <span style="font-size:0.75rem;color:#8899aa;width:140px;flex-shrink:0;" title="${escapeHtml(name)}">${escapeHtml(truncate(name, 18))}</span>
-        <div style="flex:1;height:22px;background:#09131f;border-radius:4px;overflow:hidden;position:relative;">
+        <span style="font-size:0.75rem;color:var(--txt-dim);width:140px;flex-shrink:0;" title="${escapeHtml(name)}">${escapeHtml(truncate(name, 18))}</span>
+        <div style="flex:1;height:22px;background:var(--deep2);border-radius:4px;overflow:hidden;position:relative;">
           <div style="height:100%;border-radius:4px;width:${width.toFixed(0)}%;${fill}">
             <span style="display:block;font-size:0.65rem;color:#0d1b2e;padding-left:8px;line-height:22px;white-space:nowrap;">${escapeHtml(truncate(name, 10))}</span>
           </div>
@@ -13440,7 +13440,7 @@ async function renderAnalysisTabEngineering() {
   const section2 = `
     <div class="ds-card" style="padding:20px;margin-bottom:16px;">
       ${sectionHead("height:14px;", "Implementation timeline", "estimated build sequence by priority")}
-      <div style="display:flex;gap:16px;margin-bottom:16px;font-size:0.7rem;color:#8899aa;flex-wrap:wrap;">
+      <div style="display:flex;gap:16px;margin-bottom:16px;font-size:0.7rem;color:var(--txt-dim);flex-wrap:wrap;">
         ${legendSquare("#00d4b4", "Quick win")}
         ${legendSquare("#a855f7", "Strategic")}
         ${legendSquare("#f59e0b", "Speculative")}
@@ -13468,7 +13468,7 @@ async function renderAnalysisTabEngineering() {
     : "";
   const section3 = `
     <div class="ds-card" style="padding:20px;margin-bottom:16px;">
-      ${sectionHead("height:14px;background:linear-gradient(180deg,#ff4fc8,#a855f7);", "Data sensitivity by step", "risk level per workflow step")}
+      ${sectionHead("height:14px;background:var(--grad);", "Data sensitivity by step", "risk level per workflow step")}
       ${sensRows}
       ${sensWarning}
     </div>`;
@@ -13497,22 +13497,22 @@ async function renderAnalysisTabEngineering() {
       if (!value && stateName === "empty") return "";
       const prov = engProvenance(stateName);
       const detail = value
-        ? `<span style="color:#c8d8e8;">${escapeHtml(value)}</span>`
-        : `<span style="color:#2a3f5f;">—</span>`;
+        ? `<span style="color:var(--txt);">${escapeHtml(value)}</span>`
+        : `<span style="color:var(--txt-faint);">—</span>`;
       return `
         <tr>
-          <td style="padding:6px 10px;border-bottom:1px solid #0f1e30;vertical-align:top;color:#556a7e;font-size:0.72rem;white-space:nowrap;">${escapeHtml(CELL_PLAIN_NAMES[key] || key)}</td>
-          <td style="padding:6px 10px;border-bottom:1px solid #0f1e30;vertical-align:top;">${detail}</td>
-          <td style="padding:6px 10px;border-bottom:1px solid #0f1e30;vertical-align:top;"><span class="ds-badge ${prov.badge}">${prov.label}</span></td>
+          <td style="padding:6px 10px;border-bottom:1px solid var(--sg-line-soft);vertical-align:top;color:var(--txt-dim);font-size:0.72rem;white-space:nowrap;">${escapeHtml(CELL_PLAIN_NAMES[key] || key)}</td>
+          <td style="padding:6px 10px;border-bottom:1px solid var(--sg-line-soft);vertical-align:top;">${detail}</td>
+          <td style="padding:6px 10px;border-bottom:1px solid var(--sg-line-soft);vertical-align:top;"><span class="ds-badge ${prov.badge}">${prov.label}</span></td>
         </tr>`;
     }).join("");
     const table = `
       <table style="width:100%;border-collapse:collapse;font-size:0.75rem;">
         <thead>
-          <tr style="background:#09131f;">
-            <th style="padding:6px 10px;color:#445566;text-align:left;border-bottom:1px solid #152236;font-weight:500;width:140px;">Field</th>
-            <th style="padding:6px 10px;color:#445566;text-align:left;border-bottom:1px solid #152236;font-weight:500;">Detail</th>
-            <th style="padding:6px 10px;color:#445566;text-align:left;border-bottom:1px solid #152236;font-weight:500;">Provenance</th>
+          <tr style="background:var(--deep2);">
+            <th style="padding:6px 10px;color:var(--txt-faint);text-align:left;border-bottom:1px solid var(--sg-line);font-weight:500;width:140px;">Field</th>
+            <th style="padding:6px 10px;color:var(--txt-faint);text-align:left;border-bottom:1px solid var(--sg-line);font-weight:500;">Detail</th>
+            <th style="padding:6px 10px;color:var(--txt-faint);text-align:left;border-bottom:1px solid var(--sg-line);font-weight:500;">Provenance</th>
           </tr>
         </thead>
         <tbody>${fieldRows}</tbody>
@@ -13526,9 +13526,9 @@ async function renderAnalysisTabEngineering() {
       const handoffValue = gridCellValue(step, "handoff");
       flow = `
         <div class="ds-micro" style="margin-top:14px;margin-bottom:8px;">Integration flow</div>
-        <div style="background:#04080f;border:1px solid #152236;border-radius:8px;padding:14px 16px;font-family:monospace;font-size:0.72rem;color:#00d4b4;overflow-x:auto;">
-          <div style="color:#445566;"># Step ${index + 1}: ${escapeHtml(name)}</div>
-          <div style="color:#8899aa;">[INPUT]  ${escapeHtml(trigger)}</div>
+        <div style="background:var(--sg-ink);border:1px solid var(--sg-line);border-radius:8px;padding:14px 16px;font-family:monospace;font-size:0.72rem;color:#00d4b4;overflow-x:auto;">
+          <div style="color:var(--txt-faint);"># Step ${index + 1}: ${escapeHtml(name)}</div>
+          <div style="color:var(--txt-dim);">[INPUT]  ${escapeHtml(trigger)}</div>
           <div style="color:#00d4b4;">→ [SYSTEM] ${escapeHtml(systems)}</div>
           <div style="color:#a855f7;">→ [OUTPUT] ${escapeHtml(output)}</div>
           ${handoffValue ? `<div style="color:#f59e0b;">→ [HANDOFF] ${escapeHtml(handoffValue)}</div>` : ""}
@@ -13539,15 +13539,15 @@ async function renderAnalysisTabEngineering() {
       <div class="ds-card" style="margin-bottom:10px;overflow:hidden;">
         <div data-eng-card-header style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;cursor:pointer;">
           <div style="display:flex;align-items:center;gap:10px;">
-            <span class="ds-chip" style="font-size:0.68rem;color:#445566;">Step ${index + 1}</span>
-            <span style="font-weight:600;color:#dde8f2;font-size:0.88rem;">${escapeHtml(name)}</span>
+            <span class="ds-chip" style="font-size:0.68rem;color:var(--txt-dim);">Step ${index + 1}</span>
+            <span style="font-weight:600;color:var(--txt);font-size:0.88rem;">${escapeHtml(name)}</span>
             ${patternBadge}
             <span title="Step name: ${nameProv.label}" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${nameProv.color};"></span>
           </div>
           <div style="display:flex;align-items:center;gap:8px;">
             <span style="font-size:0.9rem;letter-spacing:1px;">${dots}</span>
             ${priorityBadge}
-            <span data-eng-chevron style="color:#445566;">▸</span>
+            <span data-eng-chevron style="color:var(--txt-faint);">▸</span>
           </div>
         </div>
         <div data-eng-card-body style="display:none;padding:0 20px 20px;">
