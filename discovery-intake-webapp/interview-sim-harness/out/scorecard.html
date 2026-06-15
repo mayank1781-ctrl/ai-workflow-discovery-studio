@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Interview Simulation Scorecard</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; color: #17202a; background: #f7f8fa; }
+    header { background: #102033; color: #fff; padding: 28px 32px; }
+    main { padding: 24px 32px 48px; max-width: 1180px; margin: 0 auto; }
+    h1, h2 { margin: 0 0 12px; }
+    h2 { margin-top: 28px; }
+    .note { color: #5b6673; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 18px 0; }
+    .metric { background: #fff; border: 1px solid #dde3ea; border-radius: 8px; padding: 14px; }
+    .metric strong { display: block; font-size: 24px; margin-top: 6px; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #dde3ea; }
+    th, td { text-align: left; border-bottom: 1px solid #e8edf3; padding: 10px; vertical-align: top; }
+    th { background: #eef3f8; font-size: 13px; }
+    code { background: #eef3f8; padding: 2px 4px; border-radius: 4px; }
+    .bad { color: #a33; font-weight: 700; }
+    .ok { color: #176b3a; font-weight: 700; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; background: #edf2f7; margin: 2px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Interview Simulation Scorecard</h1>
+    <div>Separate live-model eval track. Informational only. Never gates a merge.</div>
+  </header>
+  <main>
+    <p class="note">Target: <code>mock</code> | Personas: 13 | Sims: 13 | Generated: 2026-06-15T01:01:41.408Z</p>
+    
+    <section class="grid">
+      <div class="metric"><span>Rails pass</span><strong>100%</strong></div>
+      <div class="metric"><span>Rail violations</span><strong>0</strong></div>
+      <div class="metric"><span>Capture recall avg</span><strong>1</strong></div>
+      <div class="metric"><span>Capture precision avg</span><strong>1</strong></div>
+      <div class="metric"><span>Flow quality avg</span><strong>-</strong></div>
+      <div class="metric"><span>Flow flagged</span><strong>0</strong></div>
+      <div class="metric"><span>Output completion</span><strong>100%</strong></div>
+      <div class="metric"><span>Median turns</span><strong>5</strong></div>
+    </section>
+    <h2>Weak Spots</h2>
+    <p class="ok">No weak spots detected.</p>
+    <h2>Per Persona</h2>
+    <table>
+      <thead><tr><th>Persona</th><th>Sims</th><th>Rails</th><th>Capture Recall</th><th>Capture Precision</th><th>Flow Avg</th><th>Flagged</th><th>Output</th><th>Median Time</th></tr></thead>
+      <tbody>
+        <tr><td>fin-controller-close</td><td>1</td><td>100% (0 viol)</td><td>1</td><td>1</td><td>-</td><td>0</td><td>100%</td><td>0s</td></tr><tr><td>fin-ap-specialist</td><td>1</td><td>100% (0 viol)</td><td>1</td><td>1</td><td>-</td><td>0</td><td>100%</td><td>0s</td></tr><tr><td>fin-fpa-analyst</td><td>1</td><td>100% (0 viol)</td><td>1</td><td>1</td><td>-</td><td>0</td><td>100%</td><td>0s</td></tr><tr><td>fin-accounting-mgr</td><td>1</td><td>100% (0 viol)</td><td>1</td><td>1</td><td>-</td><td>0</td><td>100%</td><td>0s</td></tr><tr><td>con-engagement-mgr</td><td>1</td><td>100% (0 viol)</td><td>1</td><td>1</td><td>-</td><td>0</td><td>100%</td><td>0s</td></tr><tr><td>con-associate</td><td>1</td><td>100% (0 viol)</td><td>1</td><td>1</td><td>-</td><td>0</td><td>100%</td><td>0s</td></tr><tr><td>corp-ops-manager</td><td>1</td><td>100% (0 viol)</td><td>1</td><td>1</td><td>-</td><td>0</td><td>100%</td><td>0s</td></tr><tr><td>corp-procurement-lead</td><td>1</td><td>100% (0 viol)</td><td>1</td><td>1</td><td>-</td><td>0</td><td>100%</td><td>0s</td></tr><tr><td>fin-ar-collections-analyst</td><td>1</td><td>100% (0 viol)</td><td>1</td><td>1</td><td>-</td><td>0</td><td>100%</td><td>0s</td></tr><tr><td>fin-treasury-analyst</td><td>1</td><td>100% (0 viol)</td><td>1</td><td>1</td><td>-</td><td>0</td><td>100%</td><td>0s</td></tr><tr><td>fin-sox-compliance-officer</td><td>1</td><td>100% (0 viol)</td><td>1</td><td>1</td><td>-</td><td>0</td><td>100%</td><td>0s</td></tr><tr><td>corp-business-analyst</td><td>1</td><td>100% (0 viol)</td><td>1</td><td>1</td><td>-</td><td>0</td><td>100%</td><td>0s</td></tr><tr><td>corp-revops-manager</td><td>1</td><td>100% (0 viol)</td><td>1</td><td>1</td><td>-</td><td>0</td><td>100%</td><td>0s</td></tr>
+      </tbody>
+    </table>
+    <h2>Simulation Detail</h2>
+    <table>
+      <thead><tr><th>Run</th><th>Persona</th><th>Turns</th><th>Stop</th><th>Rails</th><th>Capture</th><th>Flow</th><th>Output</th><th>Missed Anchors</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>fin-controller-close-r001</td>
+          <td>fin-controller-close</td>
+          <td>5</td>
+          <td>completion-heuristic</td>
+          <td class="ok">pass</td>
+          <td>R 1 / P 1</td>
+          <td>skipped</td>
+          <td class="ok">Recap has core anchors and source label.</td>
+          <td></td>
+        </tr><tr>
+          <td>fin-ap-specialist-r002</td>
+          <td>fin-ap-specialist</td>
+          <td>5</td>
+          <td>completion-heuristic</td>
+          <td class="ok">pass</td>
+          <td>R 1 / P 1</td>
+          <td>skipped</td>
+          <td class="ok">Recap has core anchors and source label.</td>
+          <td></td>
+        </tr><tr>
+          <td>fin-fpa-analyst-r003</td>
+          <td>fin-fpa-analyst</td>
+          <td>5</td>
+          <td>completion-heuristic</td>
+          <td class="ok">pass</td>
+          <td>R 1 / P 1</td>
+          <td>skipped</td>
+          <td class="ok">Recap has core anchors and source label.</td>
+          <td></td>
+        </tr><tr>
+          <td>fin-accounting-mgr-r004</td>
+          <td>fin-accounting-mgr</td>
+          <td>5</td>
+          <td>completion-heuristic</td>
+          <td class="ok">pass</td>
+          <td>R 1 / P 1</td>
+          <td>skipped</td>
+          <td class="ok">Recap has core anchors and source label.</td>
+          <td></td>
+        </tr><tr>
+          <td>con-engagement-mgr-r005</td>
+          <td>con-engagement-mgr</td>
+          <td>5</td>
+          <td>completion-heuristic</td>
+          <td class="ok">pass</td>
+          <td>R 1 / P 1</td>
+          <td>skipped</td>
+          <td class="ok">Recap has core anchors and source label.</td>
+          <td></td>
+        </tr><tr>
+          <td>con-associate-r006</td>
+          <td>con-associate</td>
+          <td>5</td>
+          <td>completion-heuristic</td>
+          <td class="ok">pass</td>
+          <td>R 1 / P 1</td>
+          <td>skipped</td>
+          <td class="ok">Recap has core anchors and source label.</td>
+          <td></td>
+        </tr><tr>
+          <td>corp-ops-manager-r007</td>
+          <td>corp-ops-manager</td>
+          <td>5</td>
+          <td>completion-heuristic</td>
+          <td class="ok">pass</td>
+          <td>R 1 / P 1</td>
+          <td>skipped</td>
+          <td class="ok">Recap has core anchors and source label.</td>
+          <td></td>
+        </tr><tr>
+          <td>corp-procurement-lead-r008</td>
+          <td>corp-procurement-lead</td>
+          <td>5</td>
+          <td>completion-heuristic</td>
+          <td class="ok">pass</td>
+          <td>R 1 / P 1</td>
+          <td>skipped</td>
+          <td class="ok">Recap has core anchors and source label.</td>
+          <td></td>
+        </tr><tr>
+          <td>fin-ar-collections-analyst-r009</td>
+          <td>fin-ar-collections-analyst</td>
+          <td>5</td>
+          <td>completion-heuristic</td>
+          <td class="ok">pass</td>
+          <td>R 1 / P 1</td>
+          <td>skipped</td>
+          <td class="ok">Recap has core anchors and source label.</td>
+          <td></td>
+        </tr><tr>
+          <td>fin-treasury-analyst-r010</td>
+          <td>fin-treasury-analyst</td>
+          <td>5</td>
+          <td>completion-heuristic</td>
+          <td class="ok">pass</td>
+          <td>R 1 / P 1</td>
+          <td>skipped</td>
+          <td class="ok">Recap has core anchors and source label.</td>
+          <td></td>
+        </tr><tr>
+          <td>fin-sox-compliance-officer-r011</td>
+          <td>fin-sox-compliance-officer</td>
+          <td>5</td>
+          <td>completion-heuristic</td>
+          <td class="ok">pass</td>
+          <td>R 1 / P 1</td>
+          <td>skipped</td>
+          <td class="ok">Recap has core anchors and source label.</td>
+          <td></td>
+        </tr><tr>
+          <td>corp-business-analyst-r012</td>
+          <td>corp-business-analyst</td>
+          <td>5</td>
+          <td>completion-heuristic</td>
+          <td class="ok">pass</td>
+          <td>R 1 / P 1</td>
+          <td>skipped</td>
+          <td class="ok">Recap has core anchors and source label.</td>
+          <td></td>
+        </tr><tr>
+          <td>corp-revops-manager-r013</td>
+          <td>corp-revops-manager</td>
+          <td>5</td>
+          <td>completion-heuristic</td>
+          <td class="ok">pass</td>
+          <td>R 1 / P 1</td>
+          <td>skipped</td>
+          <td class="ok">Recap has core anchors and source label.</td>
+          <td></td>
+        </tr>
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>

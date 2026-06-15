@@ -1,0 +1,5598 @@
+{
+  "run": {
+    "target": "mock",
+    "modeNote": "mock",
+    "generatedAt": "2026-06-15T01:01:41.408Z",
+    "personaCount": 13,
+    "appBaseUrl": "http://localhost:5173",
+    "calibration": null
+  },
+  "results": [
+    {
+      "runId": "fin-controller-close-r001",
+      "personaId": "fin-controller-close",
+      "sector": "finance",
+      "role": "Senior Controller",
+      "style": "terse, impatient, assumes you already know finance",
+      "stresses": "GAP-FILLING on a low-output speaker, and RECAP accuracy when answers are dense with jargon (intake + flow + output)",
+      "stopReason": "completion-heuristic",
+      "turns": 5,
+      "wallMs": 1,
+      "improvisedTurns": [],
+      "transcript": [
+        {
+          "role": "assistant",
+          "text": "What task or workflow do you want to talk about? Briefly describe what happens, the business outcome, and the main output.",
+          "time": "2026-06-15T01:01:41.412Z"
+        },
+        {
+          "role": "user",
+          "text": "I work on Month-end close. It is recurring, monthly, ~5 business days, and my role is that I owns the close; reviews and signs off, does not do most hands-on steps.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.412Z"
+        },
+        {
+          "role": "assistant",
+          "text": "Where are the main handoffs or approvals?",
+          "time": "2026-06-15T01:01:41.413Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "At a high level the flow is 1. Sub-ledger cutoff; 2. Bank statement import & reconcile; 3. Journal review & approval; 4. Variance commentary; 5. Reporting pack & CFO sign-off.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.413Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What tools and data show up in the main steps?",
+          "time": "2026-06-15T01:01:41.413Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Sub-ledger cutoff uses ERP with AP clerk and AR clerk; Bank statement import & reconcile uses ERP and recon tool and Excel with Staff accountant; Journal review & approval uses ERP with Staff accountant and Controller",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.413Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.413Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "The annoying parts are mostly late vendor invoices push cutoff; manual matching of exceptions; judgment calls on accruals; waiting on budget-owner commentary; last-minute restatements.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.413Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.413Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Staff accountant hands journals for approval to Controller; Budget owners hands variance commentary to FP&A analyst",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.413Z"
+        },
+        {
+          "role": "assistant",
+          "text": "I think I have enough to recap the workflow. Does this look right?",
+          "time": "2026-06-15T01:01:41.413Z",
+          "summary": ""
+        }
+      ],
+      "capturedState": {
+        "activeSection": "workflow",
+        "fields": {
+          "workflowName": "Month-end close",
+          "submittedWorkflowTask": "Month-end close",
+          "submittedFrequency": "monthly, ~5 business days",
+          "intervieweeRole": "owns the close; reviews and signs off, does not do most hands-on steps",
+          "currentStateSummary": "Month-end close: owns the close; reviews and signs off, does not do most hands-on steps"
+        },
+        "steps": [
+          {
+            "id": "step-001",
+            "name": "Sub-ledger cutoff",
+            "actor": "AP clerk, AR clerk",
+            "tool": "ERP",
+            "action": "Sub-ledger cutoff",
+            "handoff": "journals for approval",
+            "pain": "late vendor invoices push cutoff",
+            "output": "journals for approval"
+          },
+          {
+            "id": "step-002",
+            "name": "Bank statement import & reconcile",
+            "actor": "Staff accountant",
+            "tool": "ERP, recon tool, Excel",
+            "action": "Bank statement import & reconcile",
+            "handoff": "variance commentary",
+            "pain": "manual matching of exceptions",
+            "output": "variance commentary"
+          },
+          {
+            "id": "step-003",
+            "name": "Journal review & approval",
+            "actor": "Staff accountant, Controller",
+            "tool": "ERP",
+            "action": "Journal review & approval",
+            "handoff": "",
+            "pain": "judgment calls on accruals",
+            "output": ""
+          },
+          {
+            "id": "step-004",
+            "name": "Variance commentary",
+            "actor": "FP&A analyst, Budget owners",
+            "tool": "Excel, BI tool",
+            "action": "Variance commentary",
+            "handoff": "",
+            "pain": "waiting on budget-owner commentary",
+            "output": ""
+          },
+          {
+            "id": "step-005",
+            "name": "Reporting pack & CFO sign-off",
+            "actor": "Controller, CFO",
+            "tool": "Excel, slides",
+            "action": "Reporting pack & CFO sign-off",
+            "handoff": "",
+            "pain": "last-minute restatements",
+            "output": ""
+          }
+        ],
+        "data": [],
+        "systems": [],
+        "decisions": [
+          {
+            "decision": "journals for approval",
+            "owner": "Controller",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          },
+          {
+            "decision": "variance commentary",
+            "owner": "FP&A analyst",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          }
+        ],
+        "patterns": [],
+        "ideas": [],
+        "evidenceArtifacts": []
+      },
+      "suggestions": {
+        "stepTypes": {
+          "step-001": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-002": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-003": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-004": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-005": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          }
+        },
+        "handoffTags": {
+          "h:step-001": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          },
+          "h:step-002": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          }
+        },
+        "decisionTags": {},
+        "frictionTags": {
+          "step-001": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-002": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-003": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-004": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-005": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          }
+        },
+        "roleTags": {
+          "step-001": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-002": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-003": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-004": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-005": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          }
+        }
+      },
+      "finalRecap": {
+        "workflow": "Month-end close",
+        "role": "owns the close; reviews and signs off, does not do most hands-on steps",
+        "cadence": "monthly, ~5 business days",
+        "recurringOrProject": "recurring",
+        "steps": [
+          {
+            "index": 1,
+            "name": "Sub-ledger cutoff",
+            "actor": "AP clerk, AR clerk",
+            "tool": "ERP",
+            "pain": "late vendor invoices push cutoff",
+            "handoff": "journals for approval"
+          },
+          {
+            "index": 2,
+            "name": "Bank statement import & reconcile",
+            "actor": "Staff accountant",
+            "tool": "ERP, recon tool, Excel",
+            "pain": "manual matching of exceptions",
+            "handoff": "variance commentary"
+          },
+          {
+            "index": 3,
+            "name": "Journal review & approval",
+            "actor": "Staff accountant, Controller",
+            "tool": "ERP",
+            "pain": "judgment calls on accruals",
+            "handoff": ""
+          },
+          {
+            "index": 4,
+            "name": "Variance commentary",
+            "actor": "FP&A analyst, Budget owners",
+            "tool": "Excel, BI tool",
+            "pain": "waiting on budget-owner commentary",
+            "handoff": ""
+          },
+          {
+            "index": 5,
+            "name": "Reporting pack & CFO sign-off",
+            "actor": "Controller, CFO",
+            "tool": "Excel, slides",
+            "pain": "last-minute restatements",
+            "handoff": ""
+          }
+        ],
+        "source": "transcript + app extraction",
+        "stopReason": "completion-heuristic"
+      },
+      "lastResponse": {
+        "nextQuestion": "I think I have enough to recap the workflow. Does this look right?",
+        "capturedState": {
+          "activeSection": "workflow",
+          "fields": {
+            "workflowName": "Month-end close",
+            "submittedWorkflowTask": "Month-end close",
+            "submittedFrequency": "monthly, ~5 business days",
+            "intervieweeRole": "owns the close; reviews and signs off, does not do most hands-on steps",
+            "currentStateSummary": "Month-end close: owns the close; reviews and signs off, does not do most hands-on steps"
+          },
+          "steps": [
+            {
+              "id": "step-001",
+              "name": "Sub-ledger cutoff",
+              "actor": "AP clerk, AR clerk",
+              "tool": "ERP",
+              "action": "Sub-ledger cutoff",
+              "handoff": "journals for approval",
+              "pain": "late vendor invoices push cutoff",
+              "output": "journals for approval"
+            },
+            {
+              "id": "step-002",
+              "name": "Bank statement import & reconcile",
+              "actor": "Staff accountant",
+              "tool": "ERP, recon tool, Excel",
+              "action": "Bank statement import & reconcile",
+              "handoff": "variance commentary",
+              "pain": "manual matching of exceptions",
+              "output": "variance commentary"
+            },
+            {
+              "id": "step-003",
+              "name": "Journal review & approval",
+              "actor": "Staff accountant, Controller",
+              "tool": "ERP",
+              "action": "Journal review & approval",
+              "handoff": "",
+              "pain": "judgment calls on accruals",
+              "output": ""
+            },
+            {
+              "id": "step-004",
+              "name": "Variance commentary",
+              "actor": "FP&A analyst, Budget owners",
+              "tool": "Excel, BI tool",
+              "action": "Variance commentary",
+              "handoff": "",
+              "pain": "waiting on budget-owner commentary",
+              "output": ""
+            },
+            {
+              "id": "step-005",
+              "name": "Reporting pack & CFO sign-off",
+              "actor": "Controller, CFO",
+              "tool": "Excel, slides",
+              "action": "Reporting pack & CFO sign-off",
+              "handoff": "",
+              "pain": "last-minute restatements",
+              "output": ""
+            }
+          ],
+          "data": [],
+          "systems": [],
+          "decisions": [
+            {
+              "decision": "journals for approval",
+              "owner": "Controller",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            },
+            {
+              "decision": "variance commentary",
+              "owner": "FP&A analyst",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            }
+          ],
+          "patterns": [],
+          "ideas": [],
+          "evidenceArtifacts": []
+        },
+        "done": true
+      },
+      "grades": {
+        "rails": {
+          "pass": true,
+          "violations": []
+        },
+        "capture": {
+          "expectedAnchors": 34,
+          "matchedAnchors": 34,
+          "capturedItems": 27,
+          "preciseItems": 27,
+          "recall": 1,
+          "precision": 1,
+          "recallPct": 100,
+          "precisionPct": 100,
+          "missed": [],
+          "stage": {
+            "intake": {
+              "expected": 4,
+              "matched": 4,
+              "recall": 1
+            },
+            "analysis": {
+              "expected": 30,
+              "matched": 30,
+              "recall": 1
+            }
+          }
+        },
+        "output": {
+          "complete": true,
+          "missing": [],
+          "reason": "Recap has core anchors and source label."
+        },
+        "flow": {
+          "skipped": true,
+          "score": null,
+          "flagged": false,
+          "reason": "Skipped in mock mode: no network."
+        }
+      }
+    },
+    {
+      "runId": "fin-ap-specialist-r002",
+      "personaId": "fin-ap-specialist",
+      "sector": "finance",
+      "role": "Accounts Payable Specialist",
+      "style": "over-detailed, literal, lists every micro-step",
+      "stresses": "ANCHORING — avoiding exhaustiveness and extracting the real structure from a flat over-detailed list (flow + analysis)",
+      "stopReason": "completion-heuristic",
+      "turns": 5,
+      "wallMs": 0,
+      "improvisedTurns": [],
+      "transcript": [
+        {
+          "role": "assistant",
+          "text": "What task or workflow do you want to talk about? Briefly describe what happens, the business outcome, and the main output.",
+          "time": "2026-06-15T01:01:41.416Z"
+        },
+        {
+          "role": "user",
+          "text": "I work on Invoice processing (AP). It is recurring, daily, continuous, and my role is that I does the hands-on processing end to end.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.416Z"
+        },
+        {
+          "role": "assistant",
+          "text": "Where are the main handoffs or approvals?",
+          "time": "2026-06-15T01:01:41.416Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "At a high level the flow is 1. Receive invoices from shared mailbox; 2. PO match (3-way); 3. Clear exceptions; 4. Payment batch review; 5. Release for payment.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.416Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What tools and data show up in the main steps?",
+          "time": "2026-06-15T01:01:41.416Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Receive invoices from shared mailbox uses shared mailbox and AP system with Vendors; PO match (3-way) uses AP system and ERP with Procurement; Clear exceptions uses AP system and email with Procurement and Requester",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.416Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.416Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "The annoying parts are mostly invoices arrive in many formats; PO / receipt / invoice mismatches; chasing people for missing receipts; duplicate-invoice checks; cutoff timing for the payment run.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.416Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.416Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "AP Specialist hands payment batch for review to AP Manager; AP Manager hands approved batch for release to Treasury",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.416Z"
+        },
+        {
+          "role": "assistant",
+          "text": "I think I have enough to recap the workflow. Does this look right?",
+          "time": "2026-06-15T01:01:41.416Z",
+          "summary": ""
+        }
+      ],
+      "capturedState": {
+        "activeSection": "workflow",
+        "fields": {
+          "workflowName": "Invoice processing (AP)",
+          "submittedWorkflowTask": "Invoice processing (AP)",
+          "submittedFrequency": "daily, continuous",
+          "intervieweeRole": "does the hands-on processing end to end",
+          "currentStateSummary": "Invoice processing (AP): does the hands-on processing end to end"
+        },
+        "steps": [
+          {
+            "id": "step-001",
+            "name": "Receive invoices from shared mailbox",
+            "actor": "Vendors",
+            "tool": "shared mailbox, AP system",
+            "action": "Receive invoices from shared mailbox",
+            "handoff": "payment batch for review",
+            "pain": "invoices arrive in many formats",
+            "output": "payment batch for review"
+          },
+          {
+            "id": "step-002",
+            "name": "PO match (3-way)",
+            "actor": "Procurement",
+            "tool": "AP system, ERP",
+            "action": "PO match (3-way)",
+            "handoff": "approved batch for release",
+            "pain": "PO / receipt / invoice mismatches",
+            "output": "approved batch for release"
+          },
+          {
+            "id": "step-003",
+            "name": "Clear exceptions",
+            "actor": "Procurement, Requester",
+            "tool": "AP system, email",
+            "action": "Clear exceptions",
+            "handoff": "",
+            "pain": "chasing people for missing receipts",
+            "output": ""
+          },
+          {
+            "id": "step-004",
+            "name": "Payment batch review",
+            "actor": "AP Manager",
+            "tool": "AP system",
+            "action": "Payment batch review",
+            "handoff": "",
+            "pain": "duplicate-invoice checks",
+            "output": ""
+          },
+          {
+            "id": "step-005",
+            "name": "Release for payment",
+            "actor": "Treasury",
+            "tool": "AP system, banking portal",
+            "action": "Release for payment",
+            "handoff": "",
+            "pain": "cutoff timing for the payment run",
+            "output": ""
+          }
+        ],
+        "data": [],
+        "systems": [],
+        "decisions": [
+          {
+            "decision": "payment batch for review",
+            "owner": "AP Manager",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          },
+          {
+            "decision": "approved batch for release",
+            "owner": "Treasury",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          }
+        ],
+        "patterns": [],
+        "ideas": [],
+        "evidenceArtifacts": []
+      },
+      "suggestions": {
+        "stepTypes": {
+          "step-001": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-002": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-003": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-004": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-005": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          }
+        },
+        "handoffTags": {
+          "h:step-001": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          },
+          "h:step-002": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          }
+        },
+        "decisionTags": {},
+        "frictionTags": {
+          "step-001": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-002": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-003": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-004": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-005": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          }
+        },
+        "roleTags": {
+          "step-001": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-002": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-003": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-004": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-005": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          }
+        }
+      },
+      "finalRecap": {
+        "workflow": "Invoice processing (AP)",
+        "role": "does the hands-on processing end to end",
+        "cadence": "daily, continuous",
+        "recurringOrProject": "recurring",
+        "steps": [
+          {
+            "index": 1,
+            "name": "Receive invoices from shared mailbox",
+            "actor": "Vendors",
+            "tool": "shared mailbox, AP system",
+            "pain": "invoices arrive in many formats",
+            "handoff": "payment batch for review"
+          },
+          {
+            "index": 2,
+            "name": "PO match (3-way)",
+            "actor": "Procurement",
+            "tool": "AP system, ERP",
+            "pain": "PO / receipt / invoice mismatches",
+            "handoff": "approved batch for release"
+          },
+          {
+            "index": 3,
+            "name": "Clear exceptions",
+            "actor": "Procurement, Requester",
+            "tool": "AP system, email",
+            "pain": "chasing people for missing receipts",
+            "handoff": ""
+          },
+          {
+            "index": 4,
+            "name": "Payment batch review",
+            "actor": "AP Manager",
+            "tool": "AP system",
+            "pain": "duplicate-invoice checks",
+            "handoff": ""
+          },
+          {
+            "index": 5,
+            "name": "Release for payment",
+            "actor": "Treasury",
+            "tool": "AP system, banking portal",
+            "pain": "cutoff timing for the payment run",
+            "handoff": ""
+          }
+        ],
+        "source": "transcript + app extraction",
+        "stopReason": "completion-heuristic"
+      },
+      "lastResponse": {
+        "nextQuestion": "I think I have enough to recap the workflow. Does this look right?",
+        "capturedState": {
+          "activeSection": "workflow",
+          "fields": {
+            "workflowName": "Invoice processing (AP)",
+            "submittedWorkflowTask": "Invoice processing (AP)",
+            "submittedFrequency": "daily, continuous",
+            "intervieweeRole": "does the hands-on processing end to end",
+            "currentStateSummary": "Invoice processing (AP): does the hands-on processing end to end"
+          },
+          "steps": [
+            {
+              "id": "step-001",
+              "name": "Receive invoices from shared mailbox",
+              "actor": "Vendors",
+              "tool": "shared mailbox, AP system",
+              "action": "Receive invoices from shared mailbox",
+              "handoff": "payment batch for review",
+              "pain": "invoices arrive in many formats",
+              "output": "payment batch for review"
+            },
+            {
+              "id": "step-002",
+              "name": "PO match (3-way)",
+              "actor": "Procurement",
+              "tool": "AP system, ERP",
+              "action": "PO match (3-way)",
+              "handoff": "approved batch for release",
+              "pain": "PO / receipt / invoice mismatches",
+              "output": "approved batch for release"
+            },
+            {
+              "id": "step-003",
+              "name": "Clear exceptions",
+              "actor": "Procurement, Requester",
+              "tool": "AP system, email",
+              "action": "Clear exceptions",
+              "handoff": "",
+              "pain": "chasing people for missing receipts",
+              "output": ""
+            },
+            {
+              "id": "step-004",
+              "name": "Payment batch review",
+              "actor": "AP Manager",
+              "tool": "AP system",
+              "action": "Payment batch review",
+              "handoff": "",
+              "pain": "duplicate-invoice checks",
+              "output": ""
+            },
+            {
+              "id": "step-005",
+              "name": "Release for payment",
+              "actor": "Treasury",
+              "tool": "AP system, banking portal",
+              "action": "Release for payment",
+              "handoff": "",
+              "pain": "cutoff timing for the payment run",
+              "output": ""
+            }
+          ],
+          "data": [],
+          "systems": [],
+          "decisions": [
+            {
+              "decision": "payment batch for review",
+              "owner": "AP Manager",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            },
+            {
+              "decision": "approved batch for release",
+              "owner": "Treasury",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            }
+          ],
+          "patterns": [],
+          "ideas": [],
+          "evidenceArtifacts": []
+        },
+        "done": true
+      },
+      "grades": {
+        "rails": {
+          "pass": true,
+          "violations": []
+        },
+        "capture": {
+          "expectedAnchors": 31,
+          "matchedAnchors": 31,
+          "capturedItems": 26,
+          "preciseItems": 26,
+          "recall": 1,
+          "precision": 1,
+          "recallPct": 100,
+          "precisionPct": 100,
+          "missed": [],
+          "stage": {
+            "intake": {
+              "expected": 4,
+              "matched": 4,
+              "recall": 1
+            },
+            "analysis": {
+              "expected": 27,
+              "matched": 27,
+              "recall": 1
+            }
+          }
+        },
+        "output": {
+          "complete": true,
+          "missing": [],
+          "reason": "Recap has core anchors and source label."
+        },
+        "flow": {
+          "skipped": true,
+          "score": null,
+          "flagged": false,
+          "reason": "Skipped in mock mode: no network."
+        }
+      }
+    },
+    {
+      "runId": "fin-fpa-analyst-r003",
+      "personaId": "fin-fpa-analyst",
+      "sector": "finance",
+      "role": "FP&A Analyst",
+      "style": "rambling, tangential, buries the lede",
+      "stresses": "FOCUS — extracting a clean workflow from noisy, non-linear answers (intake + flow)",
+      "stopReason": "completion-heuristic",
+      "turns": 5,
+      "wallMs": 0,
+      "improvisedTurns": [],
+      "transcript": [
+        {
+          "role": "assistant",
+          "text": "What task or workflow do you want to talk about? Briefly describe what happens, the business outcome, and the main output.",
+          "time": "2026-06-15T01:01:41.417Z"
+        },
+        {
+          "role": "user",
+          "text": "I work on Budget-to-board reporting. It is recurring, monthly + quarterly board cycle, and my role is that I builds the reporting; does not own the underlying budgets.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.417Z"
+        },
+        {
+          "role": "assistant",
+          "text": "Where are the main handoffs or approvals?",
+          "time": "2026-06-15T01:01:41.417Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "At a high level the flow is 1. Load actuals & assumptions; 2. Variance analysis; 3. Collect budget-owner commentary; 4. Build board pack.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.417Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What tools and data show up in the main steps?",
+          "time": "2026-06-15T01:01:41.417Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Load actuals & assumptions uses planning tool and ERP with Accounting; Variance analysis uses Excel and BI tool with Budget owners; Collect budget-owner commentary uses email and templates with Budget owners",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.417Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.417Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "The annoying parts are mostly version control on assumptions; explaining material variances; late or thin commentary; last-minute number changes.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.417Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.417Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Budget owners hands commentary on variances to FP&A Analyst; FP&A Analyst hands draft board pack to CFO",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.417Z"
+        },
+        {
+          "role": "assistant",
+          "text": "I think I have enough to recap the workflow. Does this look right?",
+          "time": "2026-06-15T01:01:41.417Z",
+          "summary": ""
+        }
+      ],
+      "capturedState": {
+        "activeSection": "workflow",
+        "fields": {
+          "workflowName": "Budget-to-board reporting",
+          "submittedWorkflowTask": "Budget-to-board reporting",
+          "submittedFrequency": "monthly + quarterly board cycle",
+          "intervieweeRole": "builds the reporting; does not own the underlying budgets",
+          "currentStateSummary": "Budget-to-board reporting: builds the reporting; does not own the underlying budgets"
+        },
+        "steps": [
+          {
+            "id": "step-001",
+            "name": "Load actuals & assumptions",
+            "actor": "Accounting",
+            "tool": "planning tool, ERP",
+            "action": "Load actuals & assumptions",
+            "handoff": "commentary on variances",
+            "pain": "version control on assumptions",
+            "output": "commentary on variances"
+          },
+          {
+            "id": "step-002",
+            "name": "Variance analysis",
+            "actor": "Budget owners",
+            "tool": "Excel, BI tool",
+            "action": "Variance analysis",
+            "handoff": "draft board pack",
+            "pain": "explaining material variances",
+            "output": "draft board pack"
+          },
+          {
+            "id": "step-003",
+            "name": "Collect budget-owner commentary",
+            "actor": "Budget owners",
+            "tool": "email, templates",
+            "action": "Collect budget-owner commentary",
+            "handoff": "",
+            "pain": "late or thin commentary",
+            "output": ""
+          },
+          {
+            "id": "step-004",
+            "name": "Build board pack",
+            "actor": "Controller, CFO",
+            "tool": "slides, Excel",
+            "action": "Build board pack",
+            "handoff": "",
+            "pain": "last-minute number changes",
+            "output": ""
+          }
+        ],
+        "data": [],
+        "systems": [],
+        "decisions": [
+          {
+            "decision": "commentary on variances",
+            "owner": "FP&A Analyst",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          },
+          {
+            "decision": "draft board pack",
+            "owner": "CFO",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          }
+        ],
+        "patterns": [],
+        "ideas": [],
+        "evidenceArtifacts": []
+      },
+      "suggestions": {
+        "stepTypes": {
+          "step-001": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-002": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-003": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-004": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          }
+        },
+        "handoffTags": {
+          "h:step-001": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          },
+          "h:step-002": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          }
+        },
+        "decisionTags": {},
+        "frictionTags": {
+          "step-001": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-002": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-003": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-004": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          }
+        },
+        "roleTags": {
+          "step-001": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-002": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-003": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-004": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          }
+        }
+      },
+      "finalRecap": {
+        "workflow": "Budget-to-board reporting",
+        "role": "builds the reporting; does not own the underlying budgets",
+        "cadence": "monthly + quarterly board cycle",
+        "recurringOrProject": "recurring",
+        "steps": [
+          {
+            "index": 1,
+            "name": "Load actuals & assumptions",
+            "actor": "Accounting",
+            "tool": "planning tool, ERP",
+            "pain": "version control on assumptions",
+            "handoff": "commentary on variances"
+          },
+          {
+            "index": 2,
+            "name": "Variance analysis",
+            "actor": "Budget owners",
+            "tool": "Excel, BI tool",
+            "pain": "explaining material variances",
+            "handoff": "draft board pack"
+          },
+          {
+            "index": 3,
+            "name": "Collect budget-owner commentary",
+            "actor": "Budget owners",
+            "tool": "email, templates",
+            "pain": "late or thin commentary",
+            "handoff": ""
+          },
+          {
+            "index": 4,
+            "name": "Build board pack",
+            "actor": "Controller, CFO",
+            "tool": "slides, Excel",
+            "pain": "last-minute number changes",
+            "handoff": ""
+          }
+        ],
+        "source": "transcript + app extraction",
+        "stopReason": "completion-heuristic"
+      },
+      "lastResponse": {
+        "nextQuestion": "I think I have enough to recap the workflow. Does this look right?",
+        "capturedState": {
+          "activeSection": "workflow",
+          "fields": {
+            "workflowName": "Budget-to-board reporting",
+            "submittedWorkflowTask": "Budget-to-board reporting",
+            "submittedFrequency": "monthly + quarterly board cycle",
+            "intervieweeRole": "builds the reporting; does not own the underlying budgets",
+            "currentStateSummary": "Budget-to-board reporting: builds the reporting; does not own the underlying budgets"
+          },
+          "steps": [
+            {
+              "id": "step-001",
+              "name": "Load actuals & assumptions",
+              "actor": "Accounting",
+              "tool": "planning tool, ERP",
+              "action": "Load actuals & assumptions",
+              "handoff": "commentary on variances",
+              "pain": "version control on assumptions",
+              "output": "commentary on variances"
+            },
+            {
+              "id": "step-002",
+              "name": "Variance analysis",
+              "actor": "Budget owners",
+              "tool": "Excel, BI tool",
+              "action": "Variance analysis",
+              "handoff": "draft board pack",
+              "pain": "explaining material variances",
+              "output": "draft board pack"
+            },
+            {
+              "id": "step-003",
+              "name": "Collect budget-owner commentary",
+              "actor": "Budget owners",
+              "tool": "email, templates",
+              "action": "Collect budget-owner commentary",
+              "handoff": "",
+              "pain": "late or thin commentary",
+              "output": ""
+            },
+            {
+              "id": "step-004",
+              "name": "Build board pack",
+              "actor": "Controller, CFO",
+              "tool": "slides, Excel",
+              "action": "Build board pack",
+              "handoff": "",
+              "pain": "last-minute number changes",
+              "output": ""
+            }
+          ],
+          "data": [],
+          "systems": [],
+          "decisions": [
+            {
+              "decision": "commentary on variances",
+              "owner": "FP&A Analyst",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            },
+            {
+              "decision": "draft board pack",
+              "owner": "CFO",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            }
+          ],
+          "patterns": [],
+          "ideas": [],
+          "evidenceArtifacts": []
+        },
+        "done": true
+      },
+      "grades": {
+        "rails": {
+          "pass": true,
+          "violations": []
+        },
+        "capture": {
+          "expectedAnchors": 27,
+          "matchedAnchors": 27,
+          "capturedItems": 23,
+          "preciseItems": 23,
+          "recall": 1,
+          "precision": 1,
+          "recallPct": 100,
+          "precisionPct": 100,
+          "missed": [],
+          "stage": {
+            "intake": {
+              "expected": 4,
+              "matched": 4,
+              "recall": 1
+            },
+            "analysis": {
+              "expected": 23,
+              "matched": 23,
+              "recall": 1
+            }
+          }
+        },
+        "output": {
+          "complete": true,
+          "missing": [],
+          "reason": "Recap has core anchors and source label."
+        },
+        "flow": {
+          "skipped": true,
+          "score": null,
+          "flagged": false,
+          "reason": "Skipped in mock mode: no network."
+        }
+      }
+    },
+    {
+      "runId": "fin-accounting-mgr-r004",
+      "personaId": "fin-accounting-mgr",
+      "sector": "finance",
+      "role": "Accounting Manager",
+      "style": "guarded, short answers, needs probing",
+      "stresses": "MULTI-TURN PROBING and HANDOFF / approval capture (flow + analysis)",
+      "stopReason": "completion-heuristic",
+      "turns": 5,
+      "wallMs": 0,
+      "improvisedTurns": [],
+      "transcript": [
+        {
+          "role": "assistant",
+          "text": "What task or workflow do you want to talk about? Briefly describe what happens, the business outcome, and the main output.",
+          "time": "2026-06-15T01:01:41.418Z"
+        },
+        {
+          "role": "user",
+          "text": "I work on Journal entry review & approval. It is recurring, monthly around close, plus ad hoc, and my role is that I reviewer and approver; sets the approval threshold.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.418Z"
+        },
+        {
+          "role": "assistant",
+          "text": "Where are the main handoffs or approvals?",
+          "time": "2026-06-15T01:01:41.418Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "At a high level the flow is 1. Receive prepared journals; 2. Review support & coding; 3. Approve or return; 4. Post & archive.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.418Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What tools and data show up in the main steps?",
+          "time": "2026-06-15T01:01:41.418Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Receive prepared journals uses ERP with Staff accountants; Review support & coding uses ERP and Excel with Staff accountants; Approve or return uses ERP with Accounting Manager",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.418Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.418Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "The annoying parts are mostly incomplete support attached; judgment on unusual entries; threshold for exceptions is informal; audit-trail completeness.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.418Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.418Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Staff accountants hands journals for approval to Accounting Manager; Accounting Manager hands returned entries needing fixes to Staff accountants",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.418Z"
+        },
+        {
+          "role": "assistant",
+          "text": "I think I have enough to recap the workflow. Does this look right?",
+          "time": "2026-06-15T01:01:41.418Z",
+          "summary": ""
+        }
+      ],
+      "capturedState": {
+        "activeSection": "workflow",
+        "fields": {
+          "workflowName": "Journal entry review & approval",
+          "submittedWorkflowTask": "Journal entry review & approval",
+          "submittedFrequency": "monthly around close, plus ad hoc",
+          "intervieweeRole": "reviewer and approver; sets the approval threshold",
+          "currentStateSummary": "Journal entry review & approval: reviewer and approver; sets the approval threshold"
+        },
+        "steps": [
+          {
+            "id": "step-001",
+            "name": "Receive prepared journals",
+            "actor": "Staff accountants",
+            "tool": "ERP",
+            "action": "Receive prepared journals",
+            "handoff": "journals for approval",
+            "pain": "incomplete support attached",
+            "output": "journals for approval"
+          },
+          {
+            "id": "step-002",
+            "name": "Review support & coding",
+            "actor": "Staff accountants",
+            "tool": "ERP, Excel",
+            "action": "Review support & coding",
+            "handoff": "returned entries needing fixes",
+            "pain": "judgment on unusual entries",
+            "output": "returned entries needing fixes"
+          },
+          {
+            "id": "step-003",
+            "name": "Approve or return",
+            "actor": "Accounting Manager",
+            "tool": "ERP",
+            "action": "Approve or return",
+            "handoff": "",
+            "pain": "threshold for exceptions is informal",
+            "output": ""
+          },
+          {
+            "id": "step-004",
+            "name": "Post & archive",
+            "actor": "Staff accountants",
+            "tool": "ERP, document store",
+            "action": "Post & archive",
+            "handoff": "",
+            "pain": "audit-trail completeness",
+            "output": ""
+          }
+        ],
+        "data": [],
+        "systems": [],
+        "decisions": [
+          {
+            "decision": "journals for approval",
+            "owner": "Accounting Manager",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          },
+          {
+            "decision": "returned entries needing fixes",
+            "owner": "Staff accountants",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          }
+        ],
+        "patterns": [],
+        "ideas": [],
+        "evidenceArtifacts": []
+      },
+      "suggestions": {
+        "stepTypes": {
+          "step-001": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-002": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-003": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-004": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          }
+        },
+        "handoffTags": {
+          "h:step-001": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          },
+          "h:step-002": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          }
+        },
+        "decisionTags": {},
+        "frictionTags": {
+          "step-001": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-002": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-003": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-004": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          }
+        },
+        "roleTags": {
+          "step-001": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-002": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-003": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-004": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          }
+        }
+      },
+      "finalRecap": {
+        "workflow": "Journal entry review & approval",
+        "role": "reviewer and approver; sets the approval threshold",
+        "cadence": "monthly around close, plus ad hoc",
+        "recurringOrProject": "recurring",
+        "steps": [
+          {
+            "index": 1,
+            "name": "Receive prepared journals",
+            "actor": "Staff accountants",
+            "tool": "ERP",
+            "pain": "incomplete support attached",
+            "handoff": "journals for approval"
+          },
+          {
+            "index": 2,
+            "name": "Review support & coding",
+            "actor": "Staff accountants",
+            "tool": "ERP, Excel",
+            "pain": "judgment on unusual entries",
+            "handoff": "returned entries needing fixes"
+          },
+          {
+            "index": 3,
+            "name": "Approve or return",
+            "actor": "Accounting Manager",
+            "tool": "ERP",
+            "pain": "threshold for exceptions is informal",
+            "handoff": ""
+          },
+          {
+            "index": 4,
+            "name": "Post & archive",
+            "actor": "Staff accountants",
+            "tool": "ERP, document store",
+            "pain": "audit-trail completeness",
+            "handoff": ""
+          }
+        ],
+        "source": "transcript + app extraction",
+        "stopReason": "completion-heuristic"
+      },
+      "lastResponse": {
+        "nextQuestion": "I think I have enough to recap the workflow. Does this look right?",
+        "capturedState": {
+          "activeSection": "workflow",
+          "fields": {
+            "workflowName": "Journal entry review & approval",
+            "submittedWorkflowTask": "Journal entry review & approval",
+            "submittedFrequency": "monthly around close, plus ad hoc",
+            "intervieweeRole": "reviewer and approver; sets the approval threshold",
+            "currentStateSummary": "Journal entry review & approval: reviewer and approver; sets the approval threshold"
+          },
+          "steps": [
+            {
+              "id": "step-001",
+              "name": "Receive prepared journals",
+              "actor": "Staff accountants",
+              "tool": "ERP",
+              "action": "Receive prepared journals",
+              "handoff": "journals for approval",
+              "pain": "incomplete support attached",
+              "output": "journals for approval"
+            },
+            {
+              "id": "step-002",
+              "name": "Review support & coding",
+              "actor": "Staff accountants",
+              "tool": "ERP, Excel",
+              "action": "Review support & coding",
+              "handoff": "returned entries needing fixes",
+              "pain": "judgment on unusual entries",
+              "output": "returned entries needing fixes"
+            },
+            {
+              "id": "step-003",
+              "name": "Approve or return",
+              "actor": "Accounting Manager",
+              "tool": "ERP",
+              "action": "Approve or return",
+              "handoff": "",
+              "pain": "threshold for exceptions is informal",
+              "output": ""
+            },
+            {
+              "id": "step-004",
+              "name": "Post & archive",
+              "actor": "Staff accountants",
+              "tool": "ERP, document store",
+              "action": "Post & archive",
+              "handoff": "",
+              "pain": "audit-trail completeness",
+              "output": ""
+            }
+          ],
+          "data": [],
+          "systems": [],
+          "decisions": [
+            {
+              "decision": "journals for approval",
+              "owner": "Accounting Manager",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            },
+            {
+              "decision": "returned entries needing fixes",
+              "owner": "Staff accountants",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            }
+          ],
+          "patterns": [],
+          "ideas": [],
+          "evidenceArtifacts": []
+        },
+        "done": true
+      },
+      "grades": {
+        "rails": {
+          "pass": true,
+          "violations": []
+        },
+        "capture": {
+          "expectedAnchors": 24,
+          "matchedAnchors": 24,
+          "capturedItems": 19,
+          "preciseItems": 19,
+          "recall": 1,
+          "precision": 1,
+          "recallPct": 100,
+          "precisionPct": 100,
+          "missed": [],
+          "stage": {
+            "intake": {
+              "expected": 4,
+              "matched": 4,
+              "recall": 1
+            },
+            "analysis": {
+              "expected": 20,
+              "matched": 20,
+              "recall": 1
+            }
+          }
+        },
+        "output": {
+          "complete": true,
+          "missing": [],
+          "reason": "Recap has core anchors and source label."
+        },
+        "flow": {
+          "skipped": true,
+          "score": null,
+          "flagged": false,
+          "reason": "Skipped in mock mode: no network."
+        }
+      }
+    },
+    {
+      "runId": "con-engagement-mgr-r005",
+      "personaId": "con-engagement-mgr",
+      "sector": "consulting",
+      "role": "Engagement Manager (management consultancy)",
+      "style": "high-level, abstracts too early, talks in frameworks",
+      "stresses": "DISTINGUISHING the consultant's own process from the client's workflow, and resisting PREMATURE ABSTRACTION (intake + analysis)",
+      "stopReason": "completion-heuristic",
+      "turns": 5,
+      "wallMs": 1,
+      "improvisedTurns": [],
+      "transcript": [
+        {
+          "role": "assistant",
+          "text": "What task or workflow do you want to talk about? Briefly describe what happens, the business outcome, and the main output.",
+          "time": "2026-06-15T01:01:41.419Z"
+        },
+        {
+          "role": "user",
+          "text": "I work on Client Q3 finance-transformation discovery. It is project, 12-week engagement, and my role is that I runs the engagement; the workflow being captured is the CLIENT finance team's close, not the consultant's own method.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.419Z"
+        },
+        {
+          "role": "assistant",
+          "text": "Where are the main handoffs or approvals?",
+          "time": "2026-06-15T01:01:41.420Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "At a high level the flow is 1. Stakeholder interviews; 2. Current-state mapping; 3. Pain-point synthesis; 4. Opportunity sizing; 5. Roadmap & readout.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.420Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What tools and data show up in the main steps?",
+          "time": "2026-06-15T01:01:41.420Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Stakeholder interviews uses interview guides and notes with Client finance leads; Current-state mapping uses whiteboard and slides with Client ops staff; Pain-point synthesis uses Excel and slides with Engagement team",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.420Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.420Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "The annoying parts are mostly access to the right people; conflicting accounts of how work is done; separating symptoms from root causes; data to back the case; sponsor alignment on priorities.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.420Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.420Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Engagement team hands synthesis and opportunity sizing to Client sponsor",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.420Z"
+        },
+        {
+          "role": "assistant",
+          "text": "I think I have enough to recap the workflow. Does this look right?",
+          "time": "2026-06-15T01:01:41.420Z",
+          "summary": ""
+        }
+      ],
+      "capturedState": {
+        "activeSection": "workflow",
+        "fields": {
+          "workflowName": "Client Q3 finance-transformation discovery",
+          "submittedWorkflowTask": "Client Q3 finance-transformation discovery",
+          "submittedFrequency": "12-week engagement",
+          "intervieweeRole": "runs the engagement; the workflow being captured is the CLIENT finance team's close, not the consultant's own method",
+          "currentStateSummary": "Client Q3 finance-transformation discovery: runs the engagement; the workflow being captured is the CLIENT finance team's close, not the consultant's own method"
+        },
+        "steps": [
+          {
+            "id": "step-001",
+            "name": "Stakeholder interviews",
+            "actor": "Client finance leads",
+            "tool": "interview guides, notes",
+            "action": "Stakeholder interviews",
+            "handoff": "synthesis and opportunity sizing",
+            "pain": "access to the right people",
+            "output": "synthesis and opportunity sizing"
+          },
+          {
+            "id": "step-002",
+            "name": "Current-state mapping",
+            "actor": "Client ops staff",
+            "tool": "whiteboard, slides",
+            "action": "Current-state mapping",
+            "handoff": "",
+            "pain": "conflicting accounts of how work is done",
+            "output": ""
+          },
+          {
+            "id": "step-003",
+            "name": "Pain-point synthesis",
+            "actor": "Engagement team",
+            "tool": "Excel, slides",
+            "action": "Pain-point synthesis",
+            "handoff": "",
+            "pain": "separating symptoms from root causes",
+            "output": ""
+          },
+          {
+            "id": "step-004",
+            "name": "Opportunity sizing",
+            "actor": "Client sponsor",
+            "tool": "Excel",
+            "action": "Opportunity sizing",
+            "handoff": "",
+            "pain": "data to back the case",
+            "output": ""
+          },
+          {
+            "id": "step-005",
+            "name": "Roadmap & readout",
+            "actor": "Client sponsor, Client exec",
+            "tool": "slides",
+            "action": "Roadmap & readout",
+            "handoff": "",
+            "pain": "sponsor alignment on priorities",
+            "output": ""
+          }
+        ],
+        "data": [],
+        "systems": [],
+        "decisions": [
+          {
+            "decision": "synthesis and opportunity sizing",
+            "owner": "Client sponsor",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          }
+        ],
+        "patterns": [],
+        "ideas": [],
+        "evidenceArtifacts": []
+      },
+      "suggestions": {
+        "stepTypes": {
+          "step-001": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-002": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-003": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-004": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-005": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          }
+        },
+        "handoffTags": {
+          "h:step-001": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          }
+        },
+        "decisionTags": {},
+        "frictionTags": {
+          "step-001": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-002": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-003": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-004": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-005": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          }
+        },
+        "roleTags": {
+          "step-001": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-002": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-003": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-004": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-005": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          }
+        }
+      },
+      "finalRecap": {
+        "workflow": "Client Q3 finance-transformation discovery",
+        "role": "runs the engagement; the workflow being captured is the CLIENT finance team's close, not the consultant's own method",
+        "cadence": "12-week engagement",
+        "recurringOrProject": "project",
+        "steps": [
+          {
+            "index": 1,
+            "name": "Stakeholder interviews",
+            "actor": "Client finance leads",
+            "tool": "interview guides, notes",
+            "pain": "access to the right people",
+            "handoff": "synthesis and opportunity sizing"
+          },
+          {
+            "index": 2,
+            "name": "Current-state mapping",
+            "actor": "Client ops staff",
+            "tool": "whiteboard, slides",
+            "pain": "conflicting accounts of how work is done",
+            "handoff": ""
+          },
+          {
+            "index": 3,
+            "name": "Pain-point synthesis",
+            "actor": "Engagement team",
+            "tool": "Excel, slides",
+            "pain": "separating symptoms from root causes",
+            "handoff": ""
+          },
+          {
+            "index": 4,
+            "name": "Opportunity sizing",
+            "actor": "Client sponsor",
+            "tool": "Excel",
+            "pain": "data to back the case",
+            "handoff": ""
+          },
+          {
+            "index": 5,
+            "name": "Roadmap & readout",
+            "actor": "Client sponsor, Client exec",
+            "tool": "slides",
+            "pain": "sponsor alignment on priorities",
+            "handoff": ""
+          }
+        ],
+        "source": "transcript + app extraction",
+        "stopReason": "completion-heuristic"
+      },
+      "lastResponse": {
+        "nextQuestion": "I think I have enough to recap the workflow. Does this look right?",
+        "capturedState": {
+          "activeSection": "workflow",
+          "fields": {
+            "workflowName": "Client Q3 finance-transformation discovery",
+            "submittedWorkflowTask": "Client Q3 finance-transformation discovery",
+            "submittedFrequency": "12-week engagement",
+            "intervieweeRole": "runs the engagement; the workflow being captured is the CLIENT finance team's close, not the consultant's own method",
+            "currentStateSummary": "Client Q3 finance-transformation discovery: runs the engagement; the workflow being captured is the CLIENT finance team's close, not the consultant's own method"
+          },
+          "steps": [
+            {
+              "id": "step-001",
+              "name": "Stakeholder interviews",
+              "actor": "Client finance leads",
+              "tool": "interview guides, notes",
+              "action": "Stakeholder interviews",
+              "handoff": "synthesis and opportunity sizing",
+              "pain": "access to the right people",
+              "output": "synthesis and opportunity sizing"
+            },
+            {
+              "id": "step-002",
+              "name": "Current-state mapping",
+              "actor": "Client ops staff",
+              "tool": "whiteboard, slides",
+              "action": "Current-state mapping",
+              "handoff": "",
+              "pain": "conflicting accounts of how work is done",
+              "output": ""
+            },
+            {
+              "id": "step-003",
+              "name": "Pain-point synthesis",
+              "actor": "Engagement team",
+              "tool": "Excel, slides",
+              "action": "Pain-point synthesis",
+              "handoff": "",
+              "pain": "separating symptoms from root causes",
+              "output": ""
+            },
+            {
+              "id": "step-004",
+              "name": "Opportunity sizing",
+              "actor": "Client sponsor",
+              "tool": "Excel",
+              "action": "Opportunity sizing",
+              "handoff": "",
+              "pain": "data to back the case",
+              "output": ""
+            },
+            {
+              "id": "step-005",
+              "name": "Roadmap & readout",
+              "actor": "Client sponsor, Client exec",
+              "tool": "slides",
+              "action": "Roadmap & readout",
+              "handoff": "",
+              "pain": "sponsor alignment on priorities",
+              "output": ""
+            }
+          ],
+          "data": [],
+          "systems": [],
+          "decisions": [
+            {
+              "decision": "synthesis and opportunity sizing",
+              "owner": "Client sponsor",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            }
+          ],
+          "patterns": [],
+          "ideas": [],
+          "evidenceArtifacts": []
+        },
+        "done": true
+      },
+      "grades": {
+        "rails": {
+          "pass": true,
+          "violations": []
+        },
+        "capture": {
+          "expectedAnchors": 29,
+          "matchedAnchors": 29,
+          "capturedItems": 25,
+          "preciseItems": 25,
+          "recall": 1,
+          "precision": 1,
+          "recallPct": 100,
+          "precisionPct": 100,
+          "missed": [],
+          "stage": {
+            "intake": {
+              "expected": 4,
+              "matched": 4,
+              "recall": 1
+            },
+            "analysis": {
+              "expected": 25,
+              "matched": 25,
+              "recall": 1
+            }
+          }
+        },
+        "output": {
+          "complete": true,
+          "missing": [],
+          "reason": "Recap has core anchors and source label."
+        },
+        "flow": {
+          "skipped": true,
+          "score": null,
+          "flagged": false,
+          "reason": "Skipped in mock mode: no network."
+        }
+      }
+    },
+    {
+      "runId": "con-associate-r006",
+      "personaId": "con-associate",
+      "sector": "consulting",
+      "role": "Associate Consultant",
+      "style": "eager, over-volunteers solutions, jumps to 'AI could do X'",
+      "stresses": "Keeping the conversation LEVERAGE-FRAMED — capturing friction and the real workflow before solutioning; separating opportunity from friction (flow + analysis + output)",
+      "stopReason": "completion-heuristic",
+      "turns": 5,
+      "wallMs": 0,
+      "improvisedTurns": [],
+      "transcript": [
+        {
+          "role": "assistant",
+          "text": "What task or workflow do you want to talk about? Briefly describe what happens, the business outcome, and the main output.",
+          "time": "2026-06-15T01:01:41.421Z"
+        },
+        {
+          "role": "user",
+          "text": "I work on Vendor-spend analysis (for a client). It is project, 6-week analysis, and my role is that I does the analysis hands-on under an EM.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.421Z"
+        },
+        {
+          "role": "assistant",
+          "text": "Where are the main handoffs or approvals?",
+          "time": "2026-06-15T01:01:41.421Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "At a high level the flow is 1. Pull spend data; 2. Categorize & clean; 3. Identify savings opportunities; 4. Build the recommendation deck.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.421Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What tools and data show up in the main steps?",
+          "time": "2026-06-15T01:01:41.421Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Pull spend data uses client ERP export and Excel with Client AP team; Categorize & clean uses Excel and spreadsheets with Associate; Identify savings opportunities uses Excel with Engagement Manager",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.421Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.421Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "The annoying parts are mostly messy, inconsistent vendor names; manual de-duplication of vendors; judgment on which savings are real; defending the numbers.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.421Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.421Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Client AP team hands raw spend extract to Associate; Associate hands cleaned analysis to Engagement Manager",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.421Z"
+        },
+        {
+          "role": "assistant",
+          "text": "I think I have enough to recap the workflow. Does this look right?",
+          "time": "2026-06-15T01:01:41.421Z",
+          "summary": ""
+        }
+      ],
+      "capturedState": {
+        "activeSection": "workflow",
+        "fields": {
+          "workflowName": "Vendor-spend analysis (for a client)",
+          "submittedWorkflowTask": "Vendor-spend analysis (for a client)",
+          "submittedFrequency": "6-week analysis",
+          "intervieweeRole": "does the analysis hands-on under an EM",
+          "currentStateSummary": "Vendor-spend analysis (for a client): does the analysis hands-on under an EM"
+        },
+        "steps": [
+          {
+            "id": "step-001",
+            "name": "Pull spend data",
+            "actor": "Client AP team",
+            "tool": "client ERP export, Excel",
+            "action": "Pull spend data",
+            "handoff": "raw spend extract",
+            "pain": "messy, inconsistent vendor names",
+            "output": "raw spend extract"
+          },
+          {
+            "id": "step-002",
+            "name": "Categorize & clean",
+            "actor": "Associate",
+            "tool": "Excel, spreadsheets",
+            "action": "Categorize & clean",
+            "handoff": "cleaned analysis",
+            "pain": "manual de-duplication of vendors",
+            "output": "cleaned analysis"
+          },
+          {
+            "id": "step-003",
+            "name": "Identify savings opportunities",
+            "actor": "Engagement Manager",
+            "tool": "Excel",
+            "action": "Identify savings opportunities",
+            "handoff": "",
+            "pain": "judgment on which savings are real",
+            "output": ""
+          },
+          {
+            "id": "step-004",
+            "name": "Build the recommendation deck",
+            "actor": "Engagement Manager, Client sponsor",
+            "tool": "slides",
+            "action": "Build the recommendation deck",
+            "handoff": "",
+            "pain": "defending the numbers",
+            "output": ""
+          }
+        ],
+        "data": [],
+        "systems": [],
+        "decisions": [
+          {
+            "decision": "raw spend extract",
+            "owner": "Associate",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          },
+          {
+            "decision": "cleaned analysis",
+            "owner": "Engagement Manager",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          }
+        ],
+        "patterns": [],
+        "ideas": [],
+        "evidenceArtifacts": []
+      },
+      "suggestions": {
+        "stepTypes": {
+          "step-001": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-002": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-003": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-004": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          }
+        },
+        "handoffTags": {
+          "h:step-001": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          },
+          "h:step-002": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          }
+        },
+        "decisionTags": {},
+        "frictionTags": {
+          "step-001": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-002": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-003": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-004": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          }
+        },
+        "roleTags": {
+          "step-001": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-002": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-003": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-004": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          }
+        }
+      },
+      "finalRecap": {
+        "workflow": "Vendor-spend analysis (for a client)",
+        "role": "does the analysis hands-on under an EM",
+        "cadence": "6-week analysis",
+        "recurringOrProject": "project",
+        "steps": [
+          {
+            "index": 1,
+            "name": "Pull spend data",
+            "actor": "Client AP team",
+            "tool": "client ERP export, Excel",
+            "pain": "messy, inconsistent vendor names",
+            "handoff": "raw spend extract"
+          },
+          {
+            "index": 2,
+            "name": "Categorize & clean",
+            "actor": "Associate",
+            "tool": "Excel, spreadsheets",
+            "pain": "manual de-duplication of vendors",
+            "handoff": "cleaned analysis"
+          },
+          {
+            "index": 3,
+            "name": "Identify savings opportunities",
+            "actor": "Engagement Manager",
+            "tool": "Excel",
+            "pain": "judgment on which savings are real",
+            "handoff": ""
+          },
+          {
+            "index": 4,
+            "name": "Build the recommendation deck",
+            "actor": "Engagement Manager, Client sponsor",
+            "tool": "slides",
+            "pain": "defending the numbers",
+            "handoff": ""
+          }
+        ],
+        "source": "transcript + app extraction",
+        "stopReason": "completion-heuristic"
+      },
+      "lastResponse": {
+        "nextQuestion": "I think I have enough to recap the workflow. Does this look right?",
+        "capturedState": {
+          "activeSection": "workflow",
+          "fields": {
+            "workflowName": "Vendor-spend analysis (for a client)",
+            "submittedWorkflowTask": "Vendor-spend analysis (for a client)",
+            "submittedFrequency": "6-week analysis",
+            "intervieweeRole": "does the analysis hands-on under an EM",
+            "currentStateSummary": "Vendor-spend analysis (for a client): does the analysis hands-on under an EM"
+          },
+          "steps": [
+            {
+              "id": "step-001",
+              "name": "Pull spend data",
+              "actor": "Client AP team",
+              "tool": "client ERP export, Excel",
+              "action": "Pull spend data",
+              "handoff": "raw spend extract",
+              "pain": "messy, inconsistent vendor names",
+              "output": "raw spend extract"
+            },
+            {
+              "id": "step-002",
+              "name": "Categorize & clean",
+              "actor": "Associate",
+              "tool": "Excel, spreadsheets",
+              "action": "Categorize & clean",
+              "handoff": "cleaned analysis",
+              "pain": "manual de-duplication of vendors",
+              "output": "cleaned analysis"
+            },
+            {
+              "id": "step-003",
+              "name": "Identify savings opportunities",
+              "actor": "Engagement Manager",
+              "tool": "Excel",
+              "action": "Identify savings opportunities",
+              "handoff": "",
+              "pain": "judgment on which savings are real",
+              "output": ""
+            },
+            {
+              "id": "step-004",
+              "name": "Build the recommendation deck",
+              "actor": "Engagement Manager, Client sponsor",
+              "tool": "slides",
+              "action": "Build the recommendation deck",
+              "handoff": "",
+              "pain": "defending the numbers",
+              "output": ""
+            }
+          ],
+          "data": [],
+          "systems": [],
+          "decisions": [
+            {
+              "decision": "raw spend extract",
+              "owner": "Associate",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            },
+            {
+              "decision": "cleaned analysis",
+              "owner": "Engagement Manager",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            }
+          ],
+          "patterns": [],
+          "ideas": [],
+          "evidenceArtifacts": []
+        },
+        "done": true
+      },
+      "grades": {
+        "rails": {
+          "pass": true,
+          "violations": []
+        },
+        "capture": {
+          "expectedAnchors": 25,
+          "matchedAnchors": 25,
+          "capturedItems": 22,
+          "preciseItems": 22,
+          "recall": 1,
+          "precision": 1,
+          "recallPct": 100,
+          "precisionPct": 100,
+          "missed": [],
+          "stage": {
+            "intake": {
+              "expected": 4,
+              "matched": 4,
+              "recall": 1
+            },
+            "analysis": {
+              "expected": 21,
+              "matched": 21,
+              "recall": 1
+            }
+          }
+        },
+        "output": {
+          "complete": true,
+          "missing": [],
+          "reason": "Recap has core anchors and source label."
+        },
+        "flow": {
+          "skipped": true,
+          "score": null,
+          "flagged": false,
+          "reason": "Skipped in mock mode: no network."
+        }
+      }
+    },
+    {
+      "runId": "corp-ops-manager-r007",
+      "personaId": "corp-ops-manager",
+      "sector": "corporate",
+      "role": "Operations Manager",
+      "style": "contradicts earlier answers, revises mid-interview",
+      "stresses": "The RECAP / CONFIRM loop and handling REVISIONS and contradictions (flow + output)",
+      "stopReason": "completion-heuristic",
+      "turns": 5,
+      "wallMs": 0,
+      "improvisedTurns": [],
+      "transcript": [
+        {
+          "role": "assistant",
+          "text": "What task or workflow do you want to talk about? Briefly describe what happens, the business outcome, and the main output.",
+          "time": "2026-06-15T01:01:41.422Z"
+        },
+        {
+          "role": "user",
+          "text": "I work on Order-to-cash operations. It is recurring, daily, continuous, and my role is that I owns the ops handoffs across the order lifecycle.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.422Z"
+        },
+        {
+          "role": "assistant",
+          "text": "Where are the main handoffs or approvals?",
+          "time": "2026-06-15T01:01:41.422Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "At a high level the flow is 1. Order intake & validation; 2. Credit & fulfillment check; 3. Invoice & dispatch; 4. Collections handoff.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.422Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What tools and data show up in the main steps?",
+          "time": "2026-06-15T01:01:41.422Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Order intake & validation uses CRM and order system with Sales and Ops staff; Credit & fulfillment check uses ERP with Finance and Warehouse; Invoice & dispatch uses ERP and shipping system with Billing and Warehouse",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.422Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.422Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "The annoying parts are mostly incomplete order details; credit holds vs. shipping deadlines; timing mismatch between invoice and dispatch; disputed invoices bounce back to ops.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.422Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.422Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Sales hands validated orders to Ops staff; Ops staff hands billed orders for collection to AR team",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.422Z"
+        },
+        {
+          "role": "assistant",
+          "text": "I think I have enough to recap the workflow. Does this look right?",
+          "time": "2026-06-15T01:01:41.422Z",
+          "summary": ""
+        }
+      ],
+      "capturedState": {
+        "activeSection": "workflow",
+        "fields": {
+          "workflowName": "Order-to-cash operations",
+          "submittedWorkflowTask": "Order-to-cash operations",
+          "submittedFrequency": "daily, continuous",
+          "intervieweeRole": "owns the ops handoffs across the order lifecycle",
+          "currentStateSummary": "Order-to-cash operations: owns the ops handoffs across the order lifecycle"
+        },
+        "steps": [
+          {
+            "id": "step-001",
+            "name": "Order intake & validation",
+            "actor": "Sales, Ops staff",
+            "tool": "CRM, order system",
+            "action": "Order intake & validation",
+            "handoff": "validated orders",
+            "pain": "incomplete order details",
+            "output": "validated orders"
+          },
+          {
+            "id": "step-002",
+            "name": "Credit & fulfillment check",
+            "actor": "Finance, Warehouse",
+            "tool": "ERP",
+            "action": "Credit & fulfillment check",
+            "handoff": "billed orders for collection",
+            "pain": "credit holds vs. shipping deadlines",
+            "output": "billed orders for collection"
+          },
+          {
+            "id": "step-003",
+            "name": "Invoice & dispatch",
+            "actor": "Billing, Warehouse",
+            "tool": "ERP, shipping system",
+            "action": "Invoice & dispatch",
+            "handoff": "",
+            "pain": "timing mismatch between invoice and dispatch",
+            "output": ""
+          },
+          {
+            "id": "step-004",
+            "name": "Collections handoff",
+            "actor": "AR team",
+            "tool": "ERP",
+            "action": "Collections handoff",
+            "handoff": "",
+            "pain": "disputed invoices bounce back to ops",
+            "output": ""
+          }
+        ],
+        "data": [],
+        "systems": [],
+        "decisions": [
+          {
+            "decision": "validated orders",
+            "owner": "Ops staff",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          },
+          {
+            "decision": "billed orders for collection",
+            "owner": "AR team",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          }
+        ],
+        "patterns": [],
+        "ideas": [],
+        "evidenceArtifacts": []
+      },
+      "suggestions": {
+        "stepTypes": {
+          "step-001": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-002": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-003": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-004": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          }
+        },
+        "handoffTags": {
+          "h:step-001": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          },
+          "h:step-002": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          }
+        },
+        "decisionTags": {},
+        "frictionTags": {
+          "step-001": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-002": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-003": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-004": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          }
+        },
+        "roleTags": {
+          "step-001": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-002": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-003": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-004": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          }
+        }
+      },
+      "finalRecap": {
+        "workflow": "Order-to-cash operations",
+        "role": "owns the ops handoffs across the order lifecycle",
+        "cadence": "daily, continuous",
+        "recurringOrProject": "recurring",
+        "steps": [
+          {
+            "index": 1,
+            "name": "Order intake & validation",
+            "actor": "Sales, Ops staff",
+            "tool": "CRM, order system",
+            "pain": "incomplete order details",
+            "handoff": "validated orders"
+          },
+          {
+            "index": 2,
+            "name": "Credit & fulfillment check",
+            "actor": "Finance, Warehouse",
+            "tool": "ERP",
+            "pain": "credit holds vs. shipping deadlines",
+            "handoff": "billed orders for collection"
+          },
+          {
+            "index": 3,
+            "name": "Invoice & dispatch",
+            "actor": "Billing, Warehouse",
+            "tool": "ERP, shipping system",
+            "pain": "timing mismatch between invoice and dispatch",
+            "handoff": ""
+          },
+          {
+            "index": 4,
+            "name": "Collections handoff",
+            "actor": "AR team",
+            "tool": "ERP",
+            "pain": "disputed invoices bounce back to ops",
+            "handoff": ""
+          }
+        ],
+        "source": "transcript + app extraction",
+        "stopReason": "completion-heuristic"
+      },
+      "lastResponse": {
+        "nextQuestion": "I think I have enough to recap the workflow. Does this look right?",
+        "capturedState": {
+          "activeSection": "workflow",
+          "fields": {
+            "workflowName": "Order-to-cash operations",
+            "submittedWorkflowTask": "Order-to-cash operations",
+            "submittedFrequency": "daily, continuous",
+            "intervieweeRole": "owns the ops handoffs across the order lifecycle",
+            "currentStateSummary": "Order-to-cash operations: owns the ops handoffs across the order lifecycle"
+          },
+          "steps": [
+            {
+              "id": "step-001",
+              "name": "Order intake & validation",
+              "actor": "Sales, Ops staff",
+              "tool": "CRM, order system",
+              "action": "Order intake & validation",
+              "handoff": "validated orders",
+              "pain": "incomplete order details",
+              "output": "validated orders"
+            },
+            {
+              "id": "step-002",
+              "name": "Credit & fulfillment check",
+              "actor": "Finance, Warehouse",
+              "tool": "ERP",
+              "action": "Credit & fulfillment check",
+              "handoff": "billed orders for collection",
+              "pain": "credit holds vs. shipping deadlines",
+              "output": "billed orders for collection"
+            },
+            {
+              "id": "step-003",
+              "name": "Invoice & dispatch",
+              "actor": "Billing, Warehouse",
+              "tool": "ERP, shipping system",
+              "action": "Invoice & dispatch",
+              "handoff": "",
+              "pain": "timing mismatch between invoice and dispatch",
+              "output": ""
+            },
+            {
+              "id": "step-004",
+              "name": "Collections handoff",
+              "actor": "AR team",
+              "tool": "ERP",
+              "action": "Collections handoff",
+              "handoff": "",
+              "pain": "disputed invoices bounce back to ops",
+              "output": ""
+            }
+          ],
+          "data": [],
+          "systems": [],
+          "decisions": [
+            {
+              "decision": "validated orders",
+              "owner": "Ops staff",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            },
+            {
+              "decision": "billed orders for collection",
+              "owner": "AR team",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            }
+          ],
+          "patterns": [],
+          "ideas": [],
+          "evidenceArtifacts": []
+        },
+        "done": true
+      },
+      "grades": {
+        "rails": {
+          "pass": true,
+          "violations": []
+        },
+        "capture": {
+          "expectedAnchors": 27,
+          "matchedAnchors": 27,
+          "capturedItems": 22,
+          "preciseItems": 22,
+          "recall": 1,
+          "precision": 1,
+          "recallPct": 100,
+          "precisionPct": 100,
+          "missed": [],
+          "stage": {
+            "intake": {
+              "expected": 4,
+              "matched": 4,
+              "recall": 1
+            },
+            "analysis": {
+              "expected": 23,
+              "matched": 23,
+              "recall": 1
+            }
+          }
+        },
+        "output": {
+          "complete": true,
+          "missing": [],
+          "reason": "Recap has core anchors and source label."
+        },
+        "flow": {
+          "skipped": true,
+          "score": null,
+          "flagged": false,
+          "reason": "Skipped in mock mode: no network."
+        }
+      }
+    },
+    {
+      "runId": "corp-procurement-lead-r008",
+      "personaId": "corp-procurement-lead",
+      "sector": "corporate",
+      "role": "Procurement Lead",
+      "style": "acronym-heavy, assumes shared context",
+      "stresses": "COMPREHENSION and clarify-loop on acronyms; recap fidelity (intake + flow + output)",
+      "stopReason": "completion-heuristic",
+      "turns": 5,
+      "wallMs": 0,
+      "improvisedTurns": [],
+      "transcript": [
+        {
+          "role": "assistant",
+          "text": "What task or workflow do you want to talk about? Briefly describe what happens, the business outcome, and the main output.",
+          "time": "2026-06-15T01:01:41.423Z"
+        },
+        {
+          "role": "user",
+          "text": "I work on Procurement intake-to-PO. It is recurring, continuous, volume varies, and my role is that I owns the procurement pipeline from request to PO.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.423Z"
+        },
+        {
+          "role": "assistant",
+          "text": "Where are the main handoffs or approvals?",
+          "time": "2026-06-15T01:01:41.423Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "At a high level the flow is 1. Intake purchase requests; 2. Sourcing / RFQ; 3. Vendor selection & approval; 4. PO issuance.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.423Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What tools and data show up in the main steps?",
+          "time": "2026-06-15T01:01:41.423Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Intake purchase requests uses procurement portal with Requesters; Sourcing / RFQ uses procurement portal and email with Vendors and Category managers; Vendor selection & approval uses procurement portal with Budget owners and Legal",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.423Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.423Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "The annoying parts are mostly vague or under-specified requests; slow vendor responses; approval routing for higher amounts; PO data errors feeding into AP.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.423Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.423Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Requesters hands purchase requests to Procurement Lead; Procurement Lead hands issued POs to AP team",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.423Z"
+        },
+        {
+          "role": "assistant",
+          "text": "I think I have enough to recap the workflow. Does this look right?",
+          "time": "2026-06-15T01:01:41.423Z",
+          "summary": ""
+        }
+      ],
+      "capturedState": {
+        "activeSection": "workflow",
+        "fields": {
+          "workflowName": "Procurement intake-to-PO",
+          "submittedWorkflowTask": "Procurement intake-to-PO",
+          "submittedFrequency": "continuous, volume varies",
+          "intervieweeRole": "owns the procurement pipeline from request to PO",
+          "currentStateSummary": "Procurement intake-to-PO: owns the procurement pipeline from request to PO"
+        },
+        "steps": [
+          {
+            "id": "step-001",
+            "name": "Intake purchase requests",
+            "actor": "Requesters",
+            "tool": "procurement portal",
+            "action": "Intake purchase requests",
+            "handoff": "purchase requests",
+            "pain": "vague or under-specified requests",
+            "output": "purchase requests"
+          },
+          {
+            "id": "step-002",
+            "name": "Sourcing / RFQ",
+            "actor": "Vendors, Category managers",
+            "tool": "procurement portal, email",
+            "action": "Sourcing / RFQ",
+            "handoff": "issued POs",
+            "pain": "slow vendor responses",
+            "output": "issued POs"
+          },
+          {
+            "id": "step-003",
+            "name": "Vendor selection & approval",
+            "actor": "Budget owners, Legal",
+            "tool": "procurement portal",
+            "action": "Vendor selection & approval",
+            "handoff": "",
+            "pain": "approval routing for higher amounts",
+            "output": ""
+          },
+          {
+            "id": "step-004",
+            "name": "PO issuance",
+            "actor": "AP team",
+            "tool": "ERP",
+            "action": "PO issuance",
+            "handoff": "",
+            "pain": "PO data errors feeding into AP",
+            "output": ""
+          }
+        ],
+        "data": [],
+        "systems": [],
+        "decisions": [
+          {
+            "decision": "purchase requests",
+            "owner": "Procurement Lead",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          },
+          {
+            "decision": "issued POs",
+            "owner": "AP team",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          }
+        ],
+        "patterns": [],
+        "ideas": [],
+        "evidenceArtifacts": []
+      },
+      "suggestions": {
+        "stepTypes": {
+          "step-001": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-002": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-003": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-004": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          }
+        },
+        "handoffTags": {
+          "h:step-001": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          },
+          "h:step-002": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          }
+        },
+        "decisionTags": {},
+        "frictionTags": {
+          "step-001": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-002": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-003": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-004": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          }
+        },
+        "roleTags": {
+          "step-001": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-002": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-003": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-004": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          }
+        }
+      },
+      "finalRecap": {
+        "workflow": "Procurement intake-to-PO",
+        "role": "owns the procurement pipeline from request to PO",
+        "cadence": "continuous, volume varies",
+        "recurringOrProject": "recurring",
+        "steps": [
+          {
+            "index": 1,
+            "name": "Intake purchase requests",
+            "actor": "Requesters",
+            "tool": "procurement portal",
+            "pain": "vague or under-specified requests",
+            "handoff": "purchase requests"
+          },
+          {
+            "index": 2,
+            "name": "Sourcing / RFQ",
+            "actor": "Vendors, Category managers",
+            "tool": "procurement portal, email",
+            "pain": "slow vendor responses",
+            "handoff": "issued POs"
+          },
+          {
+            "index": 3,
+            "name": "Vendor selection & approval",
+            "actor": "Budget owners, Legal",
+            "tool": "procurement portal",
+            "pain": "approval routing for higher amounts",
+            "handoff": ""
+          },
+          {
+            "index": 4,
+            "name": "PO issuance",
+            "actor": "AP team",
+            "tool": "ERP",
+            "pain": "PO data errors feeding into AP",
+            "handoff": ""
+          }
+        ],
+        "source": "transcript + app extraction",
+        "stopReason": "completion-heuristic"
+      },
+      "lastResponse": {
+        "nextQuestion": "I think I have enough to recap the workflow. Does this look right?",
+        "capturedState": {
+          "activeSection": "workflow",
+          "fields": {
+            "workflowName": "Procurement intake-to-PO",
+            "submittedWorkflowTask": "Procurement intake-to-PO",
+            "submittedFrequency": "continuous, volume varies",
+            "intervieweeRole": "owns the procurement pipeline from request to PO",
+            "currentStateSummary": "Procurement intake-to-PO: owns the procurement pipeline from request to PO"
+          },
+          "steps": [
+            {
+              "id": "step-001",
+              "name": "Intake purchase requests",
+              "actor": "Requesters",
+              "tool": "procurement portal",
+              "action": "Intake purchase requests",
+              "handoff": "purchase requests",
+              "pain": "vague or under-specified requests",
+              "output": "purchase requests"
+            },
+            {
+              "id": "step-002",
+              "name": "Sourcing / RFQ",
+              "actor": "Vendors, Category managers",
+              "tool": "procurement portal, email",
+              "action": "Sourcing / RFQ",
+              "handoff": "issued POs",
+              "pain": "slow vendor responses",
+              "output": "issued POs"
+            },
+            {
+              "id": "step-003",
+              "name": "Vendor selection & approval",
+              "actor": "Budget owners, Legal",
+              "tool": "procurement portal",
+              "action": "Vendor selection & approval",
+              "handoff": "",
+              "pain": "approval routing for higher amounts",
+              "output": ""
+            },
+            {
+              "id": "step-004",
+              "name": "PO issuance",
+              "actor": "AP team",
+              "tool": "ERP",
+              "action": "PO issuance",
+              "handoff": "",
+              "pain": "PO data errors feeding into AP",
+              "output": ""
+            }
+          ],
+          "data": [],
+          "systems": [],
+          "decisions": [
+            {
+              "decision": "purchase requests",
+              "owner": "Procurement Lead",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            },
+            {
+              "decision": "issued POs",
+              "owner": "AP team",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            }
+          ],
+          "patterns": [],
+          "ideas": [],
+          "evidenceArtifacts": []
+        },
+        "done": true
+      },
+      "grades": {
+        "rails": {
+          "pass": true,
+          "violations": []
+        },
+        "capture": {
+          "expectedAnchors": 25,
+          "matchedAnchors": 25,
+          "capturedItems": 22,
+          "preciseItems": 22,
+          "recall": 1,
+          "precision": 1,
+          "recallPct": 100,
+          "precisionPct": 100,
+          "missed": [],
+          "stage": {
+            "intake": {
+              "expected": 4,
+              "matched": 4,
+              "recall": 1
+            },
+            "analysis": {
+              "expected": 21,
+              "matched": 21,
+              "recall": 1
+            }
+          }
+        },
+        "output": {
+          "complete": true,
+          "missing": [],
+          "reason": "Recap has core anchors and source label."
+        },
+        "flow": {
+          "skipped": true,
+          "score": null,
+          "flagged": false,
+          "reason": "Skipped in mock mode: no network."
+        }
+      }
+    },
+    {
+      "runId": "fin-ar-collections-analyst-r009",
+      "personaId": "fin-ar-collections-analyst",
+      "sector": "finance",
+      "role": "AR / Collections Analyst",
+      "style": "practical, slightly defensive, mixes exceptions into the main flow",
+      "stresses": "Separating normal flow from exception branches while preserving customer-risk context (flow + analysis)",
+      "stopReason": "completion-heuristic",
+      "turns": 5,
+      "wallMs": 0,
+      "improvisedTurns": [],
+      "transcript": [
+        {
+          "role": "assistant",
+          "text": "What task or workflow do you want to talk about? Briefly describe what happens, the business outcome, and the main output.",
+          "time": "2026-06-15T01:01:41.424Z"
+        },
+        {
+          "role": "user",
+          "text": "I work on Collections prioritization and dispute follow-up. It is recurring, weekly, with daily urgent checks, and my role is that I prioritizes overdue accounts and coordinates follow-up; does not approve write-offs.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.424Z"
+        },
+        {
+          "role": "assistant",
+          "text": "Where are the main handoffs or approvals?",
+          "time": "2026-06-15T01:01:41.424Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "At a high level the flow is 1. Pull aging report; 2. Prioritize accounts; 3. Send follow-up and log responses; 4. Escalate disputes; 5. Prepare collections update.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.424Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What tools and data show up in the main steps?",
+          "time": "2026-06-15T01:01:41.424Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Pull aging report uses ERP and Excel with AR analyst; Prioritize accounts uses Excel and collections notes with AR analyst and Sales; Send follow-up and log responses uses email and ERP with Customers and Sales",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.424Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.424Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "The annoying parts are mostly data needs cleanup before review; unclear ownership on strategic accounts; responses are scattered across email threads; dispute reasons are inconsistent; manual status commentary.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.424Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.424Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "AR analyst hands customer follow-up requests to Sales; AR analyst hands dispute and escalation list to AR manager",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.424Z"
+        },
+        {
+          "role": "assistant",
+          "text": "I think I have enough to recap the workflow. Does this look right?",
+          "time": "2026-06-15T01:01:41.424Z",
+          "summary": ""
+        }
+      ],
+      "capturedState": {
+        "activeSection": "workflow",
+        "fields": {
+          "workflowName": "Collections prioritization and dispute follow-up",
+          "submittedWorkflowTask": "Collections prioritization and dispute follow-up",
+          "submittedFrequency": "weekly, with daily urgent checks",
+          "intervieweeRole": "prioritizes overdue accounts and coordinates follow-up; does not approve write-offs",
+          "currentStateSummary": "Collections prioritization and dispute follow-up: prioritizes overdue accounts and coordinates follow-up; does not approve write-offs"
+        },
+        "steps": [
+          {
+            "id": "step-001",
+            "name": "Pull aging report",
+            "actor": "AR analyst",
+            "tool": "ERP, Excel",
+            "action": "Pull aging report",
+            "handoff": "customer follow-up requests",
+            "pain": "data needs cleanup before review",
+            "output": "customer follow-up requests"
+          },
+          {
+            "id": "step-002",
+            "name": "Prioritize accounts",
+            "actor": "AR analyst, Sales",
+            "tool": "Excel, collections notes",
+            "action": "Prioritize accounts",
+            "handoff": "dispute and escalation list",
+            "pain": "unclear ownership on strategic accounts",
+            "output": "dispute and escalation list"
+          },
+          {
+            "id": "step-003",
+            "name": "Send follow-up and log responses",
+            "actor": "Customers, Sales",
+            "tool": "email, ERP",
+            "action": "Send follow-up and log responses",
+            "handoff": "",
+            "pain": "responses are scattered across email threads",
+            "output": ""
+          },
+          {
+            "id": "step-004",
+            "name": "Escalate disputes",
+            "actor": "Billing, Sales, AR manager",
+            "tool": "ERP, case tracker",
+            "action": "Escalate disputes",
+            "handoff": "",
+            "pain": "dispute reasons are inconsistent",
+            "output": ""
+          },
+          {
+            "id": "step-005",
+            "name": "Prepare collections update",
+            "actor": "Finance leadership",
+            "tool": "Excel, slides",
+            "action": "Prepare collections update",
+            "handoff": "",
+            "pain": "manual status commentary",
+            "output": ""
+          }
+        ],
+        "data": [],
+        "systems": [],
+        "decisions": [
+          {
+            "decision": "customer follow-up requests",
+            "owner": "Sales",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          },
+          {
+            "decision": "dispute and escalation list",
+            "owner": "AR manager",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          }
+        ],
+        "patterns": [],
+        "ideas": [],
+        "evidenceArtifacts": []
+      },
+      "suggestions": {
+        "stepTypes": {
+          "step-001": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-002": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-003": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-004": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-005": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          }
+        },
+        "handoffTags": {
+          "h:step-001": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          },
+          "h:step-002": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          }
+        },
+        "decisionTags": {},
+        "frictionTags": {
+          "step-001": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-002": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-003": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-004": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-005": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          }
+        },
+        "roleTags": {
+          "step-001": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-002": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-003": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-004": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-005": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          }
+        }
+      },
+      "finalRecap": {
+        "workflow": "Collections prioritization and dispute follow-up",
+        "role": "prioritizes overdue accounts and coordinates follow-up; does not approve write-offs",
+        "cadence": "weekly, with daily urgent checks",
+        "recurringOrProject": "recurring",
+        "steps": [
+          {
+            "index": 1,
+            "name": "Pull aging report",
+            "actor": "AR analyst",
+            "tool": "ERP, Excel",
+            "pain": "data needs cleanup before review",
+            "handoff": "customer follow-up requests"
+          },
+          {
+            "index": 2,
+            "name": "Prioritize accounts",
+            "actor": "AR analyst, Sales",
+            "tool": "Excel, collections notes",
+            "pain": "unclear ownership on strategic accounts",
+            "handoff": "dispute and escalation list"
+          },
+          {
+            "index": 3,
+            "name": "Send follow-up and log responses",
+            "actor": "Customers, Sales",
+            "tool": "email, ERP",
+            "pain": "responses are scattered across email threads",
+            "handoff": ""
+          },
+          {
+            "index": 4,
+            "name": "Escalate disputes",
+            "actor": "Billing, Sales, AR manager",
+            "tool": "ERP, case tracker",
+            "pain": "dispute reasons are inconsistent",
+            "handoff": ""
+          },
+          {
+            "index": 5,
+            "name": "Prepare collections update",
+            "actor": "Finance leadership",
+            "tool": "Excel, slides",
+            "pain": "manual status commentary",
+            "handoff": ""
+          }
+        ],
+        "source": "transcript + app extraction",
+        "stopReason": "completion-heuristic"
+      },
+      "lastResponse": {
+        "nextQuestion": "I think I have enough to recap the workflow. Does this look right?",
+        "capturedState": {
+          "activeSection": "workflow",
+          "fields": {
+            "workflowName": "Collections prioritization and dispute follow-up",
+            "submittedWorkflowTask": "Collections prioritization and dispute follow-up",
+            "submittedFrequency": "weekly, with daily urgent checks",
+            "intervieweeRole": "prioritizes overdue accounts and coordinates follow-up; does not approve write-offs",
+            "currentStateSummary": "Collections prioritization and dispute follow-up: prioritizes overdue accounts and coordinates follow-up; does not approve write-offs"
+          },
+          "steps": [
+            {
+              "id": "step-001",
+              "name": "Pull aging report",
+              "actor": "AR analyst",
+              "tool": "ERP, Excel",
+              "action": "Pull aging report",
+              "handoff": "customer follow-up requests",
+              "pain": "data needs cleanup before review",
+              "output": "customer follow-up requests"
+            },
+            {
+              "id": "step-002",
+              "name": "Prioritize accounts",
+              "actor": "AR analyst, Sales",
+              "tool": "Excel, collections notes",
+              "action": "Prioritize accounts",
+              "handoff": "dispute and escalation list",
+              "pain": "unclear ownership on strategic accounts",
+              "output": "dispute and escalation list"
+            },
+            {
+              "id": "step-003",
+              "name": "Send follow-up and log responses",
+              "actor": "Customers, Sales",
+              "tool": "email, ERP",
+              "action": "Send follow-up and log responses",
+              "handoff": "",
+              "pain": "responses are scattered across email threads",
+              "output": ""
+            },
+            {
+              "id": "step-004",
+              "name": "Escalate disputes",
+              "actor": "Billing, Sales, AR manager",
+              "tool": "ERP, case tracker",
+              "action": "Escalate disputes",
+              "handoff": "",
+              "pain": "dispute reasons are inconsistent",
+              "output": ""
+            },
+            {
+              "id": "step-005",
+              "name": "Prepare collections update",
+              "actor": "Finance leadership",
+              "tool": "Excel, slides",
+              "action": "Prepare collections update",
+              "handoff": "",
+              "pain": "manual status commentary",
+              "output": ""
+            }
+          ],
+          "data": [],
+          "systems": [],
+          "decisions": [
+            {
+              "decision": "customer follow-up requests",
+              "owner": "Sales",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            },
+            {
+              "decision": "dispute and escalation list",
+              "owner": "AR manager",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            }
+          ],
+          "patterns": [],
+          "ideas": [],
+          "evidenceArtifacts": []
+        },
+        "done": true
+      },
+      "grades": {
+        "rails": {
+          "pass": true,
+          "violations": []
+        },
+        "capture": {
+          "expectedAnchors": 35,
+          "matchedAnchors": 35,
+          "capturedItems": 28,
+          "preciseItems": 28,
+          "recall": 1,
+          "precision": 1,
+          "recallPct": 100,
+          "precisionPct": 100,
+          "missed": [],
+          "stage": {
+            "intake": {
+              "expected": 4,
+              "matched": 4,
+              "recall": 1
+            },
+            "analysis": {
+              "expected": 31,
+              "matched": 31,
+              "recall": 1
+            }
+          }
+        },
+        "output": {
+          "complete": true,
+          "missing": [],
+          "reason": "Recap has core anchors and source label."
+        },
+        "flow": {
+          "skipped": true,
+          "score": null,
+          "flagged": false,
+          "reason": "Skipped in mock mode: no network."
+        }
+      }
+    },
+    {
+      "runId": "fin-treasury-analyst-r010",
+      "personaId": "fin-treasury-analyst",
+      "sector": "finance",
+      "role": "Treasury Analyst",
+      "style": "precise but assumes cash-management context",
+      "stresses": "Capturing controls, timing, and handoffs without drifting into staffing or savings framing (analysis + rails)",
+      "stopReason": "completion-heuristic",
+      "turns": 5,
+      "wallMs": 0,
+      "improvisedTurns": [],
+      "transcript": [
+        {
+          "role": "assistant",
+          "text": "What task or workflow do you want to talk about? Briefly describe what happens, the business outcome, and the main output.",
+          "time": "2026-06-15T01:01:41.425Z"
+        },
+        {
+          "role": "user",
+          "text": "I work on Daily cash positioning. It is recurring, daily before payment cutoff, and my role is that I prepares the cash position and flags funding needs for approval.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.425Z"
+        },
+        {
+          "role": "assistant",
+          "text": "Where are the main handoffs or approvals?",
+          "time": "2026-06-15T01:01:41.425Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "At a high level the flow is 1. Download bank balances; 2. Load expected inflows and outflows; 3. Reconcile and forecast cash position; 4. Recommend funding transfer.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.425Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What tools and data show up in the main steps?",
+          "time": "2026-06-15T01:01:41.425Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Download bank balances uses banking portals and Treasury workstation with Treasury analyst; Load expected inflows and outflows uses ERP and Excel with AP team and AR team; Reconcile and forecast cash position uses Excel and Treasury workstation with Treasury analyst",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.425Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.425Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "The annoying parts are mostly portal timing and inconsistent formats; late payment-run updates; manual tie-out across sources; approval needed before cutoff.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.425Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.425Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "AP team hands payment-run updates to Treasury analyst; Treasury analyst hands funding recommendation to Treasury manager",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.425Z"
+        },
+        {
+          "role": "assistant",
+          "text": "I think I have enough to recap the workflow. Does this look right?",
+          "time": "2026-06-15T01:01:41.425Z",
+          "summary": ""
+        }
+      ],
+      "capturedState": {
+        "activeSection": "workflow",
+        "fields": {
+          "workflowName": "Daily cash positioning",
+          "submittedWorkflowTask": "Daily cash positioning",
+          "submittedFrequency": "daily before payment cutoff",
+          "intervieweeRole": "prepares the cash position and flags funding needs for approval",
+          "currentStateSummary": "Daily cash positioning: prepares the cash position and flags funding needs for approval"
+        },
+        "steps": [
+          {
+            "id": "step-001",
+            "name": "Download bank balances",
+            "actor": "Treasury analyst",
+            "tool": "banking portals, Treasury workstation",
+            "action": "Download bank balances",
+            "handoff": "payment-run updates",
+            "pain": "portal timing and inconsistent formats",
+            "output": "payment-run updates"
+          },
+          {
+            "id": "step-002",
+            "name": "Load expected inflows and outflows",
+            "actor": "AP team, AR team",
+            "tool": "ERP, Excel",
+            "action": "Load expected inflows and outflows",
+            "handoff": "funding recommendation",
+            "pain": "late payment-run updates",
+            "output": "funding recommendation"
+          },
+          {
+            "id": "step-003",
+            "name": "Reconcile and forecast cash position",
+            "actor": "Treasury analyst",
+            "tool": "Excel, Treasury workstation",
+            "action": "Reconcile and forecast cash position",
+            "handoff": "",
+            "pain": "manual tie-out across sources",
+            "output": ""
+          },
+          {
+            "id": "step-004",
+            "name": "Recommend funding transfer",
+            "actor": "Treasury manager",
+            "tool": "email, Treasury workstation",
+            "action": "Recommend funding transfer",
+            "handoff": "",
+            "pain": "approval needed before cutoff",
+            "output": ""
+          }
+        ],
+        "data": [],
+        "systems": [],
+        "decisions": [
+          {
+            "decision": "payment-run updates",
+            "owner": "Treasury analyst",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          },
+          {
+            "decision": "funding recommendation",
+            "owner": "Treasury manager",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          }
+        ],
+        "patterns": [],
+        "ideas": [],
+        "evidenceArtifacts": []
+      },
+      "suggestions": {
+        "stepTypes": {
+          "step-001": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-002": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-003": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-004": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          }
+        },
+        "handoffTags": {
+          "h:step-001": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          },
+          "h:step-002": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          }
+        },
+        "decisionTags": {},
+        "frictionTags": {
+          "step-001": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-002": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-003": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-004": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          }
+        },
+        "roleTags": {
+          "step-001": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-002": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-003": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-004": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          }
+        }
+      },
+      "finalRecap": {
+        "workflow": "Daily cash positioning",
+        "role": "prepares the cash position and flags funding needs for approval",
+        "cadence": "daily before payment cutoff",
+        "recurringOrProject": "recurring",
+        "steps": [
+          {
+            "index": 1,
+            "name": "Download bank balances",
+            "actor": "Treasury analyst",
+            "tool": "banking portals, Treasury workstation",
+            "pain": "portal timing and inconsistent formats",
+            "handoff": "payment-run updates"
+          },
+          {
+            "index": 2,
+            "name": "Load expected inflows and outflows",
+            "actor": "AP team, AR team",
+            "tool": "ERP, Excel",
+            "pain": "late payment-run updates",
+            "handoff": "funding recommendation"
+          },
+          {
+            "index": 3,
+            "name": "Reconcile and forecast cash position",
+            "actor": "Treasury analyst",
+            "tool": "Excel, Treasury workstation",
+            "pain": "manual tie-out across sources",
+            "handoff": ""
+          },
+          {
+            "index": 4,
+            "name": "Recommend funding transfer",
+            "actor": "Treasury manager",
+            "tool": "email, Treasury workstation",
+            "pain": "approval needed before cutoff",
+            "handoff": ""
+          }
+        ],
+        "source": "transcript + app extraction",
+        "stopReason": "completion-heuristic"
+      },
+      "lastResponse": {
+        "nextQuestion": "I think I have enough to recap the workflow. Does this look right?",
+        "capturedState": {
+          "activeSection": "workflow",
+          "fields": {
+            "workflowName": "Daily cash positioning",
+            "submittedWorkflowTask": "Daily cash positioning",
+            "submittedFrequency": "daily before payment cutoff",
+            "intervieweeRole": "prepares the cash position and flags funding needs for approval",
+            "currentStateSummary": "Daily cash positioning: prepares the cash position and flags funding needs for approval"
+          },
+          "steps": [
+            {
+              "id": "step-001",
+              "name": "Download bank balances",
+              "actor": "Treasury analyst",
+              "tool": "banking portals, Treasury workstation",
+              "action": "Download bank balances",
+              "handoff": "payment-run updates",
+              "pain": "portal timing and inconsistent formats",
+              "output": "payment-run updates"
+            },
+            {
+              "id": "step-002",
+              "name": "Load expected inflows and outflows",
+              "actor": "AP team, AR team",
+              "tool": "ERP, Excel",
+              "action": "Load expected inflows and outflows",
+              "handoff": "funding recommendation",
+              "pain": "late payment-run updates",
+              "output": "funding recommendation"
+            },
+            {
+              "id": "step-003",
+              "name": "Reconcile and forecast cash position",
+              "actor": "Treasury analyst",
+              "tool": "Excel, Treasury workstation",
+              "action": "Reconcile and forecast cash position",
+              "handoff": "",
+              "pain": "manual tie-out across sources",
+              "output": ""
+            },
+            {
+              "id": "step-004",
+              "name": "Recommend funding transfer",
+              "actor": "Treasury manager",
+              "tool": "email, Treasury workstation",
+              "action": "Recommend funding transfer",
+              "handoff": "",
+              "pain": "approval needed before cutoff",
+              "output": ""
+            }
+          ],
+          "data": [],
+          "systems": [],
+          "decisions": [
+            {
+              "decision": "payment-run updates",
+              "owner": "Treasury analyst",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            },
+            {
+              "decision": "funding recommendation",
+              "owner": "Treasury manager",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            }
+          ],
+          "patterns": [],
+          "ideas": [],
+          "evidenceArtifacts": []
+        },
+        "done": true
+      },
+      "grades": {
+        "rails": {
+          "pass": true,
+          "violations": []
+        },
+        "capture": {
+          "expectedAnchors": 27,
+          "matchedAnchors": 27,
+          "capturedItems": 21,
+          "preciseItems": 21,
+          "recall": 1,
+          "precision": 1,
+          "recallPct": 100,
+          "precisionPct": 100,
+          "missed": [],
+          "stage": {
+            "intake": {
+              "expected": 4,
+              "matched": 4,
+              "recall": 1
+            },
+            "analysis": {
+              "expected": 23,
+              "matched": 23,
+              "recall": 1
+            }
+          }
+        },
+        "output": {
+          "complete": true,
+          "missing": [],
+          "reason": "Recap has core anchors and source label."
+        },
+        "flow": {
+          "skipped": true,
+          "score": null,
+          "flagged": false,
+          "reason": "Skipped in mock mode: no network."
+        }
+      }
+    },
+    {
+      "runId": "fin-sox-compliance-officer-r011",
+      "personaId": "fin-sox-compliance-officer",
+      "sector": "finance",
+      "role": "SOX Compliance Officer",
+      "style": "risk-focused, cautious, avoids over-sharing",
+      "stresses": "Capturing evidence, approvals, and exceptions while preserving uncertainty and provenance (flow + output)",
+      "stopReason": "completion-heuristic",
+      "turns": 5,
+      "wallMs": 0,
+      "improvisedTurns": [],
+      "transcript": [
+        {
+          "role": "assistant",
+          "text": "What task or workflow do you want to talk about? Briefly describe what happens, the business outcome, and the main output.",
+          "time": "2026-06-15T01:01:41.426Z"
+        },
+        {
+          "role": "user",
+          "text": "I work on SOX control evidence collection. It is recurring, quarterly, with monthly control-owner reminders, and my role is that I coordinates evidence collection and reviews completeness; control owners supply evidence.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.426Z"
+        },
+        {
+          "role": "assistant",
+          "text": "Where are the main handoffs or approvals?",
+          "time": "2026-06-15T01:01:41.426Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "At a high level the flow is 1. Send evidence request list; 2. Collect and log evidence; 3. Review evidence completeness; 4. Follow up on exceptions; 5. Prepare status summary.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.426Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What tools and data show up in the main steps?",
+          "time": "2026-06-15T01:01:41.426Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Send evidence request list uses GRC tool and email with Control owners; Collect and log evidence uses GRC tool and document store with Control owners and SOX compliance officer; Review evidence completeness uses GRC tool and Excel with SOX compliance officer",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.426Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.426Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "The annoying parts are mostly owners miss or misunderstand requests; file naming and version issues; support does not tie to the control period; open items linger near deadline; manual commentary on risk status.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.426Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.426Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Control owners hands control evidence to SOX compliance officer; SOX compliance officer hands reviewed evidence and exception status to Internal audit",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.426Z"
+        },
+        {
+          "role": "assistant",
+          "text": "I think I have enough to recap the workflow. Does this look right?",
+          "time": "2026-06-15T01:01:41.426Z",
+          "summary": ""
+        }
+      ],
+      "capturedState": {
+        "activeSection": "workflow",
+        "fields": {
+          "workflowName": "SOX control evidence collection",
+          "submittedWorkflowTask": "SOX control evidence collection",
+          "submittedFrequency": "quarterly, with monthly control-owner reminders",
+          "intervieweeRole": "coordinates evidence collection and reviews completeness; control owners supply evidence",
+          "currentStateSummary": "SOX control evidence collection: coordinates evidence collection and reviews completeness; control owners supply evidence"
+        },
+        "steps": [
+          {
+            "id": "step-001",
+            "name": "Send evidence request list",
+            "actor": "Control owners",
+            "tool": "GRC tool, email",
+            "action": "Send evidence request list",
+            "handoff": "control evidence",
+            "pain": "owners miss or misunderstand requests",
+            "output": "control evidence"
+          },
+          {
+            "id": "step-002",
+            "name": "Collect and log evidence",
+            "actor": "Control owners, SOX compliance officer",
+            "tool": "GRC tool, document store",
+            "action": "Collect and log evidence",
+            "handoff": "reviewed evidence and exception status",
+            "pain": "file naming and version issues",
+            "output": "reviewed evidence and exception status"
+          },
+          {
+            "id": "step-003",
+            "name": "Review evidence completeness",
+            "actor": "SOX compliance officer",
+            "tool": "GRC tool, Excel",
+            "action": "Review evidence completeness",
+            "handoff": "",
+            "pain": "support does not tie to the control period",
+            "output": ""
+          },
+          {
+            "id": "step-004",
+            "name": "Follow up on exceptions",
+            "actor": "Control owners, Internal audit",
+            "tool": "email, GRC tool",
+            "action": "Follow up on exceptions",
+            "handoff": "",
+            "pain": "open items linger near deadline",
+            "output": ""
+          },
+          {
+            "id": "step-005",
+            "name": "Prepare status summary",
+            "actor": "Finance leadership, Internal audit",
+            "tool": "slides, Excel",
+            "action": "Prepare status summary",
+            "handoff": "",
+            "pain": "manual commentary on risk status",
+            "output": ""
+          }
+        ],
+        "data": [],
+        "systems": [],
+        "decisions": [
+          {
+            "decision": "control evidence",
+            "owner": "SOX compliance officer",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          },
+          {
+            "decision": "reviewed evidence and exception status",
+            "owner": "Internal audit",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          }
+        ],
+        "patterns": [],
+        "ideas": [],
+        "evidenceArtifacts": []
+      },
+      "suggestions": {
+        "stepTypes": {
+          "step-001": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-002": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-003": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-004": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-005": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          }
+        },
+        "handoffTags": {
+          "h:step-001": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          },
+          "h:step-002": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          }
+        },
+        "decisionTags": {},
+        "frictionTags": {
+          "step-001": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-002": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-003": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-004": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-005": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          }
+        },
+        "roleTags": {
+          "step-001": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-002": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-003": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-004": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-005": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          }
+        }
+      },
+      "finalRecap": {
+        "workflow": "SOX control evidence collection",
+        "role": "coordinates evidence collection and reviews completeness; control owners supply evidence",
+        "cadence": "quarterly, with monthly control-owner reminders",
+        "recurringOrProject": "recurring",
+        "steps": [
+          {
+            "index": 1,
+            "name": "Send evidence request list",
+            "actor": "Control owners",
+            "tool": "GRC tool, email",
+            "pain": "owners miss or misunderstand requests",
+            "handoff": "control evidence"
+          },
+          {
+            "index": 2,
+            "name": "Collect and log evidence",
+            "actor": "Control owners, SOX compliance officer",
+            "tool": "GRC tool, document store",
+            "pain": "file naming and version issues",
+            "handoff": "reviewed evidence and exception status"
+          },
+          {
+            "index": 3,
+            "name": "Review evidence completeness",
+            "actor": "SOX compliance officer",
+            "tool": "GRC tool, Excel",
+            "pain": "support does not tie to the control period",
+            "handoff": ""
+          },
+          {
+            "index": 4,
+            "name": "Follow up on exceptions",
+            "actor": "Control owners, Internal audit",
+            "tool": "email, GRC tool",
+            "pain": "open items linger near deadline",
+            "handoff": ""
+          },
+          {
+            "index": 5,
+            "name": "Prepare status summary",
+            "actor": "Finance leadership, Internal audit",
+            "tool": "slides, Excel",
+            "pain": "manual commentary on risk status",
+            "handoff": ""
+          }
+        ],
+        "source": "transcript + app extraction",
+        "stopReason": "completion-heuristic"
+      },
+      "lastResponse": {
+        "nextQuestion": "I think I have enough to recap the workflow. Does this look right?",
+        "capturedState": {
+          "activeSection": "workflow",
+          "fields": {
+            "workflowName": "SOX control evidence collection",
+            "submittedWorkflowTask": "SOX control evidence collection",
+            "submittedFrequency": "quarterly, with monthly control-owner reminders",
+            "intervieweeRole": "coordinates evidence collection and reviews completeness; control owners supply evidence",
+            "currentStateSummary": "SOX control evidence collection: coordinates evidence collection and reviews completeness; control owners supply evidence"
+          },
+          "steps": [
+            {
+              "id": "step-001",
+              "name": "Send evidence request list",
+              "actor": "Control owners",
+              "tool": "GRC tool, email",
+              "action": "Send evidence request list",
+              "handoff": "control evidence",
+              "pain": "owners miss or misunderstand requests",
+              "output": "control evidence"
+            },
+            {
+              "id": "step-002",
+              "name": "Collect and log evidence",
+              "actor": "Control owners, SOX compliance officer",
+              "tool": "GRC tool, document store",
+              "action": "Collect and log evidence",
+              "handoff": "reviewed evidence and exception status",
+              "pain": "file naming and version issues",
+              "output": "reviewed evidence and exception status"
+            },
+            {
+              "id": "step-003",
+              "name": "Review evidence completeness",
+              "actor": "SOX compliance officer",
+              "tool": "GRC tool, Excel",
+              "action": "Review evidence completeness",
+              "handoff": "",
+              "pain": "support does not tie to the control period",
+              "output": ""
+            },
+            {
+              "id": "step-004",
+              "name": "Follow up on exceptions",
+              "actor": "Control owners, Internal audit",
+              "tool": "email, GRC tool",
+              "action": "Follow up on exceptions",
+              "handoff": "",
+              "pain": "open items linger near deadline",
+              "output": ""
+            },
+            {
+              "id": "step-005",
+              "name": "Prepare status summary",
+              "actor": "Finance leadership, Internal audit",
+              "tool": "slides, Excel",
+              "action": "Prepare status summary",
+              "handoff": "",
+              "pain": "manual commentary on risk status",
+              "output": ""
+            }
+          ],
+          "data": [],
+          "systems": [],
+          "decisions": [
+            {
+              "decision": "control evidence",
+              "owner": "SOX compliance officer",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            },
+            {
+              "decision": "reviewed evidence and exception status",
+              "owner": "Internal audit",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            }
+          ],
+          "patterns": [],
+          "ideas": [],
+          "evidenceArtifacts": []
+        },
+        "done": true
+      },
+      "grades": {
+        "rails": {
+          "pass": true,
+          "violations": []
+        },
+        "capture": {
+          "expectedAnchors": 34,
+          "matchedAnchors": 34,
+          "capturedItems": 27,
+          "preciseItems": 27,
+          "recall": 1,
+          "precision": 1,
+          "recallPct": 100,
+          "precisionPct": 100,
+          "missed": [],
+          "stage": {
+            "intake": {
+              "expected": 4,
+              "matched": 4,
+              "recall": 1
+            },
+            "analysis": {
+              "expected": 30,
+              "matched": 30,
+              "recall": 1
+            }
+          }
+        },
+        "output": {
+          "complete": true,
+          "missing": [],
+          "reason": "Recap has core anchors and source label."
+        },
+        "flow": {
+          "skipped": true,
+          "score": null,
+          "flagged": false,
+          "reason": "Skipped in mock mode: no network."
+        }
+      }
+    },
+    {
+      "runId": "corp-business-analyst-r012",
+      "personaId": "corp-business-analyst",
+      "sector": "corporate",
+      "role": "Business Analyst",
+      "style": "structured but overly broad, mixes requirements work with process work",
+      "stresses": "Distinguishing process capture from deliverable production and preserving handoff boundaries (intake + analysis)",
+      "stopReason": "completion-heuristic",
+      "turns": 5,
+      "wallMs": 0,
+      "improvisedTurns": [],
+      "transcript": [
+        {
+          "role": "assistant",
+          "text": "What task or workflow do you want to talk about? Briefly describe what happens, the business outcome, and the main output.",
+          "time": "2026-06-15T01:01:41.427Z"
+        },
+        {
+          "role": "user",
+          "text": "I work on Requirements intake and prioritization. It is project, each product increment, typically monthly, and my role is that I facilitates intake, documents requirements, and prepares prioritization inputs.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.427Z"
+        },
+        {
+          "role": "assistant",
+          "text": "Where are the main handoffs or approvals?",
+          "time": "2026-06-15T01:01:41.427Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "At a high level the flow is 1. Collect change requests; 2. Clarify requirements; 3. Assess impact and dependencies; 4. Prepare prioritization pack.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.427Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What tools and data show up in the main steps?",
+          "time": "2026-06-15T01:01:41.427Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Collect change requests uses intake form and ticket tracker with Business stakeholders; Clarify requirements uses workshops and notes with Business analyst and Product owner; Assess impact and dependencies uses ticket tracker and architecture notes with Engineering lead and Operations",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.427Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.427Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "The annoying parts are mostly requests arrive with uneven detail; stakeholders describe solutions instead of needs; dependency information is scattered; manual roll-up of tradeoffs.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.427Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.427Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Business stakeholders hands change requests to Business analyst; Business analyst hands prioritized requirement options to Product owner",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.427Z"
+        },
+        {
+          "role": "assistant",
+          "text": "I think I have enough to recap the workflow. Does this look right?",
+          "time": "2026-06-15T01:01:41.427Z",
+          "summary": ""
+        }
+      ],
+      "capturedState": {
+        "activeSection": "workflow",
+        "fields": {
+          "workflowName": "Requirements intake and prioritization",
+          "submittedWorkflowTask": "Requirements intake and prioritization",
+          "submittedFrequency": "each product increment, typically monthly",
+          "intervieweeRole": "facilitates intake, documents requirements, and prepares prioritization inputs",
+          "currentStateSummary": "Requirements intake and prioritization: facilitates intake, documents requirements, and prepares prioritization inputs"
+        },
+        "steps": [
+          {
+            "id": "step-001",
+            "name": "Collect change requests",
+            "actor": "Business stakeholders",
+            "tool": "intake form, ticket tracker",
+            "action": "Collect change requests",
+            "handoff": "change requests",
+            "pain": "requests arrive with uneven detail",
+            "output": "change requests"
+          },
+          {
+            "id": "step-002",
+            "name": "Clarify requirements",
+            "actor": "Business analyst, Product owner",
+            "tool": "workshops, notes",
+            "action": "Clarify requirements",
+            "handoff": "prioritized requirement options",
+            "pain": "stakeholders describe solutions instead of needs",
+            "output": "prioritized requirement options"
+          },
+          {
+            "id": "step-003",
+            "name": "Assess impact and dependencies",
+            "actor": "Engineering lead, Operations",
+            "tool": "ticket tracker, architecture notes",
+            "action": "Assess impact and dependencies",
+            "handoff": "",
+            "pain": "dependency information is scattered",
+            "output": ""
+          },
+          {
+            "id": "step-004",
+            "name": "Prepare prioritization pack",
+            "actor": "Product owner, Steering group",
+            "tool": "slides, ticket tracker",
+            "action": "Prepare prioritization pack",
+            "handoff": "",
+            "pain": "manual roll-up of tradeoffs",
+            "output": ""
+          }
+        ],
+        "data": [],
+        "systems": [],
+        "decisions": [
+          {
+            "decision": "change requests",
+            "owner": "Business analyst",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          },
+          {
+            "decision": "prioritized requirement options",
+            "owner": "Product owner",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          }
+        ],
+        "patterns": [],
+        "ideas": [],
+        "evidenceArtifacts": []
+      },
+      "suggestions": {
+        "stepTypes": {
+          "step-001": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-002": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-003": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-004": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          }
+        },
+        "handoffTags": {
+          "h:step-001": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          },
+          "h:step-002": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          }
+        },
+        "decisionTags": {},
+        "frictionTags": {
+          "step-001": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-002": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-003": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-004": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          }
+        },
+        "roleTags": {
+          "step-001": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-002": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-003": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-004": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          }
+        }
+      },
+      "finalRecap": {
+        "workflow": "Requirements intake and prioritization",
+        "role": "facilitates intake, documents requirements, and prepares prioritization inputs",
+        "cadence": "each product increment, typically monthly",
+        "recurringOrProject": "project",
+        "steps": [
+          {
+            "index": 1,
+            "name": "Collect change requests",
+            "actor": "Business stakeholders",
+            "tool": "intake form, ticket tracker",
+            "pain": "requests arrive with uneven detail",
+            "handoff": "change requests"
+          },
+          {
+            "index": 2,
+            "name": "Clarify requirements",
+            "actor": "Business analyst, Product owner",
+            "tool": "workshops, notes",
+            "pain": "stakeholders describe solutions instead of needs",
+            "handoff": "prioritized requirement options"
+          },
+          {
+            "index": 3,
+            "name": "Assess impact and dependencies",
+            "actor": "Engineering lead, Operations",
+            "tool": "ticket tracker, architecture notes",
+            "pain": "dependency information is scattered",
+            "handoff": ""
+          },
+          {
+            "index": 4,
+            "name": "Prepare prioritization pack",
+            "actor": "Product owner, Steering group",
+            "tool": "slides, ticket tracker",
+            "pain": "manual roll-up of tradeoffs",
+            "handoff": ""
+          }
+        ],
+        "source": "transcript + app extraction",
+        "stopReason": "completion-heuristic"
+      },
+      "lastResponse": {
+        "nextQuestion": "I think I have enough to recap the workflow. Does this look right?",
+        "capturedState": {
+          "activeSection": "workflow",
+          "fields": {
+            "workflowName": "Requirements intake and prioritization",
+            "submittedWorkflowTask": "Requirements intake and prioritization",
+            "submittedFrequency": "each product increment, typically monthly",
+            "intervieweeRole": "facilitates intake, documents requirements, and prepares prioritization inputs",
+            "currentStateSummary": "Requirements intake and prioritization: facilitates intake, documents requirements, and prepares prioritization inputs"
+          },
+          "steps": [
+            {
+              "id": "step-001",
+              "name": "Collect change requests",
+              "actor": "Business stakeholders",
+              "tool": "intake form, ticket tracker",
+              "action": "Collect change requests",
+              "handoff": "change requests",
+              "pain": "requests arrive with uneven detail",
+              "output": "change requests"
+            },
+            {
+              "id": "step-002",
+              "name": "Clarify requirements",
+              "actor": "Business analyst, Product owner",
+              "tool": "workshops, notes",
+              "action": "Clarify requirements",
+              "handoff": "prioritized requirement options",
+              "pain": "stakeholders describe solutions instead of needs",
+              "output": "prioritized requirement options"
+            },
+            {
+              "id": "step-003",
+              "name": "Assess impact and dependencies",
+              "actor": "Engineering lead, Operations",
+              "tool": "ticket tracker, architecture notes",
+              "action": "Assess impact and dependencies",
+              "handoff": "",
+              "pain": "dependency information is scattered",
+              "output": ""
+            },
+            {
+              "id": "step-004",
+              "name": "Prepare prioritization pack",
+              "actor": "Product owner, Steering group",
+              "tool": "slides, ticket tracker",
+              "action": "Prepare prioritization pack",
+              "handoff": "",
+              "pain": "manual roll-up of tradeoffs",
+              "output": ""
+            }
+          ],
+          "data": [],
+          "systems": [],
+          "decisions": [
+            {
+              "decision": "change requests",
+              "owner": "Business analyst",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            },
+            {
+              "decision": "prioritized requirement options",
+              "owner": "Product owner",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            }
+          ],
+          "patterns": [],
+          "ideas": [],
+          "evidenceArtifacts": []
+        },
+        "done": true
+      },
+      "grades": {
+        "rails": {
+          "pass": true,
+          "violations": []
+        },
+        "capture": {
+          "expectedAnchors": 29,
+          "matchedAnchors": 29,
+          "capturedItems": 24,
+          "preciseItems": 24,
+          "recall": 1,
+          "precision": 1,
+          "recallPct": 100,
+          "precisionPct": 100,
+          "missed": [],
+          "stage": {
+            "intake": {
+              "expected": 4,
+              "matched": 4,
+              "recall": 1
+            },
+            "analysis": {
+              "expected": 25,
+              "matched": 25,
+              "recall": 1
+            }
+          }
+        },
+        "output": {
+          "complete": true,
+          "missing": [],
+          "reason": "Recap has core anchors and source label."
+        },
+        "flow": {
+          "skipped": true,
+          "score": null,
+          "flagged": false,
+          "reason": "Skipped in mock mode: no network."
+        }
+      }
+    },
+    {
+      "runId": "corp-revops-manager-r013",
+      "personaId": "corp-revops-manager",
+      "sector": "corporate",
+      "role": "Revenue Operations Manager",
+      "style": "dashboard-oriented, metric-heavy, assumes CRM terms are obvious",
+      "stresses": "Keeping recurring operating cadence separate from system-maintenance subwork (flow + output)",
+      "stopReason": "completion-heuristic",
+      "turns": 5,
+      "wallMs": 0,
+      "improvisedTurns": [],
+      "transcript": [
+        {
+          "role": "assistant",
+          "text": "What task or workflow do you want to talk about? Briefly describe what happens, the business outcome, and the main output.",
+          "time": "2026-06-15T01:01:41.428Z"
+        },
+        {
+          "role": "user",
+          "text": "I work on Weekly sales forecast roll-up. It is recurring, weekly, ahead of leadership forecast review, and my role is that I runs the roll-up and challenges forecast changes; sales leaders own their pipeline inputs.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.428Z"
+        },
+        {
+          "role": "assistant",
+          "text": "Where are the main handoffs or approvals?",
+          "time": "2026-06-15T01:01:41.428Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "At a high level the flow is 1. Pull pipeline snapshot; 2. Check data hygiene; 3. Collect forecast changes; 4. Prepare forecast readout.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.428Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What tools and data show up in the main steps?",
+          "time": "2026-06-15T01:01:41.428Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Pull pipeline snapshot uses CRM and BI tool with RevOps manager; Check data hygiene uses CRM and spreadsheet with Sales operations and Account owners; Collect forecast changes uses CRM and email with Sales leaders",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.428Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.428Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "The annoying parts are mostly late-stage deal updates are inconsistent; missing close dates and stale stages; manual explanations for movements; last-minute narrative changes.",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.428Z"
+        },
+        {
+          "role": "assistant",
+          "text": "What is most painful or slow today?",
+          "time": "2026-06-15T01:01:41.428Z",
+          "summary": ""
+        },
+        {
+          "role": "user",
+          "text": "Account owners hands deal-level forecast updates to Sales leaders; RevOps manager hands forecast readout to Revenue leadership",
+          "improvised": false,
+          "time": "2026-06-15T01:01:41.428Z"
+        },
+        {
+          "role": "assistant",
+          "text": "I think I have enough to recap the workflow. Does this look right?",
+          "time": "2026-06-15T01:01:41.428Z",
+          "summary": ""
+        }
+      ],
+      "capturedState": {
+        "activeSection": "workflow",
+        "fields": {
+          "workflowName": "Weekly sales forecast roll-up",
+          "submittedWorkflowTask": "Weekly sales forecast roll-up",
+          "submittedFrequency": "weekly, ahead of leadership forecast review",
+          "intervieweeRole": "runs the roll-up and challenges forecast changes; sales leaders own their pipeline inputs",
+          "currentStateSummary": "Weekly sales forecast roll-up: runs the roll-up and challenges forecast changes; sales leaders own their pipeline inputs"
+        },
+        "steps": [
+          {
+            "id": "step-001",
+            "name": "Pull pipeline snapshot",
+            "actor": "RevOps manager",
+            "tool": "CRM, BI tool",
+            "action": "Pull pipeline snapshot",
+            "handoff": "deal-level forecast updates",
+            "pain": "late-stage deal updates are inconsistent",
+            "output": "deal-level forecast updates"
+          },
+          {
+            "id": "step-002",
+            "name": "Check data hygiene",
+            "actor": "Sales operations, Account owners",
+            "tool": "CRM, spreadsheet",
+            "action": "Check data hygiene",
+            "handoff": "forecast readout",
+            "pain": "missing close dates and stale stages",
+            "output": "forecast readout"
+          },
+          {
+            "id": "step-003",
+            "name": "Collect forecast changes",
+            "actor": "Sales leaders",
+            "tool": "CRM, email",
+            "action": "Collect forecast changes",
+            "handoff": "",
+            "pain": "manual explanations for movements",
+            "output": ""
+          },
+          {
+            "id": "step-004",
+            "name": "Prepare forecast readout",
+            "actor": "Revenue leadership",
+            "tool": "BI tool, slides",
+            "action": "Prepare forecast readout",
+            "handoff": "",
+            "pain": "last-minute narrative changes",
+            "output": ""
+          }
+        ],
+        "data": [],
+        "systems": [],
+        "decisions": [
+          {
+            "decision": "deal-level forecast updates",
+            "owner": "Sales leaders",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          },
+          {
+            "decision": "forecast readout",
+            "owner": "Revenue leadership",
+            "criteria": "",
+            "risk": "",
+            "approval": "",
+            "escalation": ""
+          }
+        ],
+        "patterns": [],
+        "ideas": [],
+        "evidenceArtifacts": []
+      },
+      "suggestions": {
+        "stepTypes": {
+          "step-001": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-002": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-003": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          },
+          "step-004": {
+            "value": "data-op",
+            "source": "ai-inferred",
+            "confidence": 0.82
+          }
+        },
+        "handoffTags": {
+          "h:step-001": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          },
+          "h:step-002": {
+            "value": "role-to-role",
+            "source": "ai-inferred",
+            "confidence": 0.76
+          }
+        },
+        "decisionTags": {},
+        "frictionTags": {
+          "step-001": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-002": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-003": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          },
+          "step-004": {
+            "value": "manual-entry",
+            "source": "ai-inferred",
+            "confidence": 0.8,
+            "note": "mock friction note"
+          }
+        },
+        "roleTags": {
+          "step-001": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-002": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-003": {
+            "value": "operations",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          },
+          "step-004": {
+            "value": "review-approval",
+            "source": "ai-inferred",
+            "confidence": 0.78
+          }
+        }
+      },
+      "finalRecap": {
+        "workflow": "Weekly sales forecast roll-up",
+        "role": "runs the roll-up and challenges forecast changes; sales leaders own their pipeline inputs",
+        "cadence": "weekly, ahead of leadership forecast review",
+        "recurringOrProject": "recurring",
+        "steps": [
+          {
+            "index": 1,
+            "name": "Pull pipeline snapshot",
+            "actor": "RevOps manager",
+            "tool": "CRM, BI tool",
+            "pain": "late-stage deal updates are inconsistent",
+            "handoff": "deal-level forecast updates"
+          },
+          {
+            "index": 2,
+            "name": "Check data hygiene",
+            "actor": "Sales operations, Account owners",
+            "tool": "CRM, spreadsheet",
+            "pain": "missing close dates and stale stages",
+            "handoff": "forecast readout"
+          },
+          {
+            "index": 3,
+            "name": "Collect forecast changes",
+            "actor": "Sales leaders",
+            "tool": "CRM, email",
+            "pain": "manual explanations for movements",
+            "handoff": ""
+          },
+          {
+            "index": 4,
+            "name": "Prepare forecast readout",
+            "actor": "Revenue leadership",
+            "tool": "BI tool, slides",
+            "pain": "last-minute narrative changes",
+            "handoff": ""
+          }
+        ],
+        "source": "transcript + app extraction",
+        "stopReason": "completion-heuristic"
+      },
+      "lastResponse": {
+        "nextQuestion": "I think I have enough to recap the workflow. Does this look right?",
+        "capturedState": {
+          "activeSection": "workflow",
+          "fields": {
+            "workflowName": "Weekly sales forecast roll-up",
+            "submittedWorkflowTask": "Weekly sales forecast roll-up",
+            "submittedFrequency": "weekly, ahead of leadership forecast review",
+            "intervieweeRole": "runs the roll-up and challenges forecast changes; sales leaders own their pipeline inputs",
+            "currentStateSummary": "Weekly sales forecast roll-up: runs the roll-up and challenges forecast changes; sales leaders own their pipeline inputs"
+          },
+          "steps": [
+            {
+              "id": "step-001",
+              "name": "Pull pipeline snapshot",
+              "actor": "RevOps manager",
+              "tool": "CRM, BI tool",
+              "action": "Pull pipeline snapshot",
+              "handoff": "deal-level forecast updates",
+              "pain": "late-stage deal updates are inconsistent",
+              "output": "deal-level forecast updates"
+            },
+            {
+              "id": "step-002",
+              "name": "Check data hygiene",
+              "actor": "Sales operations, Account owners",
+              "tool": "CRM, spreadsheet",
+              "action": "Check data hygiene",
+              "handoff": "forecast readout",
+              "pain": "missing close dates and stale stages",
+              "output": "forecast readout"
+            },
+            {
+              "id": "step-003",
+              "name": "Collect forecast changes",
+              "actor": "Sales leaders",
+              "tool": "CRM, email",
+              "action": "Collect forecast changes",
+              "handoff": "",
+              "pain": "manual explanations for movements",
+              "output": ""
+            },
+            {
+              "id": "step-004",
+              "name": "Prepare forecast readout",
+              "actor": "Revenue leadership",
+              "tool": "BI tool, slides",
+              "action": "Prepare forecast readout",
+              "handoff": "",
+              "pain": "last-minute narrative changes",
+              "output": ""
+            }
+          ],
+          "data": [],
+          "systems": [],
+          "decisions": [
+            {
+              "decision": "deal-level forecast updates",
+              "owner": "Sales leaders",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            },
+            {
+              "decision": "forecast readout",
+              "owner": "Revenue leadership",
+              "criteria": "",
+              "risk": "",
+              "approval": "",
+              "escalation": ""
+            }
+          ],
+          "patterns": [],
+          "ideas": [],
+          "evidenceArtifacts": []
+        },
+        "done": true
+      },
+      "grades": {
+        "rails": {
+          "pass": true,
+          "violations": []
+        },
+        "capture": {
+          "expectedAnchors": 27,
+          "matchedAnchors": 27,
+          "capturedItems": 22,
+          "preciseItems": 22,
+          "recall": 1,
+          "precision": 1,
+          "recallPct": 100,
+          "precisionPct": 100,
+          "missed": [],
+          "stage": {
+            "intake": {
+              "expected": 4,
+              "matched": 4,
+              "recall": 1
+            },
+            "analysis": {
+              "expected": 23,
+              "matched": 23,
+              "recall": 1
+            }
+          }
+        },
+        "output": {
+          "complete": true,
+          "missing": [],
+          "reason": "Recap has core anchors and source label."
+        },
+        "flow": {
+          "skipped": true,
+          "score": null,
+          "flagged": false,
+          "reason": "Skipped in mock mode: no network."
+        }
+      }
+    }
+  ],
+  "summary": {
+    "aggregate": {
+      "label": "ALL",
+      "n": 13,
+      "railsPassPct": 100,
+      "railViolations": 0,
+      "captureRecallAvg": 1,
+      "capturePrecisionAvg": 1,
+      "flowQualityAvg": null,
+      "flowFlagged": 0,
+      "outputCompletionPct": 100,
+      "medianTurns": 5,
+      "medianWallSec": 0
+    },
+    "perPersona": [
+      {
+        "label": "fin-controller-close",
+        "n": 1,
+        "railsPassPct": 100,
+        "railViolations": 0,
+        "captureRecallAvg": 1,
+        "capturePrecisionAvg": 1,
+        "flowQualityAvg": null,
+        "flowFlagged": 0,
+        "outputCompletionPct": 100,
+        "medianTurns": 5,
+        "medianWallSec": 0
+      },
+      {
+        "label": "fin-ap-specialist",
+        "n": 1,
+        "railsPassPct": 100,
+        "railViolations": 0,
+        "captureRecallAvg": 1,
+        "capturePrecisionAvg": 1,
+        "flowQualityAvg": null,
+        "flowFlagged": 0,
+        "outputCompletionPct": 100,
+        "medianTurns": 5,
+        "medianWallSec": 0
+      },
+      {
+        "label": "fin-fpa-analyst",
+        "n": 1,
+        "railsPassPct": 100,
+        "railViolations": 0,
+        "captureRecallAvg": 1,
+        "capturePrecisionAvg": 1,
+        "flowQualityAvg": null,
+        "flowFlagged": 0,
+        "outputCompletionPct": 100,
+        "medianTurns": 5,
+        "medianWallSec": 0
+      },
+      {
+        "label": "fin-accounting-mgr",
+        "n": 1,
+        "railsPassPct": 100,
+        "railViolations": 0,
+        "captureRecallAvg": 1,
+        "capturePrecisionAvg": 1,
+        "flowQualityAvg": null,
+        "flowFlagged": 0,
+        "outputCompletionPct": 100,
+        "medianTurns": 5,
+        "medianWallSec": 0
+      },
+      {
+        "label": "con-engagement-mgr",
+        "n": 1,
+        "railsPassPct": 100,
+        "railViolations": 0,
+        "captureRecallAvg": 1,
+        "capturePrecisionAvg": 1,
+        "flowQualityAvg": null,
+        "flowFlagged": 0,
+        "outputCompletionPct": 100,
+        "medianTurns": 5,
+        "medianWallSec": 0
+      },
+      {
+        "label": "con-associate",
+        "n": 1,
+        "railsPassPct": 100,
+        "railViolations": 0,
+        "captureRecallAvg": 1,
+        "capturePrecisionAvg": 1,
+        "flowQualityAvg": null,
+        "flowFlagged": 0,
+        "outputCompletionPct": 100,
+        "medianTurns": 5,
+        "medianWallSec": 0
+      },
+      {
+        "label": "corp-ops-manager",
+        "n": 1,
+        "railsPassPct": 100,
+        "railViolations": 0,
+        "captureRecallAvg": 1,
+        "capturePrecisionAvg": 1,
+        "flowQualityAvg": null,
+        "flowFlagged": 0,
+        "outputCompletionPct": 100,
+        "medianTurns": 5,
+        "medianWallSec": 0
+      },
+      {
+        "label": "corp-procurement-lead",
+        "n": 1,
+        "railsPassPct": 100,
+        "railViolations": 0,
+        "captureRecallAvg": 1,
+        "capturePrecisionAvg": 1,
+        "flowQualityAvg": null,
+        "flowFlagged": 0,
+        "outputCompletionPct": 100,
+        "medianTurns": 5,
+        "medianWallSec": 0
+      },
+      {
+        "label": "fin-ar-collections-analyst",
+        "n": 1,
+        "railsPassPct": 100,
+        "railViolations": 0,
+        "captureRecallAvg": 1,
+        "capturePrecisionAvg": 1,
+        "flowQualityAvg": null,
+        "flowFlagged": 0,
+        "outputCompletionPct": 100,
+        "medianTurns": 5,
+        "medianWallSec": 0
+      },
+      {
+        "label": "fin-treasury-analyst",
+        "n": 1,
+        "railsPassPct": 100,
+        "railViolations": 0,
+        "captureRecallAvg": 1,
+        "capturePrecisionAvg": 1,
+        "flowQualityAvg": null,
+        "flowFlagged": 0,
+        "outputCompletionPct": 100,
+        "medianTurns": 5,
+        "medianWallSec": 0
+      },
+      {
+        "label": "fin-sox-compliance-officer",
+        "n": 1,
+        "railsPassPct": 100,
+        "railViolations": 0,
+        "captureRecallAvg": 1,
+        "capturePrecisionAvg": 1,
+        "flowQualityAvg": null,
+        "flowFlagged": 0,
+        "outputCompletionPct": 100,
+        "medianTurns": 5,
+        "medianWallSec": 0
+      },
+      {
+        "label": "corp-business-analyst",
+        "n": 1,
+        "railsPassPct": 100,
+        "railViolations": 0,
+        "captureRecallAvg": 1,
+        "capturePrecisionAvg": 1,
+        "flowQualityAvg": null,
+        "flowFlagged": 0,
+        "outputCompletionPct": 100,
+        "medianTurns": 5,
+        "medianWallSec": 0
+      },
+      {
+        "label": "corp-revops-manager",
+        "n": 1,
+        "railsPassPct": 100,
+        "railViolations": 0,
+        "captureRecallAvg": 1,
+        "capturePrecisionAvg": 1,
+        "flowQualityAvg": null,
+        "flowFlagged": 0,
+        "outputCompletionPct": 100,
+        "medianTurns": 5,
+        "medianWallSec": 0
+      }
+    ],
+    "weakSpots": []
+  }
+}

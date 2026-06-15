@@ -1,0 +1,13 @@
+{
+  "name": "interview-sim-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone AI-vs-AI discovery interview simulation harness. On-demand only; never part of the app test gate.",
+  "scripts": {
+    "eval": "node harness/run.mjs",
+    "eval:mock": "EVAL_TARGET=mock node harness/run.mjs",
+    "eval:live": "EVAL_TARGET=live-app node harness/run.mjs",
+    "eval:replay": "EVAL_TARGET=replay node harness/run.mjs"
+  }
+}
