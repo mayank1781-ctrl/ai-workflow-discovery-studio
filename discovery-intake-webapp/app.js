@@ -4973,7 +4973,7 @@ function patternLayerColor(pattern) {
   return PATTERN_LAYER_COLOR[pattern] || "#5b7186";
 }
 
-const ANALYSIS_TABS = ["grid", "opportunities", "recipe", "engineering"];
+const ANALYSIS_TABS = ["grid", "opportunities", "leverage", "recipe", "engineering"];
 
 // Implementation-complexity bucket per pattern. Low ends Phase 2, Medium ends
 // Phase 3, High ends Phase 4. Unknown patterns default to Medium.
@@ -6321,6 +6321,7 @@ function renderAnalysisStudio() {
 
   if (active === "grid") renderAnalysisTabGrid();
   else if (active === "opportunities") renderAnalysisTabOpportunities();
+  else if (active === "leverage") renderAnalysisTabLeverage();
   else if (active === "recipe") renderAnalysisTabRecipe();
   else if (active === "engineering") renderAnalysisTabEngineering();
 }
@@ -7302,6 +7303,268 @@ function departmentHeatmapHtml() {
       <thead><tr><th style="text-align:left;padding:4px 8px;color:#8aa0b8;font-size:10px;">Role</th><th style="padding:4px 8px;color:#8aa0b8;font-size:10px;">Footprint</th>${headCols}<th style="padding:4px 8px;color:#8aa0b8;font-size:10px;">Friction</th><th style="padding:4px 8px;color:#8aa0b8;font-size:10px;">Handoffs</th></tr></thead>
       <tbody>${body}</tbody>
     </table>
+  </div>`;
+}
+
+// ============================================================================
+// Leverage Map (b6) — per-step AND per-connection "AI assist traction".
+// ============================================================================
+// A PURE derived VIEW over the CURRENT workflow's captured shape: the four
+// descriptive tags (role / step-type / structural-handoff / friction, plus the
+// per-step decision tag) and the captured tool + handoff-channel cells. It
+// marks, lo / md / hi, HOW MUCH AI can ASSIST (never replace) on each step AND
+// on each connection/seam between two adjacent steps. Option A: seams are
+// first-class from v1.
+//
+// Discipline: a seam is surfaced ONLY when a captured commonality earns it — a
+// shared tool across the two steps, a manual / digital-signal handoff channel,
+// system-switching friction across the boundary, or a classified structural
+// transition (a HANDOFF_KINDS tag). Never "score every pair." Tuned for RECALL:
+// a present commonality surfaces even a weak candidate; the human confirm prunes
+// the false ones (silently missing a real seam is the expensive failure).
+//
+// Trust rails: leverage is COMPUTED (blue) and WEARS its inputs' provenance via
+// the same source-dots as the heatmap (any inferred input => the mark reads as a
+// suggestion). It is NOT a new stored/confirmable tag — confirm already lives
+// upstream on the shape tags and downstream on the recipe. Human-hold uses the
+// reserved Human Pink and KEEPS the verify gate: AI drafts / routes / packages,
+// the person still decides / approves (an approval/judgment-call decision or a
+// judgment step is inherited by an adjacent seam). NO scorer, NO opportunity, NO
+// patchField, NO persist, NO model call. Renders "" when no shape is captured
+// (byte-identical when unused). Generation-vs-library-match is NOT decided here —
+// this only marks the signal; the Recipe Book "by connection" view consumes it
+// later. LEVERAGE framing only. Mints no new color: every hex already ships.
+
+const LEVERAGE_HUE = "#3b82f6"; // computed = Electric Blue (a locked-palette hex)
+const LEVERAGE_LEVELS = ["lo", "md", "hi"]; // strength labels — never a %-automatable
+const LEVERAGE_SHADE = { lo: "3a", md: "7a", hi: "b3" }; // one hue, discrete shades (never a gradient)
+
+// A captured tool/system string => comparable tokens for shared-tool detection.
+// Splits on commas / slashes / "and" / "&" / "+" / ";"; lowercases; drops blanks
+// and tiny stop-tokens so "Excel" matches "excel" but "a" / "the" never bridge a seam.
+function leverageToolTokens(text) {
+  return String(text || "")
+    .toLowerCase()
+    .split(/[,/&;+]|\band\b/)
+    .map((t) => t.replace(/[^a-z0-9 ]/g, "").trim())
+    .filter((t) => t.length >= 2 && !["the", "an", "and", "via", "for"].includes(t));
+}
+
+// True when a handoff's channel text reads like a MANUAL / digital-signal carry
+// (an export, a file, an email / message, a screenshot, a re-key) — the medium
+// dimension that makes a handoff worth an AI packaging / routing recipe. Recall-
+// biased on purpose; "" or direct system access => false.
+function leverageManualChannel(text) {
+  return /\b(export|exported|screenshot|screen shot|email|e-mail|outlook|teams|message|attach|attachment|file|spreadsheet|pdf|download|upload|re-?key|rekey|copy|paste|forward|sent|send|e-?sign|signature|portal)\b/i.test(String(text || ""));
+}
+
+// Map a motivator / signal count to a lo / md / hi level. Recall-biased: ONE
+// motivator is already a (lo) candidate; the human prunes. Never a number / %.
+function leverageLevelFor(count) {
+  if (count >= 3) return "hi";
+  if (count === 2) return "md";
+  return "lo";
+}
+
+// Is a step a human-hold? (its work-shape says a person owns the judgment): a
+// judgment / decision step-type, an approval / judgment-call decision tag, a
+// review-approval role, or a filled human-checkpoint. Human-hold never LOWERS
+// leverage — it reframes it as assist + verify (AI drafts / routes; person decides).
+function leverageStepHumanHeld(typeTag, roleTag, decisionTag, hasHumanCheckpoint) {
+  if (typeTag && (typeTag.value === "judgment" || typeTag.value === "decision")) return true;
+  if (decisionTag && (decisionTag.value === "approval" || decisionTag.value === "judgment-call")) return true;
+  if (roleTag && roleTag.value === "review-approval") return true;
+  return Boolean(hasHumanCheckpoint);
+}
+
+// The four seam motivators, each EARNED by something the capture actually saw.
+// Returns the list present at this boundary (empty => no seam). PURE. `a`/`b` are
+// shaped steps {tool, channel, accessMode}; the friction + handoff tags are passed in.
+function leverageSeamMotivators(a, b, handoffTag, frictionA, frictionB) {
+  const motivators = [];
+  const tokensB = leverageToolTokens(b && b.tool);
+  const shared = leverageToolTokens(a && a.tool).filter((t) => tokensB.includes(t));
+  if (shared.length) motivators.push({ kind: "shared-tool", detail: shared[0], state: "computed" });
+  if (leverageManualChannel((a && a.channel) || "") || leverageManualChannel((a && a.accessMode) || "")) {
+    motivators.push({ kind: "manual-channel", detail: "manual/digital-signal handoff", state: "computed" });
+  }
+  const sw = [frictionA, frictionB].filter((f) => f && f.value === "system-switching");
+  if (sw.length) motivators.push({ kind: "system-switching", detail: "system-switching at the boundary", state: leastAssertedState(sw.map((f) => provenanceToState(f.source))) });
+  if (handoffTag) motivators.push({ kind: "transition", detail: handoffTag.value, state: provenanceToState(handoffTag.source) });
+  return motivators;
+}
+
+// A human-readable, ASSIST-framed phrase for a seam motivator. Never "eliminate".
+function seamMotivatorPhrase(m) {
+  if (!m) return "AI can assist this connection";
+  if (m.kind === "shared-tool") return `Shared system (${m.detail}) across both steps — AI can pre-fill and carry the data`;
+  if (m.kind === "manual-channel") return "Handoff carried by a manual / digital signal — AI can package and route the artifact";
+  if (m.kind === "system-switching") return "System-switching at the boundary — AI can bridge the re-keying";
+  if (m.kind === "transition") return `${m.detail} transition — AI can prepare and route the handoff`;
+  return "AI can assist this connection";
+}
+
+// PURE: build the per-step + per-connection leverage model for ONE workflow.
+// `steps` are shaped {id, name, tool, channel, accessMode, hasHumanCheckpoint};
+// `sidecars` = {stepTypes, frictionTags, roleTags, handoffTags, decisionTags}.
+// Only a step with a captured shape signal (a step-type / friction tag or a named
+// tool) gets a row; a boundary with no commonality gets no seam. Returns
+// { steps:[...], seams:[...] }.
+function buildWorkflowLeverage(steps, sidecars) {
+  const list = Array.isArray(steps) ? steps : [];
+  const sc = sidecars && typeof sidecars === "object" ? sidecars : {};
+  const stepTypes = sc.stepTypes || {};
+  const frictionTags = sc.frictionTags || {};
+  const roleTags = sc.roleTags || {};
+  const handoffTags = sc.handoffTags || {};
+  const decisionTags = sc.decisionTags || {};
+
+  const stepRows = [];
+  list.forEach((step) => {
+    if (!step || !step.id) return;
+    const typeTag = structuralTagOf(stepTypes, step.id, STEP_TYPE_OPTIONS);
+    const frictionTag = structuralTagOf(frictionTags, step.id, FRICTION_KINDS);
+    const roleTag = structuralTagOf(roleTags, step.id, ROLE_VALUES);
+    const decisionTag = structuralTagOf(decisionTags, step.id, DECISION_KINDS);
+    const tool = String((step && step.tool) || "").trim();
+    if (!typeTag && !frictionTag && !tool) return; // no captured shape => no assist claim
+
+    const evidence = [];
+    const states = [];
+    let score = 0;
+    if (typeTag) {
+      states.push(provenanceToState(typeTag.source));
+      if (typeTag.value === "data-op" || typeTag.value === "review") { score += 1; evidence.push(`${typeTag.value} step — structured work AI can draft`); }
+      else evidence.push(`${typeTag.value} step`);
+    }
+    if (frictionTag) {
+      states.push(provenanceToState(frictionTag.source));
+      if (frictionTag.value === "manual-entry" || frictionTag.value === "rework" || frictionTag.value === "error-prone") { score += 1; evidence.push(`${frictionTag.value} friction — toil AI can reduce`); }
+      else evidence.push(`${frictionTag.value} friction`);
+    }
+    if (tool) { score += 1; states.push("computed"); evidence.push(`works in ${tool}`); }
+
+    const humanHeld = leverageStepHumanHeld(typeTag, roleTag, decisionTag, step.hasHumanCheckpoint);
+    stepRows.push({
+      id: step.id,
+      name: (step && step.name) || "",
+      level: leverageLevelFor(score),
+      state: leastAssertedState(states),
+      humanHeld,
+      assist: humanHeld ? "AI drafts and checks; the person decides" : "AI can assist this step",
+      evidence
+    });
+  });
+
+  const seams = [];
+  for (let i = 0; i < list.length - 1; i += 1) {
+    const a = list[i];
+    const b = list[i + 1];
+    if (!a || !b || !a.id || !b.id) continue;
+    const handoffTag = structuralTagOf(handoffTags, handoffId(a.id, b.id), HANDOFF_KINDS);
+    const frictionA = structuralTagOf(frictionTags, a.id, FRICTION_KINDS);
+    const frictionB = structuralTagOf(frictionTags, b.id, FRICTION_KINDS);
+    const motivators = leverageSeamMotivators(a, b, handoffTag, frictionA, frictionB);
+    if (!motivators.length) continue; // earned by a captured commonality, or not at all
+
+    // INHERIT the human-hold from either adjacent step — AI packages/routes the
+    // handoff, the person still approves. (Approval lives in the decision tag.)
+    const humanHeld = leverageStepHumanHeld(
+      structuralTagOf(stepTypes, a.id, STEP_TYPE_OPTIONS), structuralTagOf(roleTags, a.id, ROLE_VALUES), structuralTagOf(decisionTags, a.id, DECISION_KINDS), a.hasHumanCheckpoint
+    ) || leverageStepHumanHeld(
+      structuralTagOf(stepTypes, b.id, STEP_TYPE_OPTIONS), structuralTagOf(roleTags, b.id, ROLE_VALUES), structuralTagOf(decisionTags, b.id, DECISION_KINDS), b.hasHumanCheckpoint
+    );
+
+    seams.push({
+      fromId: a.id,
+      fromName: (a && a.name) || "",
+      toId: b.id,
+      toName: (b && b.name) || "",
+      level: leverageLevelFor(motivators.length),
+      state: leastAssertedState(motivators.map((m) => m.state)),
+      humanHeld,
+      motivators: motivators.map((m) => m.kind),
+      assist: humanHeld ? "AI packages and routes the handoff; the person approves" : "AI can carry the handoff between these steps",
+      evidence: motivators.map((m) => seamMotivatorPhrase(m))
+    });
+  }
+
+  return { steps: stepRows, seams };
+}
+
+// One leverage tile: a single hue (computed blue; human-held => reserved Human
+// Pink), shade = lo / md / hi strength, a TEXT label ALWAYS present, plus the
+// provenance source-dot. Never color-only, never a gradient.
+function leverageTileHtml(level, state, humanHeld) {
+  const hue = humanHeld ? HUMAN_HOLD_HUE : LEVERAGE_HUE;
+  const bg = `${hue}${LEVERAGE_SHADE[level] || "3a"}`;
+  return `<span class="lev-tile" title="${escapeHtml(level)} leverage" style="display:inline-block;min-width:34px;text-align:center;padding:2px 8px;border:1px solid #16263a;border-radius:6px;background:${bg};color:#e2e8f0;font-weight:600;font-size:11px;">${escapeHtml(level)}${heatmapSourceDot(state)}</span>`;
+}
+
+// The Leverage Map for the CURRENT workflow. Shapes the captured grid (tool /
+// channel / human-checkpoint via gridCellValue) + the four structural sidecars,
+// then renders the pure model. Returns "" when nothing is captured (byte-
+// identical when unused). Assist-framed throughout; reuses the heatmap legend.
+function leverageMapHtml() {
+  const steps = analysisGridSteps().map((step, index) => ({
+    id: step.id,
+    name: stepDisplayName(step, index),
+    tool: gridCellValue(step, "systemsTools"),
+    channel: gridCellValue(step, "handoff"),
+    accessMode: typeof step.accessMode === "string" ? step.accessMode : "",
+    hasHumanCheckpoint: Boolean(gridCellValue(step, "humanCheckpoint"))
+  }));
+  const model = buildWorkflowLeverage(steps, {
+    stepTypes: state.stepTypes,
+    frictionTags: state.frictionTags,
+    roleTags: state.roleTags,
+    handoffTags: state.handoffTags,
+    decisionTags: state.decisionTags
+  });
+  if (!model.steps.length && !model.seams.length) return "";
+
+  const row = (head, level, dotState, humanHeld, assist, evidence) => `
+    <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-top:1px solid #16263a;">
+      <div style="flex:none;padding-top:1px;">${leverageTileHtml(level, dotState, humanHeld)}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="color:#cfe0f2;font-weight:600;font-size:12px;">${head}${humanHeld ? `<span style="color:${HUMAN_HOLD_HUE};font-size:10px;font-weight:700;margin-left:8px;">human-hold</span>` : ""}</div>
+        <div style="color:#7a93b4;font-size:11px;margin-top:2px;">${escapeHtml(assist)}${evidence.length ? " — " + escapeHtml(evidence.join("; ")) : ""}</div>
+      </div>
+    </div>`;
+
+  const stepRows = model.steps.map((s) => row(escapeHtml(s.name || "Step"), s.level, s.state, s.humanHeld, s.assist, s.evidence)).join("");
+  const seamRows = model.seams.map((s) => row(`${escapeHtml(s.fromName || "Step")} <span style="color:#3f5878;">&rarr;</span> ${escapeHtml(s.toName || "Step")}`, s.level, s.state, s.humanHeld, s.assist, s.evidence)).join("");
+
+  const stepSection = model.steps.length
+    ? `<div><div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#8aa0b8;margin:0 0 4px;">By step</div>${stepRows}</div>`
+    : "";
+  const seamSection = model.seams.length
+    ? `<div style="margin-top:14px;"><div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#8aa0b8;margin:0 0 2px;">By connection</div><div style="font-size:11px;color:#7a93b4;margin:0 0 4px;">Seams between adjacent steps — surfaced only where the capture shows a shared tool, a manual handoff, system-switching, or a classified transition.</div>${seamRows}</div>`
+    : "";
+
+  return `<div class="leverage-map" style="background:#0c1726;border:1px solid #16263a;border-radius:12px;padding:16px 18px;margin:0 0 18px;">
+    <div style="font-size:0.95rem;font-weight:600;color:#e2e8f0;margin:0 0 4px;">Leverage Map</div>
+    <div style="font-size:12px;color:#7a93b4;margin:0 0 10px;">Where and how much AI can assist across this workflow — per step and per connection. A leverage read of the captured shape; AI suggests, you verify. Each mark wears where its signal came from, and a person still owns every human-hold.</div>
+    ${heatmapLegendHtml()}
+    ${stepSection}
+    ${seamSection}
+  </div>`;
+}
+
+// TAB: Leverage Map. Never a dead end — before any shape is captured it points
+// the user at the confirm step instead of showing a blank panel.
+function renderAnalysisTabLeverage() {
+  const container = document.getElementById("analysis-tab-leverage");
+  if (!container) return;
+  const steps = analysisGridSteps();
+  if (!steps.length) {
+    container.innerHTML = `<div class="summary-item">No workflow steps yet. Capture a process to see where AI can assist.</div>`;
+    return;
+  }
+  const map = leverageMapHtml();
+  container.innerHTML = map || `<div class="leverage-map" style="background:#0c1726;border:1px solid #16263a;border-radius:12px;padding:16px 18px;">
+    <div style="font-size:0.95rem;font-weight:600;color:#e2e8f0;margin:0 0 4px;">Leverage Map</div>
+    <div style="font-size:12px;color:#7a93b4;">No leverage signal yet — confirm a step's shape (role · type · friction) to see where AI can assist. Nothing here is blocked; the map fills in as the shape is captured.</div>
   </div>`;
 }
 
