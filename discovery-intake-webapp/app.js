@@ -1418,6 +1418,7 @@ document.addEventListener("DOMContentLoaded", () => {
   syncSessionsFromServer();
   syncPackagesFromServer();
   syncKnowledgeFromServer();
+  loadRecipeLibrarySeed(); // install the trusted recipe library seed (fire-and-forget)
   render();
   loadSessionFromUrlParam();
 });
@@ -11614,14 +11615,180 @@ function wireRecipeBook(container) {
 
 // THE RECIPE-SOURCE BOUNDARY — the single swap point for where recipes COME FROM.
 // A recipe attaches to a UNIT id: a step.id, or a connection's handoffId ("h:from>to").
-// TODAY the origin is GENERATION (the existing state.recipeCache). To swap to a trusted-
-// library match later — match the captured shape to fitting seed recipes, ranked by
-// leverage — change ONLY this function (read from the loaded library; set
-// origin:"library" and confirmed where the seed is confirm-pass). Nothing else in the
-// by-connection view reads recipeCache directly. Returns {text, origin, confirmed} | null.
+// recipeUnitSource resolves it in TWO tiers: (1) a TRUSTED LIBRARY match — the captured
+// unit's shape, read from the SAME detector inputs the Leverage Map already uses, matched
+// against the loaded seed and ranked by leverage; then (2) the existing GENERATION cache
+// as the fallback. The library never auto-hardens: a fit carries the seed's confirmed bit
+// (the shipped seed is confirmed:false, so it reads "proposed" / AI-grey downstream), and
+// a human-held unit still inherits its assist-and-approve framing + reserved Human Pink in
+// recipeForConnection. No library fit => the generated recipe stands (never a dead end).
+// Nothing else in the by-connection view reads the cache or the library directly.
+// Returns {text, origin:"library"|"generation", confirmed} | null.
+
+// The loaded trusted recipe library (seed entries). Held in a module-level slot — NOT on
+// `state`, so it never lands in the persisted session blob — and populated once at init by
+// loadRecipeLibrarySeed() from a SEPARATE data file (recipe-library-seed.json), never
+// inlined here. Empty until it loads (and after any load failure): the boundary then falls
+// straight through to generation, byte-identical to the pre-library behavior.
+let recipeLibrarySeed = [];
+
+// Fetch the seed data file and install the validated entries. Fire-and-forget at init; any
+// failure (offline / not served / malformed) leaves the library empty — no regression.
+async function loadRecipeLibrarySeed() {
+  try {
+    const res = await fetch("./recipe-library-seed.json", { cache: "no-store" });
+    if (!res || !res.ok) return;
+    const data = await res.json();
+    const entries = Array.isArray(data && data.entries) ? data.entries : [];
+    recipeLibrarySeed = entries.filter((e) => e && typeof e.recipe === "string" && e.match && typeof e.match === "object");
+  } catch (_err) {
+    // Leave recipeLibrarySeed = [] — recipeUnitSource uses the generation path.
+  }
+}
+
+// Leverage rank used to ORDER fitting library recipes (never a percent, never economics).
+const LIBRARY_LEVERAGE_RANK = { hi: 3, md: 2, lo: 1 };
+
+// Union of the comparable tool tokens on the two steps a connection spans — the SAME
+// tokeniser the Leverage Map uses (leverageToolTokens). A soft signal for ranking only.
+function connectionToolTokens(fromId, toId) {
+  const steps = analysisGridSteps();
+  const find = (id) => steps.find((s) => s && s.id === id);
+  const toks = new Set();
+  [find(fromId), find(toId)].forEach((s) => {
+    if (s) leverageToolTokens(gridCellValue(s, "systemsTools")).forEach((t) => toks.add(t));
+  });
+  return Array.from(toks);
+}
+
+// Resolve a UNIT id to the captured SHAPE the matcher reads — derived ENTIRELY from the
+// detector's existing inputs, never a parallel vocabulary. A connection ("h:from>to")
+// CONSUMES the Leverage Map seam (recipeConnectionSeams — it does NOT re-detect): its
+// motivator kinds, the handoff kind (HANDOFF_KINDS, present only with a transition
+// motivator), and the inherited human-hold. A step reads its structural sidecars + tool
+// tokens + the same human-hold rule. Returns null when the id matches no captured unit.
+function recipeUnitShape(unitId) {
+  if (!unitId) return null;
+  if (String(unitId).startsWith("h:")) {
+    const seam = recipeConnectionSeams().find((s) => handoffId(s.fromId, s.toId) === unitId);
+    if (!seam) return null;
+    const handoffTag = structuralTagOf(state.handoffTags, unitId, HANDOFF_KINDS);
+    return {
+      kind: "connection",
+      motivators: Array.isArray(seam.motivators) ? seam.motivators.slice() : [],
+      handoffKind: handoffTag ? handoffTag.value : null,
+      humanHeld: Boolean(seam.humanHeld),
+      toolTokens: connectionToolTokens(seam.fromId, seam.toId)
+    };
+  }
+  const step = analysisGridSteps().find((s) => s && s.id === unitId);
+  if (!step) return null;
+  const typeTag = structuralTagOf(state.stepTypes, unitId, STEP_TYPE_OPTIONS);
+  const frictionTag = structuralTagOf(state.frictionTags, unitId, FRICTION_KINDS);
+  const roleTag = structuralTagOf(state.roleTags, unitId, ROLE_VALUES);
+  const decisionTag = structuralTagOf(state.decisionTags, unitId, DECISION_KINDS);
+  const hasHumanCheckpoint = Boolean(gridCellValue(step, "humanCheckpoint"));
+  return {
+    kind: "step",
+    stepType: typeTag ? typeTag.value : null,
+    friction: frictionTag ? frictionTag.value : null,
+    role: roleTag ? roleTag.value : null,
+    decision: decisionTag ? decisionTag.value : null,
+    humanHeld: leverageStepHumanHeld(typeTag, roleTag, decisionTag, hasHumanCheckpoint),
+    toolTokens: leverageToolTokens(gridCellValue(step, "systemsTools"))
+  };
+}
+
+// PURE: rank the library entries that FIT a unit's shape, best first. A fit must satisfy
+// every signal the entry DECLARES (motivators subset-present; handoff_kind / step_type /
+// friction / role / decision exact; human_held exact when stated — held recipes only on
+// held units, free recipes only on free units, which is how the human-hold is inherited).
+// Unit-kind compatible (a span entry fits a connection unit — Option A). tools_any is a
+// SOFT ranking booster only; it never gates a fit. Ranked by leverage, then how specific
+// the match is, then id (stable). Returns [] when nothing fits.
+function matchLibraryRecipes(shape, library) {
+  if (!shape || !Array.isArray(library) || !library.length) return [];
+  const fits = [];
+  for (const entry of library) {
+    if (!entry || typeof entry.recipe !== "string" || !entry.match || typeof entry.match !== "object") continue;
+    const m = entry.match;
+    const kindOk = shape.kind === "step"
+      ? entry.unit_kind === "step"
+      : (entry.unit_kind === "connection" || entry.unit_kind === "span");
+    if (!kindOk) continue;
+
+    let fit = true;
+    let specificity = 0;
+
+    if (typeof m.human_held === "boolean") {
+      if (m.human_held !== Boolean(shape.humanHeld)) fit = false;
+      else specificity += 1;
+    }
+    if (fit && Array.isArray(m.motivators) && m.motivators.length) {
+      const have = new Set(shape.motivators || []);
+      if (m.motivators.every((k) => have.has(k))) specificity += m.motivators.length;
+      else fit = false;
+    }
+    if (fit && typeof m.handoff_kind === "string") {
+      if (shape.handoffKind === m.handoff_kind) specificity += 1; else fit = false;
+    }
+    for (const f of ["step_type", "friction", "role", "decision"]) {
+      if (!fit) break;
+      if (typeof m[f] === "string") {
+        const sv = f === "step_type" ? shape.stepType : shape[f];
+        if (sv === m[f]) specificity += 1; else fit = false;
+      }
+    }
+    if (!fit || specificity === 0) continue; // never match on unit-kind alone
+
+    if (Array.isArray(m.tools_any) && m.tools_any.length) {
+      const have = (shape.toolTokens || []).map((t) => String(t).toLowerCase());
+      const overlaps = m.tools_any.some((raw) => {
+        const tok = String(raw).toLowerCase();
+        // exact token, or a substring match only for tokens long enough to be specific
+        // (so short codes like "gl"/"ap"/"ar" never falsely boost an unrelated tool).
+        return have.some((h) => h === tok || (tok.length >= 4 && h.includes(tok)) || (h.length >= 4 && tok.includes(h)));
+      });
+      if (overlaps) specificity += 1;
+    }
+
+    fits.push({
+      id: entry.id,
+      label: entry.label || "",
+      recipe: entry.recipe,
+      leverage: entry.leverage || "lo",
+      humanHeld: Boolean(shape.humanHeld),
+      confirmed: entry.confirmed === true,
+      specificity
+    });
+  }
+  fits.sort((x, y) => {
+    const lr = (LIBRARY_LEVERAGE_RANK[y.leverage] || 0) - (LIBRARY_LEVERAGE_RANK[x.leverage] || 0);
+    if (lr) return lr;
+    if (y.specificity !== x.specificity) return y.specificity - x.specificity;
+    return String(x.id).localeCompare(String(y.id));
+  });
+  return fits;
+}
+
 function recipeUnitSource(unitId) {
+  if (!unitId) return null;
+  // (1) TRUSTED LIBRARY first — match the captured unit's shape against the loaded seed,
+  // ranked by leverage. A fit returns origin:"library" + the seed's confirmed bit (it
+  // never auto-hardens: the shipped seed is confirmed:false => "proposed" downstream).
+  const library = (typeof recipeLibrarySeed !== "undefined" && Array.isArray(recipeLibrarySeed)) ? recipeLibrarySeed : [];
+  if (library.length) {
+    const shape = recipeUnitShape(unitId);
+    if (shape) {
+      const matches = matchLibraryRecipes(shape, library);
+      if (matches.length) {
+        return { text: matches[0].recipe, origin: "library", confirmed: matches[0].confirmed === true };
+      }
+    }
+  }
+  // (2) GENERATION fallback — unchanged. The existing recipeCache path; never a dead end.
   const text = (state.recipeCache?.[unitId] || "").trim();
-  if (!unitId || !text) return null;
+  if (!text) return null;
   return { text, origin: "generation", confirmed: false };
 }
 
