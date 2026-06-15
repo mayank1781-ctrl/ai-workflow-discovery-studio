@@ -1,0 +1,221 @@
+/* ============================================================================
+   SIGNAL GLASS — Track A re-skin (PRESENTATION ONLY)
+   ----------------------------------------------------------------------------
+   Two surfaces: Discovery = light glass · Analysis Studio = dark glass.
+   Loaded LAST (after design-system.css) so it re-skins existing chrome by
+   cascade. NO behavior / markup / logic / routing / endpoint changes; app.js,
+   server.mjs and the existing CSS files are untouched.
+
+   Token note: the locked Signal Glass names --ink/--line/--blue/--cyan/--violet/
+   --pink/--amber/--green ALREADY exist in this app as CONTEXTUALLY-scoped tokens
+   (e.g. --ink is dark #111827 in some scopes and light #eef3fa in others).
+   Redefining them at a global :root would flatten that scoped system, so those
+   eight are added here namespaced as --sg-* to avoid clobbering. All other Signal
+   Glass tokens use their locked names verbatim. (Flagged in the build report.)
+   ========================================================================== */
+
+:root{
+  /* ---- Signal Glass — locked values (dark Studio surface) ---- */
+  --sg-ink:#050612; --deep:#111425; --deep2:#0b0e1c;
+  --porcelain:#F8FAFF; --mist:#EAEFFF;
+  --sg-blue:#2E8CFF; --sg-cyan:#42E8FF; --sg-violet:#7B4DFF;
+  --sg-pink:#FF4FD8; --human:#FFC4EA;
+  --gray:#8C93A7; --sg-amber:#FFB454; --sg-green:#30D5A7;
+  --grad:linear-gradient(120deg,#7B4DFF 0%,#2E8CFF 52%,#42E8FF 100%);        /* chrome / action only */
+  --grad-prism:linear-gradient(120deg,#7B4DFF,#2E8CFF,#42E8FF,#FF4FD8);      /* prism mark */
+  --sg-line:rgba(255,255,255,.10); --sg-line-soft:rgba(255,255,255,.06);
+  --glass:rgba(255,255,255,.045); --glass-2:rgba(255,255,255,.07);
+  --txt:#EAEFFF; --txt-dim:#A6ADC4; --txt-faint:#737A92;
+  --font:'Inter',system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  /* ---- Discovery — light surface (the only addition) ---- */
+  --disc-bg:#EFF2FC; --disc-panel:rgba(255,255,255,.74); --disc-raised:rgba(255,255,255,.92);
+  --disc-line:rgba(12,16,36,.10); --disc-ink:#0E1326; --disc-slate:#55607A; --disc-faint:#8A92A8;
+}
+
+/* ---- Type: Inter everywhere; headlines 800, body/UI 450 ---- */
+body{ font-family:var(--font); -webkit-font-smoothing:antialiased; letter-spacing:-.01em; }
+h1{ font-weight:800; letter-spacing:-.03em; }
+h2{ font-weight:800; letter-spacing:-.025em; }
+h3{ font-weight:700; letter-spacing:-.02em; }
+.eyebrow{ font-weight:700; letter-spacing:.12em; }
+
+/* ============================================================================
+   STUDIO — dark luminous glass (default + analysis mode)
+   ========================================================================== */
+body{
+  background:
+    radial-gradient(900px 600px at 10% -6%, rgba(123,77,255,.16), transparent 60%),
+    radial-gradient(820px 560px at 94% 4%, rgba(66,232,255,.10), transparent 60%),
+    radial-gradient(900px 760px at 80% 102%, rgba(255,79,216,.09), transparent 62%),
+    var(--sg-ink);
+  color:var(--txt);
+}
+body[data-app-mode="analysis"]{ color:var(--txt); }
+.analysis-studio{ color:var(--txt); }
+.analysis-studio .analysis-tab-panel{ color:var(--txt); }
+
+/* Studio tab bar — active tab is the only gradient (chrome/action). */
+body[data-app-mode="analysis"] .analysis-tab-btn{ font-family:var(--font); font-weight:600; color:var(--txt-dim); }
+body[data-app-mode="analysis"] .analysis-tab-btn.active{
+  color:#08111f; background:var(--grad); border-color:transparent;
+  box-shadow:0 10px 28px -14px rgba(46,140,255,.6), inset 0 1px 0 rgba(255,255,255,.4);
+}
+
+/* ============================================================================
+   DISCOVERY — light glass (interview mode)
+   The static chrome flips to light; dynamic, inline-styled content areas stay as
+   dark-glass "data insets" (their inner markup is inline-coloured in app.js and
+   must remain readable — see report).
+   ========================================================================== */
+body[data-app-mode="interview"]{
+  background:
+    radial-gradient(420px 240px at 6% -10%, rgba(123,77,255,.10), transparent 60%),
+    radial-gradient(420px 240px at 97% 4%, rgba(66,232,255,.12), transparent 60%),
+    var(--disc-bg);
+  color:var(--disc-ink);
+}
+
+/* Static Discovery cards → white glass on light. */
+body[data-app-mode="interview"] .question-stage-card{
+  background:var(--disc-raised);
+  border:1px solid var(--disc-line);
+  box-shadow:0 24px 60px -34px rgba(20,30,70,.5);
+  color:var(--disc-ink);
+}
+body[data-app-mode="interview"] .question-stage-card::before{
+  background:
+    radial-gradient(circle at 72% 34%, transparent 0 90px, rgba(46,140,255,.10) 92px, transparent 95px),
+    linear-gradient(180deg, rgba(255,255,255,.45), transparent 44%);
+  opacity:.55;
+}
+body[data-app-mode="interview"] .embedded-transcript-card,
+body[data-app-mode="interview"] .conversation-card,
+body[data-app-mode="interview"] .transcript-composer,
+body[data-app-mode="interview"] .current-question-card,
+body[data-app-mode="interview"] .step-workspace-card{
+  background:var(--disc-panel);
+  border:1px solid var(--disc-line);
+  color:var(--disc-ink);
+}
+
+/* Static Discovery text on light. */
+body[data-app-mode="interview"] .current-question-card p,
+body[data-app-mode="interview"] .conversation-heading .eyebrow,
+body[data-app-mode="interview"] .eyebrow,
+body[data-app-mode="interview"] #discoveryCompletionLabel{ color:var(--disc-slate); }
+body[data-app-mode="interview"] #currentQuestion,
+body[data-app-mode="interview"] .current-question-card h2,
+body[data-app-mode="interview"] .conversation-heading h2,
+body[data-app-mode="interview"] #workflowHeaderName{ color:var(--disc-ink); }
+body[data-app-mode="interview"] .hint,
+body[data-app-mode="interview"] .composer-hint,
+body[data-app-mode="interview"] #questionLensBar,
+body[data-app-mode="interview"] .text-intake-assist,
+body[data-app-mode="interview"] .answer-nudges{ color:var(--disc-faint); }
+
+/* Discovery text inputs → light. */
+body[data-app-mode="interview"] textarea#aiChatInput,
+body[data-app-mode="interview"] textarea#answerInput{
+  background:var(--disc-raised); border:1px solid var(--disc-line); color:var(--disc-ink);
+}
+
+/* Dynamic, inline-styled content → dark-glass insets so app.js-coloured markup
+   stays legible on the light surface (these areas are re-skinned in Track B when
+   their inline styles migrate to tokens). */
+body[data-app-mode="interview"] #aiChatLog,
+body[data-app-mode="interview"] #conversationLog,
+body[data-app-mode="interview"] #liveExtractionGrid,
+body[data-app-mode="interview"] #currentStepPanel,
+body[data-app-mode="interview"] #liveWorkflowGridPanel,
+body[data-app-mode="interview"] #discoveryPatternInterview{
+  background:var(--deep2);
+  border:1px solid var(--sg-line-soft);
+  border-radius:14px;
+}
+
+/* ============================================================================
+   SHARED CHROME — gradient is action/chrome ONLY, on both surfaces
+   ========================================================================== */
+.brand-mark{ background:var(--grad-prism); color:#fff; border:none; }
+.status-pill{ font-family:var(--font); font-weight:600; }
+.topbar-trio-button{ font-family:var(--font); }
+
+/* Mode switch (Discovery / Analysis) — active is gradient. */
+.mode-switch{ background:var(--glass); border:1px solid var(--sg-line-soft); border-radius:14px; }
+.mode-tab{ font-family:var(--font); font-weight:600; color:var(--txt-dim); }
+.mode-tab.active{
+  color:#08111f; background:var(--grad); border-color:transparent;
+  box-shadow:0 10px 28px -14px rgba(46,140,255,.55), inset 0 1px 0 rgba(255,255,255,.4);
+}
+body[data-app-mode="interview"] .mode-switch{ background:rgba(255,255,255,.5); border:1px solid var(--disc-line); }
+body[data-app-mode="interview"] .mode-tab{ color:var(--disc-slate); }
+
+/* Buttons — primary is luminous gradient (action); secondary is calm glass. */
+.primary-button, .primary-button.compact{
+  background:var(--grad); color:#08111f; border:none; font-family:var(--font); font-weight:700;
+  box-shadow:0 10px 30px -12px rgba(46,140,255,.6), inset 0 1px 0 rgba(255,255,255,.4);
+}
+.secondary-button{ font-family:var(--font); font-weight:600; }
+body[data-app-mode="analysis"] .secondary-button{ background:var(--glass-2); color:var(--txt); border:1px solid var(--sg-line); }
+body[data-app-mode="interview"] .secondary-button{ background:rgba(255,255,255,.62); color:var(--disc-ink); border:1px solid var(--disc-line); }
+
+/* Readiness / progress fills — gradient (chrome). */
+#discoveryCompletionFill{ background:var(--grad); }
+body[data-app-mode="interview"] .discovery-completion-track{ background:rgba(12,16,36,.10); }
+
+/* Status badges → Signal Glass hues (flat, single-hue; never gradient). */
+.ds-badge{ font-family:var(--font); font-weight:700; }
+.ds-badge-teal{ background:rgba(66,232,255,.14); color:#9becff; border:1px solid rgba(66,232,255,.40); }
+.ds-badge-amber{ background:rgba(255,180,84,.14); color:var(--sg-amber); border:1px solid rgba(255,180,84,.40); }
+.ds-badge-purple{ background:rgba(123,77,255,.16); color:#cbb6ff; border:1px solid rgba(123,77,255,.40); }
+
+/* Provenance chips — User·stated = cyan, AI·inferred = gray. (Signal Glass
+   classes; the live app currently emits provenance inline in app.js, so these
+   are the shared definitions for when that markup migrates — Track B.) */
+.prov{ display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:4px 9px; font-size:10px; font-weight:600; font-family:var(--font); }
+.prov .pd{ width:6px; height:6px; border-radius:50%; }
+.prov.user{ background:rgba(66,232,255,.12); border:1px solid rgba(66,232,255,.40); color:#9becff; }
+.prov.user .pd{ background:var(--sg-cyan); }
+.prov.ai{ background:rgba(140,147,167,.13); border:1px solid rgba(140,147,167,.36); color:#c2c8d8; }
+.prov.ai .pd{ background:var(--gray); }
+body[data-app-mode="interview"] .prov.user{ color:#0f6fb8; }
+body[data-app-mode="interview"] .prov.ai{ color:#5a6276; }
+
+.toast{ font-family:var(--font); }
+
+/* ============================================================================
+   SURFACE GROUNDS — high-specificity so they win over the existing scoped
+   .app-shell.session-shell / body[data-app-mode] ground rules. This is what
+   actually flips the two surfaces (body-level rules above are out-specified).
+   ========================================================================== */
+/* Studio — deep Signal Glass ink + luminous glow. */
+body[data-app-mode="analysis"] .app-shell.session-shell,
+body[data-app-mode="analysis"] .workspace{
+  background:
+    radial-gradient(900px 600px at 10% -6%, rgba(123,77,255,.16), transparent 60%),
+    radial-gradient(820px 560px at 94% 4%, rgba(66,232,255,.10), transparent 60%),
+    radial-gradient(900px 760px at 80% 102%, rgba(255,79,216,.09), transparent 62%),
+    var(--sg-ink);
+}
+
+/* Discovery — light porcelain glass ground. */
+body[data-app-mode="interview"] .app-shell.session-shell,
+body[data-app-mode="interview"] .workspace{
+  background:
+    radial-gradient(460px 280px at 4% -8%, rgba(123,77,255,.10), transparent 60%),
+    radial-gradient(460px 280px at 99% 3%, rgba(66,232,255,.13), transparent 60%),
+    var(--disc-bg);
+}
+
+/* Discovery topbar → light glass (keeps the dark app chrome from bleeding into
+   the light surface). Brand mark stays the prism gradient. */
+body[data-app-mode="interview"] .session-topbar{
+  background:rgba(255,255,255,.66);
+  border-bottom:1px solid var(--disc-line);
+}
+body[data-app-mode="interview"] .topbar-trio-button{
+  background:rgba(255,255,255,.62); color:var(--disc-ink); border:1px solid var(--disc-line);
+}
+body[data-app-mode="interview"] .status-pill{
+  background:rgba(255,255,255,.62); color:var(--disc-slate); border:1px solid var(--disc-line);
+}
