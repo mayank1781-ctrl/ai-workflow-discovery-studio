@@ -1175,6 +1175,10 @@ const defaultState = {
   currentQuestionSource: "Intake guide",
   pendingFollowUp: null,
   askedFollowUp: false,
+  // Discovery final sweep — the bounded, DESCRIPTIVE closing pass over the thinnest
+  // captured areas (see finalSweepBuildPlan / advanceFinalSweep). Reset per session
+  // via defaultState; never persisted-into-grid, never auto-confirms provenance.
+  finalSweep: { started: false, closed: false, plan: [], idx: 0, current: "" },
   intakeDeltas: [],
   testLab: {
     scenarioId: "banking-payments",
@@ -17298,6 +17302,7 @@ function applyExtraction(result, options = {}) {
     touchedStepIndex: shouldPreserveCurrentStep ? beforeActiveStepIndex : explicitStepIndex >= 0 ? explicitStepIndex : touchedStepIndex
   });
   advanceWorkflowFrameGate(options.askedQuestion || result._askedQuestion || "");
+  advanceFinalSweep(options.askedQuestion || result._askedQuestion || "");
   routeNextQuestionAfterExtraction(result);
 
   if (result.mapCheckpointRecommended) {
@@ -17308,6 +17313,150 @@ function applyExtraction(result, options = {}) {
       changes: ""
     });
   }
+}
+
+// === Discovery final sweep — bounded, descriptive closing pass ==============
+// Near the end of the interview (once the closing/validation arc is reached and a
+// real process map exists), make ONE bounded pass over the 2-3 THINNEST areas — the
+// steps with the least captured workflow detail, and handoffs named without detail —
+// and ask the person to walk through or clarify them in plain, DESCRIPTIVE terms.
+// It is the interview's last chance to fill the workflow in, then it closes.
+//
+// Rails honored IN CODE: descriptive-only (the templates below only ask the person to
+// describe/clarify their own workflow — never opportunity, leverage, time, headcount,
+// FTE, or automation); bounded (<= FINAL_SWEEP_MAX_AREAS areas, each with
+// <= FINAL_SWEEP_MAX_FOLLOWUPS_PER_AREA follow-ups) so it can never loop or
+// interrogate; ADDITIVE (it only PRODUCES questions — it never writes the grid or a
+// provenance tag, so the person's answers flow through the existing extraction with
+// provenance unchanged and nothing is auto-hardened); graceful (nothing thin / nothing
+// to add => it closes cleanly). The router decision is PURE (finalSweepPendingQuestion,
+// safe to call during render); ALL state changes happen once per answer in
+// advanceFinalSweep (mirrors advanceWorkflowFrameGate).
+const FINAL_SWEEP_MAX_AREAS = 3;
+const FINAL_SWEEP_MAX_FOLLOWUPS_PER_AREA = 2;
+// Descriptive workflow MECHANICS the sweep may probe. Deliberately EXCLUDES time,
+// pain/friction, frequency, sensitivity, and anything evaluative — nothing here is an
+// opportunity, leverage, or automation question.
+const FINAL_SWEEP_FIELDS = ["actor", "tool", "accessMode", "input", "dataHandling", "output", "handoff", "trigger", "decision"];
+const FINAL_SWEEP_INTRO = "A few last things to make sure I've got this right.";
+const FINAL_SWEEP_CLOSE = "Got it — that's a clear picture of the workflow. We can always refine the finer details later.";
+
+function ensureFinalSweep() {
+  if (!state.finalSweep || typeof state.finalSweep !== "object") {
+    state.finalSweep = { started: false, closed: false, plan: [], idx: 0, current: "" };
+  }
+  return state.finalSweep;
+}
+
+// One descriptive follow-up for a missing step mechanic. NEVER evaluative.
+function finalSweepFieldQuestion(stepName, fieldKey) {
+  const name = stepName || "that step";
+  const map = {
+    actor: `For "${name}", who actually does this part?`,
+    tool: `For "${name}", what systems, files, or tools do you use to do it?`,
+    accessMode: `For "${name}", how do you get to the work — direct system access, Microsoft 365 files, exports, screenshots, or something handed to you?`,
+    input: `What do you need in hand before "${name}" can start?`,
+    dataHandling: `During "${name}", what do you actually do with the information or files involved?`,
+    output: `After "${name}", what do you end up with — what does it produce?`,
+    handoff: `Once "${name}" is done, who or what picks it up next?`,
+    trigger: `What kicks off "${name}" — what has to happen right before it?`,
+    decision: `During "${name}", is there a point where someone has to check, approve, or decide something?`
+  };
+  return map[fieldKey] || `Tell me a bit more about "${name}" — anything in it we haven't covered yet?`;
+}
+
+// Descriptive follow-ups for one thin STEP: a walk-through plus at most one targeted
+// missing-mechanic question. Capped per area.
+function finalSweepStepQuestions(step, index = -1) {
+  const name = stepLabel(step, index);
+  const questions = [`Walk me through what actually happens during "${name}", start to finish.`];
+  const missing = stepMissingFields(step).map((item) => item.key).filter((key) => FINAL_SWEEP_FIELDS.includes(key));
+  const targetKey = FINAL_SWEEP_FIELDS.find((key) => missing.includes(key));
+  if (targetKey) questions.push(finalSweepFieldQuestion(name, targetKey));
+  return questions.slice(0, FINAL_SWEEP_MAX_FOLLOWUPS_PER_AREA);
+}
+
+// Descriptive follow-ups for one thin HANDOFF (named without detail).
+function finalSweepHandoffQuestions(fromName, toName) {
+  const from = fromName || "that step";
+  const to = toName || "the next step";
+  return [
+    `You mentioned the handoff from "${from}" to "${to}" — walk me through how that actually happens and what gets passed along.`,
+    `For the handoff from "${from}" to "${to}", what does "${to}" need to receive before it can start?`
+  ].slice(0, FINAL_SWEEP_MAX_FOLLOWUPS_PER_AREA);
+}
+
+// Rank thin areas DESCRIPTIVELY — by how little workflow detail is captured, never by
+// opportunity / leverage / automation. PURE. Steps below a clear detail bar (thinnest
+// first), then handoffs whose upstream 'handoff' mechanic was never captured.
+function finalSweepThinAreas(steps = state.steps) {
+  const list = Array.isArray(steps) ? steps : [];
+  const thinSteps = list
+    .map((step, index) => ({ type: "step", step, index, completion: stepCompletion(step) }))
+    .filter((item) => item.completion < 60)
+    .sort((a, b) => a.completion - b.completion);
+  const usedStep = new Set(thinSteps.map((item) => item.index));
+  const thinHandoffs = [];
+  for (let i = 0; i < list.length - 1; i += 1) {
+    if (usedStep.has(i)) continue; // don't double-cover a step already chosen
+    if (!isCapturedValue(stepFieldValue(list[i], "handoff"))) {
+      thinHandoffs.push({ type: "handoff", index: i, fromName: stepLabel(list[i], i), toName: stepLabel(list[i + 1], i + 1) });
+    }
+  }
+  return [...thinSteps, ...thinHandoffs];
+}
+
+// Build the bounded plan ONCE: at most FINAL_SWEEP_MAX_AREAS areas, each with at most
+// FINAL_SWEEP_MAX_FOLLOWUPS_PER_AREA descriptive follow-ups. PURE. Empty when nothing
+// is meaningfully thin.
+function finalSweepBuildPlan(steps = state.steps) {
+  const areas = finalSweepThinAreas(steps).slice(0, FINAL_SWEEP_MAX_AREAS);
+  const plan = [];
+  areas.forEach((area) => {
+    const qs = area.type === "step"
+      ? finalSweepStepQuestions(area.step, area.index)
+      : finalSweepHandoffQuestions(area.fromName, area.toName);
+    qs.slice(0, FINAL_SWEEP_MAX_FOLLOWUPS_PER_AREA).forEach((q) => plan.push(q));
+  });
+  return plan;
+}
+
+// Eligible only at the closing arc (the late validation stages) with a real process
+// map — "a question or two before wrap." PURE.
+function finalSweepEligible() {
+  if (!Array.isArray(state.steps) || state.steps.length < 3) return false;
+  const stage = currentValidationStage();
+  return Boolean(stage) && (stage.id === "candidate" || stage.id === "handoff");
+}
+
+// PURE — the question the router should show now. No mutation (the router runs in
+// render / preview contexts too).
+function finalSweepPendingQuestion() {
+  const sweep = state.finalSweep;
+  if (!sweep || !sweep.started || sweep.closed) return "";
+  return sweep.current || "";
+}
+
+// Side-effecting — once per answer (called next to advanceWorkflowFrameGate). Starts
+// the sweep at the closing arc, advances through the FIXED plan as each sweep question
+// is answered, and closes after the graceful close line. Never re-builds the plan (so
+// it can never loop) and never touches the grid or a provenance tag.
+function advanceFinalSweep(askedQuestion = "") {
+  const sweep = ensureFinalSweep();
+  if (sweep.closed) return;
+  if (!sweep.started) {
+    if (!finalSweepEligible()) return;
+    sweep.started = true;
+    sweep.plan = finalSweepBuildPlan(state.steps);
+    sweep.idx = 0;
+    sweep.current = sweep.plan.length ? `${FINAL_SWEEP_INTRO} ${sweep.plan[0]}` : FINAL_SWEEP_CLOSE;
+    return;
+  }
+  // Advance only when the question we showed is the one that was just answered.
+  if (!isSameQuestion(askedQuestion, sweep.current)) return;
+  if (sweep.current === FINAL_SWEEP_CLOSE) { sweep.closed = true; sweep.current = ""; return; }
+  sweep.idx += 1;
+  sweep.current = sweep.idx < sweep.plan.length ? sweep.plan[sweep.idx] : FINAL_SWEEP_CLOSE;
 }
 
 function routeNextQuestionAfterExtraction(result = {}) {
@@ -17327,6 +17476,11 @@ function nextQuestionRouteAfterExtraction(result = {}) {
   }
   const overviewQuestion = workflowOverviewQuestion([askedQuestion]);
   if (overviewQuestion) return overviewQuestion;
+  // Discovery final sweep — a bounded, DESCRIPTIVE last pass over the thinnest areas,
+  // shown once the interview reaches its closing arc (started/advanced only in
+  // advanceFinalSweep). Pure read here; returns "" until the sweep is active.
+  const finalSweepQuestion = finalSweepPendingQuestion();
+  if (finalSweepQuestion) return { text: finalSweepQuestion, source: "Final sweep" };
   if (state.drilldown?.status === "active" && state.steps.length) {
     return { text: stepInterviewQuestion(), source: "Step-by-step interview" };
   }
