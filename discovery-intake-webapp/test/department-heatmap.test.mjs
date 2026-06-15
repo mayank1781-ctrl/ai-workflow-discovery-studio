@@ -149,7 +149,7 @@ test("human-hold (judgment) uses the reserved Human Pink and implies nothing aut
   const sb = renderSandbox(RENDER_LIB);
   const html = sb.departmentHeatmapHtml();
   assert.match(html, /human-hold/, "human-hold is labelled");
-  assert.match(html, /#ff4fc8/, "Human Pink is used for human-hold");
+  assert.match(html, /#FF4FD8/, "Human Pink is used for human-hold");
   const agg = aggSandbox();
   const model = agg.buildDepartmentHeatmap([wf("w", [{ id: "s1", cells: {} }], { s1: tag("operations", "user-stated") }, { s1: tag("judgment", "user-stated") })]);
   assert.equal(model.rows[0].tiles.find((t) => t.workType === "judgment").humanHeld, true, "the judgment tile is flagged human-held");
@@ -160,7 +160,7 @@ test("an always-on legend maps the three source-dots + human-hold", () => {
   const sb = renderSandbox(RENDER_LIB);
   const legend = sb.heatmapLegendHtml();
   for (const word of ["stated", "computed", "inferred", "human-hold"]) assert.match(legend, new RegExp(word), `legend names ${word}`);
-  for (const hex of ["#00d4b4", "#3b82f6", "#5b7186", "#ff4fc8"]) assert.ok(legend.includes(hex), `legend shows ${hex}`);
+  for (const hex of ["#00d4b4", "#3b82f6", "#5b7186", "#FF4FD8"]) assert.ok(legend.includes(hex), `legend shows ${hex}`);
   assert.match(sb.departmentHeatmapHtml(), /hm-legend/, "the heatmap always renders the legend");
 });
 
@@ -176,7 +176,7 @@ test("shade carries strength within one hue (never a gradient); meaning-colors a
   const html = sb.departmentHeatmapHtml();
   assert.ok(!/gradient/i.test(html), "strength is a shade ramp, never a gradient");
   assert.deepEqual(extractConst(source, "HEATMAP_STATE_DOTS").match(/#[0-9a-fA-F]{6}/g).sort(), ["#00d4b4", "#3b82f6", "#5b7186"].sort(), "source-dots reuse locked hexes");
-  assert.ok(/#ff4fc8/.test(extractConst(source, "HUMAN_HOLD_HUE")), "human-hold reuses the locked pink");
+  assert.ok(/#FF4FD8/.test(extractConst(source, "HUMAN_HOLD_HUE")), "human-hold reuses the locked pink");
   const hues = extractConst(source, "HEATMAP_WORK_TYPE_HUES");
   const allowed = ["#a855f7", "#06b6d4", "#00d4b4", "#f59e0b"];
   (hues.match(/#[0-9a-fA-F]{6}/g) || []).forEach((hex) => assert.ok(allowed.includes(hex), `${hex} is a locked work-type hue (judgment uses HUMAN_HOLD_HUE)`));

@@ -19,7 +19,7 @@ const source = readAppSource();
 
 // Permits "leverage" (the signal this view consumes); bans the economics family.
 const FORBIDDEN = /headcount|\bFTE\b|full-time equivalent|automat|\bROI\b|hours? saved|time saved|\bopportunity\b/i;
-const HUMAN_PINK = /#ff4fc8/i;
+const HUMAN_PINK = /#FF4FD8/i;
 
 const tag = (value, src, confidence) => ({ value, source: src, confidence: confidence != null ? confidence : (src === "user-stated" ? 1 : 0.6) });
 // A shaped grid step (cells carry {value}); the connection view reads tool + handoff.
