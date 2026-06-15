@@ -11557,15 +11557,19 @@ function recipeBookEmptyNoteHtml() {
 function recipeBookHtml() {
   const steps = analysisGridSteps();
   if (!steps.length) return "";
-  const view = state.recipeBookView === "status" ? "status" : "byStep";
+  const view = state.recipeBookView === "status" ? "status" : state.recipeBookView === "connection" ? "connection" : "byStep";
   const hasRecipes = recipeBookHasAnyRecipe(steps);
   const toggleBtn = (id, label) => `<button type="button" data-recipe-book-view="${id}" class="recipe-book-view-btn${view === id ? " on" : ""}" style="background:${view === id ? "var(--glass-2,rgba(255,255,255,.07))" : "transparent"};color:${view === id ? "var(--txt,#EAEFFF)" : "var(--txt-dim,#A6ADC4)"};border:none;border-radius:8px;padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;">${label}</button>`;
   const header = `<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
-    <div><div style="font-size:1rem;font-weight:800;color:var(--txt,#EAEFFF);letter-spacing:-.02em;">Recipe Book</div><div style="font-size:12px;color:var(--txt-faint,#737A92);margin-top:2px;">The stock of AI recipes for this workflow, by step. Each recipe describes how AI assists one step.</div></div>
-    <div class="recipe-book-toggle" role="tablist" aria-label="Recipe Book view" style="display:inline-flex;gap:3px;background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:10px;padding:3px;">${toggleBtn("byStep", "By step")}${toggleBtn("status", "By status")}</div>
+    <div><div style="font-size:1rem;font-weight:800;color:var(--txt,#EAEFFF);letter-spacing:-.02em;">Recipe Book</div><div style="font-size:12px;color:var(--txt-faint,#737A92);margin-top:2px;">The stock of AI recipes for this workflow, by step and by connection. Each recipe describes how AI assists one step or carries one handoff.</div></div>
+    <div class="recipe-book-toggle" role="tablist" aria-label="Recipe Book view" style="display:inline-flex;gap:3px;background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:10px;padding:3px;">${toggleBtn("byStep", "By step")}${toggleBtn("connection", "By connection")}${toggleBtn("status", "By status")}</div>
   </div>`;
   let body;
-  if (!hasRecipes) {
+  if (view === "connection") {
+    // Self-contained: the by-connection view consumes the Leverage Map seam signal
+    // and carries its own never-a-dead-end empty states (independent of step recipes).
+    body = recipeBookConnectionSectionHtml();
+  } else if (!hasRecipes) {
     body = recipeBookEmptyNoteHtml() + recipeBookByStep(steps).map(recipeBookCardHtml).join("");
   } else if (view === "status") {
     body = recipeBookByStatus(steps).map(recipeBookStatusGroupHtml).join("");
@@ -11581,7 +11585,8 @@ function wireRecipeBook(container) {
   if (!container) return;
   container.querySelectorAll("[data-recipe-book-view]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      state.recipeBookView = btn.dataset.recipeBookView === "status" ? "status" : "byStep";
+      const v = btn.dataset.recipeBookView;
+      state.recipeBookView = v === "status" || v === "connection" ? v : "byStep";
       persistState();
       renderAnalysisTabRecipe();
     });
@@ -11594,6 +11599,146 @@ function wireRecipeBook(container) {
       else toast("Generate this step's recipe from its card below.");
     });
   });
+}
+
+// === Recipe Book — "by connection" view (Option A seams) =====================
+// Extends the Recipe Book grouping from per-STEP to per-CONNECTION. A recipe's unit is
+// a step, a handoff, or a short span (Option A — the unit is NOT hard-locked to a single
+// step in the data model). This view surfaces recipes attached to a handoff/seam, driven
+// ENTIRELY by the Leverage Map's per-seam signal: only connections the Leverage Map
+// already marked (lo / md / hi) get a recipe surface. It does NOT invent or re-detect
+// seams — buildWorkflowLeverage IS the seam detector; this only CONSUMES its output.
+// Dark Signal Glass surface; leverage framing only; reuses the merged .prov classes, the
+// recipe status chip, and the leverage tile. No scorer, no opportunity, no grid write,
+// no persist, no model call. Renders its own never-a-dead-end states.
+
+// THE RECIPE-SOURCE BOUNDARY — the single swap point for where recipes COME FROM.
+// A recipe attaches to a UNIT id: a step.id, or a connection's handoffId ("h:from>to").
+// TODAY the origin is GENERATION (the existing state.recipeCache). To swap to a trusted-
+// library match later — match the captured shape to fitting seed recipes, ranked by
+// leverage — change ONLY this function (read from the loaded library; set
+// origin:"library" and confirmed where the seed is confirm-pass). Nothing else in the
+// by-connection view reads recipeCache directly. Returns {text, origin, confirmed} | null.
+function recipeUnitSource(unitId) {
+  const text = (state.recipeCache?.[unitId] || "").trim();
+  if (!unitId || !text) return null;
+  return { text, origin: "generation", confirmed: false };
+}
+
+// A connection recipe's display confidence — derived DETERMINISTICALLY from the seam's
+// least-asserted provenance state (never a model number, never a %-automatable). A
+// confirmed unit reads full; an AI-inferred signal reads lowest. Always in [0,1].
+function recipeUnitConfidence(leverageState, confirmed) {
+  if (confirmed) return 1;
+  if (leverageState === "stated") return 0.9;
+  if (leverageState === "computed") return 0.7;
+  return 0.5;
+}
+
+// Consume the Leverage Map's seam signal for the ACTIVE workflow. Shapes the grid the
+// SAME way leverageMapHtml does and calls the SAME buildWorkflowLeverage detector — it
+// does NOT re-detect seams. Returns the seam list (possibly []).
+function recipeConnectionSeams() {
+  const steps = analysisGridSteps().map((step, index) => ({
+    id: step.id,
+    name: stepDisplayName(step, index),
+    tool: gridCellValue(step, "systemsTools"),
+    channel: gridCellValue(step, "handoff"),
+    accessMode: typeof step.accessMode === "string" ? step.accessMode : "",
+    hasHumanCheckpoint: Boolean(gridCellValue(step, "humanCheckpoint"))
+  }));
+  const model = buildWorkflowLeverage(steps, {
+    stepTypes: state.stepTypes,
+    frictionTags: state.frictionTags,
+    roleTags: state.roleTags,
+    handoffTags: state.handoffTags,
+    decisionTags: state.decisionTags
+  });
+  return Array.isArray(model.seams) ? model.seams : [];
+}
+
+// The recipe attached to a CONNECTION (seam), derived from EXISTING data via the source
+// boundary. null when no recipe is attached yet (the card shows the never-a-dead-end
+// state). INHERITS the human-hold from the Leverage Map seam (which itself inherited it
+// from a held adjacent step's DECISION tag): a held seam reads assist-not-replace, wears
+// the reserved Human Pink, and NEVER says "eliminate". Provenance is the merged .prov
+// way — AI grey until an explicit confirm; it NEVER auto-hardens. Every emitted value
+// carries {value, source, confidence}.
+function recipeForConnection(seam) {
+  if (!seam || !seam.fromId || !seam.toId) return null;
+  const connId = handoffId(seam.fromId, seam.toId);
+  const src = recipeUnitSource(connId);
+  if (!src) return null;
+  const confirmed = src.confirmed === true; // explicit confirm only — never auto-hardens
+  const humanHeld = Boolean(seam.humanHeld);
+  return {
+    connId,
+    kind: "connection", // Option A: a recipe unit is step | handoff | span, not step-locked
+    fromName: seam.fromName || "",
+    toName: seam.toName || "",
+    level: seam.level, // lo / md / hi, straight from the Leverage Map — never lowered here
+    humanHeld,
+    status: confirmed ? "trusted" : "proposed",
+    value: src.text,
+    source: confirmed ? "user-stated" : "ai-inferred", // .prov: AI grey -> user teal on confirm
+    confidence: recipeUnitConfidence(seam.state, confirmed),
+    origin: src.origin, // "generation" now; "library" after the one-point swap
+    assist: humanHeld
+      ? "AI packages, drafts, and routes the handoff; the person approves"
+      : "AI can carry the handoff between these steps"
+  };
+}
+
+// The by-connection book: every Leverage-Map seam, each with its recipe (or null).
+function recipeBookByConnection(seams = recipeConnectionSeams()) {
+  return (Array.isArray(seams) ? seams : []).map((seam) => ({
+    seam,
+    connId: handoffId(seam.fromId, seam.toId),
+    fromName: seam.fromName || "",
+    toName: seam.toName || "",
+    level: seam.level,
+    humanHeld: Boolean(seam.humanHeld),
+    recipe: recipeForConnection(seam)
+  }));
+}
+
+// One connection card. Always surfaces the seam (from -> to, the reused Leverage-Map
+// level tile, and a Human Pink human-hold badge when held). With a recipe attached it
+// shows the status + the merged .prov provenance + the assist line; without one, a clean
+// "No recipe yet" surface that names where connection recipes come from — never a dead
+// end, never "eliminate".
+function recipeBookConnectionCardHtml(row) {
+  const r = row.recipe;
+  const held = Boolean(row.humanHeld);
+  const tile = leverageTileHtml(row.level || "lo", (row.seam && row.seam.state) || null, held);
+  const heldBadge = held
+    ? `<span style="color:${HUMAN_HOLD_HUE};font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;">human-hold</span>`
+    : "";
+  const title = `<strong style="color:var(--txt,#EAEFFF);font-size:14px;">${escapeHtml(row.fromName || "Step")} <span style="color:var(--txt-faint,#737A92);">&rarr;</span> ${escapeHtml(row.toName || "Step")}</strong>`;
+  const head = `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">${tile}${title}${r ? recipeStatusChipHtml(r.status) : ""}${r ? recipeProvChipHtml(r.source) : ""}${heldBadge}</div>`;
+  if (!r) {
+    return `<div class="recipe-book-card recipe-book-connection recipe-book-empty-connection" data-recipe-book-connection="${escapeHtml(row.connId)}" style="background:var(--deep2,#0b0e1c);border:1px dashed var(--sg-line,rgba(255,255,255,.10));border-radius:12px;padding:14px 16px;margin-bottom:10px;">
+      ${head}
+      <div style="color:var(--txt-faint,#737A92);font-size:11px;margin-top:6px;line-height:1.5;">No recipe yet — this connection is surfaced by the Leverage Map${held ? "; a person owns the approval here" : ""}. Connection recipes fill in from the trusted recipe library; add recipes on the adjacent steps in By step to start one.</div>
+    </div>`;
+  }
+  return `<div class="recipe-book-card recipe-book-connection" data-recipe-book-connection="${escapeHtml(row.connId)}" style="background:var(--glass,rgba(255,255,255,.045));border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:12px;padding:14px 16px;margin-bottom:10px;">
+    ${head}
+    <div style="margin-top:8px;color:var(--txt-dim,#A6ADC4);font-size:12px;line-height:1.5;">
+      <span style="color:var(--txt-faint,#737A92);">Recipe:</span> ${escapeHtml(r.assist)}.
+    </div>
+  </div>`;
+}
+
+// The by-connection section. Never a dead end: with no seams it explains HOW connections
+// surface (the Leverage Map signal), and points forward — it never reads "blocked".
+function recipeBookConnectionSectionHtml() {
+  const rows = recipeBookByConnection();
+  if (!rows.length) {
+    return `<div class="recipe-book-empty" style="background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:12px;padding:16px 18px;margin-bottom:12px;color:var(--txt-dim,#A6ADC4);font-size:13px;line-height:1.55;">No connections surfaced yet — the Leverage Map highlights handoffs where AI can carry work between steps (a shared tool, a manual handoff, system-switching, or a classified transition). Capture more of the workflow's shape and the connections appear here.</div>`;
+  }
+  const intro = `<div style="font-size:11px;color:var(--txt-faint,#737A92);margin:0 0 10px;line-height:1.5;">Connections the Leverage Map surfaced between adjacent steps. A recipe here carries the handoff; where a person owns the approval, AI assists and the person decides.</div>`;
+  return intro + rows.map(recipeBookConnectionCardHtml).join("");
 }
 
 function renderAnalysisTabRecipe() {
