@@ -17907,7 +17907,7 @@ const FINAL_SWEEP_MAX_FOLLOWUPS_PER_AREA = 2;
 // opportunity, leverage, or automation question.
 const FINAL_SWEEP_FIELDS = ["actor", "tool", "accessMode", "input", "dataHandling", "output", "handoff", "trigger", "decision"];
 const FINAL_SWEEP_INTRO = "A few last things to make sure I've got this right.";
-const FINAL_SWEEP_CLOSE = "Got it — that's a clear picture of the workflow. We can always refine the finer details later.";
+const FINAL_SWEEP_CLOSE = "Got it — that's a clear picture of the workflow, and thank you for walking me through it. Nothing's locked in — we can always refine the finer details later.";
 
 function ensureFinalSweep() {
   if (!state.finalSweep || typeof state.finalSweep !== "object") {
