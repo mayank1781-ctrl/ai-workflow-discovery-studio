@@ -55,7 +55,10 @@ const PATTERN_HANDOFF_MODEL = process.env.PATTERN_HANDOFF_MODEL || "claude-fable
 const AI_MIRROR_MODEL = process.env.AI_MIRROR_MODEL || "claude-fable-5";
 const DUMP_EXTRACT_MODEL = process.env.DUMP_EXTRACT_MODEL || "claude-fable-5";
 const REALTIME_MODEL = process.env.REALTIME_MODEL || "gpt-realtime-2";
-const REALTIME_VOICE = process.env.REALTIME_VOICE || "marin";
+// b4 — the app's realtime voice. ONE swappable knob: change this fallback (or set the
+// REALTIME_VOICE env var) to swap by ear. Valid gpt-realtime voices: alloy, ash, ballad,
+// coral, echo, sage, shimmer, verse, marin, cedar.
+const REALTIME_VOICE = process.env.REALTIME_VOICE || "coral"; // softer, warmer, female-sounding default
 const REALTIME_REASONING_EFFORT = process.env.REALTIME_REASONING_EFFORT || "low";
 const TRANSCRIPTION_MODEL = process.env.TRANSCRIPTION_MODEL || "gpt-4o-transcribe";
 const TTS_MODEL = process.env.TTS_MODEL || "gpt-4o-mini-tts";
