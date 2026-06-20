@@ -7538,6 +7538,46 @@ if (typeof window !== "undefined") {
   };
 }
 
+// E1 — seam-dimension derivers. Each returns a .prov.* triple {value, source, confidence}
+// on the Leverage Map's {stated|computed|inferred} provenance vocabulary, or undefined when
+// there is no captured signal (latency/criticality only). Never imply criticality lowers when
+// friction is low — the dimensions are orthogonal.
+const SEAM_DIM_LEVELS = ["low", "medium", "high"];
+function seamFrictionDim(motivatorKinds, frictionA, frictionB) {
+  const tag = frictionA || frictionB;
+  const v = tag && tag.value;
+  let level = "low";
+  if (v === "manual-entry" || v === "rework" || v === "error-prone") level = "high";
+  else if (v || (Array.isArray(motivatorKinds) && (motivatorKinds.includes("system-switching") || motivatorKinds.includes("manual-channel")))) level = "medium";
+  return { value: level, source: tag ? provenanceToState(tag.source) : "inferred", confidence: tag ? "high" : "low" };
+}
+function seamLatencyDim(motivatorKinds, handoffTag) {
+  const kinds = Array.isArray(motivatorKinds) ? motivatorKinds : [];
+  if (handoffTag || kinds.includes("transition")) return { value: "medium", source: handoffTag ? provenanceToState(handoffTag.source) : "inferred", confidence: "low" };
+  if (kinds.includes("manual-channel")) return { value: "medium", source: "inferred", confidence: "low" };
+  return undefined;
+}
+function seamCriticalityDim(humanHeld, decA, decB) {
+  if (!humanHeld) return undefined;
+  const src = (decA && provenanceToState(decA.source)) || (decB && provenanceToState(decB.source)) || "computed";
+  return { value: "high", source: src, confidence: "high" };
+}
+
+// One seam-dimension chip — flat hue (per dimension family) + an alpha shade for the level +
+// a TEXT label, reusing the heatmap source-dot. friction=blue (leverage), latency=amber (flow),
+// criticality=Human Pink (protect; high criticality is a human-held decision). No new color.
+function seamDimChipHtml(label, dim, hue) {
+  if (!dim || !dim.value) return "";
+  const alpha = { low: "33", medium: "55", high: "88" }[dim.value] || "33";
+  return `<span title="${escapeHtml(label)}: ${escapeHtml(dim.value)} (${escapeHtml(dim.source)})" style="display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border:1px solid #16263a;border-radius:5px;background:${hue}${alpha};color:#e2e8f0;font-weight:600;font-size:10px;">${escapeHtml(label)} ${escapeHtml(dim.value)}${heatmapSourceDot(dim.source)}</span>`;
+}
+// The three-dim row for a seam — rendered ONLY when latency or criticality is present, so a
+// friction-only seam is byte-identical to today.
+function seamDimsHtml(seam) {
+  if (!seam || (!seam.latency && !seam.criticality)) return "";
+  return `<div style="margin:-2px 0 6px 46px;display:flex;gap:6px;flex-wrap:wrap;">${seamDimChipHtml("friction", seam.friction, LEVERAGE_HUE)}${seamDimChipHtml("latency", seam.latency, "#FFB454")}${seamDimChipHtml("criticality", seam.criticality, HUMAN_HOLD_HUE)}</div>`;
+}
+
 function buildWorkflowLeverage(steps, sidecars) {
   const list = Array.isArray(steps) ? steps : [];
   const sc = sidecars && typeof sidecars === "object" ? sidecars : {};
@@ -7603,6 +7643,15 @@ function buildWorkflowLeverage(steps, sidecars) {
       structuralTagOf(stepTypes, b.id, STEP_TYPE_OPTIONS), structuralTagOf(roleTags, b.id, ROLE_VALUES), structuralTagOf(decisionTags, b.id, DECISION_KINDS), b.hasHumanCheckpoint
     );
 
+    // E1 — three ORTHOGONAL seam dimensions, each a .prov.* triple on this surface's
+    // {stated|computed|inferred} vocabulary. friction (mechanical effort, the assembly-
+    // leverage signal) is always present; latency (elapsed wait, the flow signal) and
+    // criticality (consequence, the protect signal — highest at a human-held decision) are
+    // present only when the capture shows a signal, else undefined (additive: friction-only
+    // seams render exactly as before).
+    const motivatorKinds = motivators.map((m) => m.kind);
+    const decA = structuralTagOf(decisionTags, a.id, DECISION_KINDS);
+    const decB = structuralTagOf(decisionTags, b.id, DECISION_KINDS);
     seams.push({
       fromId: a.id,
       fromName: (a && a.name) || "",
@@ -7611,7 +7660,10 @@ function buildWorkflowLeverage(steps, sidecars) {
       level: leverageLevelFor(motivators.length),
       state: leastAssertedState(motivators.map((m) => m.state)),
       humanHeld,
-      motivators: motivators.map((m) => m.kind),
+      motivators: motivatorKinds,
+      friction: (typeof seamFrictionDim === "function") ? seamFrictionDim(motivatorKinds, frictionA, frictionB) : undefined,
+      latency: (typeof seamLatencyDim === "function") ? seamLatencyDim(motivatorKinds, handoffTag) : undefined,
+      criticality: (typeof seamCriticalityDim === "function") ? seamCriticalityDim(humanHeld, decA, decB) : undefined,
       assist: humanHeld ? "AI packages and routes the handoff; the person approves" : "AI can carry the handoff between these steps",
       evidence: motivators.map((m) => seamMotivatorPhrase(m))
     });
@@ -7661,7 +7713,7 @@ function leverageMapHtml() {
     </div>`;
 
   const stepRows = model.steps.map((s) => row(escapeHtml(s.name || "Step"), s.level, s.state, s.humanHeld, s.assist, s.evidence)).join("");
-  const seamRows = model.seams.map((s) => row(`${escapeHtml(s.fromName || "Step")} <span style="color:#3f5878;">&rarr;</span> ${escapeHtml(s.toName || "Step")}`, s.level, s.state, s.humanHeld, s.assist, s.evidence)).join("");
+  const seamRows = model.seams.map((s) => row(`${escapeHtml(s.fromName || "Step")} <span style="color:#3f5878;">&rarr;</span> ${escapeHtml(s.toName || "Step")}`, s.level, s.state, s.humanHeld, s.assist, s.evidence) + (typeof seamDimsHtml === "function" ? seamDimsHtml(s) : "")).join("");
 
   const stepSection = model.steps.length
     ? `<div><div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#8aa0b8;margin:0 0 4px;">By step</div>${stepRows}</div>`
