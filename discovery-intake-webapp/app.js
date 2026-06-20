@@ -12046,13 +12046,30 @@ function buildConnectionRecipeSpec(unitId) {
 
 // The spec for any unit id — a step.id, or a connection handoffId ("h:from>to"). Defensive:
 // any failure falls back to the well-formed empty spec so a unit is never left specless.
-function buildRecipeSpec(unitId) {
+// Change 2: when an AI policy is loaded (or one is passed in), the base spec's constraints /
+// escalation / readiness are populated from the normalized constraint set. With no policy
+// this is a no-op — byte-identical to Change 1. `policyInput` is an optional override (a
+// structured policyConstraints object or a clause policy); default reads state.aiPolicy.
+function buildRecipeSpec(unitId, policyInput) {
   if (!unitId) return defaultRecipeSpec();
+  let base;
   try {
-    return String(unitId).startsWith("h:") ? buildConnectionRecipeSpec(unitId) : buildStepRecipeSpec(unitId);
+    base = String(unitId).startsWith("h:") ? buildConnectionRecipeSpec(unitId) : buildStepRecipeSpec(unitId);
   } catch (_e) {
     return defaultRecipeSpec();
   }
+  try {
+    if (typeof normalizePolicyConstraints === "function") {
+      const policySource = policyInput !== undefined
+        ? policyInput
+        : (typeof currentAiPolicy === "function" ? currentAiPolicy() : null);
+      const pc = normalizePolicyConstraints(policySource);
+      if (pc) return applyPolicyConstraintsToSpec(base, unitGovernanceShape(unitId), pc);
+    }
+  } catch (_e) {
+    // any failure leaves the Change 1 base spec intact
+  }
+  return base;
 }
 
 // Render a unit's spec as a compact six-field canvas + eval-cases list. REUSES the merged
@@ -12100,6 +12117,7 @@ function recipeSpecCanvasHtml(spec, unitId) {
       ${readinessChip}
     </summary>
     <div style="margin-top:6px;">
+      ${spec.readinessReason ? `<div style="margin-bottom:6px;font-size:11px;line-height:1.5;color:var(--txt-faint,#737A92);">Readiness note: ${escapeHtml(String(spec.readinessReason))}</div>` : ""}
       ${fieldRow("goal", "Goal", spec.goal)}
       ${fieldRow("context", "Context", spec.context)}
       ${fieldRow("constraints", "Constraints", spec.constraints)}
@@ -12134,6 +12152,250 @@ function wireRecipeSpecCanvas(container) {
       toast("Add this detail on the step, then regenerate — confirming hardens it from inferred (grey) to stated (teal).");
     });
   });
+}
+
+// === Change 2 — Policy ingestion -> constraints, escalation, readiness ===============
+// An uploaded AI policy is normalized into a STRUCTURED constraint set (not regex over
+// prose: the structured path passes through; the V3-3 clause path reuses the existing
+// area classifier matchPolicyClause). The constraint set caps each unit's PERMITTED
+// ADDRESSABILITY — the level of AI autonomy the policy allows — and fills spec.constraints
+// + spec.escalation (source "ai-inferred" until a human confirms) and tags spec.readiness
+// now / gated / future with a surfaced reason. Additive: with no policy loaded every unit
+// is byte-identical to Change 1. Descriptive only — no banned economics token, no scorer,
+// no grid write, no endpoint (the policy is already uploaded via /api/extract-policy).
+
+// Addressability is measured on the same four-level autonomy ordinal as the policy's own
+// autonomyCeiling. The PRODUCT can only DELIVER "assist" today (prompt/knowledge, no live
+// actions or integrations) — a unit the policy permits ABOVE assist needs a capability not
+// present yet, which is what "future" readiness means.
+const ADDRESSABILITY_LEVELS = ["assist", "bounded-agent", "supervised-orchestration", "governed-autonomy"];
+const PRODUCT_DELIVERABLE_ADDRESSABILITY = "assist";
+const POLICY_DATA_TIERS = ["public", "internal", "confidential", "PII", "MNPI"];
+// Stricter data tiers LOWER the ceiling (never raise it). Unknown is treated conservatively
+// (assist) and surfaced — never assumed to be the most permissive tier.
+const DATA_TIER_ADDRESSABILITY_CEILING = {
+  public: "governed-autonomy",
+  internal: "supervised-orchestration",
+  confidential: "bounded-agent",
+  PII: "assist",
+  MNPI: "assist",
+  unknown: "assist"
+};
+// Step types that inherently keep a person in control cap the ceiling regardless of tier.
+const STEP_TYPE_ADDRESSABILITY_CEILING = {
+  judgment: "assist",
+  decision: "assist",
+  review: "assist",
+  handoff: "supervised-orchestration",
+  "data-op": "governed-autonomy"
+};
+
+function normalizeAddressabilityLevel(level) {
+  return ADDRESSABILITY_LEVELS.includes(level) ? level : "assist";
+}
+function addressabilityRank(level) {
+  const i = ADDRESSABILITY_LEVELS.indexOf(level);
+  return i < 0 ? 0 : i; // an unknown level is treated as the most conservative
+}
+function minAddressability(a, b) {
+  return addressabilityRank(a) <= addressabilityRank(b) ? normalizeAddressabilityLevel(a) : normalizeAddressabilityLevel(b);
+}
+
+// The level a unit could reach by its NATURE, ignoring policy. A human-held or judgment
+// unit stays at assist (a person decides); a data-op could in principle be fully autonomous.
+function theoreticalAddressability(stepType, humanHeld) {
+  if (humanHeld) return "assist";
+  switch (stepType) {
+    case "judgment":
+    case "decision":
+    case "review": return "assist";
+    case "handoff": return "supervised-orchestration";
+    case "data-op": return "governed-autonomy";
+    default: return "bounded-agent";
+  }
+}
+
+// The policy's cap for a unit, as a function of step type AND data tier (the spec's
+// ceiling(stepType, dataTier)): the MIN of the policy autonomy ceiling, the data-tier
+// ceiling, and the step-type ceiling. Monotonically restrictive — stricter inputs lower it.
+function unitAddressabilityCeiling(stepType, dataTier, pc) {
+  const autonomy = normalizeAddressabilityLevel(pc && pc.autonomyCeiling);
+  const tierCap = DATA_TIER_ADDRESSABILITY_CEILING[dataTier] || "assist";
+  const typeCap = STEP_TYPE_ADDRESSABILITY_CEILING[stepType] || "governed-autonomy";
+  return minAddressability(minAddressability(autonomy, tierCap), typeCap);
+}
+
+// Map a captured sensitivity (inferRecipeDataSensitivity: unknown/high/moderate/low) to a
+// coarse data tier. PII / MNPI come only from an explicit policy classification, never from
+// regexing the grid.
+function sensitivityToTier(sensitivity) {
+  switch (sensitivity) {
+    case "high": return "confidential";
+    case "moderate": return "internal";
+    case "low": return "public";
+    default: return "unknown";
+  }
+}
+
+// Resolve a unit's data tier: an explicit policy classification (by unit name, or a "*"
+// default) wins; else the captured sensitivity; else "unknown" (surfaced, conservative).
+function resolveUnitDataTier(gov, pc) {
+  const tiers = (pc && pc.dataTiers && typeof pc.dataTiers === "object") ? pc.dataTiers : {};
+  const explicit = (gov && gov.name && tiers[gov.name]) || tiers["*"] || tiers.default;
+  if (explicit && DATA_TIER_ADDRESSABILITY_CEILING[explicit] && explicit !== "unknown") {
+    return { tier: explicit, known: true };
+  }
+  if (gov && gov.capturedTier && gov.capturedTier !== "unknown" && DATA_TIER_ADDRESSABILITY_CEILING[gov.capturedTier]) {
+    return { tier: gov.capturedTier, known: true };
+  }
+  return { tier: "unknown", known: false };
+}
+
+// permittedAddressability = min(theoretical, ceiling(stepType, dataTier)). The single cap
+// the spec names; everything downstream (constraints text, readiness, Change 5) reads it.
+function permittedAddressability(gov, pc) {
+  const resolved = resolveUnitDataTier(gov, pc);
+  const theoretical = theoreticalAddressability(gov ? gov.stepType : "", gov ? gov.humanHeld : false);
+  const ceiling = unitAddressabilityCeiling(gov ? gov.stepType : "", resolved.tier, pc);
+  return {
+    level: minAddressability(theoretical, ceiling),
+    theoretical,
+    ceiling,
+    dataTier: resolved.tier,
+    dataTierKnown: resolved.known
+  };
+}
+
+// Normalize a policy INPUT into the policyConstraints structure. Accepts (a) a structured
+// policyConstraints object (validated/defaulted) or (b) the V3-3 clause object, from which a
+// constraint set is DERIVED via the existing area classifier (matchPolicyClause) — structure,
+// not new regex over prose. Returns null when there is no usable policy (=> Change 1 behavior).
+function normalizePolicyConstraints(input) {
+  if (!input || typeof input !== "object") return null;
+  const structured = ["autonomyCeiling", "dataTiers", "toolAllowlist", "hitlMandates", "prohibitedUses", "loggingRequirements"]
+    .some((k) => k in input);
+  if (structured) {
+    return {
+      dataTiers: (input.dataTiers && typeof input.dataTiers === "object") ? { ...input.dataTiers } : {},
+      toolAllowlist: Array.isArray(input.toolAllowlist) ? input.toolAllowlist.slice() : [],
+      autonomyCeiling: normalizeAddressabilityLevel(input.autonomyCeiling),
+      hitlMandates: Array.isArray(input.hitlMandates) ? input.hitlMandates.slice() : [],
+      prohibitedUses: Array.isArray(input.prohibitedUses) ? input.prohibitedUses.slice() : [],
+      loggingRequirements: Array.isArray(input.loggingRequirements) ? input.loggingRequirements.slice() : []
+    };
+  }
+  if (Array.isArray(input.clauses) && input.clauses.length && typeof matchPolicyClause === "function") {
+    const line = (cellKey) => {
+      const c = matchPolicyClause(input, cellKey);
+      return c ? `Per policy ${c.ref}: ${policyClip(c.text, 160)}` : null;
+    };
+    const hitl = line("humanCheckpoint");
+    const boundary = line("dataProcessing");
+    const logging = line("regulatoryContext");
+    const sensitive = matchPolicyClause(input, "dataSensitivity");
+    // A policy that mandates human review or governs sensitive data lowers the ceiling.
+    let autonomy = "governed-autonomy";
+    if (logging || boundary) autonomy = minAddressability(autonomy, "supervised-orchestration");
+    if (hitl) autonomy = minAddressability(autonomy, "supervised-orchestration");
+    if (sensitive) autonomy = minAddressability(autonomy, "bounded-agent");
+    return {
+      dataTiers: {},
+      toolAllowlist: [],
+      autonomyCeiling: autonomy,
+      hitlMandates: hitl ? [hitl] : [],
+      prohibitedUses: boundary ? [boundary] : [],
+      loggingRequirements: logging ? [logging] : []
+    };
+  }
+  return null;
+}
+
+// The currently loaded AI policy (V3-3 state.aiPolicy), or null. Guarded for sandboxes.
+function currentAiPolicy() {
+  if (typeof state === "undefined" || !state) return null;
+  const p = state.aiPolicy;
+  return (p && Array.isArray(p.clauses) && p.clauses.length) ? p : null;
+}
+
+// The governance inputs for a unit (step or connection): step type, captured data tier,
+// human-hold, name. Resolved from existing primitives only — never the opportunity scorer.
+function unitGovernanceShape(unitId) {
+  if (String(unitId).startsWith("h:")) {
+    const seams = (typeof recipeConnectionSeams === "function") ? recipeConnectionSeams() : [];
+    const seam = (Array.isArray(seams) ? seams : []).find((s) => s && handoffId(s.fromId, s.toId) === unitId);
+    if (!seam) return { kind: "connection", stepType: "handoff", capturedTier: "unknown", humanHeld: false, name: "" };
+    return {
+      kind: "connection",
+      stepType: "handoff",
+      capturedTier: "unknown", // a seam has no captured sensitivity of its own — classify via policy
+      humanHeld: Boolean(seam.humanHeld),
+      name: `${seam.fromName || ""} -> ${seam.toName || ""}`.trim()
+    };
+  }
+  const steps = (typeof analysisGridSteps === "function") ? analysisGridSteps() : [];
+  const step = (Array.isArray(steps) ? steps : []).find((s) => s && s.id === unitId);
+  if (!step) return { kind: "step", stepType: "", capturedTier: "unknown", humanHeld: false, name: "" };
+  const profile = buildRecipeDeploymentProfile(step);
+  const typeTag = (typeof stepTypeOf === "function") ? stepTypeOf(step.id) : null;
+  return {
+    kind: "step",
+    stepType: (typeTag && typeof typeTag.value === "string") ? typeTag.value : "",
+    capturedTier: sensitivityToTier(profile.dataSensitivity),
+    humanHeld: Boolean(profile.needsHumanApproval),
+    name: compilerCellText(step, "name") || ""
+  };
+}
+
+// spec.constraints — data tier + policy boundaries (permitted addressability) + allowed
+// tools. Inferred until a human confirms.
+function specConstraintsTriple(gov, pc, permitted) {
+  const tools = (pc.toolAllowlist && pc.toolAllowlist.length) ? pc.toolAllowlist.join(", ") : "per the policy allowlist";
+  const tierText = permitted.dataTierKnown
+    ? `Data tier: ${permitted.dataTier}.`
+    : "Data tier: unclassified — classify it before relying on this (treated conservatively).";
+  const value = `${tierText} Permitted addressability: ${permitted.level} (potential ${permitted.theoretical}, policy ceiling ${permitted.ceiling}). Allowed tools: ${tools}.`;
+  return recipeSpecTriple(value, "ai-inferred", null);
+}
+
+// spec.escalation — HITL mandates + prohibited-use triggers (when to stop and hand back).
+function specEscalationTriple(gov, pc) {
+  const parts = [];
+  if (gov.humanHeld) parts.push("A person approves before this proceeds; AI assists and the person decides.");
+  if (pc.hitlMandates && pc.hitlMandates.length) parts.push(`Human-in-the-loop required: ${pc.hitlMandates.join("; ")}.`);
+  if (pc.prohibitedUses && pc.prohibitedUses.length) parts.push(`Stop and hand back if a restricted action arises: ${pc.prohibitedUses.join("; ")}.`);
+  if (pc.loggingRequirements && pc.loggingRequirements.length) parts.push(`Log: ${pc.loggingRequirements.join("; ")}.`);
+  if (!parts.length) parts.push("Hand back to a person if anything falls outside the captured rules.");
+  return recipeSpecTriple(parts.join(" "), "ai-inferred", null);
+}
+
+// now / gated / future with a surfaced reason (esp. for gated). Deterministic; reads only
+// the permitted cap + the unit's captured acceptance — never the opportunity scorer.
+function specReadinessFromPolicy(spec, gov, permitted) {
+  const acceptanceOk = Boolean(spec && spec.acceptanceCriteria && spec.acceptanceCriteria.value);
+  if (!acceptanceOk) return { readiness: "gated", reason: "acceptance criteria are not captured" };
+  if (!permitted.dataTierKnown) return { readiness: "gated", reason: "data tier is unclassified — classify it before relying on this" };
+  const clampedToFloor = addressabilityRank(permitted.level) === 0 && !gov.humanHeld && addressabilityRank(permitted.theoretical) > 0;
+  if (clampedToFloor) return { readiness: "gated", reason: `policy caps AI to assist-only here for the ${permitted.dataTier} data tier` };
+  if (addressabilityRank(permitted.level) > addressabilityRank(PRODUCT_DELIVERABLE_ADDRESSABILITY)) {
+    return { readiness: "future", reason: "the permitted addressability needs an orchestration or action capability that isn't enabled yet" };
+  }
+  return { readiness: "now", reason: "" };
+}
+
+// Apply a normalized constraint set to a Change-1 base spec: populate constraints +
+// escalation, tag readiness, and attach the structured permittedAddressability (for Change 5).
+function applyPolicyConstraintsToSpec(spec, gov, pc) {
+  const permitted = permittedAddressability(gov, pc);
+  const readiness = specReadinessFromPolicy(spec, gov, permitted);
+  return {
+    ...spec,
+    constraints: specConstraintsTriple(gov, pc, permitted),
+    escalation: specEscalationTriple(gov, pc),
+    readiness: readiness.readiness,
+    readinessReason: readiness.reason,
+    permittedAddressability: permitted,
+    policyApplied: true
+  };
 }
 
 function renderAnalysisTabRecipe() {
