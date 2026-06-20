@@ -11537,6 +11537,7 @@ function recipeBookCardHtml(row) {
     <div style="margin-top:8px;color:var(--txt-dim,#A6ADC4);font-size:12px;line-height:1.5;">
       <span style="color:var(--txt-faint,#737A92);">Recipe:</span> ${escapeHtml(r.pattern)} assist, attached to this step.
     </div>
+    ${typeof recipeSpecCanvasFor === "function" ? recipeSpecCanvasFor(row.step.id) : ""}
   </div>`;
 }
 
@@ -11782,14 +11783,20 @@ function recipeUnitSource(unitId) {
     if (shape) {
       const matches = matchLibraryRecipes(shape, library);
       if (matches.length) {
-        return { text: matches[0].recipe, origin: "library", confirmed: matches[0].confirmed === true };
+        const unit = { text: matches[0].recipe, origin: "library", confirmed: matches[0].confirmed === true };
+        // Change 1: the unit also carries its spec canvas. Guarded so the boundary is
+        // byte-identical when the builder isn't loaded; it never auto-hardens.
+        if (typeof buildRecipeSpec === "function") unit.spec = buildRecipeSpec(unitId);
+        return unit;
       }
     }
   }
   // (2) GENERATION fallback — unchanged. The existing recipeCache path; never a dead end.
   const text = (state.recipeCache?.[unitId] || "").trim();
   if (!text) return null;
-  return { text, origin: "generation", confirmed: false };
+  const unit = { text, origin: "generation", confirmed: false };
+  if (typeof buildRecipeSpec === "function") unit.spec = buildRecipeSpec(unitId);
+  return unit;
 }
 
 // A connection recipe's display confidence — derived DETERMINISTICALLY from the seam's
@@ -11894,6 +11901,7 @@ function recipeBookConnectionCardHtml(row) {
     <div style="margin-top:8px;color:var(--txt-dim,#A6ADC4);font-size:12px;line-height:1.5;">
       <span style="color:var(--txt-faint,#737A92);">Recipe:</span> ${escapeHtml(r.assist)}.
     </div>
+    ${typeof recipeSpecCanvasFor === "function" ? recipeSpecCanvasFor(row.connId) : ""}
   </div>`;
 }
 
@@ -11906,6 +11914,226 @@ function recipeBookConnectionSectionHtml() {
   }
   const intro = `<div style="font-size:11px;color:var(--txt-faint,#737A92);margin:0 0 10px;line-height:1.5;">Connections the Leverage Map surfaced between adjacent steps. A recipe here carries the handoff; where a person owns the approval, AI assists and the person decides.</div>`;
   return intro + rows.map(recipeBookConnectionCardHtml).join("");
+}
+
+// === Change 1 — Spec-canvas output schema (the one-page handoff per recipe unit) =====
+// Each agent-addressable recipe unit (a step, a handoff, or a span) carries a six-field
+// `spec` + eval cases + a readiness label. Every field is a provenance triple
+// {value, source, confidence} rendered through the SAME merged .prov classes
+// (recipeProvChipHtml): user-stated reads teal, ai-inferred reads grey, and nothing
+// hardens without an explicit human confirm. The spec is DERIVED from existing evidence
+// (reuse, not re-implement): for a STEP, from the canonical Agent Recipe IR
+// (buildAgentRecipeIr); for a CONNECTION, from the Leverage Map seam it spans.
+// `constraints` and `escalation` are intentionally left inferred here — Change 2 (policy)
+// populates them — and `readiness` defaults to "future" (Change 2 computes it). Additive:
+// the unit is byte-identical when no spec builder is present; descriptive only — no banned
+// economics token, no scorer, no grid write, Human Pink reserved, flat hues only.
+
+const RECIPE_SPEC_READINESS = ["now", "gated", "future"];
+
+// One provenance triple. Empty + ai-inferred by default, so a missing field is honestly
+// grey (never silently presented as fact) and never a blocked state. Source is normalised
+// to the two .prov classes the renderer understands (user-stated -> teal, else grey).
+function recipeSpecTriple(value, source, confidence) {
+  const text = typeof value === "string" ? value.trim() : (value == null ? "" : String(value));
+  const src = (source === "user-stated" || source === "user-edited") ? "user-stated" : "ai-inferred";
+  const conf = typeof confidence === "number" ? confidence : null;
+  return { value: text, source: src, confidence: conf };
+}
+
+// A well-formed but empty spec: six inferred-empty fields, no eval cases yet, readiness
+// "future". The defensive fallback so EVERY emitted unit carries a valid spec even when the
+// underlying evidence can't be resolved (no captured step/seam) — never a dead end.
+function defaultRecipeSpec() {
+  return {
+    goal: recipeSpecTriple("", "ai-inferred", null),
+    context: recipeSpecTriple("", "ai-inferred", null),
+    constraints: recipeSpecTriple("", "ai-inferred", null),
+    acceptanceCriteria: recipeSpecTriple("", "ai-inferred", null),
+    decomposition: [],
+    escalation: recipeSpecTriple("", "ai-inferred", null),
+    evalCases: [],
+    readiness: "future"
+  };
+}
+
+// Derive a STEP unit's spec from the canonical Agent Recipe IR (reuse, not re-implement).
+// A derived field inherits the provenance of the grid cell it rests on: an evidence-backed
+// cell reads teal (user-stated), otherwise grey (ai-inferred). constraints/escalation stay
+// inferred (Change 2 grounds them in an uploaded policy); evalCases reuse the IR test cases.
+function buildStepRecipeSpec(stepId) {
+  const steps = (typeof analysisGridSteps === "function") ? analysisGridSteps() : [];
+  const step = (Array.isArray(steps) ? steps : []).find((s) => s && s.id === stepId);
+  if (!step) return defaultRecipeSpec();
+  const ir = buildAgentRecipeIr(step, {});
+  const triFrom = (key, derivedText) => {
+    const c = compilerCellSnapshot(step, key);
+    const hasEvidence = Boolean(c && c.value);
+    return recipeSpecTriple(
+      derivedText,
+      hasEvidence && c.evidenceBacked ? "user-stated" : "ai-inferred",
+      hasEvidence ? c.confidence : null
+    );
+  };
+  const out = (ir.outputs && ir.outputs[0]) || "";
+  const goal = triFrom("output", out ? `${out} for ${ir.baseName}.` : "");
+  const systems = (ir.systemsMentioned || []).join(", ");
+  const context = triFrom("systemsTools", [
+    (ir.inputs || []).filter(Boolean).join("; "),
+    systems ? `Systems: ${systems}` : ""
+  ].filter(Boolean).join(". "));
+  const constraints = recipeSpecTriple(
+    ir.dataSensitivity ? `Data sensitivity: ${ir.dataSensitivity}. Policy boundaries and allowed tools pending review.` : "",
+    "ai-inferred", null
+  );
+  const acceptanceCriteria = recipeSpecTriple(
+    [ir.testCases && ir.testCases[0] && ir.testCases[0].expected, ir.humanReview && ir.humanReview[0]]
+      .filter(Boolean).join(" Reviewer: "),
+    "ai-inferred", null
+  );
+  const decomposition = [
+    (ir.inputs && ir.inputs[0]) ? `Gather: ${ir.inputs[0]}` : "",
+    ir.purpose ? `Do the work: ${ir.purpose}` : "",
+    out ? `Produce: ${out}` : ""
+  ].filter(Boolean).map((s) => recipeSpecTriple(s, "ai-inferred", null));
+  const escalation = recipeSpecTriple(
+    (ir.humanReview && ir.humanReview[0]) || "A person reviews the output before it is used.",
+    "ai-inferred", null
+  );
+  const evalCases = (Array.isArray(ir.testCases) ? ir.testCases : []).slice(0, 5).map((tc) => ({
+    input: String((tc && tc.given) || ""),
+    expectedOutput: String((tc && tc.expected) || ""),
+    notes: [tc && tc.name, (tc && tc.reviewer) ? `reviewer: ${tc.reviewer}` : ""].filter(Boolean).join(" — ")
+  }));
+  return { goal, context, constraints, acceptanceCriteria, decomposition, escalation, evalCases, readiness: "future" };
+}
+
+// Derive a CONNECTION unit's spec from the Leverage Map seam it spans (consumed, not
+// re-detected). All fields are inferred (there is no single captured step behind a seam).
+// A human-held seam keeps the person approving — assist, not replace — and NEVER says
+// "eliminate". constraints/escalation stay inferred for Change 2.
+function buildConnectionRecipeSpec(unitId) {
+  const seams = (typeof recipeConnectionSeams === "function") ? recipeConnectionSeams() : [];
+  const seam = (Array.isArray(seams) ? seams : []).find((s) => s && handoffId(s.fromId, s.toId) === unitId);
+  if (!seam) return defaultRecipeSpec();
+  const from = seam.fromName || "the prior step";
+  const to = seam.toName || "the next step";
+  const held = Boolean(seam.humanHeld);
+  const tools = (typeof connectionToolTokens === "function") ? connectionToolTokens(seam.fromId, seam.toId) : [];
+  const toolText = (Array.isArray(tools) && tools.length) ? ` Shared context: ${tools.join(", ")}.` : "";
+  const goal = recipeSpecTriple(`The handoff from ${from} to ${to} arrives complete and correctly routed.`, "ai-inferred", null);
+  const context = recipeSpecTriple(`Connects ${from} and ${to}.${toolText}`, "ai-inferred", null);
+  const constraints = recipeSpecTriple("Data tier, policy boundaries, and allowed tools pending review.", "ai-inferred", null);
+  const acceptanceCriteria = recipeSpecTriple("The receiving step has everything it needs to proceed without rework.", "ai-inferred", null);
+  const decomposition = [
+    `Package what ${from} produced, with its supporting detail`,
+    `Route it to ${to}`,
+    held ? "Hold for the person to approve before it proceeds" : "Confirm the receiving step can proceed"
+  ].map((s) => recipeSpecTriple(s, "ai-inferred", null));
+  const escalation = recipeSpecTriple(
+    held
+      ? "A person approves before the handoff completes; AI packages and routes, the person decides."
+      : "If the handoff cannot be completed, route it back to the step owner.",
+    "ai-inferred", null
+  );
+  const evalCases = [
+    { input: `${from} completed with all required detail.`, expectedOutput: `A packaged handoff routed to ${to}${held ? ", held for approval" : ""}.`, notes: "Happy path" },
+    { input: "A required detail from the prior step is missing.", expectedOutput: "The handoff flags the gap and routes back instead of proceeding.", notes: "Missing input — never guesses" },
+    { input: held ? "The approver has not yet decided." : "The receiving step is unavailable.", expectedOutput: held ? "The handoff waits; AI never decides on the person's behalf." : "The handoff queues and surfaces the delay.", notes: held ? "Human-held: assist, not replace" : "Exception path" }
+  ];
+  return { goal, context, constraints, acceptanceCriteria, decomposition, escalation, evalCases, readiness: "future" };
+}
+
+// The spec for any unit id — a step.id, or a connection handoffId ("h:from>to"). Defensive:
+// any failure falls back to the well-formed empty spec so a unit is never left specless.
+function buildRecipeSpec(unitId) {
+  if (!unitId) return defaultRecipeSpec();
+  try {
+    return String(unitId).startsWith("h:") ? buildConnectionRecipeSpec(unitId) : buildStepRecipeSpec(unitId);
+  } catch (_e) {
+    return defaultRecipeSpec();
+  }
+}
+
+// Render a unit's spec as a compact six-field canvas + eval-cases list. REUSES the merged
+// .prov classes (recipeProvChipHtml): ai-inferred reads grey, user-stated teal. A missing /
+// inferred field is shown as an honest empty state WITH a confirm affordance
+// (data-spec-confirm) — never a blocked state. Flat hues + text labels only: no gradient,
+// no new color, Human Pink stays reserved.
+function recipeSpecCanvasHtml(spec, unitId) {
+  if (!spec || typeof spec !== "object") return "";
+  const uid = escapeHtml(String(unitId || ""));
+  const labelCss = "font-size:10px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;color:var(--txt-faint,#737A92);";
+  const rowCss = "padding:8px 0;border-top:1px solid var(--sg-line-soft,rgba(255,255,255,.06));";
+  const confirmBtn = (field) => `<button type="button" class="recipe-spec-confirm" data-spec-confirm="${uid}" data-spec-field="${escapeHtml(field)}" style="background:transparent;border:1px solid var(--sg-line,rgba(255,255,255,.14));color:var(--txt-dim,#A6ADC4);border-radius:7px;padding:2px 9px;font-size:10px;font-weight:600;cursor:pointer;">Confirm</button>`;
+  const fieldRow = (key, label, tri) => {
+    const t = (tri && typeof tri === "object") ? tri : recipeSpecTriple("", "ai-inferred", null);
+    const has = Boolean(t.value);
+    const valueHtml = has
+      ? `<span style="color:var(--txt-dim,#A6ADC4);">${escapeHtml(t.value)}</span>`
+      : `<span style="color:var(--txt-faint,#737A92);font-style:italic;">Not captured yet — confirm to add.</span>`;
+    return `<div class="recipe-spec-field" data-spec-field-row="${escapeHtml(key)}" style="${rowCss}">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:3px;">
+        <span style="${labelCss}">${escapeHtml(label)}</span>
+        <span style="display:inline-flex;align-items:center;gap:8px;">${recipeProvChipHtml(t.source)}${has ? "" : confirmBtn(key)}</span>
+      </div>
+      <div style="font-size:12px;line-height:1.5;">${valueHtml}</div>
+    </div>`;
+  };
+  const decomp = Array.isArray(spec.decomposition) ? spec.decomposition : [];
+  const decompHtml = decomp.length
+    ? `<ol style="margin:4px 0 0;padding-left:18px;font-size:12px;line-height:1.5;color:var(--txt-dim,#A6ADC4);">${decomp.map((t) => `<li>${escapeHtml((t && t.value) || "")} ${recipeProvChipHtml((t && t.source) || "ai-inferred")}</li>`).join("")}</ol>`
+    : `<div style="font-size:12px;color:var(--txt-faint,#737A92);font-style:italic;">Sub-steps not captured yet — confirm to add. ${confirmBtn("decomposition")}</div>`;
+  const cases = Array.isArray(spec.evalCases) ? spec.evalCases : [];
+  const casesHtml = cases.length
+    ? cases.map((c, i) => `<div class="recipe-spec-evalcase" style="padding:7px 0;border-top:1px solid var(--sg-line-soft,rgba(255,255,255,.06));font-size:12px;line-height:1.5;">
+        <div style="color:var(--txt-faint,#737A92);font-size:10px;font-weight:700;">CASE ${i + 1}${(c && c.notes) ? ` · ${escapeHtml(String(c.notes))}` : ""}</div>
+        <div style="color:var(--txt-dim,#A6ADC4);"><span style="color:var(--txt-faint,#737A92);">Input:</span> ${escapeHtml(String((c && c.input) || ""))}</div>
+        <div style="color:var(--txt-dim,#A6ADC4);"><span style="color:var(--txt-faint,#737A92);">Expected:</span> ${escapeHtml(String((c && c.expectedOutput) || ""))}</div>
+      </div>`).join("")
+    : `<div style="font-size:12px;color:var(--txt-faint,#737A92);font-style:italic;">No eval cases yet — confirm to add. ${confirmBtn("evalCases")}</div>`;
+  const readiness = RECIPE_SPEC_READINESS.includes(spec.readiness) ? spec.readiness : "future";
+  const readinessChip = `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:999px;padding:2px 9px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--txt-faint,#737A92);">Readiness · ${escapeHtml(readiness)}</span>`;
+  return `<details class="recipe-spec-canvas" data-spec-canvas="${uid}" style="margin-top:12px;background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:10px;padding:10px 14px;">
+    <summary style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+      <span style="font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--txt,#EAEFFF);">Spec canvas — the one-page handoff</span>
+      ${readinessChip}
+    </summary>
+    <div style="margin-top:6px;">
+      ${fieldRow("goal", "Goal", spec.goal)}
+      ${fieldRow("context", "Context", spec.context)}
+      ${fieldRow("constraints", "Constraints", spec.constraints)}
+      ${fieldRow("acceptanceCriteria", "Acceptance criteria", spec.acceptanceCriteria)}
+      <div class="recipe-spec-field" style="${rowCss}"><span style="${labelCss}">Decomposition</span>${decompHtml}</div>
+      ${fieldRow("escalation", "Escalation", spec.escalation)}
+      <div class="recipe-spec-evalcases" style="${rowCss}"><span style="${labelCss}">Eval cases</span>${casesHtml}</div>
+    </div>
+  </details>`;
+}
+
+// Guarded wrapper used at the card render sites: build + render a unit's spec, returning ""
+// if the builder is unavailable (keeps existing card HTML byte-identical where the spec
+// builder isn't loaded — e.g. focused test sandboxes). Never throws.
+function recipeSpecCanvasFor(unitId) {
+  try {
+    if (typeof buildRecipeSpec !== "function") return "";
+    return recipeSpecCanvasHtml(buildRecipeSpec(unitId), unitId);
+  } catch (_e) {
+    return "";
+  }
+}
+
+// Wire the spec-canvas confirm affordances. A confirm routes the person to add the missing
+// detail — never a dead end — and does NOT auto-harden: promotion (inferred grey -> stated
+// teal) is an explicit, human-initiated step (the confirm gate, Change 3). No grid write.
+function wireRecipeSpecCanvas(container) {
+  if (!container) return;
+  container.querySelectorAll("[data-spec-confirm]").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toast("Add this detail on the step, then regenerate — confirming hardens it from inferred (grey) to stated (teal).");
+    });
+  });
 }
 
 function renderAnalysisTabRecipe() {
@@ -12042,6 +12270,7 @@ function renderAnalysisTabRecipe() {
     `<div style="margin-top:16px;"><button class="secondary-button compact" type="button" id="downloadRecipeBookBtn">Download Recipe Book</button><button type="button" id="recipe-export-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download DOCX</button><button type="button" id="recipe-pdf-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download PDF</button></div>`;
 
   wireRecipeBook(container);
+  wireRecipeSpecCanvas(container);
 
   // Fill the prompt-template body for any step that already has a cached prompt.
   steps.forEach((step) => {
