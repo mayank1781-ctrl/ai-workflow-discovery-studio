@@ -18,6 +18,22 @@
     <script src="./vendor/lucide.js"></script>
     <script src="./vendor/mermaid.min.js"></script>
     <script src="./vendor/xlsx.full.min.js"></script>
+    <!-- Edition 2: the Studio engine is the single source of truth for the spec / recipe /
+         capacity / cost / readiness / flow / leader math + the surface-aware rail. Loaded as a
+         module and exposed on window.StudioEngine; app.js calls it (never forks the math). The
+         process shim lets the unchanged engine import in the browser (its node self-test guard
+         reads process.argv and otherwise no-ops). Additive: if it fails to load, the app runs
+         without the engine-backed figures. -->
+    <script type="module">
+      globalThis.process = globalThis.process || { argv: [] };
+      try {
+        const E = await import("./studio_engine.mjs?v=20260620-e2");
+        window.StudioEngine = E;
+        if (typeof window.onStudioEngineReady === "function") window.onStudioEngineReady();
+      } catch (err) {
+        console.warn("Studio engine failed to load; engine-backed figures are unavailable.", err);
+      }
+    </script>
     <link rel="stylesheet" href="design-system.css">
     <!-- Signal Glass re-skin (Track A) — loaded last so it re-skins existing chrome by cascade. Presentation only. -->
     <link rel="stylesheet" href="./signal-glass.css?v=20260615-discovery-dark" />
