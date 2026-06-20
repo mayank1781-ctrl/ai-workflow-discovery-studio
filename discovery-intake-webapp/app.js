@@ -12077,7 +12077,7 @@ function buildRecipeSpec(unitId, policyInput) {
 // inferred field is shown as an honest empty state WITH a confirm affordance
 // (data-spec-confirm) — never a blocked state. Flat hues + text labels only: no gradient,
 // no new color, Human Pink stays reserved.
-function recipeSpecCanvasHtml(spec, unitId) {
+function recipeSpecCanvasHtml(spec, unitId, gateState) {
   if (!spec || typeof spec !== "object") return "";
   const uid = escapeHtml(String(unitId || ""));
   const labelCss = "font-size:10px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;color:var(--txt-faint,#737A92);";
@@ -12111,12 +12111,20 @@ function recipeSpecCanvasHtml(spec, unitId) {
     : `<div style="font-size:12px;color:var(--txt-faint,#737A92);font-style:italic;">No eval cases yet — confirm to add. ${confirmBtn("evalCases")}</div>`;
   const readiness = RECIPE_SPEC_READINESS.includes(spec.readiness) ? spec.readiness : "future";
   const readinessChip = `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:999px;padding:2px 9px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--txt-faint,#737A92);">Readiness · ${escapeHtml(readiness)}</span>`;
+  // Change 3 — the confirm gate banner. gateState undefined => no banner (byte-identical to
+  // Change 1/2). true => confirmed/hardened (teal, downstream may rely on it). false => draft
+  // until confirmed, with a "Confirm capture" affordance — never a dead end. Reuses the .prov
+  // teal cue (--sg-cyan); flat fills + text only, no new color, Human Pink reserved.
+  const gateBanner = gateState === undefined ? "" : (gateState
+    ? `<div data-spec-gate="confirmed" style="margin-bottom:8px;display:flex;align-items:center;gap:8px;background:rgba(66,232,255,.08);border:1px solid rgba(66,232,255,.30);border-radius:8px;padding:6px 10px;font-size:11px;color:var(--sg-cyan,#42E8FF);"><span style="width:6px;height:6px;border-radius:50%;background:var(--sg-cyan,#42E8FF);"></span>Confirmed — this spec is hardened (stated); downstream may rely on it.</div>`
+    : `<div data-spec-gate="draft" style="margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line,rgba(255,255,255,.14));border-radius:8px;padding:6px 10px;font-size:11px;color:var(--txt-dim,#A6ADC4);"><span>Draft until confirmed — inferred values shown; not yet a hardened artifact.</span><button type="button" class="recipe-spec-confirm-unit" data-confirm-unit="${uid}" style="background:transparent;border:1px solid var(--sg-cyan,#42E8FF);color:var(--sg-cyan,#42E8FF);border-radius:7px;padding:2px 10px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;">Confirm capture</button></div>`);
   return `<details class="recipe-spec-canvas" data-spec-canvas="${uid}" style="margin-top:12px;background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:10px;padding:10px 14px;">
     <summary style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
       <span style="font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--txt,#EAEFFF);">Spec canvas — the one-page handoff</span>
       ${readinessChip}
     </summary>
     <div style="margin-top:6px;">
+      ${gateBanner}
       ${spec.readinessReason ? `<div style="margin-bottom:6px;font-size:11px;line-height:1.5;color:var(--txt-faint,#737A92);">Readiness note: ${escapeHtml(String(spec.readinessReason))}</div>` : ""}
       ${fieldRow("goal", "Goal", spec.goal)}
       ${fieldRow("context", "Context", spec.context)}
@@ -12135,7 +12143,11 @@ function recipeSpecCanvasHtml(spec, unitId) {
 function recipeSpecCanvasFor(unitId) {
   try {
     if (typeof buildRecipeSpec !== "function") return "";
-    return recipeSpecCanvasHtml(buildRecipeSpec(unitId), unitId);
+    // Change 3 — show the confirm-gate state: confirmed units read hardened (teal); the rest
+    // read draft with a Confirm affordance. Guarded so the Change 1/2 sandboxes (no gate) stay
+    // byte-identical (gateState undefined => no banner).
+    const gateState = (typeof isUnitConfirmed === "function") ? isUnitConfirmed(unitId) : undefined;
+    return recipeSpecCanvasHtml(buildRecipeSpec(unitId), unitId, gateState);
   } catch (_e) {
     return "";
   }
@@ -12150,6 +12162,20 @@ function wireRecipeSpecCanvas(container) {
     btn.addEventListener("click", (event) => {
       event.stopPropagation();
       toast("Add this detail on the step, then regenerate — confirming hardens it from inferred (grey) to stated (teal).");
+    });
+  });
+  // Change 3 — the unit-level confirm gate. Human-initiated hardening (inferred grey ->
+  // stated teal) via confirmUnit; downstream only then treats the spec as hardened. Never a
+  // dead end: if nothing is capturable yet, the toast routes the person to add detail first.
+  container.querySelectorAll("[data-confirm-unit]").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const unitId = btn.dataset.confirmUnit;
+      const hardened = (typeof confirmUnit === "function") ? confirmUnit(unitId) : false;
+      toast(hardened
+        ? "Capture confirmed — the spec is now hardened (stated/teal) and downstream can rely on it."
+        : "Nothing to confirm yet — add the missing detail above, then confirm to harden.");
+      if (typeof renderAnalysisTabRecipe === "function") renderAnalysisTabRecipe();
     });
   });
 }
@@ -13414,6 +13440,118 @@ function recipeGateCheck(step) {
     askable: gaps.filter((gap) => !gap.retired).slice(0, 3),
     p9Unconfirmed: Boolean(sensitivityGap)
   };
+}
+
+// === Change 3 — The Workbench confirm/reconcile gate ================================
+// Promotes the EXISTING confirm mechanic (recipeGateCheck + the user-stated/ai-inferred
+// provenance hardening) into a single gate the downstream surfaces call. A unit is
+// "confirmed" only when its relied-on capture is human-confirmed; nothing reaches the Recipe
+// surface or a future Dashboard as a HARDENED artifact until then. Unconfirmed units still
+// show on the Workbench as inferred (grey) with a confirm affordance — never a dead end.
+// Reuses the one-directional hardening; no parallel provenance system; no scorer.
+
+// THE single predicate. A STEP is confirmed when recipeGateCheck finds no open recipe-critical
+// gaps and the sensitivity (P9) is confirmed (the existing "trusted" bar). A CONNECTION is
+// confirmed when both adjacent steps are confirmed (a handoff rests on confirmed endpoints).
+function isUnitConfirmed(unitId) {
+  if (!unitId) return false;
+  if (String(unitId).startsWith("h:")) {
+    const rest = String(unitId).slice(2);
+    const gt = rest.indexOf(">");
+    if (gt < 0) return false;
+    const fromId = rest.slice(0, gt);
+    const toId = rest.slice(gt + 1);
+    return Boolean(fromId) && Boolean(toId) && isUnitConfirmed(fromId) && isUnitConfirmed(toId);
+  }
+  const steps = (typeof analysisGridSteps === "function") ? analysisGridSteps() : [];
+  const step = (Array.isArray(steps) ? steps : []).find((s) => s && s.id === unitId);
+  if (!step) return false;
+  const gate = recipeGateCheck(step);
+  return gate.gaps.length === 0 && !gate.p9Unconfirmed;
+}
+
+// The confirmed/unconfirmed split over a set of units (default: the active workflow's steps).
+// Downstream aggregation (a Dashboard figure) derives ONLY from `.confirmed`; `.unconfirmed`
+// powers the never-a-dead-end nudge ("confirm N more units to populate").
+function confirmedView(unitIds) {
+  const ids = Array.isArray(unitIds)
+    ? unitIds
+    : ((typeof analysisGridSteps === "function" ? analysisGridSteps() : []) || []).map((s) => s && s.id).filter(Boolean);
+  const confirmed = [];
+  const unconfirmed = [];
+  for (const id of ids) (isUnitConfirmed(id) ? confirmed : unconfirmed).push(id);
+  return { confirmed, unconfirmed, total: ids.length };
+}
+
+// THE no-bypass boundary: a HARDENED spec exists ONLY for a confirmed unit; an unconfirmed
+// unit returns null. There is no path from unconfirmed capture to a hardened downstream
+// artifact. The Workbench still renders the inferred spec via buildRecipeSpec + the draft
+// banner — this accessor is only for hardened/trusted consumers (and any Dashboard figure).
+function hardenedRecipeSpec(unitId, policyInput) {
+  if (!isUnitConfirmed(unitId)) return null;
+  if (typeof buildRecipeSpec !== "function") return null;
+  return buildRecipeSpec(unitId, policyInput);
+}
+
+// Human-initiated, one-directional hardening: affirm every PRESENT but unconfirmed cell of the
+// step as user-stated via the EXISTING write path (patchField). Empty cells can't be confirmed
+// (nothing to affirm) — the unit stays unconfirmed until they are captured (the affordance
+// routes to "add detail"). Never auto-runs. Returns true when something hardened.
+function confirmUnit(unitId) {
+  const steps = (typeof analysisGridSteps === "function") ? analysisGridSteps() : [];
+  const step = (Array.isArray(steps) ? steps : []).find((s) => s && s.id === unitId);
+  if (!step) return false;
+  const keys = (typeof GRID_CELL_KEYS !== "undefined" && Array.isArray(GRID_CELL_KEYS)) ? GRID_CELL_KEYS : [];
+  let hardened = false;
+  for (const key of keys) {
+    const cell = getField(step, null, key);
+    if (cell && cell.value && !cellConfirmedEnough(cell)) {
+      if (patchField(step, null, key, cell.value, "user-stated", 1)) hardened = true;
+    }
+  }
+  if (hardened && typeof persistState === "function") persistState();
+  return hardened;
+}
+
+// EXTENSION POINT — multi-person capture is single-capture in this build. Merge multiple
+// capture views of the same unit into ONE, PRESERVING each contributor's provenance and
+// SURFACING conflicts (differing values) rather than silently resolving them. Pure; ready for
+// a multi-person Workbench to call. Ranks by the existing provenance order (GRID_SOURCE_RANK).
+function reconcileCaptures(captures) {
+  const list = (Array.isArray(captures) ? captures : []).filter((c) => c && typeof c === "object");
+  const rank = (src) => (typeof GRID_SOURCE_RANK !== "undefined" && GRID_SOURCE_RANK[src]) || 0;
+  const fieldsOf = (c) => (c.fields && typeof c.fields === "object") ? c.fields : c;
+  const fieldNames = new Set();
+  list.forEach((c) => Object.keys(fieldsOf(c)).forEach((f) => { if (f !== "contributor" && f !== "fields") fieldNames.add(f); }));
+  const merged = {};
+  const conflicts = [];
+  for (const field of fieldNames) {
+    const entries = list.map((c) => {
+      const cell = fieldsOf(c)[field];
+      if (!cell || typeof cell !== "object") return null;
+      return {
+        value: cell.value,
+        source: cell.source || "ai-inferred",
+        confidence: (typeof cell.confidence === "number" ? cell.confidence : null),
+        contributor: c.contributor || "unknown"
+      };
+    }).filter((e) => e && e.value != null && e.value !== "");
+    if (!entries.length) continue;
+    const distinct = [...new Set(entries.map((e) => String(e.value)))];
+    const best = entries.slice().sort((a, b) => rank(b.source) - rank(a.source))[0];
+    const conflicted = distinct.length > 1;
+    if (conflicted) {
+      conflicts.push({ field, values: entries.map((e) => ({ value: e.value, source: e.source, contributor: e.contributor })) });
+    }
+    merged[field] = {
+      value: best.value,
+      source: best.source,
+      confidence: best.confidence,
+      contributors: entries.map((e) => e.contributor),
+      conflicted
+    };
+  }
+  return { merged, conflicts, contributorCount: list.length };
 }
 
 // Inline gap panel rendered into the step's recipe-body slot INSTEAD of calling
