@@ -7411,6 +7411,133 @@ function seamMotivatorPhrase(m) {
 // Only a step with a captured shape signal (a step-type / friction tag or a named
 // tool) gets a row; a boundary with no commonality gets no seam. Returns
 // { steps:[...], seams:[...] }.
+// ============ Edition 2 — Studio engine integration ====================================
+// studio_engine.mjs is the SINGLE SOURCE OF TRUTH for the intake -> spec -> recipe ->
+// capacity / cost / readiness / flow / leader pipeline AND the surface-aware rail. The app
+// CALLS it (never forks the math). It is loaded as a module in index.html and exposed on
+// window.StudioEngine. These adapters map the app's captured-unit shape to the engine intake
+// record and the engine's outputs back onto render models, preserving provenance. Additive:
+// when the engine isn't loaded every wrapper returns null and the app renders as before.
+
+function studioEngine() {
+  if (typeof window !== "undefined" && window.StudioEngine) return window.StudioEngine;
+  if (typeof globalThis !== "undefined" && globalThis.StudioEngine) return globalThis.StudioEngine;
+  return null;
+}
+
+// THE surface-aware rail (Change 4), delegated to the engine — one authority, gating. Returns
+// {ok, violations}. When the engine isn't loaded it reports engineMissing (callers treat that
+// as "unchecked"; the per-module test rails still hold).
+function railCheck(text, surface) {
+  const E = studioEngine();
+  if (E && typeof E.railCheck === "function") return E.railCheck(text, surface);
+  return { ok: true, violations: [], engineMissing: true };
+}
+
+// Unwrap a .prov.* triple (or a bare value) to its value — so engine intake fields stay plain.
+function engineProvValue(t) {
+  return (t && typeof t === "object" && "value" in t) ? t.value : (t == null ? undefined : t);
+}
+
+// app step typology (V3-15) -> engine step class (assembly | judgment | decision).
+function engineStepClass(step) {
+  const tag = (typeof stepTypeOf === "function" && step && step.id) ? stepTypeOf(step.id) : null;
+  const v = (tag && typeof tag.value === "string") ? tag.value : ((step && step.cls) || "");
+  switch (v) {
+    case "decision": return "decision";
+    case "judgment": case "review": return "judgment";
+    case "assembly": case "data-op": case "handoff": return "assembly";
+    default: break;
+  }
+  const cell = (k) => (typeof gridCellValue === "function") ? gridCellValue(step, k) : "";
+  const cues = `${cell("rulesDecisionLogic")} ${cell("humanCheckpoint")} ${cell("exceptionBranching")}`;
+  if (/\b(decid|approve|approval|sign[- ]?off|advisory)\b/i.test(cues)) return "decision";
+  if (/\b(review|judg|assess)\b/i.test(cues)) return "judgment";
+  return "assembly";
+}
+
+// captured sensitivity + regulatory cues -> engine data tier. PII/MNPI only from explicit
+// classification (never assumed); unknown stays undefined so the engine surfaces it.
+function engineDataTier(step) {
+  if (step && step.data) return step.data;
+  const cell = (k) => (typeof gridCellValue === "function") ? gridCellValue(step, k) : "";
+  const reg = `${cell("regulatoryContext")} ${cell("dataProcessing")} ${cell("dataSensitivity")}`.toLowerCase();
+  if (/\b(mnpi|material non[- ]public|inside information)\b/.test(reg)) return "MNPI";
+  if (/\b(pii|personal data|personal information)\b/.test(reg)) return "PII";
+  const sens = (typeof inferRecipeDataSensitivity === "function") ? inferRecipeDataSensitivity(step) : "unknown";
+  if (sens === "high") return "confidential";
+  if (sens === "moderate") return "internal";
+  if (sens === "low") return "public";
+  return undefined;
+}
+
+// One app step -> one engine intake step. Prefers explicit engine fields on the step (a
+// fully-specified unit), falls back to captured grid cells; OMITS a value when capture is
+// absent so the engine tags it "inferred" (provenance preserved through presence).
+function appStepToEngineStep(step) {
+  const cell = (k) => (typeof gridCellValue === "function") ? String(gridCellValue(step, k) || "") : "";
+  const out = { step: (step && step.step) || cell("name") || (typeof stepDisplayName === "function" ? stepDisplayName(step, 0) : "") || "Step", cls: engineStepClass(step) };
+  const tier = engineDataTier(step); if (tier) out.data = tier;
+  const time = (step && step.time != null) ? step.time : parseFloat(cell("timeTaken"));
+  if (time != null && Number.isFinite(time)) out.time = time;
+  if (step && step.theo != null) out.theo = step.theo;
+  if (step && step.touch != null) out.touch = step.touch;
+  if (step && step.wait != null) out.wait = step.wait;
+  if (step && step.waitKind) out.waitKind = step.waitKind;
+  const tool = (step && step.tool) || cell("systemsTools"); if (tool) out.tool = tool;
+  const inputs = (step && step.inputs) || cell("dataProcessing"); if (inputs) out.inputs = inputs;
+  const output = (step && step.output) || cell("output"); if (output) out.output = output;
+  const consumer = (step && step.consumer) || cell("handoff"); if (consumer) out.consumer = consumer;
+  return out;
+}
+
+// The active app workflow (or a passed-in step/seam list + meta) -> an engine intake record.
+// Seams come from buildWorkflowLeverage via recipeConnectionSeams (consumed, not re-detected),
+// carrying the E1 friction/latency/criticality triples.
+function appWorkflowToIntake(opts = {}) {
+  const steps = Array.isArray(opts.steps) ? opts.steps
+    : (typeof analysisGridSteps === "function" ? analysisGridSteps() : []);
+  const seamsRaw = Array.isArray(opts.seams) ? opts.seams
+    : (typeof recipeConnectionSeams === "function" ? recipeConnectionSeams() : []);
+  const seams = (Array.isArray(seamsRaw) ? seamsRaw : []).map((s) => ({
+    from: s.fromName || s.from || "", to: s.toName || s.to || "",
+    type: s.type || (Array.isArray(s.motivators) && s.motivators[0]) || "seam",
+    friction: engineProvValue(s.friction), latency: engineProvValue(s.latency),
+    crit: engineProvValue(s.criticality != null ? s.criticality : s.crit), note: s.note || ""
+  }));
+  const meta = opts.meta || {};
+  return {
+    header: meta.header || { persona: opts.persona || "", dept: opts.dept || "", anchor: opts.anchor || (typeof analysisWorkflowName === "function" ? analysisWorkflowName() : ""), lifecycle: opts.lifecycle },
+    trigger: meta.trigger || { trigger: opts.trigger || "", cadence: opts.cadence || "", volume: opts.volume || "" },
+    steps: (Array.isArray(steps) ? steps : []).map(appStepToEngineStep),
+    seams,
+    judgment: meta.judgment || opts.judgment || {},
+    confirm: meta.confirm || opts.confirm || {},
+    recap: meta.recap || opts.recap || {}
+  };
+}
+
+// Engine-backed compute wrappers — the calc layer the Recipe surface + Dashboard read. Each
+// returns null when the engine isn't loaded (additive). The math lives ONLY in the engine.
+function engineWorkflowSpec(opts = {}) { const E = studioEngine(); if (!E) return null; return E.buildSpec(opts.record || appWorkflowToIntake(opts), opts); }
+function engineWorkflowCapacity(opts = {}) { const E = studioEngine(); if (!E) return null; return E.roleCapacity(E.normalizeIntake(opts.record || appWorkflowToIntake(opts)).steps, opts.profile || "Conservative", opts); }
+function engineWorkflowCost(opts = {}) { const E = studioEngine(); if (!E) return null; return E.costToServe(E.normalizeIntake(opts.record || appWorkflowToIntake(opts)).steps, opts.profile || "Conservative", opts.mode || "routed", opts); }
+function engineWorkflowFlow(opts = {}) { const E = studioEngine(); if (!E) return null; return E.cycleTime(E.normalizeIntake(opts.record || appWorkflowToIntake(opts)).steps, opts); }
+function engineLeaderView(records, opts = {}) { const E = studioEngine(); if (!E) return null; return E.buildLeaderView(records, opts); }
+
+// When the engine finishes loading (async module), re-render the active analysis surface so
+// engine-backed figures appear. Best-effort; never throws.
+if (typeof window !== "undefined") {
+  window.onStudioEngineReady = function () {
+    try {
+      if (typeof document !== "undefined" && document.getElementById) {
+        if (document.getElementById("analysis-tab-recipe") && typeof renderAnalysisTabRecipe === "function") renderAnalysisTabRecipe();
+        if (document.getElementById("analysis-tab-dashboard") && typeof renderAnalysisTabDashboard === "function") renderAnalysisTabDashboard();
+      }
+    } catch (_e) { /* additive */ }
+  };
+}
+
 function buildWorkflowLeverage(steps, sidecars) {
   const list = Array.isArray(steps) ? steps : [];
   const sc = sidecars && typeof sidecars === "object" ? sidecars : {};
