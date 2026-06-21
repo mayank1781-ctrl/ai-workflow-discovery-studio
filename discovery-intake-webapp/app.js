@@ -1628,6 +1628,11 @@ async function checkAiStatus() {
     els.aiStatus.title = realtimeAvailable ? `Primary voice model: ${realtimeModel}. Structured extraction model: ${extractionModel}.` : "";
     els.aiStatus.classList.toggle("active", !aiSlow);
     els.aiStatus.style.color = aiSlow ? "#f59e0b" : "";
+    // M9 — visibly flag demo / non-production mode so no one mistakes it for production.
+    if (data.demoMode) {
+      els.aiStatus.textContent = `${els.aiStatus.textContent} · DEMO`;
+      els.aiStatus.title = `${els.aiStatus.title} Non-production demo mode — secrets are read from the server environment; runtime key-setting is disabled.`.trim();
+    }
     renderLiveTestCommandCenter();
     renderOperatorAddOnsPanel();
     renderPilotControlSummary();

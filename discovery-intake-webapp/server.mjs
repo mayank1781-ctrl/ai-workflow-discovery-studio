@@ -551,7 +551,15 @@ function handleGetSettings(req, res) {
 
 // POST /api/settings/apikey — set the OpenAI key for the running process only
 // (not written to disk; lost on restart, where it falls back to the env var).
+// M9 — runtime key mutation requires an AUTHENTICATED user. In demo / unauthenticated mode
+// (AUTH_ENABLED=false, or no valid session) this is REFUSED, so an unauthenticated request can
+// never flip health to "configured" with a planted key. The key comes from the server env there.
 async function handleSetApiKey(req, res) {
+  const session = readSession(req);
+  if (!session?.sub) {
+    appendAudit(req, "apikey_set_rejected", { detail: "unauthenticated key-set refused" });
+    return sendJson(res, 403, { error: "auth_required", detail: "Setting the API key requires an authenticated user. In demo mode the key is read from the server environment." });
+  }
   let body;
   try { body = await readJson(req); } catch { body = {}; }
   const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
@@ -559,6 +567,7 @@ async function handleSetApiKey(req, res) {
     return sendJson(res, 400, { error: "Invalid API key format" });
   }
   runtimeOpenAiKey = apiKey;
+  appendAudit(req, "apikey_set", { detail: "runtime key updated" });
   return sendJson(res, 200, { ok: true });
 }
 
@@ -1448,6 +1457,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && requestUrl.pathname === "/api/health") {
       return sendJson(res, 200, {
         ok: true,
+        // M9 — make demo / non-production posture VISIBLE. demoMode=true when auth is off; the
+        // client surfaces a "DEMO — non-production" indicator and runtime key-setting is refused.
+        demoMode: !AUTH_ENABLED,
+        nonProduction: !AUTH_ENABLED,
         aiConfigured: Boolean(getOpenAiKey()),
         model: REALTIME_MODEL,
         extractionModel: EXTRACTION_MODEL,
@@ -4603,17 +4616,18 @@ function auditHash(input) {
   return crypto.createHash("sha256").update(text).digest("hex").slice(0, 32);
 }
 
-// Fire-and-forget audit logger. No-op when there's no authenticated user
-// (AUTH_ENABLED=false / no session), so un-gated dev and CI are unaffected.
+// Fire-and-forget audit logger. M9 — audit events are REAL even with no authenticated user:
+// rather than silently no-op (which hid security-relevant actions in demo mode), an
+// unauthenticated event is recorded against the "anonymous" principal and flagged demo:true.
 // Never throws and never blocks the caller — failures are swallowed.
 function appendAudit(req, action, { sessionId = "", detail = "", content } = {}) {
   const session = readSession(req);
-  if (!session?.sub) return;
   const record = {
     ts: new Date().toISOString(),
-    userId: session.sub,
-    email: session.email || "",
-    tid: session.tid || "",
+    userId: session?.sub || "anonymous",
+    email: session?.email || "",
+    tid: session?.tid || "",
+    demo: !session?.sub,
     action,
     sessionId,
     detail,
