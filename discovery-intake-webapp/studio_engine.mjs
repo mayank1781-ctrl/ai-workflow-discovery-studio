@@ -1361,6 +1361,63 @@ export function discoveryRubricHint(text) {
 }
 
 // =====================================================================
+// B1 · DISCOVERY — clean-capture helpers: combined-step split flag + contradiction queue.
+// Pure + additive. The capture surface calls these so the consultant SPLITS combined steps and
+// RECONCILES contradictions at capture, instead of hardening a fiction. Same eval-gated rubric the
+// rest of the app trusts (rubricClassify / stepDecisionLanguage) — no parallel classifier.
+// =====================================================================
+
+// B1 — flag a captured step whose utterance bundles assembly with a judgment/decision act
+// ("draft and approve" -> draft (AI) + approve (the person)). combined:false for a single-act step.
+export function flagCombinedStep(text) {
+  const rc = rubricClassify(text);
+  return {
+    combined: rc.split === true,
+    acts: rc.steps.map(a => ({ text: String(a.text || "").trim(), cls: a.cls })),
+    overall: rc.cls,
+    suggestion: rc.split
+      ? `Split into ${rc.steps.length} steps: ${rc.steps.map(a => `"${String(a.text || "").trim()}" (${a.cls})`).join(" + ")}. AI carries the assembly; the person keeps the judgment/decision.`
+      : null,
+  };
+}
+
+// B1 — the live CONTRADICTION QUEUE. Surfaces captured signals that conflict so they are reconciled at
+// capture, never hardened. Each entry is a {kind, a, b, detail} pair (the two conflicting signals + why).
+// Empty array when the capture is internally consistent (additive — no false conflicts).
+export function detectContradictions(record) {
+  const r = record || {};
+  const steps = Array.isArray(r.steps) ? r.steps : [];
+  const out = [];
+  // 1) class vs language — a step tagged assembly/judgment whose text commits the firm (the B2 rubric)
+  steps.forEach(s => {
+    if (stepDecisionLanguage(s)) out.push({ kind: "class-vs-language",
+      a: { field: "class", step: s.step, value: s.cls }, b: { field: "text", step: s.step, value: s.step },
+      detail: `"${s.step || "this step"}" reads as a decision/commitment but is tagged "${s.cls}" — split the prep (AI) from the call (the person), or confirm the class.` });
+  });
+  // 2) declared sensitivity vs what a step actually touches (the higher tier governs)
+  const declared = r.confirm?.dataTier;
+  if (declared && TIER_RANK[declared] != null) {
+    steps.forEach(s => {
+      if (s.data && TIER_RANK[s.data] != null && TIER_RANK[s.data] > TIER_RANK[declared]) {
+        out.push({ kind: "sensitivity",
+          a: { field: "confirm.dataTier", value: declared }, b: { field: "data", step: s.step, value: s.data },
+          detail: `the workflow is classified "${declared}" but "${s.step}" touches "${s.data}" — the higher tier governs; reconcile the classification before scoring.` });
+      }
+    });
+  }
+  // 3) acceptance/escalation requires a human sign-off, but every captured step is assembly (no human-held step)
+  const acc = `${r.confirm?.acceptance || ""} ${r.confirm?.escalation || ""}`.toLowerCase();
+  const needsHuman = /\b(sign[\s-]?off|reviewer|approv|four-eyes|human review|escalat)\b/.test(acc);
+  const hasHumanHeld = steps.some(s => s.cls === "judgment" || s.cls === "decision");
+  if (needsHuman && steps.length && !hasHumanHeld) {
+    out.push({ kind: "review-vs-steps",
+      a: { field: "confirm.acceptance", value: r.confirm?.acceptance || r.confirm?.escalation }, b: { field: "steps", value: "every step tagged assembly" },
+      detail: "acceptance/escalation requires a human sign-off, but every captured step is tagged assembly — add the human-held review/decision step it implies." });
+  }
+  return out;
+}
+
+// =====================================================================
 // 6 · RAIL (Change 4) — surface-aware, deterministic, gating
 // =====================================================================
 export const RAIL = {
@@ -1857,6 +1914,20 @@ function runTests() {
     const pool = buildPooledLibrary([dirty, RECON_INTAKE]);
     ok("A4 derived layer aggregates over the POOLED library (role/capability/leader)", buildRoleView(pool).confirmedCount === 2 && buildCapabilityMap(pool).confirmedCount === 2 && buildLeaderView(pool).confirmedCount === 2, "");
     ok("A4 the whole pooled library carries no literal PII/MNPI value", !/"(PII|MNPI)"/.test(JSON.stringify(pool)), "");
+  }
+
+  // B1 — clean capture: combined-step split flag + the contradiction queue
+  {
+    ok("B1 'draft and approve' is flagged for split at capture", flagCombinedStep("draft and approve the memo").combined === true, "");
+    ok("B1 the split names the assembly + decision acts", (() => { const f = flagCombinedStep("draft and approve the memo"); return f.acts.length >= 2 && f.acts.some(a => a.cls === "assembly") && f.acts.some(a => a.cls === "decision"); })(), "");
+    ok("B1 a single assembly act is NOT flagged (no false split)", flagCombinedStep("reconcile the two ledgers").combined === false, "");
+    // contradiction queue — a step tagged assembly but committing the firm lands in the queue
+    const mis = { steps: [{ step: "Approve the waiver and send it", cls: "assembly", data: "internal", time: 10, theo: 80 }] };
+    ok("B1 a class-vs-language contradiction lands in the queue", detectContradictions(mis).some(c => c.kind === "class-vs-language"), "");
+    // declared sensitivity vs what a step touches
+    const sens = { steps: [{ step: "Pull client financials", cls: "assembly", data: "MNPI", time: 10, theo: 80 }], confirm: { dataTier: "internal" } };
+    ok("B1 a sensitivity contradiction lands in the queue", detectContradictions(sens).some(c => c.kind === "sensitivity"), "");
+    ok("B1 a clean capture has an EMPTY queue (no false conflicts)", detectContradictions(FPA_INTAKE).length === 0, JSON.stringify(detectContradictions(FPA_INTAKE)));
   }
 
   // ---- Edition 3 \u00b7 F6 \u2014 confirm gate, control-aware (confirmBlockers / canHarden) ----

@@ -1153,6 +1153,13 @@ const defaultState = {
   // SEPARATE from the opportunity score. ai-inferred never auto-hardens;
   // normalizeLoadedState backfills {} and never promotes.
   roleTags: {},
+  // B1 (Phase 2): solution-shape per step (A1 axis) — sidecar keyed by step.id, {value,source,confidence}.
+  // Threaded into the engine record by appStepToEngineStep; absent => byte-identical (A1 default path).
+  solutionShapes: {},
+  // B1: the live contradiction queue (engine-computed pairs of conflicting captured signals) and the
+  // policy-first capture frame (profile + data tiers set BEFORE steps). Additive; [] / default when unused.
+  contradictionQueue: [],
+  capturePolicy: { profile: "Conservative", tiers: ["public", "internal", "confidential", "PII", "MNPI"], setAt: null },
   // V3-3: uploaded AI policy (a relied-on value). Shape:
   // { fileName, uploadedAt, clauses:[{id,ref,heading,text,source,confidence}] }.
   // null = no policy → artifacts use the generic advisory caution. Read-only at
@@ -6983,6 +6990,79 @@ function confirmRole(id) { return confirmStructuralTag(ensureRoleTags(), id, ROL
 // Reject → delete the key (reuses the generic core). PURE.
 function rejectRole(id) { return rejectStructuralTag(ensureRoleTags(), id); }
 
+// ===================================================================
+// B1 (Phase 2) — DISCOVERY clean capture: solution-shape per step + the contradiction queue.
+// solution-shape is the A1 axis (prompt | rag | deterministic-tool | agentic | human-in-loop),
+// captured per step and threaded into the engine record so cost/eval/controls/readiness follow it.
+// REUSES the generic structural-tag core (sidecar state.solutionShapes keyed by step.id) — same
+// manual/AI-suggest/confirm/reject discipline as role/friction. The contradiction queue + combined-
+// step split flag delegate to the engine (detectContradictions / flagCombinedStep) — no app math.
+// ===================================================================
+const SOLUTION_SHAPE_VALUES = ["prompt", "rag", "deterministic-tool", "agentic", "human-in-loop"];
+function ensureSolutionShapes() { if (!state.solutionShapes || typeof state.solutionShapes !== "object") state.solutionShapes = {}; return state.solutionShapes; }
+// Read: a {value, source, confidence} triple, or null when unset / off-set (never fabricated).
+function solutionShapeOf(id) { return structuralTagOf(ensureSolutionShapes(), id, SOLUTION_SHAPE_VALUES); }
+// Manual assign → user-stated (reuses the generic core). Invalid/"" clears.
+function setSolutionShape(id, value) { return setStructuralTag(ensureSolutionShapes(), id, value, SOLUTION_SHAPE_VALUES); }
+// AI suggestion → ai-inferred only after the core validates against the allowed set.
+function applySolutionShapeSuggestion(id, suggestion) { return applyStructuralSuggestion(ensureSolutionShapes(), id, suggestion, SOLUTION_SHAPE_VALUES); }
+// Confirm → promote ai-inferred to user-stated; Reject → delete. PURE.
+function confirmSolutionShape(id) { return confirmStructuralTag(ensureSolutionShapes(), id, SOLUTION_SHAPE_VALUES); }
+function rejectSolutionShape(id) { return rejectStructuralTag(ensureSolutionShapes(), id); }
+
+// B1 — flag a captured step that bundles assembly with a judgment/decision ("draft and approve").
+// Delegates to the engine rubric (no parallel classifier). Returns {combined, acts, suggestion}.
+function engineFlagCombinedStep(text) { const E = studioEngine(); if (!E || typeof E.flagCombinedStep !== "function") return { combined: false, acts: [], suggestion: null, engineMissing: true }; return E.flagCombinedStep(text); }
+// B1 — the contradiction queue over a record (the engine detector). Returns the conflict pairs.
+function engineDetectContradictions(opts = {}) { const E = studioEngine(); if (!E || typeof E.detectContradictions !== "function") return []; return E.detectContradictions(opts.record || appWorkflowToIntake(opts)); }
+
+// B1 — refresh + read the live contradiction queue for the active workflow (engine-computed; stored
+// on state.contradictionQueue so the capture surface can render it). Never throws; [] when clean.
+function refreshContradictionQueue() {
+  const q = engineDetectContradictions();
+  state.contradictionQueue = Array.isArray(q) ? q : [];
+  return state.contradictionQueue;
+}
+// B1 — combined-step split flags across the current grid (one per step whose utterance bundles acts).
+function captureSplitFlags() {
+  const steps = (typeof analysisGridSteps === "function") ? analysisGridSteps() : [];
+  return (Array.isArray(steps) ? steps : []).map((s) => {
+    const name = (s && s.step) || (typeof stepDisplayName === "function" ? stepDisplayName(s, 0) : "") || "";
+    const flag = engineFlagCombinedStep(name);
+    return flag.combined ? { stepId: s && s.id, step: name, ...flag } : null;
+  }).filter(Boolean);
+}
+
+// B1 — POLICY-FIRST capture: the policy profile + data tiers are set BEFORE steps (the capture frame).
+// Default Conservative; reads the uploaded AI policy's tiers when present (state.aiPolicy). PURE read.
+const CAPTURE_POLICY_PROFILES = ["Conservative", "Moderate", "Progressive"];
+function ensureCapturePolicy() {
+  if (!state.capturePolicy || typeof state.capturePolicy !== "object") {
+    state.capturePolicy = { profile: "Conservative", tiers: ["public", "internal", "confidential", "PII", "MNPI"], setAt: null };
+  }
+  return state.capturePolicy;
+}
+function capturePolicyProfile() { return ensureCapturePolicy().profile; }
+function setCapturePolicyProfile(profile) {
+  if (!CAPTURE_POLICY_PROFILES.includes(profile)) return false;
+  ensureCapturePolicy().profile = profile;
+  return true;
+}
+
+// B1 — the capture-integrity strip rendered into the discovery cockpit: the policy-first frame, the
+// combined-step split flags, and the live contradiction queue. Pure HTML; safe when the engine is
+// missing (no flags). Amber = split suggestion; pink = a contradiction to reconcile.
+function captureIntegrityHtml() {
+  let splits = [], queue = [];
+  try { splits = captureSplitFlags(); } catch (_e) { splits = []; }
+  try { queue = refreshContradictionQueue(); } catch (_e) { queue = []; }
+  const profile = capturePolicyProfile();
+  const head = `<div class="ds-micro" style="margin-bottom:4px;">Capture frame · policy <strong style="color:#00d4b4;">${escapeHtml(profile)}</strong>${queue.length ? ` · <span style="color:#ff8da1;">${queue.length} to reconcile</span>` : ""}${splits.length ? ` · <span style="color:#f6c453;">${splits.length} to split</span>` : ""}</div>`;
+  const splitHtml = splits.map((f) => `<div style="font-size:12px;color:#f6c453;line-height:1.45;">⎘ Split &ldquo;${escapeHtml(f.step)}&rdquo; — ${escapeHtml(f.suggestion || "bundles assembly with a human call")}</div>`).join("");
+  const queueHtml = queue.map((c) => `<div style="font-size:12px;color:#ff8da1;line-height:1.45;">⚠ ${escapeHtml(c.detail || "")}</div>`).join("");
+  return `<div style="margin-top:12px;border-top:1px solid rgba(148,163,184,.18);padding-top:10px;">${head}${splitHtml}${queueHtml}${(!splits.length && !queue.length) ? `<div style="font-size:12px;color:#8aa0b8;">No split or contradiction flags — capture is internally consistent.</div>` : ""}</div>`;
+}
+
 // Role footprint: { roleValue: [ {workflowId, workflowName, stepId, stepName, source,
 // confidence}, ... ] } — the steps tagged with each role ACROSS all workflows.
 // Provenance preserved per contributing step. Off-set tags never enter the footprint.
@@ -7504,6 +7584,10 @@ function appStepToEngineStep(step) {
   if (step && Array.isArray(step.participants)) out.participants = step.participants;
   // E3/F2 — pass through the step's control (four-eyes / authority / halt-on-flag / completeness / SoD).
   if (step && step.control && typeof step.control === "object") out.control = step.control;
+  // B1/A1 — the captured solution shape (sidecar, keyed by step.id) threads into the engine record so
+  // cost / eval / controls / readiness follow it. Absent => omitted => byte-identical (A1 default path).
+  const shape = (step && step.solutionShape) || ((typeof solutionShapeOf === "function" && step && step.id) ? (solutionShapeOf(step.id) || {}).value : null);
+  if (shape) out.solutionShape = shape;
   return out;
 }
 
@@ -17173,6 +17257,7 @@ function specStackCockpitHtml(next) {
             </div>`).join("")}
         </div>
       </details>
+      ${captureIntegrityHtml()}
     </div>`;
 }
 
@@ -37209,6 +37294,12 @@ function normalizeLoadedState(parsed = {}) {
     // role is never promoted on load (it hardens only on an explicit confirm); older
     // sessions backfill to {} (byte-identical when the role lens is unused).
     roleTags: parsed.roleTags && typeof parsed.roleTags === "object" ? parsed.roleTags : {},
+    // B1 (Phase 2): backfill the solution-shape sidecar + contradiction queue + policy-first frame.
+    // Stored shapes pass through UNCHANGED (an ai-inferred shape hardens only on confirm); older
+    // sessions backfill to the defaults (byte-identical when these are unused).
+    solutionShapes: parsed.solutionShapes && typeof parsed.solutionShapes === "object" ? parsed.solutionShapes : {},
+    contradictionQueue: Array.isArray(parsed.contradictionQueue) ? parsed.contradictionQueue : [],
+    capturePolicy: parsed.capturePolicy && typeof parsed.capturePolicy === "object" ? parsed.capturePolicy : structuredClone(defaultState.capturePolicy),
     // V3-9: backfill the guided first-run flag so sessions persisted before this
     // feature load cleanly (default: not yet dismissed → first-run can offer).
     onboarding: {
