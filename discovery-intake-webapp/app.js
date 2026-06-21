@@ -1160,6 +1160,8 @@ const defaultState = {
   // policy-first capture frame (profile + data tiers set BEFORE steps). Additive; [] / default when unused.
   contradictionQueue: [],
   capturePolicy: { profile: "Conservative", tiers: ["public", "internal", "confidential", "PII", "MNPI"], setAt: null },
+  // C1: the shared dashboard slice — one control pivots all three dashboards. Default = no slice (all).
+  dashboardSlice: { dimension: "all", value: "all" },
   // V3-3: uploaded AI policy (a relied-on value). Shape:
   // { fileName, uploadedAt, clauses:[{id,ref,heading,text,source,confidence}] }.
   // null = no policy → artifacts use the generic advisory caution. Read-only at
@@ -7122,6 +7124,65 @@ function recipeProofHtml(opts = {}) {
     </div>
     ${remedy}
   </div>`;
+}
+
+// ===================================================================
+// C1 (Phase 2) — the SHARED SLICE + DRILL-DOWN + THREE-LENSES-ALWAYS render invariant. One slice
+// control pivots all three dashboards (engine sliceRecords); the three-lens guard makes a lone
+// capacity tile impossible (capacity is only ever rendered bundled with cost + flow).
+// ===================================================================
+const DASHBOARD_SLICE_DIMENSIONS = ["all", "department", "function", "workflow", "dataTier", "solutionShape"];
+function ensureDashboardSlice() { if (!state.dashboardSlice || typeof state.dashboardSlice !== "object") state.dashboardSlice = { dimension: "all", value: "all" }; return state.dashboardSlice; }
+function engineSliceRecords(records, slice) { const E = studioEngine(); if (!E || typeof E.sliceRecords !== "function") return Array.isArray(records) ? records : []; return E.sliceRecords(records, slice); }
+function engineSliceOptions(records) { const E = studioEngine(); if (!E || typeof E.sliceOptions !== "function") return { department: [], workflow: [], dataTier: [], solutionShape: [] }; return E.sliceOptions(records); }
+function engineThreeLenses(records, opts) { const E = studioEngine(); if (!E || typeof E.threeLenses !== "function") return null; return E.threeLenses(records, opts || {}); }
+function engineDrillDown(records, opts) { const E = studioEngine(); if (!E || typeof E.drillDown !== "function") return []; return E.drillDown(records, opts || {}); }
+
+// C1 — apply the shared slice to a record set (used by every dashboard so they pivot together).
+function sliceDashboardRecords(records) { return engineSliceRecords(records, ensureDashboardSlice()); }
+
+// C1 — the THREE-LENSES render guard. A capacity figure may NOT render without cost + flow alongside.
+// Returns {ok,false reason} so a tile builder can refuse (the render assertion the test pins).
+function threeLensGuard(lenses) {
+  const l = lenses || {};
+  const missing = ["capacity", "cost", "flow"].filter((k) => l[k] == null);
+  return { ok: missing.length === 0, missing, reason: missing.length ? `three-lenses invariant: capacity cannot be shown without ${missing.join(" + ")}` : "" };
+}
+// C1 — the three-lens tile: capacity ALWAYS paired with cost + flow. A lone-capacity input yields the
+// guard marker, never a capacity number (never-a-dead-end, but the invariant holds).
+function threeLensTileHtml(lenses) {
+  const g = threeLensGuard(lenses);
+  if (!g.ok) return `<div class="ds-panel" style="padding:10px 12px;border:1px solid #ff8da155;border-radius:8px;color:#ff8da1;font-size:12px;">⚠ ${escapeHtml(g.reason)}</div>`;
+  const c = lenses.capacity, cost = lenses.cost, flow = lenses.flow;
+  const usd = (n) => `$${Number(n || 0).toLocaleString("en-US")}`;
+  return `<div class="ds-panel" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:12px 14px;border:1px solid #1e3350;border-radius:10px;">
+    <div><div class="ds-micro">Capacity</div><div style="font-size:18px;font-weight:800;color:#00d4b4;">${usd(c.net)}</div><div style="font-size:11px;color:#8aa0b8;">net/yr · ${Number(c.policyGapHrs || 0).toLocaleString("en-US")} h/wk policy gap</div></div>
+    <div><div class="ds-micro">Cost</div><div style="font-size:18px;font-weight:800;color:#aebfd4;">${usd(cost.costToServe)}</div><div style="font-size:11px;color:#8aa0b8;">cost-to-serve · ${usd(cost.modelFitLever)} model-fit lever</div></div>
+    <div><div class="ds-micro">Flow</div><div style="font-size:18px;font-weight:800;color:#FFB454;">${flow.azReductionPct == null ? "—" : flow.azReductionPct + "%"}</div><div style="font-size:11px;color:#8aa0b8;">A–Z reduction · ${flow.pctSavingFromWait == null ? "—" : flow.pctSavingFromWait + "% from wait"}</div></div>
+  </div>`;
+}
+
+// C1 — the shared slice control rendered above every dashboard. Pivots all three together.
+function dashboardSliceControlHtml(records) {
+  const slice = ensureDashboardSlice();
+  const opts = engineSliceOptions(records);
+  const dimLabel = { all: "All", department: "Department", function: "Function", workflow: "Workflow", dataTier: "Data tier", solutionShape: "Solution shape" };
+  const dims = DASHBOARD_SLICE_DIMENSIONS.map((d) => `<option value="${d}"${slice.dimension === d ? " selected" : ""}>${escapeHtml(dimLabel[d] || d)}</option>`).join("");
+  const valueKey = slice.dimension === "function" ? "department" : slice.dimension;
+  const values = (opts[valueKey] || []);
+  const valOpts = [`<option value="all"${slice.value === "all" ? " selected" : ""}>All</option>`].concat(values.map((v) => `<option value="${escapeHtml(String(v))}"${String(slice.value) === String(v) ? " selected" : ""}>${escapeHtml(String(v))}</option>`)).join("");
+  return `<div class="ds-panel" style="display:flex;gap:8px;align-items:center;padding:8px 12px;border:1px solid #1e3350;border-radius:8px;margin-bottom:10px;">
+    <span class="ds-micro">Slice all dashboards by</span>
+    <select data-dashboard-slice-dim style="background:#0d1b2e;color:#aebfd4;border:1px solid #1e3350;border-radius:6px;padding:4px 8px;font-size:12px;">${dims}</select>
+    ${slice.dimension === "all" ? "" : `<select data-dashboard-slice-val style="background:#0d1b2e;color:#aebfd4;border:1px solid #1e3350;border-radius:6px;padding:4px 8px;font-size:12px;">${valOpts}</select>`}
+  </div>`;
+}
+function setDashboardSlice(dimension, value) {
+  const s = ensureDashboardSlice();
+  if (DASHBOARD_SLICE_DIMENSIONS.includes(dimension)) s.dimension = dimension;
+  s.value = (value == null || value === "") ? "all" : value;
+  if (dimension === "all") s.value = "all";
+  return s;
 }
 
 // Role footprint: { roleValue: [ {workflowId, workflowName, stepId, stepName, source,
@@ -13354,9 +13415,11 @@ function dashboardRecords() {
 // The Dashboard data model — the single engine call. recordsOverride lets tests/fixtures
 // drive it; otherwise the app's confirmed workflows.
 function dashboardModel(recordsOverride, opts) {
-  const records = Array.isArray(recordsOverride) ? recordsOverride : dashboardRecords();
+  const allRecords = Array.isArray(recordsOverride) ? recordsOverride : dashboardRecords();
+  // C1 — the shared slice pivots every dashboard from one control (no-op when slice = all).
+  const records = (typeof sliceDashboardRecords === "function") ? sliceDashboardRecords(allRecords) : allRecords;
   const lv = (typeof engineLeaderView === "function") ? engineLeaderView(records, opts || {}) : null;
-  return { lv, records, opts: opts || {} };
+  return { lv, records, allRecords, opts: opts || {} };
 }
 
 // A · program state + the V1 lifecycle funnel (cumulative — a funnel of the confirmed set).
@@ -13542,8 +13605,17 @@ function renderAnalysisTabDashboard(recordsOverride, opts) {
   // multi-actor confirmed data). Bound to F4 + the F8 numbers; reshape language, leader rail.
   let e3OrgTier = "";
   try { if (typeof dashOrgTierHtml === "function") e3OrgTier = dashOrgTierHtml(records, opts) || ""; } catch (_e) { e3OrgTier = ""; }
+  // C1 — the shared slice control + the three-lenses tile (capacity never alone). allRecords drives the
+  // slice options; records are already sliced by dashboardModel.
+  let c1Slice = "", c1ThreeLens = "";
+  try {
+    const all = Array.isArray(recordsOverride) ? recordsOverride : (typeof dashboardRecords === "function" ? dashboardRecords() : records);
+    if (typeof dashboardSliceControlHtml === "function") c1Slice = dashboardSliceControlHtml(all) || "";
+    if (typeof threeLensTileHtml === "function" && typeof engineThreeLenses === "function") c1ThreeLens = threeLensTileHtml(engineThreeLenses(records, opts)) || "";
+  } catch (_e) { c1Slice = ""; c1ThreeLens = ""; }
   container.innerHTML =
     `<div style="font-size:11px;color:${DASH.faint};margin:0 0 10px;padding:6px 10px;background:${DASH.panel};border:1px solid ${DASH.line};border-radius:8px;">FIREWALL · capacity / cost / flow live only on this surface · nothing here reaches capture / workbench / recipe</div>` +
+    c1Slice + c1ThreeLens +
     e3OrgTier +
     dashHeaderHtml(lv) + dashEvidenceChainHtml(lv, flow) + dashCapacityNetHtml(lv) + dashFlowHtml(lv, sample, flow) + dashAgendasHtml(lv);
   wireDashboard(container);
@@ -13555,6 +13627,11 @@ function wireDashboard(container) {
     if (typeof setAnalysisTab === "function") setAnalysisTab("leverage");
     else if (typeof renderAnalysisTabLeverage === "function") renderAnalysisTabLeverage();
   });
+  // C1 — the shared slice control pivots every dashboard; persists + re-renders.
+  const dim = container.querySelector("[data-dashboard-slice-dim]");
+  const val = container.querySelector("[data-dashboard-slice-val]");
+  dim?.addEventListener("change", (e) => { setDashboardSlice(e.target.value, "all"); if (typeof persistState === "function") persistState(); renderAnalysisTabDashboard(); });
+  val?.addEventListener("change", (e) => { setDashboardSlice(ensureDashboardSlice().dimension, e.target.value); if (typeof persistState === "function") persistState(); renderAnalysisTabDashboard(); });
 }
 
 function renderAnalysisTabRecipe() {
@@ -37368,6 +37445,7 @@ function normalizeLoadedState(parsed = {}) {
     solutionShapes: parsed.solutionShapes && typeof parsed.solutionShapes === "object" ? parsed.solutionShapes : {},
     contradictionQueue: Array.isArray(parsed.contradictionQueue) ? parsed.contradictionQueue : [],
     capturePolicy: parsed.capturePolicy && typeof parsed.capturePolicy === "object" ? parsed.capturePolicy : structuredClone(defaultState.capturePolicy),
+    dashboardSlice: parsed.dashboardSlice && typeof parsed.dashboardSlice === "object" ? parsed.dashboardSlice : structuredClone(defaultState.dashboardSlice),
     // V3-9: backfill the guided first-run flag so sessions persisted before this
     // feature load cleanly (default: not yet dismissed → first-run can offer).
     onboarding: {

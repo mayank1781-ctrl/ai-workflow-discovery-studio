@@ -1039,6 +1039,65 @@ export function buildLeaderView(records, opts = {}) {
 }
 
 // =====================================================================
+// C1 (Phase 2) — the SHARED SLICE + DRILL-DOWN + THREE-LENSES-ALWAYS. One control pivots all three
+// dashboards (department / function / workflow / data tier / solution shape); rendering invariant:
+// capacity is NEVER shown alone — every capacity figure is paired with cost and flow (the three lenses).
+// =====================================================================
+
+// C1 — slice records by one dimension. Empty / "all" / unknown => no-op (returns all). Pure.
+export function sliceRecords(records, slice) {
+  const list = (Array.isArray(records) ? records : []).filter(Boolean);
+  if (!slice || !slice.dimension || slice.value == null || slice.value === "" || slice.value === "all") return list;
+  const dim = slice.dimension, val = String(slice.value);
+  return list.filter(r => {
+    switch (dim) {
+      case "department": case "function": return String(r.header?.dept || "") === val;
+      case "workflow": return String(r.header?.anchor || r.header?.persona || "") === val;
+      case "dataTier": return (maxTier(r) || "internal") === val;
+      case "solutionShape": return Object.keys(buildShapeProfile(normalizeIntake(r).steps).byShape).includes(val);
+      default: return true;
+    }
+  });
+}
+// C1 — the slice options present across the loaded records (for the control's dropdowns).
+export function sliceOptions(records) {
+  const list = (Array.isArray(records) ? records : []).filter(Boolean);
+  const uniqv = (f) => [...new Set(list.map(f).filter(v => v != null && v !== ""))];
+  return {
+    department: uniqv(r => r.header?.dept),
+    workflow: uniqv(r => r.header?.anchor || r.header?.persona),
+    dataTier: uniqv(r => maxTier(r) || "internal"),
+    solutionShape: [...new Set(list.flatMap(r => Object.keys(buildShapeProfile(normalizeIntake(r).steps).byShape)))],
+  };
+}
+// C1 — drill-down: department -> its workflows -> a workflow's recipe units (ranked). Pure, confirmed-only.
+export function drillDown(records, opts = {}) {
+  const confirmed = (Array.isArray(records) ? records : []).filter(isConfirmed);
+  const byDept = {};
+  confirmed.forEach(r => {
+    const d = r.header?.dept || "—";
+    (byDept[d] = byDept[d] || []).push({ workflow: r.header?.anchor || r.header?.persona || "workflow",
+      units: buildDraftRecipe(r, opts).rankedUnits.map(u => ({ step: u.step, tier: u.tier, leverage: u.leverage, solutionShape: u.solutionShape })) });
+  });
+  return Object.entries(byDept).map(([department, workflows]) => ({ department, workflows }));
+}
+
+// C1 — THREE LENSES, never one number alone. Returns capacity ALWAYS bundled with cost + flow, so a
+// surface physically cannot show a lone capacity figure (the render guard enforces this — see app).
+export function threeLenses(records, opts = {}) {
+  const lv = buildLeaderView(records, opts);
+  const confirmed = (Array.isArray(records) ? records : []).filter(isConfirmed);
+  const flow = confirmed.length ? cycleTime(normalizeIntake(confirmed[0]).steps, opts) : null;
+  const k = (id) => { const kpi = lv.kpis.find(x => x.id === id); return kpi ? kpi.value : 0; };
+  return {
+    capacity: { gross: k("gross_capacity"), net: k("net_capacity"), policyGapHrs: k("policy_gap"), realizationGapHrs: k("realization_gap") },
+    cost: { costToServe: k("cost_to_serve"), modelFitLever: k("model_fit_lever") },
+    flow: flow ? { azReductionPct: round(flow.azReductionPct, 1), pctSavingFromWait: round(flow.pctSavingFromWait, 1) } : { azReductionPct: null, pctSavingFromWait: null, note: "no confirmed flow yet" },
+    confirmedCount: lv.confirmedCount, pairedLenses: true,
+  };
+}
+
+// =====================================================================
 // 5.5 · EDITION 3 — DERIVED LEADER LAYER (F4): role roll-up · capability map · adjacency
 // Pure derived views over CONFIRMED multi-actor workflows (no new schema), the way buildLeaderView sits
 // on the units. Capacity + operating-model language ONLY — the reasons name controls / data tiers, never
@@ -2067,6 +2126,24 @@ function runTests() {
     // a non-gated workflow (no policy gap) names no remedy
     const clean = buildRecipeProof({ steps: [{ step: "x", cls: "assembly", data: "internal", time: 10, theo: 50 }], confirm: { acceptance: "matches" } }, { profile: "Progressive" });
     ok("B3 a non-gated recipe names NO false remedy", clean.governanceRemedy.gated === false && clean.governanceRemedy.remedy === null, JSON.stringify(clean.governanceRemedy));
+  }
+
+  // C1 — shared slice + drill-down + three-lenses-always
+  {
+    const tech = { ...FPA_INTAKE, header: { ...FPA_INTAKE.header, dept: "Technology", anchor: "tech-wf" }, steps: FPA_INTAKE.steps.map(s => s.cls === "assembly" ? { ...s, solutionShape: "agentic", data: "internal" } : { ...s, data: "internal" }), confirm: { ...FPA_INTAKE.confirm, dataTier: "internal" } };
+    const credit = { ...FPA_INTAKE, header: { ...FPA_INTAKE.header, dept: "Credit Risk", anchor: "credit-wf" }, steps: FPA_INTAKE.steps.map(s => s.cls === "assembly" ? { ...s, solutionShape: "prompt" } : s) };
+    const set = [tech, credit];
+    ok("C1 slice by department filters all dashboards", sliceRecords(set, { dimension: "department", value: "Technology" }).length === 1, "");
+    ok("C1 slice by solution shape = agentic filters to the agentic workflow", sliceRecords(set, { dimension: "solutionShape", value: "agentic" }).length === 1 && sliceRecords(set, { dimension: "solutionShape", value: "agentic" })[0].header.dept === "Technology", "");
+    ok("C1 slice by data tier filters", sliceRecords(set, { dimension: "dataTier", value: "internal" }).length === 1, "");
+    ok("C1 empty/all slice is a no-op (returns all)", sliceRecords(set, { dimension: "department", value: "all" }).length === 2 && sliceRecords(set, null).length === 2, "");
+    ok("C1 slice options enumerate departments + shapes", sliceOptions(set).department.includes("Technology") && sliceOptions(set).solutionShape.includes("agentic"), JSON.stringify(sliceOptions(set)));
+    // three lenses — capacity NEVER alone: always bundled with cost + flow
+    const tl = threeLenses(set);
+    ok("C1 threeLenses bundles capacity WITH cost AND flow (never one number)", tl.capacity && tl.cost && tl.flow && tl.pairedLenses === true, JSON.stringify(Object.keys(tl)));
+    // drill-down: department -> workflows -> units
+    const dd = drillDown(set);
+    ok("C1 drill-down goes department -> workflows -> ranked units", dd.length === 2 && dd.every(d => d.workflows.length >= 1 && d.workflows[0].units.length >= 1), JSON.stringify(dd.map(d => d.department)));
   }
 
   // ---- Edition 3 \u00b7 F6 \u2014 confirm gate, control-aware (confirmBlockers / canHarden) ----
