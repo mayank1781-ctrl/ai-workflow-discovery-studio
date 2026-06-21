@@ -7095,6 +7095,35 @@ function protectedByDesignHtml(records, opts = {}) {
   </div>`;
 }
 
+// ===================================================================
+// B3 (Phase 2) — RECIPE: shape + proof + costed model-fit. Delegates to the engine (buildRecipeProof);
+// renders shape, eval plan, owner, fallback, maintenance, "how you prove it", "the governance remedy",
+// and model-fit as a costed lever (routed vs frontier delta — cost framing, recipe/dashboard only).
+// ===================================================================
+function engineRecipeProof(opts = {}) { const E = studioEngine(); if (!E || typeof E.buildRecipeProof !== "function") return null; return E.buildRecipeProof(opts.record || appWorkflowToIntake(opts), opts); }
+
+function recipeProofHtml(opts = {}) {
+  let p = null;
+  try { p = engineRecipeProof(opts); } catch (_e) { p = null; }
+  if (!p) return "";
+  const shapes = Object.entries(p.solutionShapes || {}).map(([k, v]) => `${escapeHtml(k)}×${v}`).join(", ") || "—";
+  const lever = p.modelFitLever || { routed: 0, frontier: 0, delta: 0 };
+  const remedy = p.governanceRemedy && p.governanceRemedy.gated
+    ? `<div style="font-size:12px;color:#f6c453;line-height:1.5;margin-top:6px;"><strong>The governance remedy:</strong> ${escapeHtml(p.governanceRemedy.remedy)}</div>`
+    : `<div style="font-size:12px;color:#8aa0b8;margin-top:6px;">No policy gap — deployable now (no governance change needed).</div>`;
+  return `<div class="ds-panel" style="padding:12px 14px;border:1px solid #1e3350;border-radius:10px;margin-top:10px;">
+    <div class="ds-micro" style="margin-bottom:6px;color:#00d4b4;">Recipe proof · shape ${shapes} · eval ${escapeHtml(p.evalEffort || "—")}</div>
+    <div style="font-size:12px;color:#aebfd4;line-height:1.6;">
+      <div><strong>Eval plan:</strong> ${escapeHtml((p.evalPlan || []).join("; "))}</div>
+      <div><strong>Owner:</strong> ${escapeHtml(String(p.owner || "—"))} · <strong>Fallback:</strong> ${escapeHtml(p.fallback || "—")}</div>
+      <div><strong>Maintenance:</strong> $${Number(p.maintenanceCost?.annualPoint || 0).toLocaleString("en-US")}/yr (band $${Number(p.maintenanceCost?.band?.low || 0).toLocaleString("en-US")}–$${Number(p.maintenanceCost?.band?.high || 0).toLocaleString("en-US")})</div>
+      <div><strong>How you prove it:</strong> ${escapeHtml(p.howYouProveIt?.goldenSet || "")}; ${escapeHtml(p.howYouProveIt?.thresholds || "")}</div>
+      <div><strong>Model-fit lever:</strong> routed $${Number(lever.routed).toLocaleString("en-US")} vs frontier $${Number(lever.frontier).toLocaleString("en-US")} → <span style="color:#00d4b4;">$${Number(lever.delta).toLocaleString("en-US")}/yr saved</span></div>
+    </div>
+    ${remedy}
+  </div>`;
+}
+
 // Role footprint: { roleValue: [ {workflowId, workflowName, stepId, stepName, source,
 // confidence}, ... ] } — the steps tagged with each role ACROSS all workflows.
 // Provenance preserved per contributing step. Off-set tags never enter the footprint.
@@ -13652,7 +13681,7 @@ function renderAnalysisTabRecipe() {
   // E3/F6 — the confirm-the-map gate (controls enforced at confirm). Additive: empty unless the active
   // workflow carries multi-actor participants/controls. E3/F7 — the multi-actor recipe artifact, likewise.
   // B2 — the adversarial confirm flags + the protected-by-design artifact ride on the same e3rec.
-  let e3WorkbenchGate = "", e3MultiActorRecipe = "", b2Adversarial = "", b2Protected = "";
+  let e3WorkbenchGate = "", e3MultiActorRecipe = "", b2Adversarial = "", b2Protected = "", b3Proof = "";
   try {
     if (typeof appWorkflowToIntake === "function") {
       const e3rec = appWorkflowToIntake();
@@ -13660,14 +13689,16 @@ function renderAnalysisTabRecipe() {
       if (typeof recipeMultiActorHtml === "function") e3MultiActorRecipe = recipeMultiActorHtml(e3rec) || "";
       if (typeof adversarialFlagsHtml === "function") b2Adversarial = adversarialFlagsHtml({ record: e3rec }) || "";
       if (typeof protectedByDesignHtml === "function") b2Protected = protectedByDesignHtml(e3rec) || "";
+      if (typeof recipeProofHtml === "function") b3Proof = recipeProofHtml({ record: e3rec }) || "";
     }
-  } catch (_e) { e3WorkbenchGate = ""; e3MultiActorRecipe = ""; b2Adversarial = ""; b2Protected = ""; }
+  } catch (_e) { e3WorkbenchGate = ""; e3MultiActorRecipe = ""; b2Adversarial = ""; b2Protected = ""; b3Proof = ""; }
   container.innerHTML =
     recipeWorkflowHeaderHtml() +
     artifactStudioHeaderHtml(steps) +
     e3WorkbenchGate +
     b2Adversarial +
     b2Protected +
+    b3Proof +
     e3MultiActorRecipe +
     recipeBookHtml() +
     renderPolicyPanelHtml() +

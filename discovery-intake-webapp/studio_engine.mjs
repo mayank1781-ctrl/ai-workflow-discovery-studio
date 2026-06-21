@@ -915,6 +915,52 @@ export function buildRecipe(record, opts = {}) {
   return { ...buildDraftRecipe(record, opts), draft: false, hardened: true };
 }
 
+// B3 (Phase 2) — the RECIPE PROOF block: everything a recipe must carry to be buildable, beyond the
+// ordered steps. Solution shape (A1) drives the eval plan + maintenance cost (A2); the deck's required
+// fields ride along: "how you prove it" (a golden set + thresholds from acceptance) and "the governance
+// remedy" (the named policy change that unlocks a gated-policy recipe). Model-fit is shown as a COSTED
+// LEVER (routed vs frontier-everywhere delta). Pure; composes the existing engine — no new math.
+export function buildRecipeProof(record, opts = {}) {
+  const r = normalizeIntake(record);
+  const profile = opts.profile || "Conservative";
+  const instances = Math.max(1, Number(opts.instances) || 1);
+  const shapeProf = buildShapeProfile(r.steps);
+  const cap = roleCapacity(r.steps, profile, opts);
+  // MODEL-FIT LEVER — routed (right model per step) vs frontier-everywhere, costed (the deck's $ lever).
+  const routed = costToServe(r.steps, profile, "routed", opts).annual * instances;
+  const frontier = costToServe(r.steps, profile, "frontier", opts).annual * instances;
+  const modelFitLever = { routed: round(routed), frontier: round(frontier), delta: round(frontier - routed),
+    note: "routed (the right model per step) vs frontier-everywhere — the FinOps lever from gross to net; route down to the cheapest tier that clears acceptance." };
+  // HOW YOU PROVE IT — a golden set + thresholds from the acceptance criteria (+ a route-back fallback).
+  const acceptance = (r.confirm?.acceptance || "").trim();
+  const cases = (r.confirm?.evals || "").split("\n").map(s => s.trim()).filter(Boolean);
+  const howYouProveIt = {
+    goldenSet: cases.length ? `${cases.length} acceptance case(s) form the golden set` : "capture a golden set from the acceptance criteria",
+    thresholds: acceptance ? `meets: ${acceptance}` : "set thresholds from the acceptance criteria",
+    cases, source: acceptance ? "stated" : "inferred",
+    fallback: "if quality slips below threshold it routes back to the human — never an auto-pass",
+  };
+  // THE GOVERNANCE REMEDY — the named policy change that unlocks a gated-policy recipe (else null).
+  const policyGapPts = round((cap.theoPct - cap.permittedPct) * 100);
+  const aiMaxTier = (() => { let m = "", mx = -1; r.steps.filter(s => s.cls !== "decision").forEach(s => { if (s.data && TIER_RANK[s.data] > mx) { mx = TIER_RANK[s.data]; m = s.data; } }); return m; })();
+  const governanceRemedy = policyGapPts > 1
+    ? { gated: true, unlockPts: policyGapPts,
+        remedy: `Permit AI on ${aiMaxTier || "the restricted"} data with redaction + the mandatory human gate — one posture change unlocks ~${policyGapPts}pts of addressability (the governance agenda).` }
+    : { gated: false, unlockPts: 0, remedy: null };
+  // SHAPE-DRIVEN eval plan + maintenance cost (A1 requirements + A2 ownership components).
+  const evalPlan = shapeProf.requiredEvidence.length ? shapeProf.requiredEvidence : ["spot-check against the acceptance criteria"];
+  const tco = buildTco(record, { ...opts, instances });
+  return {
+    solutionShapes: shapeProf.byShape, hasAgentic: shapeProf.hasAgentic,
+    evalPlan, evalEffort: shapeProf.maxEvalEffort,
+    owner: opts.owner || r.confirm?.checker || r.judgment?.human || "name the recipe owner before deploy",
+    evidenceLog: { kind: "append-only", entries: [], note: "log runs + outcomes here (reuses the audit primitive — hash-chained, frozen)" },
+    fallback: howYouProveIt.fallback,
+    maintenanceCost: { annualPoint: round(tco.tco.components.maintenance + tco.tco.components.eval), band: tco.tco.annualOngoing },
+    howYouProveIt, governanceRemedy, modelFitLever,
+  };
+}
+
 // =====================================================================
 // 5 · OUTPUTS — worker / engineering / business projections + leader roll-up
 // =====================================================================
@@ -2006,6 +2052,21 @@ function runTests() {
     ok("B2 protected-by-design lists the decision steps human-held", pbd.items.some(i => i.kind === "decision-step" && i.humanHeld), "");
     ok("B2 protected-by-design lists high-criticality seams", pbd.items.some(i => i.kind === "high-criticality-seam"), "");
     ok("B2 the mislabeled decision (assembly tag) appears in protected-by-design", buildProtectedByDesign(mislabel).items.some(i => /Approve the waiver/.test(i.item)), JSON.stringify(buildProtectedByDesign(mislabel).items.map(i => i.item)));
+  }
+
+  // B3 — the recipe proof block: shape + eval + owner + fallback + maintenance + how-you-prove-it + remedy + costed model-fit lever
+  {
+    const proof = buildRecipeProof(FPA_INTAKE);  // FPA at Conservative is gated-policy (theo 55% > permitted ~46%)
+    ok("B3 the model-fit lever shows a NON-ZERO routed-vs-frontier delta", proof.modelFitLever.delta > 0 && proof.modelFitLever.frontier > proof.modelFitLever.routed, JSON.stringify(proof.modelFitLever));
+    ok("B3 a gated-policy recipe NAMES its governance remedy", proof.governanceRemedy.gated === true && typeof proof.governanceRemedy.remedy === "string" && proof.governanceRemedy.unlockPts > 0, JSON.stringify(proof.governanceRemedy));
+    ok("B3 the recipe carries shape / eval plan / owner / fallback / maintenance", !!proof.solutionShapes && Array.isArray(proof.evalPlan) && !!proof.owner && !!proof.fallback && proof.maintenanceCost.annualPoint >= 0, "");
+    ok("B3 'how you prove it' derives a golden set + thresholds from acceptance", /golden set/.test(proof.howYouProveIt.goldenSet) && /meets:/.test(proof.howYouProveIt.thresholds) && /routes back/.test(proof.howYouProveIt.fallback), JSON.stringify(proof.howYouProveIt));
+    // shape drives the eval plan: an agentic recipe demands the harness; a prompt does not
+    const agentic = buildRecipeProof({ ...FPA_INTAKE, steps: FPA_INTAKE.steps.map(s => s.cls === "assembly" ? { ...s, solutionShape: "agentic" } : s) });
+    ok("B3 an agentic recipe's eval plan demands a harness; a prompt's does not", agentic.evalPlan.some(e => /harness/.test(e)) && !buildRecipeProof({ ...FPA_INTAKE, steps: FPA_INTAKE.steps.map(s => s.cls === "assembly" ? { ...s, solutionShape: "prompt" } : s) }).evalPlan.some(e => /harness/.test(e)), JSON.stringify(agentic.evalPlan));
+    // a non-gated workflow (no policy gap) names no remedy
+    const clean = buildRecipeProof({ steps: [{ step: "x", cls: "assembly", data: "internal", time: 10, theo: 50 }], confirm: { acceptance: "matches" } }, { profile: "Progressive" });
+    ok("B3 a non-gated recipe names NO false remedy", clean.governanceRemedy.gated === false && clean.governanceRemedy.remedy === null, JSON.stringify(clean.governanceRemedy));
   }
 
   // ---- Edition 3 \u00b7 F6 \u2014 confirm gate, control-aware (confirmBlockers / canHarden) ----
