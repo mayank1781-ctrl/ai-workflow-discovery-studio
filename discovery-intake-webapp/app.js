@@ -7525,6 +7525,41 @@ function engineWorkflowCost(opts = {}) { const E = studioEngine(); if (!E) retur
 function engineWorkflowFlow(opts = {}) { const E = studioEngine(); if (!E) return null; return E.cycleTime(E.normalizeIntake(opts.record || appWorkflowToIntake(opts)).steps, opts); }
 function engineLeaderView(records, opts = {}) { const E = studioEngine(); if (!E) return null; return E.buildLeaderView(records, opts); }
 
+// E2 — the spec's 7th field. The engine decides model-fit (permitted tier per class + data-tier
+// residency: PII/MNPI force a restricted/in-VPC pricing tier; confidential routes at its normal
+// class tier) and the cost-to-serve band. Returns the engine's modelFit prov triple (or
+// undefined when the engine isn't loaded). The math + the residency coupling live in the engine.
+function engineModelFitForUnit(steps, opts = {}) {
+  const E = studioEngine(); if (!E) return undefined;
+  const list = Array.isArray(steps) ? steps : [steps];
+  const record = appWorkflowToIntake({ ...opts, steps: list });
+  if (!record.steps.length) return undefined;
+  const spec = E.buildSpec(record, opts);
+  return spec ? spec.modelFit : undefined;
+}
+
+// E2 — netValue = capacityValue - costToServe (engine.netValue). Consumed by E3 (readiness)
+// and E5 (Dashboard); NEVER rendered on a worker surface (the rail keeps the cost family off
+// capture/workbench). Returns null when the engine isn't loaded.
+function engineWorkflowNetValue(opts = {}) {
+  const E = studioEngine(); if (!E) return null;
+  const cap = engineWorkflowCapacity(opts), cost = engineWorkflowCost(opts);
+  if (!cap || !cost) return null;
+  return { value: E.netValue(cap.grossValue, cost.annual), grossValue: cap.grossValue, annualCost: cost.annual };
+}
+
+// E2 — the engine's modelFit prov triple, mapped onto the app's .prov vocabulary
+// (engine "stated"->user-stated/teal, "inferred"->ai-inferred/grey). Undefined when the
+// engine isn't loaded, so the spec stays a six-field canvas (additive).
+function engineUnitModelFitTriple(steps) {
+  if (typeof engineModelFitForUnit !== "function") return undefined;
+  const mf = engineModelFitForUnit(steps);
+  if (!mf || !mf.value) return undefined;
+  const source = mf.source === "stated" ? "user-stated" : "ai-inferred";
+  const confidence = typeof mf.confidence === "number" ? mf.confidence : null;
+  return (typeof recipeSpecTriple === "function") ? recipeSpecTriple(mf.value, source, confidence) : { value: mf.value, source, confidence };
+}
+
 // When the engine finishes loading (async module), re-render the active analysis surface so
 // engine-backed figures appear. Best-effort; never throws.
 if (typeof window !== "undefined") {
@@ -12184,7 +12219,9 @@ function buildStepRecipeSpec(stepId) {
     expectedOutput: String((tc && tc.expected) || ""),
     notes: [tc && tc.name, (tc && tc.reviewer) ? `reviewer: ${tc.reviewer}` : ""].filter(Boolean).join(" — ")
   }));
-  return { goal, context, constraints, acceptanceCriteria, decomposition, escalation, evalCases, readiness: "future" };
+  // E2 — field 7: engine-decided model-fit + cost-to-serve band (undefined => six-field canvas).
+  const modelFit = (typeof engineUnitModelFitTriple === "function") ? engineUnitModelFitTriple([step]) : undefined;
+  return { goal, context, constraints, acceptanceCriteria, decomposition, escalation, evalCases, readiness: "future", modelFit };
 }
 
 // Derive a CONNECTION unit's spec from the Leverage Map seam it spans (consumed, not
@@ -12220,7 +12257,10 @@ function buildConnectionRecipeSpec(unitId) {
     { input: "A required detail from the prior step is missing.", expectedOutput: "The handoff flags the gap and routes back instead of proceeding.", notes: "Missing input — never guesses" },
     { input: held ? "The approver has not yet decided." : "The receiving step is unavailable.", expectedOutput: held ? "The handoff waits; AI never decides on the person's behalf." : "The handoff queues and surfaces the delay.", notes: held ? "Human-held: assist, not replace" : "Exception path" }
   ];
-  return { goal, context, constraints, acceptanceCriteria, decomposition, escalation, evalCases, readiness: "future" };
+  // E2 — field 7 from the two steps the seam spans (undefined => six-field canvas).
+  const adj = (typeof analysisGridSteps === "function" ? analysisGridSteps() : []).filter((s) => s && (s.id === seam.fromId || s.id === seam.toId));
+  const modelFit = (typeof engineUnitModelFitTriple === "function") ? engineUnitModelFitTriple(adj) : undefined;
+  return { goal, context, constraints, acceptanceCriteria, decomposition, escalation, evalCases, readiness: "future", modelFit };
 }
 
 // The spec for any unit id — a step.id, or a connection handoffId ("h:from>to"). Defensive:
@@ -12311,6 +12351,7 @@ function recipeSpecCanvasHtml(spec, unitId, gateState) {
       ${fieldRow("acceptanceCriteria", "Acceptance criteria", spec.acceptanceCriteria)}
       <div class="recipe-spec-field" style="${rowCss}"><span style="${labelCss}">Decomposition</span>${decompHtml}</div>
       ${fieldRow("escalation", "Escalation", spec.escalation)}
+      ${spec.modelFit && spec.modelFit.value ? fieldRow("modelFit", "Model-fit & cost-to-serve", spec.modelFit) : ""}
       <div class="recipe-spec-evalcases" style="${rowCss}"><span style="${labelCss}">Eval cases</span>${casesHtml}</div>
     </div>
   </details>`;
