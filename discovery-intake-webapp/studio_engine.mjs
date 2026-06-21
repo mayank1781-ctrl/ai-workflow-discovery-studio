@@ -1098,6 +1098,39 @@ export function threeLenses(records, opts = {}) {
 }
 
 // =====================================================================
+// C2 (Phase 2) — the WORKER VIEW. Leverage framing ONLY: "what AI carries vs what stays mine" and
+// "time given back, and to what". NO cost, NO capacity, NO headcount, NO FTE — every string here must
+// pass railCheck(text, "worker"). Reuses buildRoleView for the assembly->judgment shift; the leverage
+// summary is a real, rail-clean export.
+// =====================================================================
+export function buildWorkerView(records, opts = {}) {
+  const rv = buildRoleView(records, opts);
+  const roles = rv.roles.map(r => ({
+    role: r.role,
+    timeGivenBackHrsPerWeek: r.freedHrs,                 // a numeric FIELD (rendered as "time given back", never "hours saved")
+    assemblyShare: r.assemblyShare, humanHeldShare: r.humanHeldShare, shift: r.shift,
+    aiCarries: `AI carries the heavy lifting on the assembly work (${Math.round(r.assemblyShare * 100)}% of your steps).`,
+    staysMine: `The judgment and the decisions stay yours (${Math.round(r.humanHeldShare * 100)}%) — AI assists, you decide.`,
+    givenBackTo: "time back for the parts that need you — the judgment, the relationships, the harder calls.",
+  }));
+  return { surface: "worker", roles, confirmedCount: rv.confirmedCount,
+    headline: "From tasks to leverage — AI carries the heavy lifting so you spend more time on the parts that need you.",
+    note: rv.confirmedCount ? null : "No confirmed work yet — capture a workflow to see where the leverage is." };
+}
+
+// C2 — the leverage-summary export (worker-safe). Returns the content + a filename for the download.
+// Every line is leverage framing and passes the worker rail (asserted in tests).
+export function buildLeverageSummary(records, opts = {}) {
+  const wv = buildWorkerView(records, opts);
+  const lines = ["# Your leverage summary", "", wv.headline, ""];
+  if (!wv.roles.length) { lines.push("No confirmed work yet — capture a workflow to see where the leverage is."); }
+  wv.roles.forEach(r => {
+    lines.push(`## ${r.role}`, `- ${r.aiCarries}`, `- ${r.staysMine}`, `- The shift: ${r.shift}.`, `- Time given back: ${r.givenBackTo}`, "");
+  });
+  return { content: lines.join("\n"), filename: "leverage-summary.md", surface: "worker", roleCount: wv.roles.length };
+}
+
+// =====================================================================
 // 5.5 · EDITION 3 — DERIVED LEADER LAYER (F4): role roll-up · capability map · adjacency
 // Pure derived views over CONFIRMED multi-actor workflows (no new schema), the way buildLeaderView sits
 // on the units. Capacity + operating-model language ONLY — the reasons name controls / data tiers, never
@@ -2144,6 +2177,20 @@ function runTests() {
     // drill-down: department -> workflows -> units
     const dd = drillDown(set);
     ok("C1 drill-down goes department -> workflows -> ranked units", dd.length === 2 && dd.every(d => d.workflows.length >= 1 && d.workflows[0].units.length >= 1), JSON.stringify(dd.map(d => d.department)));
+  }
+
+  // C2 — worker view: leverage framing only; every string passes the worker rail; leverage summary exports
+  {
+    const wv = buildWorkerView([RECON_INTAKE]);
+    ok("C2 worker view frames AI-carries vs stays-mine + time given back", wv.roles.length >= 1 && wv.roles.every(r => /AI carries/.test(r.aiCarries) && /stay yours/.test(r.staysMine) && /time back/.test(r.givenBackTo)), "");
+    // EVERY rendered worker string passes the worker rail (no cost / capacity / headcount / FTE)
+    const workerStrings = [wv.headline, ...wv.roles.flatMap(r => [r.aiCarries, r.staysMine, r.givenBackTo, r.shift])];
+    ok("C2 every worker-view string passes the worker rail", workerStrings.every(s => railCheck(s, "worker").ok), JSON.stringify(workerStrings.filter(s => !railCheck(s, "worker").ok)));
+    // the rail BLOCKS cost / headcount on the worker surface (the guard the test pins)
+    ok("C2 cost/headcount vocab is BLOCKED on the worker surface", !railCheck("cost-to-serve", "worker").ok && !railCheck("reduce headcount", "worker").ok && !railCheck("0.6 FTE freed", "worker").ok, "");
+    // the leverage summary is a real, rail-clean export
+    const ls = buildLeverageSummary([RECON_INTAKE]);
+    ok("C2 leverage summary exports rail-clean content + a filename", railCheck(ls.content, "worker").ok && ls.filename === "leverage-summary.md" && ls.content.length > 0, JSON.stringify(railCheck(ls.content, "worker").violations));
   }
 
   // ---- Edition 3 \u00b7 F6 \u2014 confirm gate, control-aware (confirmBlockers / canHarden) ----
