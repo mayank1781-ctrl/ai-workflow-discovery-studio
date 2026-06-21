@@ -71,8 +71,9 @@ test("C3 — both exports produce real files (capacity pack + roadmap)", () => {
 // ---- app: the render + the real downloads ----
 function sandbox(downloads) {
   return buildSandbox(source, {
-    functions: ["studioEngine", "engineLeadership", "engineRailGuardCollective", "engineCapacityPack", "engineRoadmapExport", "enginePooledLibrary", "leadershipSectionsHtml", "dashboardCurrentRecords", "downloadCapacityPack", "downloadRoadmap", "escapeHtml"],
+    functions: ["studioEngine", "engineLeadership", "engineRailGuardCollective", "engineCapacityPack", "engineRoadmapExport", "enginePooledLibrary", "leadershipSectionsHtml", "dashboardCurrentRecords", "downloadCapacityPack", "downloadRoadmap", "exportOpts", "exportProvenanceHtml", "escapeHtml"],
     globals: {
+      state: { realConfirmedSeed: false },
       window: { StudioEngine: engine },
       DASH: { faint: "#888", panel: "#111", line: "#222", ink: "#eee", dim: "#aaa" },
       dashboardModel: () => ({ records: SET }),

@@ -1263,8 +1263,11 @@ export function buildHonestUnderPressure(records, opts = {}) {
     ] };
 }
 
-// C3 — the two REAL exports. Both carry the illustrative marker (D3) unless opts.realConfirmedSeed is set.
-function illustrativeMarker(opts) { return (opts && opts.realConfirmedSeed === true) ? null : "Illustrative — calibrated seed, not a confirmed pilot."; }
+// C3/D3 — the two REAL exports. Both carry the illustrative marker (D3) unless opts.realConfirmedSeed is set.
+// D3 — until a REAL confirmed seed replaces the calibrated/illustrative one, EVERY export pack (capacity,
+// evidence, roadmap) carries this visible marker; opts.realConfirmedSeed === true drops it. Single source.
+export const CALIBRATED_SEED_MARKER = "Illustrative — calibrated seed, not a confirmed pilot.";
+export function illustrativeMarker(opts) { return (opts && opts.realConfirmedSeed === true) ? null : CALIBRATED_SEED_MARKER; }
 export function buildCapacityPack(records, opts = {}) {
   const lv = buildLeaderView(records, opts), mix = buildAiHybridHumanMix(records, opts), tiles = buildGapTiles(records, opts), up = realizationUplift(records, opts);
   const k = id => { const kpi = lv.kpis.find(x => x.id === id); return kpi ? kpi.value : 0; };
@@ -2537,6 +2540,15 @@ function runTests() {
     ok("D2 the actual collective heatmap text is rail-clean", (() => { const heat = buildCollectiveHeatmap(buildPooledLibrary([RECON_INTAKE, RECON_INTAKE])); const texts = [heat.note, ...heat.rows.map(r => `${r.role} n=${r.n} ${r.confidence} ${r.coverage}`)].filter(Boolean); return railGuardCollective(texts, "dashboard").ok; })(), "");
     ok("D2 the leadership aggregate text is rail-clean (mix + sequencing + uplift + unlock)", (() => { const set = [RECON_INTAKE, { ...RECON_INTAKE, header: { ...RECON_INTAKE.header, dept: "Tech", anchor: "t" } }]; const texts = [buildAiHybridHumanMix(set).whereTheLineSits, buildCrossGroupSequencing(set).note, realizationUplift(set).headline, governanceUnlock(set).note, buildRoleRedefinition(set).team, buildRoleRedefinition(set).department]; return railGuardCollective(texts, "dashboard").ok; })(), "");
     ok("D2 FAILS CLOSED if the rail itself throws (never a fake-OK on the collective surface)", railGuardCollective([{ toString() { throw new Error("boom"); } }], "dashboard").ok === false, "");
+  }
+
+  // D3 — illustrative-data provenance: every export carries the calibrated-seed marker; a real confirmed seed drops it
+  {
+    const set = [FPA_INTAKE];
+    const exports = [buildCapacityPack, buildRoadmapExport, buildEvidencePack];
+    ok("D3 every export shows the calibrated-seed marker by default", exports.every(fn => fn(set).content.includes(CALIBRATED_SEED_MARKER) && fn(set).illustrative === true), "");
+    ok("D3 every export DROPS the marker under a real-confirmed-seed flag", exports.every(fn => !fn(set, { realConfirmedSeed: true }).content.includes(CALIBRATED_SEED_MARKER) && fn(set, { realConfirmedSeed: true }).illustrative === false), "");
+    ok("D3 the marker is the single shared source of truth", CALIBRATED_SEED_MARKER === illustrativeMarker({}) && illustrativeMarker({ realConfirmedSeed: true }) === null, "");
   }
 
   // ---- Edition 3 \u00b7 F6 \u2014 confirm gate, control-aware (confirmBlockers / canHarden) ----
