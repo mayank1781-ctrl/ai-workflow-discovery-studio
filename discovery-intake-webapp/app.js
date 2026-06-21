@@ -7560,6 +7560,35 @@ function engineUnitModelFitTriple(steps) {
   return (typeof recipeSpecTriple === "function") ? recipeSpecTriple(mf.value, source, confidence) : { value: mf.value, source, confidence };
 }
 
+// E3 — engine readiness for a unit: now / gated-policy / gated-economics / future-capability,
+// each with a reason (the engine bakes in the remedy for the gated states). Returns null when
+// the engine isn't loaded (the Change 1/2 readiness then stands). The math is the engine's.
+function engineUnitReadiness(steps, opts = {}) {
+  const E = studioEngine(); if (!E) return null;
+  const cap = engineWorkflowCapacity({ ...opts, steps });
+  const cost = engineWorkflowCost({ ...opts, steps });
+  if (!cap || !cost) return null;
+  return E.readiness({ theoPct: cap.theoPct, permittedPct: cap.permittedPct, grossValue: cap.grossValue, annualCost: cost.annual, tier: opts.tier, econMargin: opts.econMargin, futureCapability: opts.futureCapability, futureReason: opts.futureReason });
+}
+
+// Resolve a unit id to its step(s) and compute the engine readiness. A connection reads its
+// two adjacent steps. null when nothing resolves or the engine isn't loaded.
+function engineSpecReadiness(unitId, opts = {}) {
+  if (typeof engineUnitReadiness !== "function" || !studioEngine()) return null;
+  const allSteps = (typeof analysisGridSteps === "function") ? analysisGridSteps() : [];
+  let steps = [];
+  if (String(unitId).startsWith("h:")) {
+    const seams = (typeof recipeConnectionSeams === "function") ? recipeConnectionSeams() : [];
+    const seam = (Array.isArray(seams) ? seams : []).find((s) => handoffId(s.fromId, s.toId) === unitId);
+    if (seam) steps = (Array.isArray(allSteps) ? allSteps : []).filter((s) => s && (s.id === seam.fromId || s.id === seam.toId));
+  } else {
+    const step = (Array.isArray(allSteps) ? allSteps : []).find((s) => s && s.id === unitId);
+    if (step) steps = [step];
+  }
+  if (!steps.length) return null;
+  return engineUnitReadiness(steps, opts);
+}
+
 // When the engine finishes loading (async module), re-render the active analysis surface so
 // engine-backed figures appear. Best-effort; never throws.
 if (typeof window !== "undefined") {
@@ -12143,7 +12172,10 @@ function recipeBookConnectionSectionHtml() {
 // the unit is byte-identical when no spec builder is present; descriptive only — no banned
 // economics token, no scorer, no grid write, Human Pink reserved, flat hues only.
 
-const RECIPE_SPEC_READINESS = ["now", "gated", "future"];
+// E3 — the readiness enum, extended with the engine's economics/policy/capability split.
+// "gated"/"future" remain valid for Change 1/2 specs (additive); the engine sets the
+// 4-state {now, gated-policy, gated-economics, future-capability} when it is loaded.
+const RECIPE_SPEC_READINESS = ["now", "gated", "future", "gated-policy", "gated-economics", "future-capability"];
 
 // One provenance triple. Empty + ai-inferred by default, so a missing field is honestly
 // grey (never silently presented as fact) and never a blocked state. Source is normalised
@@ -12277,18 +12309,30 @@ function buildRecipeSpec(unitId, policyInput) {
   } catch (_e) {
     return defaultRecipeSpec();
   }
+  let spec = base;
   try {
     if (typeof normalizePolicyConstraints === "function") {
       const policySource = policyInput !== undefined
         ? policyInput
         : (typeof currentAiPolicy === "function" ? currentAiPolicy() : null);
       const pc = normalizePolicyConstraints(policySource);
-      if (pc) return applyPolicyConstraintsToSpec(base, unitGovernanceShape(unitId), pc);
+      if (pc) spec = applyPolicyConstraintsToSpec(base, unitGovernanceShape(unitId), pc);
     }
   } catch (_e) {
     // any failure leaves the Change 1 base spec intact
   }
-  return base;
+  // E3 — when the engine is loaded, readiness becomes the engine's 4-state
+  // (now / gated-policy / gated-economics / future-capability) with a reason + remedy,
+  // overriding the Change 1/2 readiness. Additive: skipped when the engine isn't present.
+  try {
+    if (typeof engineSpecReadiness === "function") {
+      const rd = engineSpecReadiness(unitId);
+      if (rd && rd.state) spec = { ...spec, readiness: rd.state, readinessReason: rd.reason };
+    }
+  } catch (_e) {
+    // keep the Change 1/2 readiness
+  }
+  return spec;
 }
 
 // Render a unit's spec as a compact six-field canvas + eval-cases list. REUSES the merged
