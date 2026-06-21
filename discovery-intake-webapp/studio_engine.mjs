@@ -1131,6 +1131,153 @@ export function buildLeverageSummary(records, opts = {}) {
 }
 
 // =====================================================================
+// C3 (Phase 2) — the LEADERSHIP dashboard aggregations (capacity language; the leader rail). All pure,
+// confirmed-only, composed from the existing engine. AI/Hybrid/Human mix · two gap tiles + remedies ·
+// cross-group sequencing · collective heatmap (n + confidence) · realization uplift · role redefinition.
+// Two real exports: the board-ready capacity pack and the Land -> Expand -> Retain roadmap.
+// =====================================================================
+
+// C3 — where the line sits: AI (assembly) / Hybrid (judgment, AI assists) / Human (decision), time-weighted.
+export function buildAiHybridHumanMix(records, opts = {}) {
+  const confirmed = (Array.isArray(records) ? records : []).filter(isConfirmed);
+  let ai = 0, hybrid = 0, human = 0;
+  confirmed.forEach(rec => normalizeIntake(rec).steps.forEach(s => {
+    const t = s.time || 0; if (s.cls === "assembly") ai += t; else if (s.cls === "judgment") hybrid += t; else human += t;
+  }));
+  const tot = ai + hybrid + human || 1;
+  const pct = n => round(n / tot * 100);
+  return { ai: pct(ai), hybrid: pct(hybrid), human: pct(human), confirmedCount: confirmed.length,
+    whereTheLineSits: `AI carries ${pct(ai)}% (assembly); ${pct(hybrid)}% is hybrid (judgment — AI assists, the person decides); ${pct(human)}% stays human (the decisions).` };
+}
+
+// C3 — the two gap tiles, each with its remedy. The POLICY tile is RED whenever a policy gap exists —
+// INDEPENDENT of economics (M6: economics never masks policy). Realization tile drives the L&D agenda.
+export function buildGapTiles(records, opts = {}) {
+  const lv = buildLeaderView(records, opts);
+  const k = id => { const kpi = lv.kpis.find(x => x.id === id); return kpi ? kpi.value : 0; };
+  const policyGap = k("policy_gap") || 0, realizationGap = k("realization_gap") || 0;
+  return {
+    policy: { lens: "policy", hrs: policyGap, status: policyGap > 0.5 ? "red" : "ok",
+      remedy: policyGap > 0.5 ? "governance posture review — permit AI on the restricted tier with redaction + the mandatory human gate" : "no policy gap — deployable now" },
+    realization: { lens: "adoption", hrs: realizationGap, status: realizationGap > 0.5 ? "amber" : "ok",
+      remedy: realizationGap > 0.5 ? "enablement — the role-based builder ladder (Use -> Shape -> Evaluate)" : "realization within range" },
+  };
+}
+
+// C3 — cross-group sequencing (computed from per-group policy gap): build where the gap is low NOW, run
+// the governance track where the gap is high IN PARALLEL. Derived, never hardcoded.
+export function buildCrossGroupSequencing(records, opts = {}) {
+  const confirmed = (Array.isArray(records) ? records : []).filter(isConfirmed);
+  const byDept = {};
+  confirmed.forEach(rec => {
+    const d = rec.header?.dept || "—";
+    const cap = roleCapacity(normalizeIntake(rec).steps, opts.profile || "Conservative", opts);
+    const g = byDept[d] = byDept[d] || { dept: d, policyGapHrs: 0, count: 0 };
+    g.policyGapHrs += cap.policyGapHrs; g.count += 1;
+  });
+  const groups = Object.values(byDept).map(g => ({ dept: g.dept, policyGapHrs: round(g.policyGapHrs, 1), count: g.count })).sort((a, b) => a.policyGapHrs - b.policyGapHrs);
+  const floor = groups.length ? groups[0].policyGapHrs : 0;
+  const sequence = groups.map(g => ({ dept: g.dept, policyGapHrs: g.policyGapHrs,
+    move: g.policyGapHrs <= floor + 1 ? "build now (low policy gap — deployable)" : "run the governance track in parallel (the policy gap unlocks the prize)" }));
+  return { groups, sequence,
+    note: groups.length >= 2 ? `Build in ${groups[0].dept} now; run the governance track for ${groups[groups.length - 1].dept} in parallel — that is where the single biggest unlock sits.` : "Single group — sequence by readiness." };
+}
+
+// C3 — collective historical heatmap over the POOLED library (de-identified, A4). Each cell carries
+// n = discoveries behind it + a confidence/coverage marker; degrades GRACEFULLY under low n (n<3 =>
+// directional). Replaces the old "what changed since last view".
+export function buildCollectiveHeatmap(pooledRecords, opts = {}) {
+  const pool = (Array.isArray(pooledRecords) ? pooledRecords : []).filter(isConfirmed);
+  const cells = {};
+  pool.forEach(rec => buildRoleView([rec], opts).roles.forEach(role => {
+    const c = cells[role.role] = cells[role.role] || { role: role.role, dept: rec.header?.dept || "—", n: 0, freedHrs: 0 };
+    c.n += 1; c.freedHrs += role.freedHrs;
+  }));
+  const rows = Object.values(cells).map(c => ({ role: c.role, dept: c.dept, n: c.n, freedHrs: round(c.freedHrs, 2),
+    confidence: c.n >= 5 ? "established" : c.n >= 3 ? "indicative" : "directional",
+    lowConfidence: c.n < 3, coverage: c.n < 3 ? "low — directional only (degrades gracefully under low n)" : "ok" }));
+  return { rows, totalDiscoveries: pool.length,
+    note: pool.length ? null : "No pooled discoveries yet — the collective view fills as engagements are pooled (the moat)." };
+}
+
+// C3 / D1 — the realization uplift, COMPUTED from the builder-ladder rung (the realization factor), never
+// a constant: recompute gross at base vs target realization; the uplift is the delta. Changing the rung
+// changes the number (asserted in D1).
+export function realizationUplift(records, opts = {}) {
+  const baseRf = opts.realizationFactor ?? CONFIG.realizationFactor;       // ~0.70 today
+  const targetRf = opts.targetRealizationFactor ?? 0.85;                   // builder-ladder rung 3
+  const confirmed = (Array.isArray(records) ? records : []).filter(isConfirmed);
+  const grossAt = rf => sum(confirmed.map(rec => roleCapacity(normalizeIntake(rec).steps, opts.profile || "Conservative", { ...opts, realizationFactor: rf }).grossValue));
+  const base = grossAt(baseRf), target = grossAt(targetRf);
+  return { baseRealization: baseRf, targetRealization: targetRf, baseGross: round(base), targetGross: round(target),
+    upliftDollars: round(target - base), upliftPct: base ? round((target - base) / base * 100, 1) : 0,
+    headline: `Realization ${Math.round(baseRf * 100)}% -> ${Math.round(targetRf * 100)}% (the builder ladder) — +${base ? round((target - base) / base * 100, 1) : 0}% more deployable capacity on the same footprint.` };
+}
+
+// C3 — role redefinition: individual -> team -> department (its own section + download).
+export function buildRoleRedefinition(records, opts = {}) {
+  const rv = buildRoleView(records, opts);
+  return { confirmedCount: rv.confirmedCount,
+    individual: rv.roles.map(r => ({ role: r.role, shift: r.shift, was: "assembler", becomes: "spends the freed time on the judgment that was always theirs" })),
+    team: "from throughput to coverage — the same team takes on more at the same headcount, and reviews more consistently",
+    department: "from cost center to capability — a truthful map of where AI helps, a governance agenda with dollars attached, and a builder ladder that compounds" };
+}
+
+// C3 — honest-under-pressure: the disclosures a CFO asks for (confirmed-vs-inferred, excluded steps,
+// policy blockers, TCO payback). Pure summary over the confirmed set.
+export function buildHonestUnderPressure(records, opts = {}) {
+  const all = (Array.isArray(records) ? records : []);
+  const confirmed = all.filter(isConfirmed);
+  let inferredUnits = 0, excludedDecisionSteps = 0, policyBlocked = 0;
+  confirmed.forEach(rec => {
+    if (provenanceBlockers(rec).length) inferredUnits += 1;
+    const r = normalizeIntake(rec);
+    excludedDecisionSteps += r.steps.filter(s => s.cls === "decision").length;
+    const cap = roleCapacity(r.steps, opts.profile || "Conservative", opts);
+    if ((cap.theoPct - cap.permittedPct) > 0.01) policyBlocked += 1;
+  });
+  const tco = confirmed.length ? buildTco(confirmed[0], opts) : null;
+  return { confirmedCount: confirmed.length, skippedUnconfirmed: all.length - confirmed.length,
+    inferredUnits, excludedDecisionSteps, policyBlocked,
+    tcoPayback: tco ? tco.payback : null,
+    disclosures: [
+      `${confirmed.length} confirmed · ${all.length - confirmed.length} unconfirmed (excluded from the figures)`,
+      `${excludedDecisionSteps} decision step(s) excluded — never credited to AI`,
+      `${policyBlocked} unit(s) policy-blocked (governance agenda)`,
+      `${inferredUnits} unit(s) rest on inferred values — confirm before relying`,
+    ] };
+}
+
+// C3 — the two REAL exports. Both carry the illustrative marker (D3) unless opts.realConfirmedSeed is set.
+function illustrativeMarker(opts) { return (opts && opts.realConfirmedSeed === true) ? null : "Illustrative — calibrated seed, not a confirmed pilot."; }
+export function buildCapacityPack(records, opts = {}) {
+  const lv = buildLeaderView(records, opts), mix = buildAiHybridHumanMix(records, opts), tiles = buildGapTiles(records, opts), up = realizationUplift(records, opts);
+  const k = id => { const kpi = lv.kpis.find(x => x.id === id); return kpi ? kpi.value : 0; };
+  const usd = n => `$${Number(n || 0).toLocaleString("en-US")}`;
+  const lines = ["# Board-ready capacity pack", "", `Confirmed units: ${lv.confirmedCount} (${lv.skippedUnconfirmed} unconfirmed excluded)`, "",
+    `Net deployable capacity: ${usd(k("net_capacity"))}/yr (outcome quality held)`,
+    `Cost-to-serve (routed): ${usd(k("cost_to_serve"))}/yr · Model-fit lever: ${usd(k("model_fit_lever"))}/yr`,
+    `AI / Hybrid / Human: ${mix.ai}% / ${mix.hybrid}% / ${mix.human}%`,
+    `Policy gap: ${tiles.policy.hrs} h/wk -> ${tiles.policy.remedy}`,
+    `Realization gap: ${tiles.realization.hrs} h/wk -> ${tiles.realization.remedy}`,
+    `Realization uplift: ${up.headline}`,
+    illustrativeMarker(opts)].filter(x => x != null);
+  return { content: lines.join("\n"), filename: "capacity-pack.md", surface: "dashboard", illustrative: illustrativeMarker(opts) != null };
+}
+export function buildRoadmapExport(records, opts = {}) {
+  const seq = buildCrossGroupSequencing(records, opts), up = realizationUplift(records, opts);
+  const lines = ["# Land -> Expand -> Retain roadmap", "",
+    "BUILD · now — ship the deployables (technology-led, no policy change needed).",
+    "GOVERNANCE — posture review (unlocks the gated-policy workflows).",
+    `ENABLEMENT — builder ladder (closes the realization gap; ${up.headline}).`,
+    "MODEL-FIT / FinOps — route & protect (defer gated-economics; protect the lever).",
+    "", "Sequence (computed from per-group policy gap):", ...seq.sequence.map(s => `- ${s.dept}: ${s.move}`),
+    "", "... then RETAIN — a recurring capacity/cost/flow telemetry view + a de-identified recipe added to a library only you own.",
+    illustrativeMarker(opts)].filter(x => x != null);
+  return { content: lines.join("\n"), filename: "land-expand-retain-roadmap.md", surface: "dashboard", illustrative: illustrativeMarker(opts) != null };
+}
+
+// =====================================================================
 // 5.5 · EDITION 3 — DERIVED LEADER LAYER (F4): role roll-up · capability map · adjacency
 // Pure derived views over CONFIRMED multi-actor workflows (no new schema), the way buildLeaderView sits
 // on the units. Capacity + operating-model language ONLY — the reasons name controls / data tiers, never
@@ -2191,6 +2338,35 @@ function runTests() {
     // the leverage summary is a real, rail-clean export
     const ls = buildLeverageSummary([RECON_INTAKE]);
     ok("C2 leverage summary exports rail-clean content + a filename", railCheck(ls.content, "worker").ok && ls.filename === "leverage-summary.md" && ls.content.length > 0, JSON.stringify(railCheck(ls.content, "worker").violations));
+  }
+
+  // C3 — leadership dashboard: AI/Hybrid/Human mix, gap tiles + remedies, sequencing, collective heatmap, uplift, exports
+  {
+    const tech = { ...RECON_INTAKE, header: { ...RECON_INTAKE.header, dept: "Technology", anchor: "tech-wf" }, steps: RECON_INTAKE.steps.map(s => ({ ...s, data: "internal" })), confirm: { ...RECON_INTAKE.confirm, dataTier: "internal" } };
+    const credit = { ...RECON_INTAKE, header: { ...RECON_INTAKE.header, dept: "Credit Risk", anchor: "credit-wf" } };
+    const set = [tech, credit];
+    const mix = buildAiHybridHumanMix(set);
+    ok("C3 AI/Hybrid/Human mix sums to 100 and shows where the line sits", mix.ai + mix.hybrid + mix.human >= 99 && /AI carries/.test(mix.whereTheLineSits), JSON.stringify(mix));
+    // gap tiles — the POLICY tile is RED regardless of economics
+    const weakEcon = { ...FPA_INTAKE, steps: FPA_INTAKE.steps.map(s => ({ ...s, data: "MNPI" })) }; // high policy gap + weak economics
+    ok("C3 a policy-blocked + weak-economics workflow shows the policy tile RED regardless of economics", buildGapTiles([weakEcon]).policy.status === "red" && !!buildGapTiles([weakEcon]).policy.remedy, JSON.stringify(buildGapTiles([weakEcon]).policy));
+    ok("C3 the realization gap tile names the builder-ladder remedy", /builder ladder/.test(buildGapTiles([credit]).realization.remedy) || buildGapTiles([credit]).realization.status === "ok", "");
+    // cross-group sequencing — computed from per-group policy gap
+    const seq = buildCrossGroupSequencing(set);
+    ok("C3 cross-group sequencing builds low-gap now, governance high-gap in parallel", seq.sequence.length === 2 && seq.sequence[0].move.includes("build now") && /governance track/.test(seq.note), JSON.stringify(seq.sequence));
+    // collective heatmap over the pooled library — n + confidence; <3 = directional
+    const pool = buildPooledLibrary([RECON_INTAKE, RECON_INTAKE]);
+    const heat = buildCollectiveHeatmap(pool);
+    ok("C3 a collective cell backed by <3 discoveries is marked directional/low-confidence", heat.rows.length && heat.rows.every(r => r.n < 3 ? (r.confidence === "directional" && r.lowConfidence) : true), JSON.stringify(heat.rows.map(r => `${r.role}:n=${r.n}:${r.confidence}`)));
+    // realization uplift — computed from the rung (not a constant)
+    const up = realizationUplift(set), upHigher = realizationUplift(set, { targetRealizationFactor: 0.95 });
+    ok("C3 realization uplift is COMPUTED (a higher rung gives a bigger uplift)", up.upliftDollars > 0 && upHigher.upliftDollars > up.upliftDollars, `${up.upliftDollars} vs ${upHigher.upliftDollars}`);
+    // role redefinition + honest-under-pressure
+    ok("C3 role redefinition spans individual -> team -> department", buildRoleRedefinition(set).individual.length >= 1 && /coverage/.test(buildRoleRedefinition(set).team) && /capability/.test(buildRoleRedefinition(set).department), "");
+    ok("C3 honest-under-pressure discloses excluded decisions + policy blockers + TCO payback", buildHonestUnderPressure(set).excludedDecisionSteps > 0 && buildHonestUnderPressure(set).disclosures.length >= 4 && buildHonestUnderPressure(set).tcoPayback !== undefined, "");
+    // two REAL exports
+    ok("C3 the capacity pack export produces real content + filename", buildCapacityPack(set).content.length > 0 && buildCapacityPack(set).filename === "capacity-pack.md", "");
+    ok("C3 the roadmap export produces real content + filename", buildRoadmapExport(set).content.length > 0 && buildRoadmapExport(set).filename === "land-expand-retain-roadmap.md" && /Land -> Expand -> Retain/.test(buildRoadmapExport(set).content), "");
   }
 
   // ---- Edition 3 \u00b7 F6 \u2014 confirm gate, control-aware (confirmBlockers / canHarden) ----

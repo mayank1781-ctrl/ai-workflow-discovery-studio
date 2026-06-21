@@ -7231,6 +7231,55 @@ function downloadLeverageSummary(records) {
   if (typeof downloadTextFile === "function") downloadTextFile(ls.filename, ls.content, "text/markdown");
   return true;
 }
+
+// ===================================================================
+// C3 (Phase 2) — the LEADERSHIP dashboard sections + the two real exports. All delegate to the engine.
+// ===================================================================
+function engineLeadership(fn, records, opts) { const E = studioEngine(); if (!E || typeof E[fn] !== "function") return null; return E[fn](records, opts || {}); }
+function engineCapacityPack(records, opts) { return engineLeadership("buildCapacityPack", records, opts); }
+function engineRoadmapExport(records, opts) { return engineLeadership("buildRoadmapExport", records, opts); }
+function enginePooledLibrary(records) { const E = studioEngine(); if (!E || typeof E.buildPooledLibrary !== "function") return []; return E.buildPooledLibrary(records); }
+
+// C3 — the leadership-specific sections appended to the leadership dashboard (capacity language, leader rail).
+function leadershipSectionsHtml(records, opts) {
+  const mix = engineLeadership("buildAiHybridHumanMix", records, opts);
+  const tiles = engineLeadership("buildGapTiles", records, opts);
+  const seq = engineLeadership("buildCrossGroupSequencing", records, opts);
+  const up = engineLeadership("realizationUplift", records, opts);
+  const honest = engineLeadership("buildHonestUnderPressure", records, opts);
+  const heat = engineLeadership("buildCollectiveHeatmap", enginePooledLibrary(records), opts);
+  if (!mix) return "";
+  const pill = (label, v, c) => `<span style="display:inline-block;background:${c}22;color:${c};border:1px solid ${c}55;border-radius:99px;padding:2px 10px;font-size:11px;font-weight:700;margin-right:6px;">${escapeHtml(label)} ${v}%</span>`;
+  const tile = (t) => `<div style="background:${DASH.panel};border:1px solid ${t.status === "red" ? "#ff4f6d66" : t.status === "amber" ? "#f6c45366" : DASH.line};border-radius:11px;padding:12px 14px;"><div style="font-size:11px;color:${DASH.faint};font-weight:600;text-transform:uppercase;">${escapeHtml(t.lens)} gap${t.status === "red" ? " · <span style=\"color:#ff4f6d;\">RED</span>" : ""}</div><div style="font-size:18px;font-weight:800;color:${DASH.ink};">${t.hrs} h/wk</div><div style="font-size:11px;color:${DASH.dim};margin-top:3px;">${escapeHtml(t.remedy)}</div></div>`;
+  const heatRows = (heat && heat.rows || []).map((r) => `<div style="font-size:12px;color:${DASH.dim};">${escapeHtml(r.role)} · n=${r.n} · <span style="color:${r.lowConfidence ? "#f6c453" : "#00d4b4"};">${escapeHtml(r.confidence)}</span></div>`).join("") || `<div style="font-size:12px;color:${DASH.faint};">${escapeHtml((heat && heat.note) || "No pooled discoveries yet.")}</div>`;
+  return `<section class="dash-sec" style="margin-top:14px;">
+    <div style="font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${DASH.faint};margin:0 0 6px;">L · Leadership — mix · gaps · sequencing · collective</div>
+    <div style="background:${DASH.panel};border:1px solid ${DASH.line};border-radius:12px;padding:14px 16px;">
+      <div style="margin-bottom:8px;">${pill("AI", mix.ai, "#00d4b4")}${pill("Hybrid", mix.hybrid, "#FFB454")}${pill("Human", mix.human, "#FF4FD8")} <span style="font-size:11px;color:${DASH.faint};">where the line sits</span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">${tiles ? tile(tiles.policy) + tile(tiles.realization) : ""}</div>
+      ${up ? `<div style="font-size:12px;color:#00d4b4;margin-bottom:8px;">${escapeHtml(up.headline)}</div>` : ""}
+      ${seq ? `<div style="font-size:12px;color:${DASH.dim};margin-bottom:8px;"><strong>Sequencing:</strong> ${escapeHtml(seq.note)}</div>` : ""}
+      <div style="font-size:11px;color:${DASH.faint};margin-bottom:4px;">Collective historical heatmap (pooled library · n + confidence)</div>${heatRows}
+      ${honest ? `<div style="font-size:11px;color:${DASH.faint};margin-top:10px;border-top:1px solid ${DASH.line};padding-top:8px;">Honest under pressure: ${honest.disclosures.map((d) => escapeHtml(d)).join(" · ")}</div>` : ""}
+      <div style="margin-top:12px;">
+        <button type="button" id="downloadCapacityPackBtn" class="secondary-button compact">⬇ Board-ready capacity pack</button>
+        <button type="button" id="downloadRoadmapBtn" class="secondary-button compact" style="margin-left:8px;">⬇ Land → Expand → Retain roadmap</button>
+      </div>
+    </div></section>`;
+}
+
+// C3 — the two real downloads + the role-redefinition section download.
+function dashboardCurrentRecords() { return (typeof dashboardModel === "function") ? (dashboardModel().records || []) : []; }
+function downloadCapacityPack() { const p = engineCapacityPack(dashboardCurrentRecords()); if (!p) { if (typeof toast === "function") toast("Capacity pack unavailable — engine not loaded"); return false; } if (typeof downloadTextFile === "function") downloadTextFile(p.filename, p.content, "text/markdown"); return true; }
+function downloadRoadmap() { const p = engineRoadmapExport(dashboardCurrentRecords()); if (!p) { if (typeof toast === "function") toast("Roadmap unavailable — engine not loaded"); return false; } if (typeof downloadTextFile === "function") downloadTextFile(p.filename, p.content, "text/markdown"); return true; }
+
+// C3/C4 — wire the dashboard export buttons (called from wireDashboard).
+function wireDashboardExports(container) {
+  if (!container) return;
+  container.querySelector("#downloadCapacityPackBtn")?.addEventListener("click", () => downloadCapacityPack());
+  container.querySelector("#downloadRoadmapBtn")?.addEventListener("click", () => downloadRoadmap());
+  container.querySelector("#downloadEvidencePackBtn")?.addEventListener("click", () => { if (typeof downloadEvidencePack === "function") downloadEvidencePack(); });
+}
 // confidence}, ... ] } — the steps tagged with each role ACROSS all workflows.
 // Provenance preserved per contributing step. Off-set tags never enter the footprint.
 // PURE over an array of workflows; no model call, no scorer, no headcount/FTE/%.
