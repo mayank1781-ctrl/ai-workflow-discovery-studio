@@ -7551,6 +7551,11 @@ function engineControlRail(opts = {}) { const E = studioEngine(); if (!E || type
 // E3/F2 — resolve the value-banded approver for an authority-gated step from the write-once ladder.
 function engineResolveApprover(ref, value, opts = {}) { const E = studioEngine(); if (!E || typeof E.resolveAuthorityApprover !== "function") return null; return E.resolveAuthorityApprover(opts.record || appWorkflowToIntake(opts), ref, value); }
 
+// E3/F3 — routes overlay the linear recipe (reject loop, AML halt, SLA escalation). onReject + onSlaRisk
+// are derived from controls + escalation; onFlag is authored. ANNOTATIONS, not new flow math — the
+// happy-path cycleTime is unchanged. null when the engine isn't loaded (typeof-guarded, additive).
+function engineWorkflowRoutes(opts = {}) { const E = studioEngine(); if (!E || typeof E.deriveRoutes !== "function") return null; return E.deriveRoutes(opts.record || appWorkflowToIntake(opts)); }
+
 // E2 — the spec's 7th field. The engine decides model-fit (permitted tier per class + data-tier
 // residency: PII/MNPI force a restricted/in-VPC pricing tier; confidential routes at its normal
 // class tier) and the cost-to-serve band. Returns the engine's modelFit prov triple (or
