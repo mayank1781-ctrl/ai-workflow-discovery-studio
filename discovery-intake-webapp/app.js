@@ -7246,6 +7246,7 @@ function leadershipSectionsHtml(records, opts) {
   const tiles = engineLeadership("buildGapTiles", records, opts);
   const seq = engineLeadership("buildCrossGroupSequencing", records, opts);
   const up = engineLeadership("realizationUplift", records, opts);
+  const unlock = engineLeadership("governanceUnlock", records, opts); // D1 — computed, never fixed
   const honest = engineLeadership("buildHonestUnderPressure", records, opts);
   const heat = engineLeadership("buildCollectiveHeatmap", enginePooledLibrary(records), opts);
   if (!mix) return "";
@@ -7258,6 +7259,7 @@ function leadershipSectionsHtml(records, opts) {
       <div style="margin-bottom:8px;">${pill("AI", mix.ai, "#00d4b4")}${pill("Hybrid", mix.hybrid, "#FFB454")}${pill("Human", mix.human, "#FF4FD8")} <span style="font-size:11px;color:${DASH.faint};">where the line sits</span></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">${tiles ? tile(tiles.policy) + tile(tiles.realization) : ""}</div>
       ${up ? `<div style="font-size:12px;color:#00d4b4;margin-bottom:8px;">${escapeHtml(up.headline)}</div>` : ""}
+      ${unlock ? `<div style="font-size:12px;color:#f6c453;margin-bottom:8px;"><strong>Governance unlock:</strong> ${escapeHtml(unlock.note)}</div>` : ""}
       ${seq ? `<div style="font-size:12px;color:${DASH.dim};margin-bottom:8px;"><strong>Sequencing:</strong> ${escapeHtml(seq.note)}</div>` : ""}
       <div style="font-size:11px;color:${DASH.faint};margin-bottom:4px;">Collective historical heatmap (pooled library · n + confidence)</div>${heatRows}
       ${honest ? `<div style="font-size:11px;color:${DASH.faint};margin-top:10px;border-top:1px solid ${DASH.line};padding-top:8px;">Honest under pressure: ${honest.disclosures.map((d) => escapeHtml(d)).join(" · ")}</div>` : ""}
