@@ -298,6 +298,24 @@ export function stepPermitted(step, profile) {
   return Math.min(theo, stepCeilingFraction(step.cls, step.data, profile));
 }
 
+// A1 — the systems a step INVOLVES (Option-A counting). A step may legitimately touch several
+// systems at once (Section 0 of the rubric: switching systems is NOT a step boundary). The systems
+// are an ATTRIBUTE of the step, not separate steps. Reads an explicit `step.systems` (A2 registry
+// refs) when present, else parses the free-text `step.tool`. Used to RECORD involvement only; the
+// capacity / cost / flow math below counts time to the STEP AS A WHOLE and never gives a system a
+// split share of the hours (splitting invents precision no one can defend). Returns a deduped list.
+export function stepSystems(step) {
+  if (!step || typeof step !== "object") return [];
+  if (Array.isArray(step.systems) && step.systems.length) {
+    return uniq(step.systems.map(s => (s && typeof s === "object") ? (s.ref ?? s.id ?? s.name) : s));
+  }
+  return uniq(String(step.tool || "").split(/[,/]/));
+}
+
+// A1 — OPTION-A COUNTING. roleCapacity attributes each step's effort to the step as a whole. A step
+// that spans several systems (stepSystems().length > 1) is still ONE unit of capacity — its hours are
+// never divided per system. Purely a function of s.time, so a one-class step touching three systems
+// scores exactly as the same step touching one (the systems are recorded as involved, not as shares).
 export function roleCapacity(steps, profile, opts = {}) {
   const H = opts.weeklyHours ?? CONFIG.weeklyHours;
   const ff = opts.freeingFactor ?? CONFIG.freeingFactor;
@@ -1766,10 +1784,46 @@ export function flagCombinedStep(text) {
     combined: rc.split === true,
     acts: rc.steps.map(a => ({ text: String(a.text || "").trim(), cls: a.cls })),
     overall: rc.cls,
+    // A1 — which boundary (rule 0) the combined step crosses: a CLASS change is the boundary that
+    // forces a split (assembly bundled with a judgment/decision). null when the step is single-act.
+    boundary: rc.split ? "class-change" : null,
     suggestion: rc.split
       ? `Split into ${rc.steps.length} steps: ${rc.steps.map(a => `"${String(a.text || "").trim()}" (${a.cls})`).join(" + ")}. AI carries the assembly; the person keeps the judgment/decision.`
       : null,
   };
+}
+
+// A1 — THE UNIT-OF-WORK RULE (rubric Section 0), encoded so the engine and the capture surface
+// agree on where one step ends and the next begins. A STEP is one CLASS of work (assembly /
+// judgment / decision), by one PERSON, that may span SEVERAL SYSTEMS at once — ending at the FIRST
+// of: (a) the class changes · (b) the person changes · (c) the work waits on a signal. Two
+// corollaries the engine enforces elsewhere: switching systems is NOT a boundary (stepSystems +
+// Option-A counting), and a DECISION is ALWAYS its own step (stepPermitted clamps it to 0, and a
+// combined utterance carrying a decision splits the decision out). Pure data — additive.
+export const STEP_RULE = {
+  unit: "one class of work, by one person, spanning any number of systems at once",
+  boundaries: ["class-change", "person-change", "wait-on-signal"],
+  notABoundary: ["system-switch"],
+  always: "a decision is its own step",
+  counting: "Option A — capacity counts to the step as a whole; systems are recorded as involved, never given a split share",
+};
+
+// A1 — apply the step rule to a CAPTURED step: a step whose utterance bundles assembly with a
+// judgment/decision act is TWO (or more) atomic steps — so AI carries the assembly and the person
+// keeps the call (a decision is always carved out). Builds the atomic steps off the parent (its
+// data tier / systems / action ride along; per-act time is left UNSET so normalizeIntake fills it
+// by class — we never invent a split share). A single-act step round-trips as one step unchanged
+// (additive). The text used is the step's own label/utterance, falling back to step.step.
+export function splitCombinedStep(step) {
+  const text = String((step && (step.utterance ?? step.step)) || "");
+  const f = flagCombinedStep(text);
+  if (!f.combined) return { combined: false, boundary: null, steps: [step] };
+  const base = (step && typeof step === "object") ? step : {};
+  const steps = f.acts.map(a => {
+    const { utterance, time, ...carry } = base;       // drop the parent's combined label + shared time
+    return { ...carry, step: a.text, cls: a.cls };    // per-act class; time re-inferred by class
+  });
+  return { combined: true, boundary: f.boundary, steps };
 }
 
 // B1 — the live CONTRADICTION QUEUE. Surfaces captured signals that conflict so they are reconciled at
@@ -2126,6 +2180,18 @@ export const RECON_INTAKE = {
   recap: { corrections: "split investigate from propose; named the four-eyes approver ladder", confirmed: true },
 };
 
+// A1 — the recon "Classify and open" first step, as the SME actually says it: it bundles a JUDGMENT
+// (read whether it's a real break or a timing difference) with an ASSEMBLY (pull the file and open
+// the case). By the step rule it is TWO steps, not one. splitCombinedStep(RECON_S1_COMBINED) carves
+// the human-held read away from the mechanical open, so AI can carry the open while the person keeps
+// the call. The canonical RECON_INTAKE seed is left byte-identical; this is the worked split example
+// (and the shape D1's stress recon carries pre-split).
+export const RECON_S1_COMBINED = {
+  step: "Classify and open",
+  utterance: "Assess whether it's a real break or a timing difference and pull the case file to open it",
+  cls: "judgment", data: "confidential", tool: "case manager, ERP",
+};
+
 function runTests() {
   let pass = 0, fail = 0;
   const ok = (name, cond, got) => { if (cond) { pass++; } else { fail++; console.log(`  \u2717 ${name}  got=${got}`); } };
@@ -2384,6 +2450,24 @@ function runTests() {
     const pool = buildPooledLibrary([dirty, RECON_INTAKE]);
     ok("A4 derived layer aggregates over the POOLED library (role/capability/leader)", buildRoleView(pool).confirmedCount === 2 && buildCapabilityMap(pool).confirmedCount === 2 && buildLeaderView(pool).confirmedCount === 2, "");
     ok("A4 the whole pooled library carries no literal PII/MNPI value", !/"(PII|MNPI)"/.test(JSON.stringify(pool)), "");
+  }
+
+  // A1 — the unit-of-work step rule: combined-step split + Option-A multi-system counting
+  {
+    ok("A1 STEP_RULE names the three boundaries and the system-switch non-boundary", STEP_RULE.boundaries.length === 3 && STEP_RULE.notABoundary.includes("system-switch") && /decision/.test(STEP_RULE.always), JSON.stringify(STEP_RULE));
+    ok("A1 'draft and approve' flags a required split on a class-change boundary", (() => { const f = flagCombinedStep("draft and approve the memo"); return f.combined === true && f.boundary === "class-change"; })(), "");
+    // recon s1 ("Classify and open") is TWO steps by the rule — a human-held read carved from the open
+    const s1 = splitCombinedStep(RECON_S1_COMBINED);
+    ok("A1 recon s1 'Classify and open' splits into two steps", s1.combined === true && s1.steps.length === 2, `${s1.combined}/${s1.steps.length}`);
+    ok("A1 recon s1 split keeps a human-held read + a carried assembly", s1.steps.some(x => x.cls === "judgment") && s1.steps.some(x => x.cls === "assembly"), JSON.stringify(s1.steps.map(x => x.cls)));
+    ok("A1 a single-act step is NOT split (round-trips as one)", splitCombinedStep({ step: "Reconcile the two ledgers", cls: "assembly", data: "internal" }).combined === false, "");
+    // Option-A: a one-class step touching three systems stays ONE step; capacity is NOT divided per system
+    const oneSys = [{ step: "Pull and reconcile feeds", cls: "assembly", data: "internal", time: 100, theo: 80, tool: "ERP" }];
+    const threeSys = [{ step: "Pull and reconcile feeds", cls: "assembly", data: "internal", time: 100, theo: 80, tool: "ERP, SharePoint, recon engine" }];
+    ok("A1 a multi-system step records 3 systems involved", stepSystems(threeSys[0]).length === 3, JSON.stringify(stepSystems(threeSys[0])));
+    ok("A1 capacity counts to the step as a whole — not divided per system", roleCapacity(normalizeIntake({ steps: threeSys }).steps, "Conservative").grossValue === roleCapacity(normalizeIntake({ steps: oneSys }).steps, "Conservative").grossValue, "");
+    ok("A1 cost-to-serve is the step's, not split per system", costToServe(normalizeIntake({ steps: threeSys }).steps, "Conservative", "routed").annual === costToServe(normalizeIntake({ steps: oneSys }).steps, "Conservative", "routed").annual, "");
+    ok("A1 explicit systems[] refs are read without dividing capacity", stepSystems({ systems: [{ ref: "sysA" }, { ref: "sysB" }] }).length === 2, "");
   }
 
   // B1 — clean capture: combined-step split flag + the contradiction queue
