@@ -7489,6 +7489,11 @@ function appStepToEngineStep(step) {
   const inputs = (step && step.inputs) || cell("dataProcessing"); if (inputs) out.inputs = inputs;
   const output = (step && step.output) || cell("output"); if (output) out.output = output;
   const consumer = (step && step.consumer) || cell("handoff"); if (consumer) out.consumer = consumer;
+  // E3/F1 — pass through multi-actor participants (the part each actor plays here). Absent =>
+  // the engine treats the one persona as the implicit doer (byte-identical to today).
+  if (step && Array.isArray(step.participants)) out.participants = step.participants;
+  // E3/F2 — pass through the step's control (four-eyes / authority / halt-on-flag / completeness / SoD).
+  if (step && step.control && typeof step.control === "object") out.control = step.control;
   return out;
 }
 
@@ -7511,6 +7516,11 @@ function appWorkflowToIntake(opts = {}) {
     header: meta.header || { persona: opts.persona || "", dept: opts.dept || "", anchor: opts.anchor || (typeof analysisWorkflowName === "function" ? analysisWorkflowName() : ""), lifecycle: opts.lifecycle },
     trigger: meta.trigger || { trigger: opts.trigger || "", cadence: opts.cadence || "", volume: opts.volume || "" },
     steps: (Array.isArray(steps) ? steps : []).map(appStepToEngineStep),
+    // E3/F1+F2+F3 — firm-level registry + write-once shared rules + routes. Absent => omitted
+    // empty, so the engine's multi-actor math is inert and the record reads as today.
+    actors: meta.actors || opts.actors || [],
+    sharedRules: meta.sharedRules || opts.sharedRules || [],
+    routes: meta.routes || opts.routes || [],
     seams,
     judgment: meta.judgment || opts.judgment || {},
     confirm: meta.confirm || opts.confirm || {},
@@ -7525,6 +7535,14 @@ function engineWorkflowCapacity(opts = {}) { const E = studioEngine(); if (!E) r
 function engineWorkflowCost(opts = {}) { const E = studioEngine(); if (!E) return null; return E.costToServe(E.normalizeIntake(opts.record || appWorkflowToIntake(opts)).steps, opts.profile || "Conservative", opts.mode || "routed", opts); }
 function engineWorkflowFlow(opts = {}) { const E = studioEngine(); if (!E) return null; return E.cycleTime(E.normalizeIntake(opts.record || appWorkflowToIntake(opts)).steps, opts); }
 function engineLeaderView(records, opts = {}) { const E = studioEngine(); if (!E) return null; return E.buildLeaderView(records, opts); }
+
+// E3/F1 — capacity scoped per doer (the multi-actor role roll-up; freed attributes to the doer's
+// role, non-doer parts contribute 0). Absent participants => one implicit doer = persona, so this
+// equals the single-role roleCapacity (additive). typeof-guarded: an E2-vintage engine returns null.
+function engineWorkflowRoleCapacity(opts = {}) { const E = studioEngine(); if (!E || typeof E.roleCapacityByActor !== "function") return null; return E.roleCapacityByActor(opts.record || appWorkflowToIntake(opts), opts.profile || "Conservative", opts); }
+// E3/F1 — the hand-offs (where the doer changes between consecutive steps). Absent participants =>
+// no hand-offs (a single persona never hands off). The crossing math lives in the engine.
+function engineWorkflowHandoffs(opts = {}) { const E = studioEngine(); if (!E || typeof E.detectHandoffs !== "function") return null; return E.detectHandoffs(opts.record || appWorkflowToIntake(opts)); }
 
 // E2 — the spec's 7th field. The engine decides model-fit (permitted tier per class + data-tier
 // residency: PII/MNPI force a restricted/in-VPC pricing tier; confidential routes at its normal
