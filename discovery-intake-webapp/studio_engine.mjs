@@ -760,6 +760,121 @@ export function buildAdjacency(records, opts = {}) {
 }
 
 // =====================================================================
+// 5.6 · EDITION 3 — INTERPRETATION RUBRIC, EXECUTABLE (F5 — the layer above the engine)
+// The engine trusts the consultant's tags completely; it cannot catch a bad one. This encodes the
+// rubric's decision RULES so a wrong tag fails CI. classifyUtterance(sme_says) returns the rubric's
+// classification; the eval set asserts it never produces a dangerous_wrong (a decision/judgment step
+// labeled assembly, an un-split combined step, a high-criticality seam scored low, an auto-resolvable
+// halt). CONSERVATIVE — round UP: when unsure, keep more with the human (assembly < judgment < decision).
+// =====================================================================
+
+// commit-the-firm / accountability verbs -> decision (highest). "decide if/whether" commits; so does the send.
+// NOTE: stems anchor with a LEADING \b only (so "approv" matches "approve/approval/approved"); a trailing \b
+// would block the suffix. "commit" keeps a trailing \b so it does not match "committee".
+const RUBRIC_DECISION_RE = /\b(?:approv|declin|sign[\s-]?off|signs?\s+off|authori[sz]e|waiv|escalat|commit(?:s|ted|ting)?\b|deploy|releas|merg|remediat|put\s+in\s+whether|present(?:s|ing)?\s+to\s+(?:the\s+)?committee)/i;
+const RUBRIC_PUSH_PROD_RE = /\bpush(?:es|ed|ing)?\b[^.]*\b(prod|production|live)\b/i;
+const RUBRIC_SEND_FINAL_RE = /\bsend(?:s|ing)?\b[^.]*\b(final|memo|client|customer|as final)\b|\bsend it on\b/i;
+const RUBRIC_DECIDE_COMMIT_RE = /\bdecide\s+(?:if|whether)\b|\bdecide\b[^.]*\b(?:page|incident|escalat)/i;
+// needs a person's read -> judgment. "decide/choose WHICH/WHAT" is a read (not a firm-commit).
+const RUBRIC_JUDGMENT_RE = /\b(?:assess|interpret|weigh|evaluat|prioriti[sz]e|judge|decid(?:e|ing)\s+wh(?:ich|at)|choose\s+(?:wh|the\s+relevant|relevant)|select\s+(?:wh|the\s+relevant|relevant)|which\s+\w+\s+(?:are|is)\s+relevant|figure\s+out\s+wh|understand\s+the\s+(?:request|ask|situation|case)|techniques?\s+to\s+use|where\s+the\s+art\s+is)/i;
+// rule-following, same inputs -> same output -> assembly (AI can carry it, with a spot-check).
+const RUBRIC_ASSEMBLY_RE = /\b(?:pull|gather|extract|\bmap\b|format|populat|reconcil|comput|calculat|work(?:s|ed|ing)?\s+out|draft|classif|categor|collect|retriev|summari[sz]e|correlat|spread|search|dig\s+in|tie[\s-]?out|review|book|post)/i;
+
+export function rubricStepClass(text) {
+  const t = String(text || "");
+  if (RUBRIC_DECISION_RE.test(t) || RUBRIC_PUSH_PROD_RE.test(t) || RUBRIC_SEND_FINAL_RE.test(t) || RUBRIC_DECIDE_COMMIT_RE.test(t)) return "decision";
+  if (RUBRIC_JUDGMENT_RE.test(t)) return "judgment";
+  if (RUBRIC_ASSEMBLY_RE.test(t)) return "assembly";
+  return "judgment"; // round UP when unsure — never silently assembly
+}
+const rubricHasVerb = (t) => RUBRIC_DECISION_RE.test(t) || RUBRIC_PUSH_PROD_RE.test(t) || RUBRIC_SEND_FINAL_RE.test(t) || RUBRIC_DECIDE_COMMIT_RE.test(t) || RUBRIC_JUDGMENT_RE.test(t) || RUBRIC_ASSEMBLY_RE.test(t);
+
+// Split a combined utterance into atomic acts; a step that bundles assembly with a judgment/decision is
+// TWO steps (so AI carries the assembly and the human keeps the call). Returns split + per-act classes.
+export function rubricClassify(utterance) {
+  const t = String(utterance || "");
+  const clauses = t.split(/\b(?:and then|and|then)\b|[,;.]/i).map(s => s.trim()).filter(s => s.length > 2);
+  const acts = clauses.map(c => ({ text: c, cls: rubricStepClass(c) })).filter(a => rubricHasVerb(a.text));
+  const classes = new Set(acts.map(a => a.cls));
+  const split = acts.length >= 2 && classes.has("assembly") && (classes.has("judgment") || classes.has("decision"));
+  const overall = classes.has("decision") ? "decision" : classes.has("judgment") ? "judgment" : (classes.has("assembly") ? "assembly" : rubricStepClass(t));
+  return { split, steps: split ? acts.map(a => ({ text: a.text, cls: a.cls })) : [{ text: t, cls: overall }], cls: overall,
+    // a facilitation/template step's output is deliberately incomplete — AI must NOT pre-fill the answer.
+    aiMustNotPrefill: /facilitat|deliberately incomplete|live during|template with headers|populate it live|not coming with it|fill(?:s|ing)?\s+in\s+the\s+answer/i.test(t) };
+}
+
+// data tier — the HIGHEST the step actually touches; round UP. Personal identifiers -> PII; market-moving
+// -> MNPI; non-public business/borrower -> confidential; else internal/public.
+export function rubricDataTier(text) {
+  const t = String(text || "").toLowerCase();
+  if (/\b(ssn|social security|passport|date of birth|home address|personally? identif|named individual|account numbers?)\b/.test(t)) return "PII";
+  if (/\b(mnpi|material non[\s-]?public|inside information|insider|unannounced deal|pending merger)\b/.test(t)) return "MNPI";
+  if (/\b(financ(?:ials?|e)|borrower|client\b|revenue|earnings|forecast|spread|covenant|salary|tax returns?|confidential|non[\s-]?public)\b/.test(t)) return "confidential";
+  if (/\b(internal|operational|ticket|\blog)\b/.test(t)) return "internal";
+  if (/\b(public|published|press release)\b/.test(t)) return "public";
+  return null;
+}
+// theo % — honest, never 100 for assembly (setup, exceptions, verification keep headroom: ~65–80%).
+export function rubricTheoRange(cls) {
+  if (cls === "assembly") return [65, 80];
+  if (cls === "judgment") return [20, 40];
+  return [5, 15];
+}
+// seam friction — mechanical toil only (re-key/swivel/manual). "one click" is LOW friction.
+export function rubricSeamFriction(text) {
+  const t = String(text || "").toLowerCase();
+  if (/\b(re-?key|rekey|swivel|copy[\s-]?paste|manual|retype|by hand|reformat)\b/.test(t)) return "high";
+  if (/\b(one click|single click|automatic|a click)\b/.test(t)) return "low";
+  return "medium";
+}
+// seam criticality — from CONSEQUENCE, never from ease. A flag/hand-off into a decision/officer/credit is HIGH.
+// (Leading-\b stems only, so "approv" matches "approval"; a trailing \b would block the suffix.)
+export function rubricSeamCriticality(text) {
+  const t = String(text || "").toLowerCase();
+  if (/\b(?:flag|escalat|officer|approv|credit|sign[\s-]?off|committee|decision|breach|aml|\brisk|compliance|four-eyes)/.test(t)) return "high";
+  if (/\b(?:review|check|verify|reconcil)/.test(t)) return "medium";
+  return "low";
+}
+// waitKind — the wait around a human DECISION is protected (never compress to zero); routine queue is reducible.
+export function rubricWaitKind(text) {
+  const t = String(text || "").toLowerCase();
+  if (/\b(committee|approval|sign[\s-]?off|deliberat|board|decision|review meeting|hearing)\b/.test(t)) return "protected";
+  return "reducible";
+}
+export function rubricWaits(text) {
+  const segs = String(text || "").split(/[,;]|\bthen\b/i).map(s => s.trim()).filter(Boolean);
+  return segs.filter(s => /\b(wait|sits|queue|pending|few days|a day|committee|deliberat)\b/i.test(s)).map(s => ({ what: s, waitKind: rubricWaitKind(s) }));
+}
+// acceptance/escalation source — inferred when the SME didn't state it (the consultant filled it in).
+export function rubricAcceptanceSource(text) {
+  const t = String(text || "").toLowerCase();
+  if (/\b(never states?|assumes?|consultant (?:fills|assumes)|inferred|i'?d guess|probably|typical(?:ly)?)\b/.test(t)) return "inferred";
+  return "stated";
+}
+
+// classifyUtterance — the rubric's full read of one SME utterance. The eval set runs each case through
+// this and asserts the dangerous_wrong never occurs (gating). This IS the rubric, executable.
+export function classifyUtterance(text) {
+  const c = rubricClassify(text);
+  return { ...c, dataTier: rubricDataTier(text), theoRange: rubricTheoRange(c.cls),
+    seamFriction: rubricSeamFriction(text), seamCriticality: rubricSeamCriticality(text),
+    waits: rubricWaits(text), acceptanceSource: rubricAcceptanceSource(text) };
+}
+
+// F5 (render) — the eval traps as inline warnings on a Discovery capture string. null when no trap fires.
+// Worker-safe (no economics/headcount): nudges the consultant to split/round-up, never tells them an answer.
+export function discoveryRubricHint(text) {
+  const t = String(text || "").toLowerCase();
+  if (/\bjust\s+(sign[\s-]?off|approv)/.test(t)) return "'just sign off' usually hides a decision — split the sign-off (the person) from the prep (AI)?";
+  if (RUBRIC_SEND_FINAL_RE.test(t)) return "the send is the commit — AI drafts, the person sends. Tag the send as a decision?";
+  if (/\bdraft\b[^.]*\b(recommend|waiv|whether)\b/.test(t)) return "two things in one step — split the draft (AI) from the call (the person)?";
+  if (/\b(pull|gather|review)\b[^.]*\b(decide|choose|page|approv|merge)\b/.test(t)) return "this bundles assembly with a decision — split them so AI carries the gather and the person keeps the call?";
+  if (/\bbasically do the whole\b|\bcould (?:basically )?do (?:it|the whole)\b/.test(t)) return "even strong assembly keeps headroom (~65–80%) — setup, exceptions and verification stay with the person.";
+  if (/\bone click\b/.test(t)) return "one click ≠ low stakes — score how bad it is if it's wrong from the consequence, not the ease.";
+  return null;
+}
+
+// =====================================================================
 // 6 · RAIL (Change 4) — surface-aware, deterministic, gating
 // =====================================================================
 export const RAIL = {
