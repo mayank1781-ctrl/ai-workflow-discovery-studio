@@ -78,6 +78,24 @@ export const CONFIG = {
     "human-in-loop":      { loop: 1,   retry: 1.0, evalEffort: "standard", needsHarness: false, needsObservability: false, needsRollback: false, controlEvidence: "high" },
   },
 
+  // A2 (M5) — TOTAL COST OF OWNERSHIP drivers, SHAPE-driven and SEPARATE from run-cost. Run-cost
+  // (cost.* above) is inference only; TCO adds build, integration, eval-build, maintenance, eval-run,
+  // and failure/rework — the build/own decision a CFO actually signs. An agentic flow costs far more
+  // to build and maintain than a prompt even when its run-cost is similar. bandSpread expresses that
+  // cost-to-serve + build effort are STOCHASTIC (the deck's "bands, not point estimates"). buildRate is
+  // a loaded $/builder-week. Per-shape weeks; unshaped steps use `default` (a conservative middle).
+  tco: {
+    buildRate: 6000, bandSpread: 0.30,
+    shape: {
+      "prompt":             { buildWk: 1,  integrationWk: 0.25, evalBuildWk: 0.5, maintWkPerYr: 0.5, evalWkPerYr: 0.5, reworkRate: 0.02 },
+      "rag":                { buildWk: 4,  integrationWk: 2,    evalBuildWk: 1.5, maintWkPerYr: 2,   evalWkPerYr: 1.5, reworkRate: 0.05 },
+      "deterministic-tool": { buildWk: 3,  integrationWk: 2,    evalBuildWk: 1,   maintWkPerYr: 1.5, evalWkPerYr: 1,   reworkRate: 0.03 },
+      "agentic":            { buildWk: 10, integrationWk: 5,    evalBuildWk: 4,   maintWkPerYr: 5,   evalWkPerYr: 4,   reworkRate: 0.12 },
+      "human-in-loop":      { buildWk: 2,  integrationWk: 1,    evalBuildWk: 1,   maintWkPerYr: 1,   evalWkPerYr: 1,   reworkRate: 0.03 },
+    },
+    default: { buildWk: 3, integrationWk: 1.5, evalBuildWk: 1, maintWkPerYr: 1.5, evalWkPerYr: 1, reworkRate: 0.05 },
+  },
+
   flow: { assemblyTouchReduction: 0.18, reducibleWaitReduction: 0.30, decisionLeadReduction: 0.12, workdayHours: 8 },
 
   econMarginPerYr: 0, // netValue <= this at the permitted tier => gated-economics
@@ -379,6 +397,66 @@ export function buildShapeProfile(steps) {
 }
 
 export const netValue = (grossValue, annualCost) => grossValue - annualCost;
+
+// A2 (M5) — RUN-COST vs TOTAL COST OF OWNERSHIP, as two separate lenses.
+//   • RUN-COST is the v3 inference model (costToServe). Net realized value keeps using it — UNCHANGED.
+//   • TCO adds the build/own costs run-cost ignores: build, integration, eval-build (all one-time),
+//     plus maintenance, eval-run, and failure/rework (annual). All SHAPE-driven — an agentic flow is
+//     far more expensive to build and keep alive than a prompt even when the per-run cost is close.
+// Both are BANDS (cost-to-serve + build effort are stochastic — the deck's discipline). Payback is a
+// RANGE: one-time build / annual net benefit (gross − run-cost − ongoing). Each AI-addressable step is
+// a build unit (decision steps are human → no AI build). Unshaped steps use the conservative default,
+// so a workflow with no shapes still gets a defensible TCO (and is byte-identical to the default model).
+export function buildTco(record, opts = {}) {
+  const r = normalizeIntake(record);
+  const profile = opts.profile || "Conservative", mode = opts.mode || "routed";
+  const T = opts.tco || CONFIG.tco, rate = T.buildRate, spread = T.bandSpread;
+  // You BUILD a recipe once and DEPLOY it across N instances (the roles that run it). Build/maintain
+  // are one-time/fixed; the captured value and the run-cost scale with the deployment. instances
+  // defaults to 1 (the single-role lens); the dashboards pass the role headcount.
+  const instances = Math.max(1, Number(opts.instances) || 1);
+  const cap = roleCapacity(r.steps, profile, opts);
+  const grossScaled = cap.grossValue * instances;
+  const runAnnual = costToServe(r.steps, profile, mode, opts).annual * instances;
+  const aiSteps = r.steps.filter(s => s.cls !== "decision");          // decision = human, no AI build
+  const drv = (s) => (s.solutionShape && T.shape[s.solutionShape]) || T.default;
+  // one-time build cost (each AI step is a build unit; agentic steps dominate). Built ONCE for the deployment.
+  const build = sum(aiSteps.map(s => drv(s).buildWk)) * rate;
+  const integration = sum(aiSteps.map(s => drv(s).integrationWk)) * rate;
+  const evalBuild = sum(aiSteps.map(s => drv(s).evalBuildWk)) * rate;
+  const buildOneTime = build + integration + evalBuild;
+  // annual ongoing (EXCLUDES run-cost — that is its own lens). maintain/eval are fixed per recipe;
+  // rework scales with the value at stake (the riskiest shape sets the rate).
+  const maintenance = sum(aiSteps.map(s => drv(s).maintWkPerYr)) * rate;
+  const evalOngoing = sum(aiSteps.map(s => drv(s).evalWkPerYr)) * rate;
+  const reworkRate = aiSteps.length ? Math.max(...aiSteps.map(s => drv(s).reworkRate)) : 0;
+  const rework = reworkRate * grossScaled;
+  const annualOngoing = maintenance + evalOngoing + rework;
+  const band = (x) => ({ low: round(x * (1 - spread)), point: round(x), high: round(x * (1 + spread)) });
+  const firstYear = buildOneTime + annualOngoing + runAnnual;
+  // payback band: one-time build / annual net benefit; honest when no positive benefit exists.
+  const annualBenefit = grossScaled - runAnnual - annualOngoing;
+  const pay = (b, n) => (n > 0 ? round(b / n, 2) : null);
+  const payback = annualBenefit > 0
+    ? { lowYears: pay(buildOneTime * (1 - spread), annualBenefit * (1 + spread)),
+        highYears: pay(buildOneTime * (1 + spread), annualBenefit * (1 - spread)),
+        annualBenefit: round(annualBenefit),
+        note: "one-time build / annual net benefit (band — cost-to-serve is stochastic)" }
+    : { lowYears: null, highYears: null, annualBenefit: round(annualBenefit),
+        note: "no positive annual net benefit after ownership cost — TCO is not recovered; a route-down / defer (build-or-buy) decision, separate from the run-cost net" };
+  return {
+    instances,
+    runCost: band(runAnnual),                                          // the v3 inference lens (a band), at deployment scale
+    tco: {
+      buildOneTime: band(buildOneTime), annualOngoing: band(annualOngoing), firstYear: band(firstYear),
+      components: { build: round(build), integration: round(integration), eval: round(evalBuild + evalOngoing), maintenance: round(maintenance), rework: round(rework) },
+    },
+    payback,
+    grossValue: round(grossScaled),
+    netRunCost: round(grossScaled - runAnnual),                        // the EXISTING net lens (run-cost only) — unchanged at instances=1
+    shape: buildShapeProfile(r.steps),
+  };
+}
 
 // M6 — INDEPENDENT GATE MATRIX. The single 4-state verdict collapses too much: ordering economics
 // before policy lets weak economics MASK a policy block. This computes six gates independently —
@@ -1458,6 +1536,22 @@ function runTests() {
   ok("routed cost ~$161", near(routed.annual, 161, 8), round(routed.annual));
   ok("frontier cost ~$1,583", near(frontier.annual, 1583, 25), round(frontier.annual));
   ok("net routed ~$20,617", near(netValue(cap.grossValue, routed.annual), 20617, 30), round(netValue(cap.grossValue, routed.annual))); // M3 — decision ceiling 0
+
+  // A2 — RUN-COST vs TCO as two separate lenses; both bands; shape drives TCO + payback
+  {
+    const wf = (shape) => ({ ...FPA_INTAKE, steps: FPA_INTAKE.steps.map(s => s.cls === "assembly" ? { ...s, solutionShape: shape } : s) });
+    const tProm = buildTco(wf("prompt"), { instances: 18 }), tAgent = buildTco(wf("agentic"), { instances: 18 });
+    ok("A2 run-cost and TCO are separate", tProm.runCost.point !== tProm.tco.firstYear.point && tProm.tco.buildOneTime.point > 0, "");
+    ok("A2 agentic TCO build >> prompt TCO build", tAgent.tco.buildOneTime.point > tProm.tco.buildOneTime.point * 3, `${tAgent.tco.buildOneTime.point} vs ${tProm.tco.buildOneTime.point}`);
+    ok("A2 agentic payback longer than prompt", tAgent.payback.highYears > tProm.payback.highYears, `${tAgent.payback.highYears} vs ${tProm.payback.highYears}`);
+    ok("A2 each cost is a band (low<point<high)", tAgent.runCost.low < tAgent.runCost.high && tAgent.tco.firstYear.low < tAgent.tco.firstYear.high, "");
+    ok("A2 net realized value still run-cost only (unchanged at instances=1)", near(buildTco(wf("prompt")).netRunCost, round(netValue(roleCapacity(normalizeIntake(wf("prompt")).steps, "Conservative").grossValue, costToServe(normalizeIntake(wf("prompt")).steps, "Conservative", "routed").annual)), 1), "");
+    // even when run-cost is forced similar (low-volume), TCO still diverges by shape — the whole point
+    const tiny = (shape) => buildTco({ ...FPA_INTAKE, steps: [{ step: "reconcile", cls: "assembly", data: "internal", time: 1, theo: 80, solutionShape: shape }], recap: { confirmed: true } });
+    const dRun = Math.abs(tiny("agentic").runCost.point - tiny("prompt").runCost.point);
+    const dTco = tiny("agentic").tco.buildOneTime.point - tiny("prompt").tco.buildOneTime.point;
+    ok("A2 TCO gap exceeds run-cost gap (TCO is the lens that reveals build/maintain)", dTco > dRun, `dTco=${dTco} dRun=${round(dRun, 2)}`);
+  }
 
   // readiness states
   ok("net-negative -> gated-economics", readiness({ theoPct: .5, permittedPct: .5, grossValue: 1000, annualCost: 4000 }).state === "gated-economics", "");
