@@ -1278,6 +1278,94 @@ export function buildRoadmapExport(records, opts = {}) {
 }
 
 // =====================================================================
+// C4 (Phase 2) — the TECH & GOVERNANCE dashboard. Build view (shape · model tier · eval plan · owner
+// per recipe) · control evidence (four-eyes / authority / halts + the Phase-1 gate-matrix status) · the
+// six AI-policy KPIs · the builder ladder (Use -> Shape -> Evaluate). One real export: the audit-ready
+// evidence pack. All pure, composed from the existing engine.
+// =====================================================================
+
+// C4 — the builder ladder (the realization / enablement track lives here): rungs map to a realization
+// factor, so the enablement story ties to the computed uplift (C3 / D1).
+export const BUILDER_LADDER = [
+  { rung: 1, name: "Use", detail: "run the shipped recipes confidently; know when to trust and when to check", realization: 0.70 },
+  { rung: 2, name: "Shape", detail: "adapt prompts + acceptance criteria to your own portfolio or service", realization: 0.78 },
+  { rung: 3, name: "Evaluate", detail: "read evals, catch drift, own the quality guardrail for your workflow", realization: 0.85 },
+];
+
+// C4 — the six AI-policy KPIs + the residency exceptions. Confirmed-only.
+export function buildTechGovKpis(records, opts = {}) {
+  const confirmed = (Array.isArray(records) ? records : []).filter(isConfirmed);
+  let aiSteps = 0, aiWithOwner = 0, controls = 0, controlsOk = 0, shaped = 0, shapedWithEval = 0, hardened = 0;
+  const tierMix = {}; const openExceptions = [];
+  confirmed.forEach(rec => {
+    const r = normalizeIntake(rec);
+    if (canHarden(rec)) hardened += 1;
+    const hasEvals = !!(rec.confirm?.evals || "").trim();
+    const hasHumanOwner = !!(rec.confirm?.checker || rec.judgment?.human);
+    r.steps.filter(s => s.cls !== "decision").forEach(s => {
+      aiSteps += 1;
+      const owned = hasHumanOwner || (Array.isArray(s.participants) && s.participants.some(p => p.part === "approver" && !isNonHumanActor(p.actorId, rec)));
+      if (owned) aiWithOwner += 1;
+      tierMix[modelTier(s.cls, s.data, "routed")] = (tierMix[modelTier(s.cls, s.data, "routed")] || 0) + 1;
+      if (s.solutionShape) { shaped += 1; if (hasEvals) shapedWithEval += 1; }
+    });
+    const violated = new Set(controlRail(rec).violations.map(v => v.step));
+    r.steps.forEach(s => { if (s.control && s.control.type) { controls += 1; if (!violated.has(s.step)) controlsOk += 1; } });
+    (Array.isArray(rec.policyExceptions) ? rec.policyExceptions : []).forEach(exc => { if (validPolicyException(exc, exc && exc.dataClass)) openExceptions.push({ approver: exc.approver, jurisdiction: exc.jurisdiction, dataClass: exc.dataClass, expiry: exc.expiry }); });
+  });
+  const pct = (a, b) => b ? round(a / b * 100) : 0;
+  return {
+    kpis: [
+      { id: "ai_steps_human_owner", label: "% AI steps with a human owner", value: pct(aiWithOwner, aiSteps), unit: "%" },
+      { id: "hardened_from_confirmed", label: "% hardened from confirmed data", value: pct(hardened, confirmed.length), unit: "%" },
+      { id: "residency_exceptions_open", label: "Residency exceptions open", value: openExceptions.length, unit: "count" },
+      { id: "eval_coverage_by_shape", label: "% shaped steps with eval coverage", value: pct(shapedWithEval, shaped), unit: "%" },
+      { id: "control_evidence_completeness", label: "Control-evidence completeness", value: pct(controlsOk, controls), unit: "%" },
+      { id: "model_tier_mix", label: "Model-tier mix", value: tierMix, unit: "mix" },
+    ],
+    residencyExceptions: openExceptions, confirmedCount: confirmed.length,
+  };
+}
+
+// C4 — the build view (per recipe) + control evidence (the gate matrix) + the KPIs + the ladder.
+export function buildTechGovView(records, opts = {}) {
+  const confirmed = (Array.isArray(records) ? records : []).filter(isConfirmed);
+  const builds = confirmed.map(rec => {
+    const proof = buildRecipeProof(rec, opts);
+    const rec2 = buildDraftRecipe(rec, opts);
+    const ctrl = controlRail(rec);
+    return {
+      workflow: rec.header?.anchor || rec.header?.persona || "workflow",
+      shapes: proof.solutionShapes, evalEffort: proof.evalEffort, owner: proof.owner,
+      tiers: [...new Set(rec2.rankedUnits.map(u => u.tier))],
+      evalPlan: proof.evalPlan,
+      controlEvidence: { ok: ctrl.ok, violations: ctrl.violations.map(v => ({ rule: v.rule, step: v.step, detail: v.detail })),
+        controls: normalizeIntake(rec).steps.filter(s => s.control && s.control.type).map(s => ({ step: s.step, type: s.control.type })) },
+    };
+  });
+  return { builds, kpis: buildTechGovKpis(records, opts), builderLadder: BUILDER_LADDER, confirmedCount: confirmed.length,
+    note: confirmed.length ? null : "No confirmed units yet — confirm a workflow to populate the build & governance view." };
+}
+
+// C4 — the audit-ready evidence pack export (control evidence + KPIs + hardened status). Carries the
+// illustrative marker (D3) unless a real confirmed seed is flagged.
+export function buildEvidencePack(records, opts = {}) {
+  const view = buildTechGovView(records, opts);
+  const kpiLine = view.kpis.kpis.filter(k => k.unit !== "mix").map(k => `${k.label}: ${k.value}${k.unit === "%" ? "%" : ""}`).join(" · ");
+  const lines = ["# Audit-ready evidence pack", "", `Confirmed units: ${view.confirmedCount}`, "", "## AI-policy KPIs", kpiLine, `Model-tier mix: ${JSON.stringify(view.kpis.kpis.find(k => k.id === "model_tier_mix").value)}`, "", "## Control evidence"];
+  view.builds.forEach(b => {
+    lines.push(`### ${b.workflow}`, `- shape: ${Object.keys(b.shapes).join(", ") || "—"} · owner: ${b.owner} · tiers: ${b.tiers.join("/")}`,
+      `- controls: ${b.controlEvidence.controls.map(c => `${c.step} (${c.type})`).join("; ") || "none"}`,
+      `- control rail: ${b.controlEvidence.ok ? "PASS" : `BLOCKED — ${b.controlEvidence.violations.map(v => v.rule).join(", ")}`}`, "");
+  });
+  lines.push("## Residency exceptions (open)");
+  view.kpis.residencyExceptions.forEach(e => lines.push(`- ${e.dataClass} by ${e.approver} (${e.jurisdiction}), expires ${e.expiry}`));
+  if (!view.kpis.residencyExceptions.length) lines.push("- none open");
+  const mark = illustrativeMarker(opts); if (mark) lines.push("", mark);
+  return { content: lines.join("\n"), filename: "evidence-pack.md", surface: "dashboard", illustrative: mark != null };
+}
+
+// =====================================================================
 // 5.5 · EDITION 3 — DERIVED LEADER LAYER (F4): role roll-up · capability map · adjacency
 // Pure derived views over CONFIRMED multi-actor workflows (no new schema), the way buildLeaderView sits
 // on the units. Capacity + operating-model language ONLY — the reasons name controls / data tiers, never
@@ -2367,6 +2455,23 @@ function runTests() {
     // two REAL exports
     ok("C3 the capacity pack export produces real content + filename", buildCapacityPack(set).content.length > 0 && buildCapacityPack(set).filename === "capacity-pack.md", "");
     ok("C3 the roadmap export produces real content + filename", buildRoadmapExport(set).content.length > 0 && buildRoadmapExport(set).filename === "land-expand-retain-roadmap.md" && /Land -> Expand -> Retain/.test(buildRoadmapExport(set).content), "");
+  }
+
+  // C4 — tech & governance: build view, control evidence, six AI-policy KPIs, builder ladder, evidence pack
+  {
+    const view = buildTechGovView([RECON_INTAKE]);
+    ok("C4 the build view carries shape / model tier / eval plan / owner per recipe", view.builds.length >= 1 && view.builds[0].owner && Array.isArray(view.builds[0].evalPlan) && view.builds[0].tiers.length >= 1, "");
+    ok("C4 control evidence carries the gate-matrix status + the controls", view.builds[0].controlEvidence && typeof view.builds[0].controlEvidence.ok === "boolean" && view.builds[0].controlEvidence.controls.length >= 1, JSON.stringify(view.builds[0].controlEvidence.controls));
+    ok("C4 the six AI-policy KPIs are present", view.kpis.kpis.length === 6 && view.kpis.kpis.map(k => k.id).join(",") === "ai_steps_human_owner,hardened_from_confirmed,residency_exceptions_open,eval_coverage_by_shape,control_evidence_completeness,model_tier_mix", "");
+    ok("C4 the builder ladder is Use -> Shape -> Evaluate (the enablement track)", view.builderLadder.map(r => r.name).join(" -> ") === "Use -> Shape -> Evaluate", "");
+    // residency-exceptions-open KPI reflects ACTUAL exception objects
+    const withExc = { ...RECON_INTAKE, policyExceptions: [{ approver: "CRO", jurisdiction: "US", dataClass: "confidential", expiry: "2099-01-01" }] };
+    const expired = { ...RECON_INTAKE, policyExceptions: [{ approver: "CRO", jurisdiction: "US", dataClass: "confidential", expiry: "2000-01-01" }] };
+    ok("C4 residency-exceptions-open KPI reflects actual valid exception objects", buildTechGovKpis([withExc]).kpis.find(k => k.id === "residency_exceptions_open").value === 1 && buildTechGovKpis([RECON_INTAKE]).kpis.find(k => k.id === "residency_exceptions_open").value === 0, "");
+    ok("C4 an expired/invalid exception does NOT count as open", buildTechGovKpis([expired]).kpis.find(k => k.id === "residency_exceptions_open").value === 0, "");
+    // the evidence pack is a real export
+    const ep = buildEvidencePack([withExc]);
+    ok("C4 the evidence pack produces real content + filename", ep.content.length > 0 && ep.filename === "evidence-pack.md" && /Control evidence/.test(ep.content) && /CRO/.test(ep.content), "");
   }
 
   // ---- Edition 3 \u00b7 F6 \u2014 confirm gate, control-aware (confirmBlockers / canHarden) ----
