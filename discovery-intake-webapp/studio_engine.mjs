@@ -177,8 +177,26 @@ export function stepCeilingFraction(cls, dataTier, profile) {
   const P = CONFIG.profiles[profile];
   return (P.step[cls] / 100) * (P.tier[dataTier] ?? 1);
 }
+// B2 — SEMANTIC CLASS CHECK. A step whose TEXT reads as a firm decision/commitment (approve /
+// waive / authorize / sign-off / send-final / sanction — scored by the SAME eval-gated rubric the
+// rest of the app uses, rubricStepClass) but is DECLARED assembly/judgment is a mislabel: left
+// alone it would harden into an AI step and earn capacity for a call a human must keep. Returns
+// true for that mislabel. Two escapes, both deliberate: SPLIT the step (the prep clause classifies
+// assembly, the decision clause classifies decision — so neither single step is a mislabel), or
+// supply an explicit, documented human override (step.classOverride, >= 8 chars). Additive:
+// false for any step without decision language, so existing capture is byte-identical.
+export function stepDecisionLanguage(step) {
+  if (!step || !step.cls || step.cls === "decision") return false;
+  const text = `${step.step || ""}. ${step.output || ""}. ${step.action || ""}`;
+  if (rubricStepClass(text) !== "decision") return false;
+  const override = step.classOverride ?? step.overrideRationale;
+  if (typeof override === "string" && override.trim().length >= 8) return false;
+  return true;
+}
+
 // permitted addressability for one step (fraction 0..1) = min(theoretical, policy ceiling)
 export function stepPermitted(step, profile) {
+  if (stepDecisionLanguage(step)) return 0; // B2 — a decision in disguise earns NO automation
   const theo = (step.theo ?? 0) / 100;
   return Math.min(theo, stepCeilingFraction(step.cls, step.data, profile));
 }
@@ -511,7 +529,9 @@ export function buildRecipe(record, opts = {}) {
 
   // ordered build steps: assembly -> an AI instruction at its tier; judgment/decision -> a human checkpoint
   const ordered = r.steps.map(s => {
-    const base = (s.cls === "assembly")
+    // B2 \u2014 a step tagged assembly but whose text commits the firm is NEVER rendered as an AI step;
+    // it falls through to a human checkpoint that says split prep from the decision.
+    const base = (s.cls === "assembly" && !stepDecisionLanguage(s))
       ? {
           kind: "ai-step", step: s.step, tier: modelTier(s.cls, s.data, mode, opts.policyAllowsExternal),
           action: `Assemble: ${dash(s.output) === "\u2014" ? s.step : dash(s.output)} from ${dash(s.inputs)} using ${dash(s.tool)}.`,
@@ -519,7 +539,9 @@ export function buildRecipe(record, opts = {}) {
         }
       : {
           kind: "human-checkpoint", step: s.step, cls: s.cls,
-          action: s.cls === "decision"
+          action: stepDecisionLanguage(s)
+            ? `Decision/commitment language in a step tagged "${s.cls}" \u2014 AI prepares the lead-up only; the call stays with the person. Split prep (AI) from the decision before hardening.`
+            : s.cls === "decision"
             ? `Human decision: ${s.step}. AI prepares the lead-up only; the call stays with the person.`
             : `Human judgment: ${s.step}. AI surfaces options/evidence; the person decides.`,
         };
@@ -983,6 +1005,15 @@ export function controlRail(record, opts = {}) {
 // approver, halt not auto-resolved). This EXTENDS the no-bypass boundary (isConfirmed/assertHardenable)
 // — nothing hardens unconfirmed, and now nothing hardens with a broken control. Returns the blockers
 // (empty => hardenable), each a human-readable reason for the Workbench confirm affordance.
+// B2 — one blocker per step whose declared class contradicts its decision/commitment text.
+// Surfaced at the Workbench confirm affordance so the consultant must split or override.
+export function decisionMislabelBlockers(record) {
+  const steps = Array.isArray(record?.steps) ? record.steps : [];
+  return steps.filter(stepDecisionLanguage).map(s => ({
+    rule: "class-mismatch-decision", step: s.step || "step",
+    detail: `"${s.step || "this step"}" uses decision/authority/approval language but is tagged "${s.cls}". Split the prep (AI) from the call (the person), or supply an explicit override rationale — AI must never harden a decision.`,
+  }));
+}
 export function confirmBlockers(record) {
   const blockers = [];
   if (record?.recap?.confirmed !== true) blockers.push({ rule: "not-confirmed", detail: "the unit hasn't been confirmed on the Workbench" });
@@ -990,6 +1021,7 @@ export function confirmBlockers(record) {
   cov.coverage.gaps.forEach(g => blockers.push({ rule: "incomplete", field: g, detail: `still needed before confirm: ${g}` }));
   cov.errors.forEach(e => blockers.push({ rule: "invalid", detail: e }));
   controlRail(record).violations.forEach(v => blockers.push({ rule: v.rule, step: v.step, detail: v.detail }));
+  decisionMislabelBlockers(record).forEach(b => blockers.push(b)); // B2 — semantic class check
   return blockers;
 }
 export function canHarden(record) { return confirmBlockers(record).length === 0; }
@@ -1258,6 +1290,15 @@ function runTests() {
   const autoHalt6 = { ...RECON_INTAKE, steps: RECON_INTAKE.steps.map(s => s.step === "Investigate root cause" ? { ...s, autoResolve: true } : s) };
   ok("F6 a halt that is auto-resolvable cannot harden", !canHarden(autoHalt6) && confirmBlockers(autoHalt6).some(b => b.rule === "halt-no-auto-resolve"), "");
   ok("F6 a single-persona confirmed workflow still hardens (additive)", canHarden(FPA_INTAKE), JSON.stringify(confirmBlockers(FPA_INTAKE)));
+
+  // ---- P2 (B2) — semantic class check: a decision/commitment mislabeled as assembly is caught ----
+  const mislabelB2 = { ...RECON_INTAKE, steps: RECON_INTAKE.steps.map(s => s.step === "Post adjustment" ? { ...s, step: "Approve the write-off and post the final entry" } : s) };
+  const mlStep = mislabelB2.steps.find(s => /Approve the write-off/.test(s.step));
+  ok("B2 a decision-language step tagged assembly blocks hardening", !canHarden(mislabelB2) && confirmBlockers(mislabelB2).some(b => b.rule === "class-mismatch-decision"), JSON.stringify(confirmBlockers(mislabelB2)));
+  ok("B2 the mislabeled step earns ZERO permitted automation (no fake capacity)", stepPermitted(mlStep, "Conservative") === 0 && roleCapacity(normalizeIntake({ steps: [mlStep] }).steps, "Conservative").grossValue === 0, String(stepPermitted(mlStep, "Conservative")));
+  ok("B2 buildRecipe renders the mislabel as a human checkpoint, not an ai-step", (() => { const st = buildRecipe(mislabelB2).orderedSteps.find(s => /Approve the write-off/.test(s.step)); return st && st.kind !== "ai-step"; })(), "");
+  ok("B2 an explicit override rationale lets a genuine edge case through", stepDecisionLanguage({ ...mlStep, classOverride: "Control owner reviewed: rote posting, not a firm commitment." }) === false, "");
+  ok("B2 a clean record still hardens — no false positive (additive)", canHarden(RECON_INTAKE) && canHarden(FPA_INTAKE), "");
 
   // ---- Edition 3 \u00b7 F8 \u2014 org-tier numbers: hand-off reduction + SLA dividend ----
   const hr = buildHandoffReduction([RECON_INTAKE]);
