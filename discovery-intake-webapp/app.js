@@ -12301,6 +12301,73 @@ function buildConnectionRecipeSpec(unitId) {
 // escalation / readiness are populated from the normalized constraint set. With no policy
 // this is a no-op — byte-identical to Change 1. `policyInput` is an optional override (a
 // structured policyConstraints object or a clause policy); default reads state.aiPolicy.
+// === E4 — Lifecycle states ============================================================
+// A unit's lifecycle: captured -> confirmed -> specified -> in-build -> in-telemetry, a
+// .prov.* triple with ONE-DIRECTIONAL, human-initiated transitions. captured->confirmed is the
+// Change-3 confirm gate; confirmed->specified needs a complete 7-field spec (E2 satisfied);
+// specified->in-build and in-build->in-telemetry are EXTENSION POINTS (a Workbench build flag /
+// live telemetry — no build or telemetry system is assumed here). Additive: with no stored tag
+// the lifecycle is INFERRED (confirmed? "confirmed" : "captured"), so nothing breaks.
+const LIFECYCLE_STATES = ["captured", "confirmed", "specified", "in-build", "in-telemetry"];
+
+function ensureLifecycleTags() {
+  if (typeof state === "undefined" || !state) return {};
+  if (!state.lifecycleTags || typeof state.lifecycleTags !== "object") state.lifecycleTags = {};
+  return state.lifecycleTags;
+}
+
+// The lifecycle .prov triple for a unit: the stored (human-set, stated/teal) tag if present,
+// else inferred from the confirm gate (ai-inferred/grey). Provenance preserved either way.
+function unitLifecycle(unitId) {
+  const tags = ensureLifecycleTags();
+  const stored = unitId ? tags[unitId] : null;
+  if (stored && LIFECYCLE_STATES.includes(stored.value)) {
+    return { value: stored.value, source: stored.source || "user-stated", confidence: typeof stored.confidence === "number" ? stored.confidence : 1 };
+  }
+  const confirmed = (typeof isUnitConfirmed === "function") ? isUnitConfirmed(unitId) : false;
+  return { value: confirmed ? "confirmed" : "captured", source: "ai-inferred", confidence: confirmed ? 0.9 : 0.6 };
+}
+
+// "specified" = confirmed AND a complete 7-field spec (the six core fields + the E2 modelFit
+// field + eval cases). E2 must be satisfied (the engine loaded).
+function isUnitSpecified(unitId) {
+  if (typeof isUnitConfirmed === "function" && !isUnitConfirmed(unitId)) return false;
+  if (typeof buildRecipeSpec !== "function") return false;
+  const spec = buildRecipeSpec(unitId);
+  if (!spec) return false;
+  const core = ["goal", "context", "constraints", "acceptanceCriteria", "escalation"];
+  const allCore = core.every((k) => spec[k] && spec[k].value);
+  const hasModelFit = Boolean(spec.modelFit && spec.modelFit.value);
+  const hasEvals = Array.isArray(spec.evalCases) && spec.evalCases.length > 0;
+  return allCore && hasModelFit && hasEvals;
+}
+
+// One step FORWARD only (one-directional), each transition gated. in-build / in-telemetry are
+// extension points (advance on the explicit human/Workbench/telemetry flag, no auto-signal).
+function lifecycleCanAdvance(unitId, toState) {
+  const from = unitLifecycle(unitId).value;
+  const fromRank = LIFECYCLE_STATES.indexOf(from), toRank = LIFECYCLE_STATES.indexOf(toState);
+  if (toRank < 0 || toRank !== fromRank + 1) return false;
+  if (toState === "confirmed") return (typeof isUnitConfirmed === "function") ? isUnitConfirmed(unitId) : false;
+  if (toState === "specified") return isUnitSpecified(unitId);
+  if (toState === "in-build") return true;     // extension point — a Workbench build flag
+  if (toState === "in-telemetry") return true; // extension point — live telemetry connected
+  return false;
+}
+function lifecycleNextAdvanceable(unitId) {
+  const next = LIFECYCLE_STATES[LIFECYCLE_STATES.indexOf(unitLifecycle(unitId).value) + 1];
+  return (next && lifecycleCanAdvance(unitId, next)) ? next : null;
+}
+
+// Human-initiated, one-directional lifecycle advance. Writes a stated tag (teal) + persists;
+// no-op (returns false) when the transition's gate isn't met — never a backward move.
+function advanceLifecycle(unitId, toState) {
+  if (!unitId || !lifecycleCanAdvance(unitId, toState)) return false;
+  ensureLifecycleTags()[unitId] = { value: toState, source: "user-stated", confidence: 1 };
+  if (typeof persistState === "function") persistState();
+  return true;
+}
+
 function buildRecipeSpec(unitId, policyInput) {
   if (!unitId) return defaultRecipeSpec();
   let base;
@@ -12332,6 +12399,11 @@ function buildRecipeSpec(unitId, policyInput) {
   } catch (_e) {
     // keep the Change 1/2 readiness
   }
+  // E4 — attach the unit's lifecycle .prov triple (inferred from the confirm gate, or the
+  // human-set tag). Guarded => absent for the Change 1/2 sandboxes (additive).
+  try {
+    if (typeof unitLifecycle === "function") spec = { ...spec, lifecycle: unitLifecycle(unitId) };
+  } catch (_e) { /* additive */ }
   return spec;
 }
 
@@ -12340,7 +12412,7 @@ function buildRecipeSpec(unitId, policyInput) {
 // inferred field is shown as an honest empty state WITH a confirm affordance
 // (data-spec-confirm) — never a blocked state. Flat hues + text labels only: no gradient,
 // no new color, Human Pink stays reserved.
-function recipeSpecCanvasHtml(spec, unitId, gateState) {
+function recipeSpecCanvasHtml(spec, unitId, gateState, nextLifecycle) {
   if (!spec || typeof spec !== "object") return "";
   const uid = escapeHtml(String(unitId || ""));
   const labelCss = "font-size:10px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;color:var(--txt-faint,#737A92);";
@@ -12374,6 +12446,15 @@ function recipeSpecCanvasHtml(spec, unitId, gateState) {
     : `<div style="font-size:12px;color:var(--txt-faint,#737A92);font-style:italic;">No eval cases yet — confirm to add. ${confirmBtn("evalCases")}</div>`;
   const readiness = RECIPE_SPEC_READINESS.includes(spec.readiness) ? spec.readiness : "future";
   const readinessChip = `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:999px;padding:2px 9px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--txt-faint,#737A92);">Readiness · ${escapeHtml(readiness)}</span>`;
+  // E4 — lifecycle chip + provenance. Present only when the spec carries a lifecycle triple
+  // (additive: absent => summary byte-identical to before). A one-directional human-initiated
+  // advance affordance shows when the next stage's gate is met. Flat fills only, no new color.
+  const advanceBtn = nextLifecycle
+    ? `<button type="button" class="recipe-lifecycle-advance" data-lifecycle-advance="${uid}" data-lifecycle-to="${escapeHtml(nextLifecycle)}" style="background:transparent;border:1px solid var(--sg-cyan,#42E8FF);color:var(--sg-cyan,#42E8FF);border-radius:7px;padding:1px 8px;font-size:9px;font-weight:700;cursor:pointer;">Advance to ${escapeHtml(nextLifecycle)}</button>`
+    : "";
+  const lifecycleChip = (spec.lifecycle && spec.lifecycle.value)
+    ? `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:999px;padding:2px 9px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--txt-faint,#737A92);">Lifecycle · ${escapeHtml(spec.lifecycle.value)}</span>${recipeProvChipHtml(spec.lifecycle.source)}${advanceBtn}`
+    : "";
   // Change 3 — the confirm gate banner. gateState undefined => no banner (byte-identical to
   // Change 1/2). true => confirmed/hardened (teal, downstream may rely on it). false => draft
   // until confirmed, with a "Confirm capture" affordance — never a dead end. Reuses the .prov
@@ -12384,7 +12465,7 @@ function recipeSpecCanvasHtml(spec, unitId, gateState) {
   return `<details class="recipe-spec-canvas" data-spec-canvas="${uid}" style="margin-top:12px;background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:10px;padding:10px 14px;">
     <summary style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
       <span style="font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--txt,#EAEFFF);">Spec canvas — the one-page handoff</span>
-      ${readinessChip}
+      <span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">${lifecycleChip}${readinessChip}</span>
     </summary>
     <div style="margin-top:6px;">
       ${gateBanner}
@@ -12411,7 +12492,9 @@ function recipeSpecCanvasFor(unitId) {
     // read draft with a Confirm affordance. Guarded so the Change 1/2 sandboxes (no gate) stay
     // byte-identical (gateState undefined => no banner).
     const gateState = (typeof isUnitConfirmed === "function") ? isUnitConfirmed(unitId) : undefined;
-    return recipeSpecCanvasHtml(buildRecipeSpec(unitId), unitId, gateState);
+    // E4 — the next advanceable lifecycle stage (one-directional, human-initiated), if any.
+    const nextLifecycle = (typeof lifecycleNextAdvanceable === "function") ? lifecycleNextAdvanceable(unitId) : undefined;
+    return recipeSpecCanvasHtml(buildRecipeSpec(unitId), unitId, gateState, nextLifecycle);
   } catch (_e) {
     return "";
   }
@@ -12439,6 +12522,16 @@ function wireRecipeSpecCanvas(container) {
       toast(hardened
         ? "Capture confirmed — the spec is now hardened (stated/teal) and downstream can rely on it."
         : "Nothing to confirm yet — add the missing detail above, then confirm to harden.");
+      if (typeof renderAnalysisTabRecipe === "function") renderAnalysisTabRecipe();
+    });
+  });
+  // E4 — one-directional, human-initiated lifecycle advance (the gate is checked in
+  // advanceLifecycle; in-build / in-telemetry are extension points).
+  container.querySelectorAll("[data-lifecycle-advance]").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const moved = (typeof advanceLifecycle === "function") ? advanceLifecycle(btn.dataset.lifecycleAdvance, btn.dataset.lifecycleTo) : false;
+      toast(moved ? `Lifecycle advanced to ${btn.dataset.lifecycleTo}.` : "That stage isn't reachable yet — complete the prior stage first.");
       if (typeof renderAnalysisTabRecipe === "function") renderAnalysisTabRecipe();
     });
   });
