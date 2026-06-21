@@ -1064,8 +1064,26 @@ export function discoveryRubricHint(text) {
 // 6 · RAIL (Change 4) — surface-aware, deterministic, gating
 // =====================================================================
 export const RAIL = {
-  // denied on EVERY surface (reduction / headcount / displacement framing)
-  banned: ["headcount", "fte", "reduce headcount", "cut staff", "eliminate roles", "hours saved", "hours-saved", "lay off", "layoff", "replace the", "downsize"],
+  // denied on EVERY surface (reduction / headcount / displacement framing). NOTE: "fte" moved to a
+  // WORD-BOUNDED bannedPattern below — the bare substring also matched innocent words (softer,
+  // drafter, lifted). "FTE"/"F.T.E" are still banned everywhere via that pattern.
+  banned: ["headcount", "reduce headcount", "cut staff", "eliminate roles", "hours saved", "hours-saved", "lay off", "layoff", "replace the", "downsize"],
+  // M7 — denied on EVERY surface, matched as WORD-BOUNDED patterns over NORMALIZED text so the
+  // spaced / hyphenated / synonym / risk-phrase variants the audit slipped past are caught too.
+  // Separators are flexible ([\s-]*) so "headcount" / "head count" / "head-count" all match; word
+  // boundaries keep innocent text safe (e.g. "ahead counting" does NOT match "head count").
+  bannedPatterns: [
+    /\bhead[\s-]*counts?\b/,                                  // headcount / head count / head-count
+    /\bf[\s.\-]*t[\s.\-]*e[\s.\-]*s?\b/,                      // FTE / F.T.E / F T E (word-bounded; not "softer")
+    /\b(?:reduc\w*|cut\w*|trim\w*|shrink\w*)\s+(?:the\s+)?(?:head[\s-]*count|workforce|staff|teams?|roles?)\b/,
+    /\b(?:head[\s-]*count|workforce|staff|role|job)[\s-]*(?:reduc\w*|cuts?|eliminat\w*)\b/,
+    /\bwork[\s-]*force\s+(?:reduc\w*|optimi[sz]\w*|rationali[sz]\w*)\b/,
+    /\broles?\s+eliminat\w*\b/, /\beliminat\w*\s+(?:the\s+)?roles?\b/,
+    /\bhours?[\s-]*saved\b/, /\bsaved\s+hours?\b/, /\btime[\s-]*saved\b/,
+    /\blay[\s-]*offs?\b/, /\bdown[\s-]*siz\w*\b/, /\bright[\s-]*siz\w*\b/,
+    /\bredundanc\w*\b/, /\bjob[\s-]*cuts?\b/, /\breduction[\s-]+in[\s-]+force\b/,
+    /\battrition\s+target\w*\b/, /\bredeploy\s+(?:the\s+)?staff\b/,
+  ],
   // allowed ONLY on dashboard
   capacityFamily: ["capacity", "consolidation", "reinvestment", "capacity planning"],
   // allowed on recipe + dashboard (engineering economics)
@@ -1073,17 +1091,46 @@ export const RAIL = {
   // allowed on workbench + recipe; kept off capture
   leverage: ["leverage"],
 };
+
+// M7 — homoglyph confusables (the common Cyrillic / Greek look-alikes) folded to their Latin
+// equivalent, so "hеadcount" (Cyrillic е) can't slip past. en-US worker surfaces only — folding
+// to Latin is correct here.
+const RAIL_CONFUSABLES = { "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x", "ѕ": "s", "і": "i", "ј": "j", "к": "k", "һ": "h", "ԁ": "d", "ο": "o", "α": "a", "ι": "i", "κ": "k", "ρ": "p", "ν": "v", "ɡ": "g", "ł": "l", "ᴄ": "c" };
+
+// M7 — normalize text before the rail reads it: NFKC (fold full-width / compatibility forms), strip
+// zero-width + soft-hyphen, fold the dash family to '-', fold unicode spaces to ' ', fold homoglyphs,
+// lowercase, collapse whitespace. Strictly widens what the existing banned list catches (never less).
+export function normalizeRailText(s) {
+  let t = String(s == null ? "" : s);
+  try { t = t.normalize("NFKC"); } catch (_e) { /* keep raw on the rare normalize failure */ }
+  t = t
+    .replace(/[​‌‍⁠﻿­]/g, "")                 // zero-width + soft hyphen -> remove
+    .replace(/[‐‑‒–—―−]/g, "-")          // dash / non-breaking-hyphen family -> '-'
+    .replace(/[  -   　]/g, " ")               // unicode spaces -> ' '
+    .replace(/[Ѐ-ӿͰ-Ͽɐ-ʯᴀ-ᵿԀ-ԯ]/g, (ch) => RAIL_CONFUSABLES[ch] || ch)
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  return t;
+}
+
 export function railCheck(text, surface) {
   // Edition 3 (F2) — ONE rail, two modes. Passed a record (an object with steps), railCheck runs the
-  // CONTROL-AWARE structural gating checks; passed a string, it runs the surface-aware vocabulary rail
-  // exactly as before (byte-identical — a string never has .steps).
+  // CONTROL-AWARE structural gating checks; passed a string, it runs the surface-aware vocabulary rail.
   if (text && typeof text === "object" && Array.isArray(text.steps)) return controlRail(text, surface);
-  const t = String(text || "").toLowerCase(), v = [];
-  RAIL.banned.forEach(w => { if (t.includes(w)) v.push({ term: w, rule: "banned-everywhere" }); });
-  if (surface !== "dashboard") RAIL.capacityFamily.forEach(w => { if (new RegExp(`\\b${w}\\b`).test(t)) v.push({ term: w, rule: "capacity-dashboard-only" }); });
-  if (!["recipe", "dashboard"].includes(surface)) RAIL.costFamily.forEach(w => { if (t.includes(w)) v.push({ term: w, rule: "cost-recipe+dashboard-only" }); });
-  if (surface === "capture") RAIL.leverage.forEach(w => { if (new RegExp(`\\b${w}\\b`).test(t)) v.push({ term: w, rule: "leverage-not-on-capture" }); });
-  return { ok: v.length === 0, violations: v };
+  try {
+    const t = normalizeRailText(text), v = [];
+    RAIL.banned.forEach(w => { if (t.includes(w)) v.push({ term: w, rule: "banned-everywhere" }); });
+    RAIL.bannedPatterns.forEach(re => { const m = t.match(re); if (m) v.push({ term: m[0], rule: "banned-everywhere" }); });
+    if (surface !== "dashboard") RAIL.capacityFamily.forEach(w => { if (new RegExp(`\\b${w}\\b`).test(t)) v.push({ term: w, rule: "capacity-dashboard-only" }); });
+    if (!["recipe", "dashboard"].includes(surface)) RAIL.costFamily.forEach(w => { if (t.includes(w)) v.push({ term: w, rule: "cost-recipe+dashboard-only" }); });
+    if (surface === "capture") RAIL.leverage.forEach(w => { if (new RegExp(`\\b${w}\\b`).test(t)) v.push({ term: w, rule: "leverage-not-on-capture" }); });
+    return { ok: v.length === 0, violations: v };
+  } catch (_e) {
+    // M7 — FAIL CLOSED: if the rail itself can't run, never report ok (a worker surface must not
+    // render un-checked vocabulary just because the checker threw).
+    return { ok: false, violations: [{ term: "", rule: "rail-error", detail: "the worker-safe rail could not run — failing closed (M7)" }], railError: true };
+  }
 }
 
 // F2 — the CONTROL-AWARE rail: deterministic, gating, control-aware checks over a record. One place,
@@ -1488,6 +1535,17 @@ function runTests() {
   ok("M6 an all-inferred unit raises the EVIDENCE gate to blocked", readiness({ theoPct: 0.5, permittedPct: 0.5, grossValue: 50000, annualCost: 200, evidenceInferred: true }).gates.evidence.status === "blocked", "");
   ok("M6 the six gates are always present and named", (() => { const g = readiness({ grossValue: 1, annualCost: 0 }).gates; return ["policy", "data", "control", "economics", "adoption", "evidence"].every(k => g[k] && typeof g[k].status === "string"); })(), "");
   ok("M6 the buildSpec carries the gate matrix on its readiness object", (() => { const sp = buildSpec(FPA_INTAKE); return sp._readiness && sp._readiness.gates && sp._readiness.gates.data && typeof sp._readiness.gateSummary === "string"; })(), "");
+
+  // ---- P7 (M7) — the worker-safe rail catches obfuscation + synonyms, and fails closed ----
+  ok("M7 spaced 'head count' is blocked everywhere", !railCheck("plan a head count review", "dashboard").ok, "");
+  ok("M7 a zero-width-space inside 'head\\u200Bcount' is blocked", !railCheck("head​count target", "recipe").ok, "");
+  ok("M7 a non-breaking hyphen in 'hours\\u2011saved' is blocked", !railCheck("hours‑saved this quarter", "recipe").ok, "");
+  ok("M7 a Cyrillic homoglyph 'h\\u0435adcount' is blocked", !railCheck("hеadcount", "dashboard").ok, "");
+  ok("M7 synonyms are blocked (workforce reduction / role elimination / job cuts / downsize)", ["workforce reduction", "role elimination", "job cuts", "downsize the team", "reduce the workforce"].every(p => !railCheck(p, "recipe").ok), "");
+  ok("M7 the literal FTE and F.T.E are still banned (word-bounded)", !railCheck("0.6 FTE freed", "dashboard").ok && !railCheck("cut F.T.E", "recipe").ok, "");
+  ok("M7 NO over-block: innocent words containing 'fte' as a substring pass (softer/drafter/lifted)", railCheck("a softer drafter lifted the tone", "capture").ok, "");
+  ok("M7 the rail FAILS CLOSED if it cannot run (railCheck never returns ok on an internal error)", (() => { const real = RAIL.bannedPatterns; try { RAIL.bannedPatterns = { forEach() { throw new Error("boom"); } }; const r = railCheck("anything", "capture"); return r.ok === false && r.railError === true; } finally { RAIL.bannedPatterns = real; } })(), "");
+  ok("M7 surface families still hold (capacity dashboard-only; cost recipe+dashboard; leverage off capture)", railCheck("capacity freed", "dashboard").ok && !railCheck("capacity freed", "capture").ok && railCheck("cost-to-serve", "recipe").ok && !railCheck("leverage", "capture").ok, "");
 
   // ---- Edition 3 \u00b7 F8 \u2014 org-tier numbers: hand-off reduction + SLA dividend ----
   const hr = buildHandoffReduction([RECON_INTAKE]);
