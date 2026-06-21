@@ -7658,6 +7658,78 @@ function discoveryMultiActorCaptureHtml(record) {
     ${rows}</section>`;
 }
 
+// ============ Edition 3 · F6 — Workbench (confirm the map, enforce the controls) ============
+// The confirm gate now confirms actors/parts/controls/routes and ENFORCES the controls AT confirm:
+// four-eyes actors distinct; an authority step names a HUMAN approver; a halt is never auto-resolved.
+// The enforcement is the engine's control rail (confirmBlockers/canHarden) — one authority, reusing the
+// existing recap/required gate. Promote inferred -> stated on confirm; mark protected controls; nothing
+// hardens unconfirmed or with a broken control. Buttons are never hard-disabled (toast guard + return).
+
+// the three enforced control checks — each pass/fail with a human reason for the confirm affordance.
+function workbenchControlChecks(record) {
+  const E = studioEngine();
+  const violations = (E && typeof E.controlRail === "function") ? E.controlRail(record).violations : [];
+  const pick = (re) => violations.filter((v) => re.test(v.rule));
+  const mk = (id, label, re) => { const hits = pick(re); return { id, label, ok: hits.length === 0, reasons: hits.map((v) => `${v.step}: ${v.detail}`) }; };
+  return [
+    mk("four-eyes", "Four-eyes actors are distinct (maker ≠ checker)", /four-eyes|self-approve|approver-must-be-human/),
+    mk("authority", "Authority steps name a human approver", /authority/),
+    mk("halt", "A halt-on-flag is never auto-resolved", /halt/),
+  ];
+}
+// can this multi-actor unit be confirmed? combines the existing recap/required gate with the control rail.
+function workbenchConfirmModel(record) {
+  const E = studioEngine();
+  const blockers = (E && typeof E.confirmBlockers === "function") ? E.confirmBlockers(record) : [];
+  return {
+    canConfirm: blockers.length === 0,
+    blockers: blockers.map((b) => b.detail),
+    checks: workbenchControlChecks(record),
+    protectedControls: (Array.isArray(record && record.steps) ? record.steps : []).filter((s) => s.control && s.control.type).map((s) => ({ step: s.step, type: s.control.type })),
+  };
+}
+// promote inferred -> stated on confirm, PRESERVING provenance (the prior source moves to _priorSource).
+// Pure: returns a NEW record; participants/controls become user-stated and controls are marked protected.
+function workbenchPromoteOnConfirm(record) {
+  const r = JSON.parse(JSON.stringify(record || {}));
+  (Array.isArray(r.steps) ? r.steps : []).forEach((s) => {
+    (Array.isArray(s.participants) ? s.participants : []).forEach((p) => { if (p && p.source !== "user-stated") { p._priorSource = p.source || "ai-inferred"; p.source = "user-stated"; } });
+    if (s.control) { if (s.control.source !== "user-stated") { s.control._priorSource = s.control.source || "ai-inferred"; s.control.source = "user-stated"; } s.control.protected = true; }
+  });
+  return r;
+}
+// the confirm action — control-aware. NEVER hard-disables: when blocked it toasts the reason and returns;
+// when clean it promotes inferred->stated, marks controls protected, and advances lifecycle to confirmed.
+function confirmMultiActorWorkflow(record) {
+  const model = workbenchConfirmModel(record);
+  if (!model.canConfirm) {
+    if (typeof toast === "function") toast(`Can't confirm yet — ${model.blockers[0] || "resolve the control above"}`);
+    return { confirmed: false, blockers: model.blockers };
+  }
+  const promoted = workbenchPromoteOnConfirm(record);
+  promoted.header = promoted.header || {};
+  promoted.header.lifecycle = "confirmed";
+  return { confirmed: true, record: promoted, protectedControls: model.protectedControls };
+}
+// render the confirm-the-map gate: the three enforced checks + a confirm affordance (never hard-disabled).
+function workbenchControlGateHtml(record) {
+  const esc = (s) => (typeof escapeHtml === "function" ? escapeHtml(String(s == null ? "" : s)) : String(s == null ? "" : s));
+  const steps = Array.isArray(record && record.steps) ? record.steps : [];
+  if (!steps.some((s) => s.control || Array.isArray(s.participants))) return ""; // additive: no multi-actor data => nothing
+  const model = workbenchConfirmModel(record);
+  const rows = model.checks.map((c) => {
+    const tint = c.ok ? "var(--sg-green)" : "var(--sg-pink)";
+    const reasons = c.reasons.length ? `<div style="font-size:11px;color:var(--sg-pink);margin-top:2px;">${c.reasons.map(esc).join("<br>")}</div>` : "";
+    return `<div style="padding:5px 0;"><span style="color:${tint};font-weight:700;">${c.ok ? "✓" : "✕"}</span> <span style="font-size:12px;">${esc(c.label)}</span>${reasons}</div>`;
+  }).join("");
+  const muted = model.canConfirm ? "" : "opacity:.6;";
+  const note = model.canConfirm ? `<span style="font-size:11px;color:var(--gray);margin-left:8px;">promotes inferred → stated; marks controls protected</span>` : `<span style="font-size:11px;color:var(--gray);margin-left:8px;">resolve the controls above first</span>`;
+  return `<section class="workbench-control-gate" style="margin-top:12px;padding:10px 12px;border:1px solid var(--sg-line);border-radius:10px;">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--gray);margin-bottom:6px;">Confirm the map — controls enforced</div>
+    ${rows}
+    <div style="margin-top:8px;"><button type="button" data-workbench-confirm style="background:var(--sg-cyan);color:#08111f;border:none;border-radius:6px;padding:6px 14px;font-weight:700;font-size:12px;cursor:pointer;${muted}">Confirm the map</button>${note}</div></section>`;
+}
+
 // E2 — the spec's 7th field. The engine decides model-fit (permitted tier per class + data-tier
 // residency: PII/MNPI force a restricted/in-VPC pricing tier; confidential routes at its normal
 // class tier) and the cost-to-serve band. Returns the engine's modelFit prov triple (or
@@ -13236,9 +13308,21 @@ function renderAnalysisTabRecipe() {
       </div>`;
   }).join("");
 
+  // E3/F6 — the confirm-the-map gate (controls enforced at confirm). Additive: empty unless the active
+  // workflow carries multi-actor participants/controls. E3/F7 — the multi-actor recipe artifact, likewise.
+  let e3WorkbenchGate = "", e3MultiActorRecipe = "";
+  try {
+    if (typeof appWorkflowToIntake === "function") {
+      const e3rec = appWorkflowToIntake();
+      if (typeof workbenchControlGateHtml === "function") e3WorkbenchGate = workbenchControlGateHtml(e3rec) || "";
+      if (typeof recipeMultiActorHtml === "function") e3MultiActorRecipe = recipeMultiActorHtml(e3rec) || "";
+    }
+  } catch (_e) { e3WorkbenchGate = ""; e3MultiActorRecipe = ""; }
   container.innerHTML =
     recipeWorkflowHeaderHtml() +
     artifactStudioHeaderHtml(steps) +
+    e3WorkbenchGate +
+    e3MultiActorRecipe +
     recipeBookHtml() +
     renderPolicyPanelHtml() +
     renderAuditPanelHtml() +
@@ -13250,6 +13334,18 @@ function renderAnalysisTabRecipe() {
 
   wireRecipeBook(container);
   wireRecipeSpecCanvas(container);
+
+  // E3/F6 — the confirm-the-map button enforces the controls (never hard-disabled; toast guard + return).
+  const e3ConfirmBtn = container.querySelector("[data-workbench-confirm]");
+  if (e3ConfirmBtn && typeof confirmMultiActorWorkflow === "function") {
+    e3ConfirmBtn.addEventListener("click", () => {
+      try {
+        const result = confirmMultiActorWorkflow(appWorkflowToIntake());
+        if (result.confirmed && typeof toast === "function") toast("Map confirmed — controls protected, capture promoted to stated.");
+        renderAnalysisTabRecipe();
+      } catch (_e) { if (typeof toast === "function") toast("Couldn't confirm the map."); }
+    });
+  }
 
   // Fill the prompt-template body for any step that already has a cached prompt.
   steps.forEach((step) => {

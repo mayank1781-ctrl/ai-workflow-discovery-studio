@@ -944,6 +944,22 @@ export function controlRail(record, opts = {}) {
   return { ok: v.length === 0, surface: opts.surface || "control", violations: v };
 }
 
+// F6 — the confirm/harden gate, now CONTROL-AWARE. A unit hardens only when it is confirmed (recap +
+// every required field) AND its controls pass the rail (four-eyes distinct, authority names a human
+// approver, halt not auto-resolved). This EXTENDS the no-bypass boundary (isConfirmed/assertHardenable)
+// — nothing hardens unconfirmed, and now nothing hardens with a broken control. Returns the blockers
+// (empty => hardenable), each a human-readable reason for the Workbench confirm affordance.
+export function confirmBlockers(record) {
+  const blockers = [];
+  if (record?.recap?.confirmed !== true) blockers.push({ rule: "not-confirmed", detail: "the unit hasn't been confirmed on the Workbench" });
+  const cov = validateIntake(record);
+  cov.coverage.gaps.forEach(g => blockers.push({ rule: "incomplete", field: g, detail: `still needed before confirm: ${g}` }));
+  cov.errors.forEach(e => blockers.push({ rule: "invalid", detail: e }));
+  controlRail(record).violations.forEach(v => blockers.push({ rule: v.rule, step: v.step, detail: v.detail }));
+  return blockers;
+}
+export function canHarden(record) { return confirmBlockers(record).length === 0; }
+
 // =====================================================================
 // GOLDEN FIXTURE + SELF-TEST  (run: node studio_engine.mjs)
 // =====================================================================
@@ -1197,6 +1213,17 @@ function runTests() {
   ] };
   ok("F4 a four-eyes/SoD collision is CONTROL-BLOCKED with a reason", buildAdjacency([RECON_INTAKE, SOD]).clusters.some(c => c.status === "control-blocked" && /four-eyes|separation of duties/.test(c.reason)), JSON.stringify(buildAdjacency([RECON_INTAKE, SOD]).clusters.map(c => `${c.status}:${c.reason}`)));
   ok("F4 the derived layer never emits headcount/cut vocabulary", [JSON.stringify(rv), JSON.stringify(cm), JSON.stringify(buildAdjacency([RECON_INTAKE, PAY_MNPI]))].every(s => !/headcount|cut staff|lay ?off|eliminate role|reduce role/i.test(s)), "");
+
+  // ---- Edition 3 \u00b7 F6 \u2014 confirm gate, control-aware (confirmBlockers / canHarden) ----
+  ok("F6 a clean confirmed multi-actor unit can harden", canHarden(RECON_INTAKE), JSON.stringify(confirmBlockers(RECON_INTAKE)));
+  ok("F6 an unconfirmed unit cannot harden (recap gate preserved)", !canHarden({ ...RECON_INTAKE, recap: { confirmed: false } }), "");
+  const sameActor6 = { ...RECON_INTAKE, steps: RECON_INTAKE.steps.map(s => s.step === "Approve adjustment" ? { ...s, participants: [{ actorId: "maker", part: "doer" }, { actorId: "maker", part: "approver" }] } : s) };
+  ok("F6 a four-eyes with the same actor cannot harden, with a reason", !canHarden(sameActor6) && confirmBlockers(sameActor6).some(b => b.rule === "four-eyes-distinct"), "");
+  const noAppr6 = { ...RECON_INTAKE, steps: RECON_INTAKE.steps.map(s => s.step === "Approve adjustment" ? { ...s, participants: [{ actorId: "maker", part: "doer" }] } : s) };
+  ok("F6 an authority/four-eyes step missing its approver cannot harden", !canHarden(noAppr6) && confirmBlockers(noAppr6).some(b => /approver|named/.test(b.rule)), "");
+  const autoHalt6 = { ...RECON_INTAKE, steps: RECON_INTAKE.steps.map(s => s.step === "Investigate root cause" ? { ...s, autoResolve: true } : s) };
+  ok("F6 a halt that is auto-resolvable cannot harden", !canHarden(autoHalt6) && confirmBlockers(autoHalt6).some(b => b.rule === "halt-no-auto-resolve"), "");
+  ok("F6 a single-persona confirmed workflow still hardens (additive)", canHarden(FPA_INTAKE), JSON.stringify(confirmBlockers(FPA_INTAKE)));
 
   console.log(`\n${fail === 0 ? "\u2713 ALL PASS" : "\u2717 FAILURES"} \u2014 ${pass} passed, ${fail} failed`);
   return fail === 0;
