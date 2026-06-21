@@ -9,7 +9,10 @@ import { DatabaseSync } from "node:sqlite";
 import dotenv from "dotenv";
 import Busboy from "busboy";
 import mammoth from "mammoth";
-import * as XLSX from "xlsx";
+import { Worker } from "node:worker_threads";
+// M10 — the CVE-prone `xlsx` library is NO LONGER imported into the main process. Untrusted
+// spreadsheet bytes are parsed in an isolated worker (xlsx-parse-worker.mjs) that is killed on
+// timeout, so a malicious workbook cannot exploit or hang the server.
 import { detectConnectors, formatForRecipe } from "./connectors/connector-detector.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -2215,6 +2218,55 @@ function readMultipartFile(req, maxBytes = 25_000_000) {
   });
 }
 
+// M10 — spreadsheet parsing is the highest-risk path (the xlsx advisories). Tighter than the
+// generic 25 MB upload cap, and a hard wall-clock timeout on the isolated parse.
+const SPREADSHEET_MAX_BYTES = 8_000_000;          // 8 MB — a real finance tracker is far smaller
+const SPREADSHEET_PARSE_TIMEOUT_MS = 8000;        // kill a hanging / decompression-bomb parse
+const SPREADSHEET_WORKER_PATH = path.join(__dirname, "xlsx-parse-worker.mjs");
+
+// FORMAT RESTRICTION — a real .xlsx/.xlsm/.xlsb is a ZIP container (PK..); legacy .xls is OLE2
+// (D0 CF 11 E0 A1 B1 1A E1). Anything else declared as a spreadsheet is rejected BEFORE it ever
+// reaches the parser, so arbitrary/hostile bytes are never handed to xlsx.
+function looksLikeSpreadsheet(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 8) return false;
+  const zip = buffer[0] === 0x50 && buffer[1] === 0x4B && (buffer[2] === 0x03 || buffer[2] === 0x05 || buffer[2] === 0x07);
+  const ole2 = buffer[0] === 0xD0 && buffer[1] === 0xCF && buffer[2] === 0x11 && buffer[3] === 0xE0 &&
+               buffer[4] === 0xA1 && buffer[5] === 0xB1 && buffer[6] === 0x1A && buffer[7] === 0xE1;
+  return zip || ole2;
+}
+
+// Parse a spreadsheet buffer SAFELY: reject empty/oversized/wrong-format up front, then parse in
+// an isolated worker with a timeout. Resolves to the labelled CSV text, or rejects (the caller
+// returns a safe "couldn't read that file" message). Never parses untrusted bytes in-process.
+function parseSpreadsheetIsolated(buffer, { timeoutMs = SPREADSHEET_PARSE_TIMEOUT_MS, maxBytes = SPREADSHEET_MAX_BYTES } = {}) {
+  return new Promise((resolve, reject) => {
+    if (!Buffer.isBuffer(buffer) || buffer.length === 0) return reject(new Error("Empty spreadsheet upload."));
+    if (buffer.length > maxBytes) return reject(Object.assign(new Error("That spreadsheet is too large to process."), { status: 413 }));
+    if (!looksLikeSpreadsheet(buffer)) return reject(new Error("That file is not a valid spreadsheet (format check failed); it was rejected, not parsed."));
+    let settled = false;
+    let worker;
+    const finish = (fn, arg) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (worker) worker.terminate().catch(() => {});
+      fn(arg);
+    };
+    const timer = setTimeout(() => finish(reject, new Error("Spreadsheet parsing timed out — the file was rejected, not parsed.")), timeoutMs);
+    try {
+      worker = new Worker(SPREADSHEET_WORKER_PATH, { workerData: { buffer }, resourceLimits: { maxOldGenerationSizeMb: 256 } });
+    } catch (e) {
+      return finish(reject, e instanceof Error ? e : new Error("Could not start the spreadsheet parser."));
+    }
+    worker.on("message", (msg) => {
+      if (msg && msg.ok) finish(resolve, typeof msg.text === "string" ? msg.text : "");
+      else finish(reject, new Error(msg && msg.error ? `Could not parse the spreadsheet: ${msg.error}` : "Could not parse the spreadsheet."));
+    });
+    worker.on("error", (e) => finish(reject, e instanceof Error ? e : new Error(String(e))));
+    worker.on("exit", (code) => { if (code !== 0) finish(reject, new Error(`Spreadsheet parser exited unexpectedly (code ${code}).`)); });
+  });
+}
+
 // Extract raw text from a buffered PDF, Word, or Excel document.
 async function extractDocumentText({ buffer, filename = "", mimeType = "" }) {
   const probe = `${filename} ${mimeType}`.toLowerCase();
@@ -2227,19 +2279,10 @@ async function extractDocumentText({ buffer, filename = "", mimeType = "" }) {
     return result.value || "";
   }
   if (probe.includes("sheet") || probe.includes("excel") || /\.xlsx?(\s|$)/.test(probe)) {
-    const workbook = XLSX.read(buffer, { type: "buffer" });
-    // Read EVERY tab: multi-sheet trackers are the common Finance/MC case, and
-    // reading only the first sheet silently dropped all the others. Each sheet
-    // is labelled so the model can keep them distinct.
-    const sheets = [];
-    for (const name of workbook.SheetNames) {
-      const sheet = workbook.Sheets[name];
-      if (!sheet) continue;
-      const csv = XLSX.utils.sheet_to_csv(sheet);
-      if (!csv || !csv.trim()) continue;
-      sheets.push(`--- Sheet: ${name} ---\n${csv}`);
-    }
-    return sheets.join("\n\n");
+    // M10 — parse the workbook in an ISOLATED worker (format + size checked first). Reads every
+    // tab (multi-sheet trackers are the common Finance case), each labelled so the model keeps
+    // them distinct. A malformed / oversized / hostile file is rejected here, never parsed inline.
+    return await parseSpreadsheetIsolated(buffer);
   }
   // Plain text / Markdown: read the buffer as UTF-8 verbatim. Additive branch
   // (V3-3) so a pasted-as-text AI policy can be ingested through the same
