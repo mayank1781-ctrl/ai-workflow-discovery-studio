@@ -7236,6 +7236,8 @@ function downloadLeverageSummary(records) {
 // C3 (Phase 2) — the LEADERSHIP dashboard sections + the two real exports. All delegate to the engine.
 // ===================================================================
 function engineLeadership(fn, records, opts) { const E = studioEngine(); if (!E || typeof E[fn] !== "function") return null; return E[fn](records, opts || {}); }
+// D2 — the collective/aggregate rail guard. Fails closed if banned vocab appears OR the rail can't run.
+function engineRailGuardCollective(texts, surface) { const E = studioEngine(); if (!E || typeof E.railGuardCollective !== "function") return { ok: false, railError: true, detail: "rail authority not loaded — failing closed (D2)" }; return E.railGuardCollective(texts, surface || "dashboard"); }
 function engineCapacityPack(records, opts) { return engineLeadership("buildCapacityPack", records, opts); }
 function engineRoadmapExport(records, opts) { return engineLeadership("buildRoadmapExport", records, opts); }
 function enginePooledLibrary(records) { const E = studioEngine(); if (!E || typeof E.buildPooledLibrary !== "function") return []; return E.buildPooledLibrary(records); }
@@ -7250,6 +7252,20 @@ function leadershipSectionsHtml(records, opts) {
   const honest = engineLeadership("buildHonestUnderPressure", records, opts);
   const heat = engineLeadership("buildCollectiveHeatmap", enginePooledLibrary(records), opts);
   if (!mix) return "";
+  // D2 — run the hardened rail over EVERY aggregate string and FAIL CLOSED if any carries banned vocab
+  // (or the rail can't run). The collective surface is the highest-risk place for leverage to drift to
+  // headcount reduction; it refuses to render un-checked aggregate text.
+  const rr = engineLeadership;
+  const aggregateTexts = [
+    mix && mix.whereTheLineSits, seq && seq.note, up && up.headline, unlock && unlock.note,
+    tiles && tiles.policy && tiles.policy.remedy, tiles && tiles.realization && tiles.realization.remedy,
+    ...((heat && heat.rows) || []).map((r) => `${r.role} ${r.confidence} ${r.coverage}`),
+    ...(((rr("buildRoleRedefinition", records, opts)) || { individual: [] }).individual || []).map((i) => `${i.role} ${i.becomes}`),
+  ].filter(Boolean);
+  const railGuard = engineRailGuardCollective(aggregateTexts, "dashboard");
+  if (!railGuard.ok) {
+    return `<section class="dash-sec" style="margin-top:14px;"><div class="ds-panel" style="padding:12px 14px;border:1px solid #ff4f6d66;border-radius:10px;color:#ff8da1;font-size:12px;">⚠ Collective view blocked by the worker-safe rail (D2): ${escapeHtml(railGuard.detail || "banned vocabulary on the aggregate surface")}. Reshape framing only — never headcount reduction.</div></section>`;
+  }
   const pill = (label, v, c) => `<span style="display:inline-block;background:${c}22;color:${c};border:1px solid ${c}55;border-radius:99px;padding:2px 10px;font-size:11px;font-weight:700;margin-right:6px;">${escapeHtml(label)} ${v}%</span>`;
   const tile = (t) => `<div style="background:${DASH.panel};border:1px solid ${t.status === "red" ? "#ff4f6d66" : t.status === "amber" ? "#f6c45366" : DASH.line};border-radius:11px;padding:12px 14px;"><div style="font-size:11px;color:${DASH.faint};font-weight:600;text-transform:uppercase;">${escapeHtml(t.lens)} gap${t.status === "red" ? " · <span style=\"color:#ff4f6d;\">RED</span>" : ""}</div><div style="font-size:18px;font-weight:800;color:${DASH.ink};">${t.hrs} h/wk</div><div style="font-size:11px;color:${DASH.dim};margin-top:3px;">${escapeHtml(t.remedy)}</div></div>`;
   const heatRows = (heat && heat.rows || []).map((r) => `<div style="font-size:12px;color:${DASH.dim};">${escapeHtml(r.role)} · n=${r.n} · <span style="color:${r.lowConfidence ? "#f6c453" : "#00d4b4"};">${escapeHtml(r.confidence)}</span></div>`).join("") || `<div style="font-size:12px;color:${DASH.faint};">${escapeHtml((heat && heat.note) || "No pooled discoveries yet.")}</div>`;
