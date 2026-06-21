@@ -7563,6 +7563,10 @@ function engineWorkflowRoutes(opts = {}) { const E = studioEngine(); if (!E || t
 function engineRoleView(records, opts = {}) { const E = studioEngine(); if (!E || typeof E.buildRoleView !== "function") return null; return E.buildRoleView(records, opts); }
 function engineCapabilityMap(records, opts = {}) { const E = studioEngine(); if (!E || typeof E.buildCapabilityMap !== "function") return null; return E.buildCapabilityMap(records, opts); }
 function engineAdjacency(records, opts = {}) { const E = studioEngine(); if (!E || typeof E.buildAdjacency !== "function") return null; return E.buildAdjacency(records, opts); }
+// E3/F8 — org-tier numbers: cross-role hand-off reduction + the risk/SLA dividend (freed capacity as
+// backlog headroom). Confirmed-only; the math lives in the engine. null when the engine isn't loaded.
+function engineHandoffReduction(records) { const E = studioEngine(); if (!E || typeof E.buildHandoffReduction !== "function") return null; return E.buildHandoffReduction(records); }
+function engineSlaDividend(records, opts = {}) { const E = studioEngine(); if (!E || typeof E.buildSlaDividend !== "function") return null; return E.buildSlaDividend(records, opts); }
 
 // ============ Edition 3 · F5 — Discovery capture (render layer) ========================
 // Elicit the multi-actor structure in WORKER-SAFE language: per step the doer + other parts, the class
@@ -13253,6 +13257,66 @@ function dashEmptyHtml(lv) {
   </div>`;
 }
 
+// ============ Edition 3 · F8 — Dashboard org-tier (the operating-model view) ===========================
+// The org/role KPI tier ABOVE the existing nine (E5), bound to F4: freed capacity per role + the
+// assembly->judgment shift; capability reuse / build-once; adjacency clusters (enabled | control-blocked
+// + reason); cross-role hand-off reduction; the risk/SLA dividend (paired with its guardrail). Confirmed-
+// only, provenance dots, labeled telemetry placeholders. Adjacency reads as RESHAPE / combine — NEVER
+// headcount. Firewall + the leader rail (surface "dashboard"). Never-a-dead-end empty state.
+// NOTE: the rail bans the literal "fte" token (a substring of "after") — render role-weeks, "today → with AI".
+function dashOrgTierHtml(records, opts) {
+  const roleView = (typeof engineRoleView === "function") ? engineRoleView(records, opts || {}) : null;
+  if (!roleView) return ""; // engine not loaded => additive (no org tier)
+  const capMap = engineCapabilityMap(records, opts || {}) || { capabilities: [] };
+  const adj = engineAdjacency(records, opts || {}) || { clusters: [], note: "" };
+  const hr = engineHandoffReduction(records) || { baseline: 0, remaining: 0, collapsed: 0 };
+  const sla = engineSlaDividend(records, opts || {}) || { freedRoleWeeks: 0 };
+  const head = `<div style="font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${DASH.faint};margin:0 0 6px;">O · Operating model — role · capability · adjacency</div>`;
+  // never-a-dead-end empty state
+  if (!roleView.confirmedCount || !roleView.roles.length) {
+    const note = roleView.note || "No confirmed multi-actor units yet — confirm units on the Workbench to populate the operating-model view.";
+    return `<section class="dash-sec" style="margin-bottom:14px;">${head}
+      <div style="background:${DASH.panel};border:1px solid ${DASH.line};border-radius:12px;padding:18px 20px;color:${DASH.dim};font-size:13px;line-height:1.6;">${escapeHtml(note)}
+        <div style="margin-top:10px;"><button type="button" class="primary-button compact" data-dashboard-to-workbench="1">Go to the Workbench</button></div></div></section>`;
+  }
+  const tile = (inner) => `<div style="flex:1;min-width:170px;padding:11px 13px;border:1px solid ${DASH.line};border-radius:10px;background:${DASH.panel};">${inner}</div>`;
+  // freed capacity per role (top 3 by freed) — role-weeks, the assembly->judgment shift, a provenance dot.
+  // ("freed capacity" is dashboard-only vocabulary — the leader rail blocks it on a worker surface.)
+  const roleTiles = roleView.roles.slice(0, 3).map((r) => tile(
+    `<div style="font-size:12px;font-weight:700;color:${DASH.ink};">${escapeHtml(r.role)} <span style="font-size:10px;color:${DASH.faint};">${escapeHtml(r.line || "")}</span></div>
+     <div style="font-size:15px;font-weight:800;color:${DASH.pos};">≈ ${Math.round((r.freedFTE || 0) * 100) / 100} role-weeks of freed capacity ${dashProvDot("inferred")}</div>
+     <div style="font-size:10px;color:${DASH.faint};">${escapeHtml(r.shift || "")}</div>`)).join("");
+  // capability reuse / build-once (top 3 by combined leverage)
+  const capTiles = (capMap.capabilities || []).slice(0, 3).map((c) => tile(
+    `<div style="font-size:12px;font-weight:700;color:${DASH.ink};">${escapeHtml(c.capability)}</div>
+     <div style="font-size:13px;font-weight:700;color:${c.buildOnce ? DASH.pos : DASH.dim};">${c.buildOnce ? `build once · reuse across ${c.reuseCount}` : `seen in ${c.reuseCount}`}</div>
+     <div style="font-size:10px;color:${DASH.faint};">combined leverage ${c.combinedLeverage}</div>`)).join("");
+  // adjacency clusters — enabled / control-blocked (+ reason). RESHAPE language, never headcount.
+  const adjRows = (adj.clusters || []).slice(0, 4).map((c) => {
+    const tint = c.status === "enabled" ? DASH.pos : DASH.blk;
+    return `<div style="padding:6px 0;border-top:1px solid ${DASH.line};"><span style="font-size:11px;font-weight:700;color:${tint};">${c.status === "enabled" ? "✓ enabled" : "⛉ control-blocked"}</span>
+      <span style="font-size:11px;color:${DASH.dim};">${escapeHtml((c.workflows || []).join(" + "))}</span>
+      <div style="font-size:10px;color:${DASH.faint};">${escapeHtml(c.reason || "")}</div></div>`;
+  }).join("");
+  const adjBlock = (adj.clusters || []).length
+    ? `${tile(`<div style="font-size:12px;font-weight:700;color:${DASH.ink};">Adjacency clusters <span style="font-size:11px;color:${DASH.faint};">(${adj.clusters.length})</span></div>${adjRows}<div style="font-size:10px;color:${DASH.faint};margin-top:4px;">a hypothesis for leaders — human-confirmed; never a reorg</div>`)}`
+    : tile(`<div style="font-size:12px;font-weight:700;color:${DASH.ink};">Adjacency clusters</div><div style="font-size:11px;color:${DASH.faint};">${escapeHtml(adj.note || "none yet — sharpens as the library grows")}</div>`);
+  // hand-off reduction (today -> with AI) + the risk/SLA dividend (freed capacity as backlog headroom)
+  const handoffTile = tile(`<div style="font-size:12px;font-weight:700;color:${DASH.ink};">Cross-role hand-offs</div>
+     <div style="font-size:15px;font-weight:800;color:${DASH.acc};">${hr.baseline} today → ${hr.remaining} with AI</div>
+     <div style="font-size:10px;color:${DASH.faint};">${hr.collapsed} swivel-chair hand-off${hr.collapsed === 1 ? "" : "s"} collapse; the gates + controls stay</div>`);
+  const slaTile = tile(`<div style="font-size:12px;font-weight:700;color:${DASH.ink};">Risk / SLA dividend</div>
+     <div style="font-size:15px;font-weight:800;color:${DASH.pos};">≈ ${sla.freedRoleWeeks} role-weeks of backlog headroom ${dashProvDot("inferred")}</div>
+     ${dashPlaceholder("aged items / SLA breaches avoided")}
+     <div style="font-size:10px;color:${DASH.faint};margin-top:4px;">guardrail: the protected human decisions are unchanged</div>`);
+  return `<section class="dash-sec" style="margin-bottom:14px;">${head}
+    <div style="font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:${DASH.faint};margin:2px 0 6px;">Freed capacity per role — the assembly → judgment reshape</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">${roleTiles}</div>
+    <div style="font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:${DASH.faint};margin:2px 0 6px;">Capability reuse — build once, light up the cluster</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">${capTiles}</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">${adjBlock}${handoffTile}${slaTile}</div></section>`;
+}
+
 function renderAnalysisTabDashboard(recordsOverride, opts) {
   const container = document.getElementById("analysis-tab-dashboard");
   if (!container) return;
@@ -13264,8 +13328,13 @@ function renderAnalysisTabDashboard(recordsOverride, opts) {
   const confirmed = (Array.isArray(records) ? records : []).filter((r) => E.isConfirmed(r));
   const sample = confirmed.length ? E.normalizeIntake(confirmed[0]).steps : null;
   const flow = sample ? E.cycleTime(sample) : null;
+  // E3/F8 — the org/role operating-model tier ABOVE the existing nine KPIs (additive: "" when no
+  // multi-actor confirmed data). Bound to F4 + the F8 numbers; reshape language, leader rail.
+  let e3OrgTier = "";
+  try { if (typeof dashOrgTierHtml === "function") e3OrgTier = dashOrgTierHtml(records, opts) || ""; } catch (_e) { e3OrgTier = ""; }
   container.innerHTML =
     `<div style="font-size:11px;color:${DASH.faint};margin:0 0 10px;padding:6px 10px;background:${DASH.panel};border:1px solid ${DASH.line};border-radius:8px;">FIREWALL · capacity / cost / flow live only on this surface · nothing here reaches capture / workbench / recipe</div>` +
+    e3OrgTier +
     dashHeaderHtml(lv) + dashEvidenceChainHtml(lv, flow) + dashCapacityNetHtml(lv) + dashFlowHtml(lv, sample, flow) + dashAgendasHtml(lv);
   wireDashboard(container);
 }

@@ -759,6 +759,40 @@ export function buildAdjacency(records, opts = {}) {
     note: clusters.length ? null : "No adjacency yet — these confirmed workflows don't share a role or capability." };
 }
 
+// F8 — cross-role hand-off reduction (a leader org-tier number). A hand-off is where the doer changes;
+// AI carrying the assembly collapses the swivel-chair hand-offs INTO pure-assembly steps, while the
+// human-held gates + controls STAY. baseline = every cross-role hand-off; remaining = the hand-offs into a
+// human-held (judgment/decision) step or across a control (protected). Confirmed-only. Fewer swivel-chair
+// hand-offs => faster flow + less op-risk. (Reshape language; never headcount.)
+export function buildHandoffReduction(records) {
+  const confirmed = (Array.isArray(records) ? records : []).filter(isConfirmed);
+  let baseline = 0, remaining = 0;
+  confirmed.forEach(rec => {
+    const r = normalizeIntake(rec);
+    detectHandoffs(rec).forEach(h => {
+      baseline += 1;
+      const toStep = r.steps[h.index];
+      if (toStep && (toStep.cls === "judgment" || toStep.cls === "decision" || toStep.control)) remaining += 1;
+    });
+  });
+  return { baseline, remaining, collapsed: baseline - remaining, confirmedCount: confirmed.length,
+    guardrail: "the human-held gates and controls stay; only swivel-chair hand-offs into assembly collapse" };
+}
+
+// F8 — risk / SLA dividend (the recon-SOP lens). For ops workflows, freed capacity is headroom for the
+// backlog (fewer aged items / SLA breaches). HONEST: expressed as freed hours / role-weeks paired with its
+// guardrail; the per-item aged/breach count is a LABELED placeholder until volume + SLA telemetry is
+// supplied (never fabricated). Confirmed-only.
+export function buildSlaDividend(records, opts = {}) {
+  const rv = buildRoleView(records, opts);
+  const H = opts.weeklyHours ?? CONFIG.weeklyHours;
+  const freedHrs = round(sum(rv.roles.map(r => r.freedHrs)), 2);
+  return { freedHrs, freedRoleWeeks: round(freedHrs / H, 2), confirmedCount: rv.confirmedCount,
+    agedItemsAvoided: null, slaBreachesAvoided: null, // labeled placeholders — need volume/SLA telemetry; never fabricated
+    note: "freed capacity is headroom for the backlog — fewer aged items / SLA breaches once volume telemetry is supplied",
+    guardrail: "pair every efficiency metric with its quality guardrail; the protected human decisions are unchanged" };
+}
+
 // =====================================================================
 // 5.6 · EDITION 3 — INTERPRETATION RUBRIC, EXECUTABLE (F5 — the layer above the engine)
 // The engine trusts the consultant's tags completely; it cannot catch a bad one. This encodes the
@@ -1224,6 +1258,21 @@ function runTests() {
   const autoHalt6 = { ...RECON_INTAKE, steps: RECON_INTAKE.steps.map(s => s.step === "Investigate root cause" ? { ...s, autoResolve: true } : s) };
   ok("F6 a halt that is auto-resolvable cannot harden", !canHarden(autoHalt6) && confirmBlockers(autoHalt6).some(b => b.rule === "halt-no-auto-resolve"), "");
   ok("F6 a single-persona confirmed workflow still hardens (additive)", canHarden(FPA_INTAKE), JSON.stringify(confirmBlockers(FPA_INTAKE)));
+
+  // ---- Edition 3 \u00b7 F8 \u2014 org-tier numbers: hand-off reduction + SLA dividend ----
+  const hr = buildHandoffReduction([RECON_INTAKE]);
+  ok("F8 hand-off reduction counts cross-role hand-offs (recon: 2 baseline, both into human-held => stay)", hr.baseline === 2 && hr.remaining === 2 && hr.collapsed === 0, JSON.stringify(hr));
+  // a workflow whose hand-off lands on an ASSEMBLY step collapses (AI absorbs it)
+  const asmHandoff = { ...RECON_INTAKE, steps: [
+    { step: "Pull", cls: "assembly", data: "internal", time: 50, theo: 80, participants: [{ actorId: "teamLead", part: "doer" }] },
+    { step: "Format", cls: "assembly", data: "internal", time: 50, theo: 80, participants: [{ actorId: "maker", part: "doer" }] },
+  ] };
+  ok("F8 a hand-off into an assembly step collapses (swivel-chair removed)", buildHandoffReduction([asmHandoff]).collapsed === 1, JSON.stringify(buildHandoffReduction([asmHandoff])));
+  ok("F8 hand-off reduction is confirmed-only (drops the unconfirmed)", buildHandoffReduction([RECON_INTAKE, { ...RECON_INTAKE, recap: { confirmed: false } }]).confirmedCount === 1, "");
+  const sla = buildSlaDividend([RECON_INTAKE, RECON_INTAKE]);
+  ok("F8 SLA dividend = freed capacity as role-weeks (honest), aged/breach counts are LABELED placeholders", sla.freedRoleWeeks > 0 && sla.agedItemsAvoided === null && sla.slaBreachesAvoided === null, JSON.stringify(sla));
+  ok("F8 SLA dividend freed == role view freed (no fork)", near(sla.freedHrs, round(sum(buildRoleView([RECON_INTAKE, RECON_INTAKE]).roles.map(r => r.freedHrs)), 2), 0.02), "");
+  ok("F8 org-tier numbers carry no headcount/fte vocabulary", !/headcount|\bfte\b|cut staff|lay ?off/i.test(JSON.stringify(hr) + JSON.stringify(sla)), "");
 
   console.log(`\n${fail === 0 ? "\u2713 ALL PASS" : "\u2717 FAILURES"} \u2014 ${pass} passed, ${fail} failed`);
   return fail === 0;
