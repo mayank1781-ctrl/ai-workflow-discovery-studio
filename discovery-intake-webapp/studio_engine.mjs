@@ -82,6 +82,9 @@ export const LINES = ["1LoD", "2LoD", "3LoD", "—"];
 // segregation name two parts that MUST be different actors; authority references a sharedRules ladder;
 // halt-on-flag halts and routes to a human escalation-target with a negativeConstraint.
 export const CONTROL_TYPES = ["four-eyes", "segregation", "authority", "completeness", "halt-on-flag"];
+// Edition 3 (F3) — routes overlay the linear recipe (absent => linear, as today). onReject + onSlaRisk
+// are DERIVED from controls + escalation; onFlag is the AUTHORED exception (carries a negativeConstraint).
+export const ROUTE_KINDS = ["onReject", "onFlag", "onSlaRisk"];
 
 const prov = (value, source = "inferred", confidence = "medium") => ({ value, source, confidence });
 const round = (n, d = 0) => { const f = 10 ** d; return Math.round(n * f) / f; };
@@ -129,6 +132,10 @@ export function validateIntake(record) {
   // Edition 3 (F1) — a firm-level actor's line-of-defence must be a known line, when present.
   (record.actors || []).forEach((a, i) => {
     if (a && a.line && !LINES.includes(a.line)) errors.push(`actor ${i + 1}: unknown line "${a.line}" (Edition 3)`);
+  });
+  // Edition 3 (F3) — an authored route's kind must be a known route kind, when present.
+  (record.routes || []).forEach((rt, i) => {
+    if (rt && rt.kind && !ROUTE_KINDS.includes(rt.kind)) errors.push(`route ${i + 1}: unknown kind "${rt.kind}" (Edition 3)`);
   });
   const passed = REQUIRED.filter(([, t]) => !!t(record));
   const gaps = REQUIRED.filter(([, t]) => !t(record)).map(([k]) => k);
@@ -385,6 +392,45 @@ function isNonHumanActor(actorId, record) {
   return !!(a && (a.kind === "system" || a.line === "system"));
 }
 
+// F3 — routes overlay the linear recipe (the rework loop, the AML halt, the SLA escalation). These are
+// ANNOTATIONS, NOT new flow math: the happy-path cycleTime stays linear and unchanged; routes are
+// rendered as loop/halt/escalation edges (F7) and checked by the rail. onReject + onSlaRisk are DERIVED
+// from the controls + the escalation matrix; onFlag is AUTHORED (the unusual exception). Each carries a
+// routeOrigin: derived | authored. Additive: no controls + no authored routes => [] (linear, as today).
+export function deriveRoutes(record) {
+  const r = record || {};
+  const steps = Array.isArray(r.steps) ? r.steps : [];
+  const authoredRoutes = Array.isArray(r.routes) ? r.routes.filter(Boolean) : [];
+  const out = [];
+  const priorStep = (idx) => { for (let i = idx - 1; i >= 0; i--) { if (steps[i]) return steps[i].step; } return null; };
+  let hasAuthorityEscalation = false, gateStep = null;
+  steps.forEach((s, i) => {
+    const c = s && s.control;
+    if (!c) return;
+    // onReject (DERIVED) — an approval gate (four-eyes / authority) implies a rework loop back to the prior step
+    if (c.type === "four-eyes" || c.type === "authority" || c.authorityRef) {
+      const back = priorStep(i);
+      if (back) out.push({ kind: "onReject", fromStep: s.step, toStep: back, routeOrigin: "derived", reason: "rework loop on rejection (derived from the approval control)" });
+      hasAuthorityEscalation = true; if (!gateStep) gateStep = s.step;
+    }
+    // onFlag (DERIVED fallback) — a halt-on-flag with no authored route still gets its halt edge (never-a-dead-end)
+    if (c.type === "halt-on-flag") {
+      const authored = authoredRoutes.some(rt => rt.kind === "onFlag" && (rt.fromStep === s.step || rt.from === s.step));
+      if (!authored) out.push({ kind: "onFlag", fromStep: s.step, to: c.escalateTo || null, toRole: c.escalateTo ? resolveActor(c.escalateTo, r).role : null, routeOrigin: "derived", negativeConstraint: c.negativeConstraint || null, reason: "halt-and-route (derived from the halt-on-flag control)" });
+    }
+  });
+  // onFlag (AUTHORED) — the unusual exception routes pass through, carrying their negativeConstraint
+  authoredRoutes.forEach(rt => {
+    if (rt.kind === "onFlag") out.push({ kind: "onFlag", fromStep: rt.fromStep || rt.from || null, to: rt.to || null, toRole: rt.to ? resolveActor(rt.to, r).role : null, routeOrigin: rt.routeOrigin || "authored", negativeConstraint: rt.negativeConstraint || null, reason: rt.reason || "authored exception route" });
+    else out.push({ ...rt, routeOrigin: rt.routeOrigin || "authored" }); // any other authored route passes through
+  });
+  // onSlaRisk (DERIVED) — once, when an authority/escalation structure exists: escalate per tier on SLA breach
+  if (hasAuthorityEscalation) {
+    out.push({ kind: "onSlaRisk", fromStep: gateStep || (steps[0] && steps[0].step) || null, to: "escalation tier (per the authority ladder + response time)", routeOrigin: "derived", reason: "SLA-at-risk -> escalate per tier (derived from the escalation matrix)" });
+  }
+  return out;
+}
+
 // =====================================================================
 // 3 · SPEC CANVAS (Generator B) — deterministic assembly, per workflow unit
 // =====================================================================
@@ -499,8 +545,9 @@ export function buildRecipe(record, opts = {}) {
 
   return { title: prov(`AI solution \u2014 ${dash(r.header?.persona)} / ${dash(r.header?.anchor)}`, "inferred"),
     origin: opts.origin || "generation", orderedSteps: ordered, rankedUnits: ranked,
-    // F1/F2 \u2014 multi-actor overlays (empty/inert for a single-persona, control-free workflow).
-    handoffs: detectHandoffs(r), controls: r.steps.filter(s => s.control && s.control.type).map(s => ({ step: s.step, type: s.control.type })), rail: controlRail(r) };
+    // F1/F2/F3 \u2014 multi-actor overlays (empty/inert for a single-persona, linear, control-free workflow).
+    handoffs: detectHandoffs(r), controls: r.steps.filter(s => s.control && s.control.type).map(s => ({ step: s.step, type: s.control.type })),
+    routes: deriveRoutes(r), rail: controlRail(r) };
 }
 
 // =====================================================================
@@ -854,6 +901,24 @@ function runTests() {
   ok("F2 controlRail on a control-free workflow passes (additive)", controlRail(FPA_INTAKE).ok, "");
   ok("F2 buildRecipe single-actor step stays byte-identical (no doer/control fields)", (() => { const st = buildRecipe(FPA_INTAKE).orderedSteps[0]; return !("doer" in st) && !("control" in st); })(), "");
   ok("F2 buildRecipe surfaces the four-eyes control + resolved authority ladder on the recon approve step", (() => { const st = buildRecipe(RECON_INTAKE).orderedSteps.find(s => s.step === "Approve adjustment"); return st && st.control && st.control.type === "four-eyes" && st.control.authority && Array.isArray(st.control.authority.bands); })(), "");
+
+  // ---- Edition 3 \u00b7 F3 \u2014 routes (derive common, author exceptions) ----
+  const routes = deriveRoutes(RECON_INTAKE);
+  ok("F3 onReject is DERIVED from the four-eyes approval gate (Approve -> Propose rework loop)", routes.some(rt => rt.kind === "onReject" && rt.fromStep === "Approve adjustment" && rt.toStep === "Propose resolution" && rt.routeOrigin === "derived"), JSON.stringify(routes.map(r => `${r.kind}:${r.routeOrigin}`)));
+  ok("F3 onFlag is AUTHORED and round-trips with its negativeConstraint", routes.some(rt => rt.kind === "onFlag" && rt.routeOrigin === "authored" && /tip-off/.test(rt.negativeConstraint || "")), "");
+  ok("F3 onSlaRisk is DERIVED from the escalation/authority structure", routes.some(rt => rt.kind === "onSlaRisk" && rt.routeOrigin === "derived"), "");
+  ok("F3 every route names a routeOrigin in {derived, authored}", routes.every(rt => ["derived", "authored"].includes(rt.routeOrigin)), "");
+  // ADDITIVE \u2014 no controls + no authored routes => linear (no routes)
+  ok("F3 absent routes => linear (FP&A derives no routes)", deriveRoutes(FPA_INTAKE).length === 0, JSON.stringify(deriveRoutes(FPA_INTAKE)));
+  // a halt-on-flag with NO authored route still gets its halt edge (never-a-dead-end)
+  const haltOnly = { ...RECON_INTAKE, routes: [] };
+  ok("F3 a halt-on-flag with no authored route gets a DERIVED halt edge", deriveRoutes(haltOnly).some(rt => rt.kind === "onFlag" && rt.routeOrigin === "derived" && rt.fromStep === "Investigate root cause"), "");
+  // NO new flow math \u2014 deriveRoutes is a pure annotation; cycleTime is byte-identical with/without routes
+  const stripped = { ...RECON_INTAKE }; delete stripped.routes;
+  ok("F3 routes add NO flow math (cycleTime unchanged with/without routes)", JSON.stringify(cycleTime(normalizeIntake(RECON_INTAKE).steps)) === JSON.stringify(cycleTime(normalizeIntake(stripped).steps)), "");
+  ok("F3 the rail blocks an auto-resolve past a halt route", !controlRail({ ...RECON_INTAKE, steps: [{ ...RECON_INTAKE.steps[1], autoResolve: true }] }).ok, "");
+  ok("F3 buildRecipe carries routes; the FP&A single-persona recipe stays linear (no routes)", buildRecipe(RECON_INTAKE).routes.length >= 3 && buildRecipe(FPA_INTAKE).routes.length === 0, "");
+  ok("F3 unknown route kind is surfaced", !validateIntake({ ...RECON_INTAKE, routes: [{ kind: "onWhatever" }] }).ok, "");
 
   console.log(`\n${fail === 0 ? "\u2713 ALL PASS" : "\u2717 FAILURES"} \u2014 ${pass} passed, ${fail} failed`);
   return fail === 0;
