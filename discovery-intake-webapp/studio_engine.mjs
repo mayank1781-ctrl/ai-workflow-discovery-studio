@@ -164,6 +164,13 @@ export const SYSTEM_ARCHETYPES = {
   "BI":               { typicalDataTier: "internal",     controlProfile: "read entitlement",                integrationDifficulty: "low" },
 };
 
+// A3 — the ACTION-ON-DATA verb. Each step tags WHAT is done to the data, from a fixed set (a freeform
+// step.actionNote covers the rare exception). The verb drives solution shape, controls, and
+// automatability MORE than the system name does: in the SAME system and tier, `read` is cheap assembly
+// AI can carry; `write-in-place` / `approve` is a controlled, often human-held act. Enum-integrity
+// surfaced at intake. Additive: absent step.action, every output is byte-identical.
+export const ACTION_VERBS = ["read", "download", "transform", "write-in-place", "generate-output", "notify", "approve"];
+
 const prov = (value, source = "inferred", confidence = "medium") => ({ value, source, confidence });
 const round = (n, d = 0) => { const f = 10 ** d; return Math.round(n * f) / f; };
 const sum = a => a.reduce((x, y) => x + y, 0);
@@ -238,6 +245,9 @@ export function validateIntake(rawRecord) {
     // A1 — a step's solution shape (when present) must resolve to the controlled vocabulary; an
     // unknown shape is surfaced here, never silently accepted (it would mis-price cost-to-serve).
     if (s.solutionShape && !SOLUTION_SHAPES.includes(s.solutionShape)) errors.push(`step ${i + 1}: unknown solution shape "${s.solutionShape}" (not in ${SOLUTION_SHAPES.join("|")})`);
+    // A3 — a step's action verb (when present) must resolve to the fixed set; the rare exception goes
+    // in step.actionNote (freeform). An unknown verb is surfaced, never silently accepted.
+    if (s.action != null && !ACTION_VERBS.includes(s.action)) errors.push(`step ${i + 1}: unknown action "${s.action}" (not in ${ACTION_VERBS.join("|")}; use step.actionNote for the rare exception)`);
     if (s.volume != null && (typeof s.volume !== "number" || !Number.isFinite(s.volume) || s.volume < 0)) errors.push(`step ${i + 1}: volume "${s.volume}" is not a valid non-negative number`);
     // A2 — a step's system refs must resolve to the systems[] registry (when a registry exists); an
     // unresolved ref is surfaced, never silently assumed reachable (it would mis-shape the build).
@@ -308,6 +318,28 @@ export function stepCeilingFraction(cls, dataTier, profile) {
   const P = CONFIG.profiles[profile];
   return (P.step[cls] / 100) * (P.tier[dataTier] ?? 1);
 }
+// A3 — the control + automatability PROFILE of an action verb. read/download/transform are cheap,
+// low-control assembly AI can carry; generate-output/notify need output/recipient controls;
+// write-in-place is a controlled write into the system of record (write authority, four-eyes,
+// reversibility); approve is the human-held commit. Unknown/absent => a conservative neutral profile.
+export function actionProfile(action) {
+  const P = {
+    "read":            { automatability: "high",       controls: ["least-privilege read scope"], humanHeld: false },
+    "download":        { automatability: "high",       controls: ["egress / DLP scope"], humanHeld: false },
+    "transform":       { automatability: "high",       controls: ["validation; reversibility"], humanHeld: false },
+    "generate-output": { automatability: "medium",     controls: ["output review; grounding to source"], humanHeld: false },
+    "notify":          { automatability: "medium",     controls: ["recipient scoping; no auto-send external"], humanHeld: false },
+    "write-in-place":  { automatability: "low",        controls: ["write authority", "four-eyes on the write", "reversibility / audit trail"], humanHeld: false },
+    "approve":         { automatability: "human-held", controls: ["authority band", "segregation of duties"], humanHeld: true },
+  };
+  return { action: action || null, ...(P[action] || { automatability: "medium", controls: [], humanHeld: false }) };
+}
+// A3 — how much of a step AI may realistically carry given its action verb (a ceiling FACTOR 0..1),
+// applied on top of the class/tier policy ceiling: read/transform = full; the controlled write is
+// haircut; approve = 0 (the commit stays human). 1 for an absent/unknown verb -> an un-tagged step is
+// byte-identical. (approve is also caught upstream by stepDecisionLanguage; the 0 here is defence-in-depth.)
+const ACTION_CEILING = { "read": 1, "download": 1, "transform": 1, "generate-output": 1, "notify": 1, "write-in-place": 0.6, "approve": 0 };
+export function actionCeilingFactor(action) { return action != null && ACTION_CEILING[action] != null ? ACTION_CEILING[action] : 1; }
 // B2 — SEMANTIC CLASS CHECK. A step whose TEXT reads as a firm decision/commitment (approve /
 // waive / authorize / sign-off / send-final / sanction — scored by the SAME eval-gated rubric the
 // rest of the app uses, rubricStepClass) but is DECLARED assembly/judgment is a mislabel: left
@@ -330,7 +362,8 @@ export function stepPermitted(step, profile) {
   if (step.cls === "decision") return 0;    // M3 — a decision is NEVER given to AI (defence in depth, independent of the profile config)
   if (stepDecisionLanguage(step)) return 0; // B2 — a decision in disguise earns NO automation
   const theo = (step.theo ?? 0) / 100;
-  return Math.min(theo, stepCeilingFraction(step.cls, step.data, profile));
+  const af = step.action != null ? actionCeilingFactor(step.action) : 1; // A3 — the action verb caps automatability (a controlled write/approve carries less than a read)
+  return Math.min(theo, stepCeilingFraction(step.cls, step.data, profile)) * af;
 }
 
 // A1 — the systems a step INVOLVES (Option-A counting). A step may legitimately touch several
@@ -2570,6 +2603,24 @@ function runTests() {
     ok("A2 an unknown reachability is surfaced at intake", !validateIntake({ ...RECON_INTAKE, systems: [{ id: "x", class: "CRM", reachability: "telepathy" }] }).ok, "");
     ok("A2 an unresolved step system ref is surfaced at intake", !validateIntake({ ...RECON_INTAKE, systems: [{ id: "erp", class: "ledger/GL", reachability: "batch" }], steps: RECON_INTAKE.steps.map((s, i) => i === 0 ? { ...s, systems: ["ghost"] } : s) }).ok, "");
     ok("A2 a well-formed systems registry validates clean", validateIntake(reconScreen).ok, JSON.stringify(validateIntake(reconScreen).errors));
+  }
+
+  // A3 — the action-on-data verb drives controls + automatability (same system + tier, opposite work)
+  {
+    const base = { step: "Reconcile the two feeds", cls: "assembly", data: "confidential", theo: 80, time: 100 };
+    // control requirements differ by verb
+    ok("A3 read and write-in-place carry DIFFERENT controls", JSON.stringify(actionProfile("read").controls) !== JSON.stringify(actionProfile("write-in-place").controls), "");
+    ok("A3 read is high automatability; write-in-place is low", actionProfile("read").automatability === "high" && actionProfile("write-in-place").automatability === "low", "");
+    ok("A3 approve is human-held", actionProfile("approve").humanHeld === true && actionProfile("approve").automatability === "human-held", "");
+    // automatability is REAL: in the same class/tier, read carries more than a controlled write
+    ok("A3 read carries more permitted automation than write-in-place (same tier)", stepPermitted({ ...base, action: "read" }, "Conservative") > stepPermitted({ ...base, action: "write-in-place" }, "Conservative"), "");
+    ok("A3 an approve action earns ZERO permitted automation (the commit stays human)", stepPermitted({ ...base, action: "approve" }, "Conservative") === 0, "");
+    // additive: an absent action behaves exactly like read (factor 1) — un-tagged steps byte-identical
+    ok("A3 absent action == read (no cap) -> byte-identical", stepPermitted(base, "Conservative") === stepPermitted({ ...base, action: "read" }, "Conservative"), "");
+    ok("A3 read vs write-in-place yields different role capacity", roleCapacity([{ ...base, action: "read" }], "Conservative").grossValue > roleCapacity([{ ...base, action: "write-in-place" }], "Conservative").grossValue, "");
+    // enum integrity surfaced; valid verb + freeform note both accepted
+    ok("A3 an unknown action is surfaced at intake", !validateIntake({ ...RECON_INTAKE, steps: RECON_INTAKE.steps.map((s, i) => i === 0 ? { ...s, action: "frobnicate" } : s) }).ok, "");
+    ok("A3 a valid action + a freeform actionNote validate clean", validateIntake({ ...RECON_INTAKE, steps: RECON_INTAKE.steps.map((s, i) => i === 0 ? { ...s, action: "read", actionNote: "screen-scrape exception list" } : s) }).ok, "");
   }
 
   // B1 — clean capture: combined-step split flag + the contradiction queue
