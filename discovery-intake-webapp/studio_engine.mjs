@@ -1214,6 +1214,19 @@ export function realizationUplift(records, opts = {}) {
     headline: `Realization ${Math.round(baseRf * 100)}% -> ${Math.round(targetRf * 100)}% (the builder ladder) — +${base ? round((target - base) / base * 100, 1) : 0}% more deployable capacity on the same footprint.` };
 }
 
+// D1 — the GOVERNANCE UNLOCK: the policy-gap dollars that MOVE when the policy profile shifts (e.g.
+// Conservative -> Moderate). COMPUTED, never a constant — recompute gross at each profile; the unlock is
+// the delta. Changing the target profile changes the number (asserted in D1).
+export function governanceUnlock(records, opts = {}) {
+  const from = opts.fromProfile || "Conservative", to = opts.toProfile || "Moderate";
+  const confirmed = (Array.isArray(records) ? records : []).filter(isConfirmed);
+  const grossAt = profile => sum(confirmed.map(rec => roleCapacity(normalizeIntake(rec).steps, profile, opts).grossValue));
+  const fromGross = grossAt(from), toGross = grossAt(to);
+  return { fromProfile: from, toProfile: to, fromGross: round(fromGross), toGross: round(toGross),
+    unlockDollars: round(toGross - fromGross),
+    note: `Moving ${from} -> ${to} converts ~$${round(toGross - fromGross).toLocaleString("en-US")}/yr of policy-locked value to deployable — a risk conversation becomes a costed decision.` };
+}
+
 // C3 — role redefinition: individual -> team -> department (its own section + download).
 export function buildRoleRedefinition(records, opts = {}) {
   const rv = buildRoleView(records, opts);
@@ -2472,6 +2485,26 @@ function runTests() {
     // the evidence pack is a real export
     const ep = buildEvidencePack([withExc]);
     ok("C4 the evidence pack produces real content + filename", ep.content.length > 0 && ep.filename === "evidence-pack.md" && /Control evidence/.test(ep.content) && /CRO/.test(ep.content), "");
+  }
+
+  // D1 — computed, never fixed: the three signature figures change when their driver changes
+  {
+    const set = [FPA_INTAKE];
+    // (1) realization uplift driven by the builder-ladder rung
+    const u70to85 = realizationUplift(set, { targetRealizationFactor: 0.85 });
+    const u70to95 = realizationUplift(set, { targetRealizationFactor: 0.95 });
+    ok("D1 changing the builder-ladder rung CHANGES the uplift (not a constant)", u70to85.upliftDollars !== u70to95.upliftDollars && u70to95.upliftDollars > u70to85.upliftDollars, `${u70to85.upliftDollars} vs ${u70to95.upliftDollars}`);
+    // (2) governance unlock driven by the policy profile shift
+    const gMod = governanceUnlock(set, { toProfile: "Moderate" });
+    const gProg = governanceUnlock(set, { toProfile: "Progressive" });
+    ok("D1 changing the policy profile CHANGES the governance-unlock dollars (not a constant)", gMod.unlockDollars !== gProg.unlockDollars && gProg.unlockDollars >= gMod.unlockDollars, `${gMod.unlockDollars} vs ${gProg.unlockDollars}`);
+    // (3) model-fit lever = frontier-everywhere minus routed (computed)
+    const proof = buildRecipeProof(FPA_INTAKE);
+    const routed = costToServe(normalizeIntake(FPA_INTAKE).steps, "Conservative", "routed").annual;
+    const frontier = costToServe(normalizeIntake(FPA_INTAKE).steps, "Conservative", "frontier").annual;
+    ok("D1 the model-fit lever IS frontier-everywhere minus routed (computed)", near(proof.modelFitLever.delta, round(frontier - routed), 1) && proof.modelFitLever.delta > 0, `${proof.modelFitLever.delta} vs ${round(frontier - routed)}`);
+    // a zero-policy-gap set unlocks nothing (the unlock tracks the actual gap, not a fixed figure)
+    ok("D1 governance unlock tracks the ACTUAL gap (a no-gap set unlocks ~0)", governanceUnlock([{ steps: [{ step: "x", cls: "assembly", data: "internal", time: 10, theo: 30 }], recap: { confirmed: true }, header: { persona: "p", dept: "d", anchor: "a" }, trigger: { trigger: "t", cadence: "daily" }, seams: [{ friction: "low", latency: "low", crit: "low" }], judgment: { needs: "n", hard: "h", cues: "c", human: "h" }, confirm: { acceptance: "a", escalation: "e", dataTier: "internal" } }], { fromProfile: "Conservative", toProfile: "Moderate" }).unlockDollars === 0, "");
   }
 
   // ---- Edition 3 \u00b7 F6 \u2014 confirm gate, control-aware (confirmBlockers / canHarden) ----
