@@ -142,6 +142,28 @@ export const CONTROL_TYPES = ["four-eyes", "segregation", "authority", "complete
 // are DERIVED from controls + escalation; onFlag is the AUTHORED exception (carries a negativeConstraint).
 export const ROUTE_KINDS = ["onReject", "onFlag", "onSlaRisk"];
 
+// A2 — the SYSTEMS registry. A workflow carries systems[] (like actors[]); each step references the
+// system(s) it touches by id. A system has a CLASS (the archetype), a REACHABILITY (how AI can reach
+// it), and the data SOURCE it exposes. Reachability is the hard constraint on solution shape: a
+// screen-only system can't honestly be agentic (no API to act through) — it caps at human-in-loop and
+// carries a large integration line in TCO. Enum-integrity surfaced at intake, same as class/tier/part.
+export const SYSTEM_CLASSES = ["ledger/GL", "loan-origination", "policy-admin", "ACH/payment-rail", "recon-engine", "CRM", "file-store", "email", "BI"];
+export const REACHABILITY = ["api", "batch", "screen-only"];
+// A2 — curated finance system-ARCHETYPE taxonomy: class -> typical data tier, control profile, and
+// integration difficulty. These are the de-identified TRAITS the pooled library keeps (never a vendor
+// name). Used to seed conservative defaults and to price the integration line by class.
+export const SYSTEM_ARCHETYPES = {
+  "ledger/GL":        { typicalDataTier: "confidential", controlProfile: "four-eyes posting; period close", integrationDifficulty: "medium" },
+  "loan-origination": { typicalDataTier: "PII",          controlProfile: "credit authority bands",          integrationDifficulty: "high" },
+  "policy-admin":     { typicalDataTier: "PII",          controlProfile: "underwriting authority",          integrationDifficulty: "high" },
+  "ACH/payment-rail": { typicalDataTier: "confidential", controlProfile: "payment approval; sanctions screen", integrationDifficulty: "high" },
+  "recon-engine":     { typicalDataTier: "confidential", controlProfile: "exception four-eyes",             integrationDifficulty: "medium" },
+  "CRM":              { typicalDataTier: "PII",          controlProfile: "data-access entitlement",         integrationDifficulty: "low" },
+  "file-store":       { typicalDataTier: "internal",     controlProfile: "folder access entitlement",       integrationDifficulty: "low" },
+  "email":            { typicalDataTier: "internal",     controlProfile: "DLP / retention",                 integrationDifficulty: "low" },
+  "BI":               { typicalDataTier: "internal",     controlProfile: "read entitlement",                integrationDifficulty: "low" },
+};
+
 const prov = (value, source = "inferred", confidence = "medium") => ({ value, source, confidence });
 const round = (n, d = 0) => { const f = 10 ** d; return Math.round(n * f) / f; };
 const sum = a => a.reduce((x, y) => x + y, 0);
@@ -217,6 +239,19 @@ export function validateIntake(rawRecord) {
     // unknown shape is surfaced here, never silently accepted (it would mis-price cost-to-serve).
     if (s.solutionShape && !SOLUTION_SHAPES.includes(s.solutionShape)) errors.push(`step ${i + 1}: unknown solution shape "${s.solutionShape}" (not in ${SOLUTION_SHAPES.join("|")})`);
     if (s.volume != null && (typeof s.volume !== "number" || !Number.isFinite(s.volume) || s.volume < 0)) errors.push(`step ${i + 1}: volume "${s.volume}" is not a valid non-negative number`);
+    // A2 — a step's system refs must resolve to the systems[] registry (when a registry exists); an
+    // unresolved ref is surfaced, never silently assumed reachable (it would mis-shape the build).
+    if (Array.isArray(record.systems) && Array.isArray(s.systems)) {
+      s.systems.forEach(ref => {
+        const key = (ref && typeof ref === "object") ? (ref.ref ?? ref.id ?? ref.name) : ref;
+        if (key != null && !record.systems.some(sys => sys && (sys.id === key || sys.name === key))) errors.push(`step ${i + 1}: system ref "${key}" does not resolve to the systems[] registry`);
+      });
+    }
+  });
+  // A2 — systems[] registry enum integrity: class + reachability resolve to the controlled vocab.
+  (record.systems || []).forEach((sys, i) => {
+    if (sys && sys.class && !SYSTEM_CLASSES.includes(sys.class)) errors.push(`system ${i + 1}: unknown class "${sys.class}" (not in ${SYSTEM_CLASSES.join("|")})`);
+    if (sys && sys.reachability && !REACHABILITY.includes(sys.reachability)) errors.push(`system ${i + 1}: unknown reachability "${sys.reachability}" (not in ${REACHABILITY.join("|")})`);
   });
   (record.seams || []).forEach((s, i) => ["friction", "latency", "crit"].forEach(k => {
     if (s[k] && !LEVELS.includes(s[k])) errors.push(`seam ${i + 1}: ${k} "${s[k]}" not in low|medium|high`);
@@ -310,6 +345,34 @@ export function stepSystems(step) {
     return uniq(step.systems.map(s => (s && typeof s === "object") ? (s.ref ?? s.id ?? s.name) : s));
   }
   return uniq(String(step.tool || "").split(/[,/]/));
+}
+
+// A2 — resolve a step's system reference against the workflow's systems[] registry. Returns the
+// registry record {id,name,class,reachability,dataSource} when the ref matches an id/name; otherwise
+// a minimal {ref} so an un-registered ref is still legible (validateIntake surfaces the drift).
+export function resolveSystem(ref, record) {
+  const key = (ref && typeof ref === "object") ? (ref.ref ?? ref.id ?? ref.name) : ref;
+  const reg = Array.isArray(record?.systems) ? record.systems : [];
+  return reg.find(s => s && (s.id === key || s.name === key)) || { ref: key };
+}
+// A2 — the system records a step touches (resolved against the registry). Drives the reachability
+// cap and the integration line. Empty when the step references no systems.
+export function stepSystemRecords(step, record) {
+  return stepSystems(step).map(ref => resolveSystem(ref, record));
+}
+// A2 — the REALISTIC solution shape after the reachability cap. A screen-only system has no API for
+// AI to act through, so an agentic plan is un-buildable: the realistic shape caps at human-in-loop
+// (the rubric's "a screen-only system can't honestly be agentic"). batch/api impose no cap here.
+// Additive: with no systems referenced, realistic === declared and capped:false.
+export function cappedSolutionShape(step, record) {
+  const declared = (step && step.solutionShape) || null;
+  const recs = stepSystemRecords(step, record);
+  const screenOnly = recs.filter(s => s && s.reachability === "screen-only");
+  if (screenOnly.length) {
+    return { declared, realistic: "human-in-loop", capped: declared != null && declared !== "human-in-loop",
+      reason: "a screen-only system has no API to act through — an agentic plan is un-buildable; realistic shape is human-in-loop (with a large integration line in TCO)." };
+  }
+  return { declared, realistic: declared, capped: false, reason: null };
 }
 
 // A1 — OPTION-A COUNTING. roleCapacity attributes each step's effort to the step as a whole. A step
@@ -448,7 +511,14 @@ export function buildTco(record, opts = {}) {
   const build = sum(aiSteps.map(s => drv(s).buildWk)) * rate;
   const integration = sum(aiSteps.map(s => drv(s).integrationWk)) * rate;
   const evalBuild = sum(aiSteps.map(s => drv(s).evalBuildWk)) * rate;
-  const buildOneTime = build + integration + evalBuild;
+  // A2 — a SCREEN-ONLY system has no API: integrating AI means scraping / RPA / human-in-loop glue,
+  // a large one-time integration line over and above the shape's. Added per AI step that touches a
+  // screen-only system. Additive: ZERO when no systems are referenced, so an un-systemed workflow's
+  // TCO is byte-identical (the component line only appears when the cost is non-zero).
+  const screenOnlyWk = T.screenOnlyIntegrationWk ?? 6;
+  const screenOnlySteps = aiSteps.filter(s => stepSystemRecords(s, r).some(sys => sys && sys.reachability === "screen-only"));
+  const screenOnlyIntegration = screenOnlySteps.length * screenOnlyWk * rate;
+  const buildOneTime = build + integration + screenOnlyIntegration + evalBuild;
   // annual ongoing (EXCLUDES run-cost — that is its own lens). maintain/eval are fixed per recipe;
   // rework scales with the value at stake (the riskiest shape sets the rate).
   const maintenance = sum(aiSteps.map(s => drv(s).maintWkPerYr)) * rate;
@@ -473,7 +543,8 @@ export function buildTco(record, opts = {}) {
     runCost: band(runAnnual),                                          // the v3 inference lens (a band), at deployment scale
     tco: {
       buildOneTime: band(buildOneTime), annualOngoing: band(annualOngoing), firstYear: band(firstYear),
-      components: { build: round(build), integration: round(integration), eval: round(evalBuild + evalOngoing), maintenance: round(maintenance), rework: round(rework) },
+      components: { build: round(build), integration: round(integration), eval: round(evalBuild + evalOngoing), maintenance: round(maintenance), rework: round(rework),
+        ...(screenOnlyIntegration > 0 ? { screenOnlyIntegration: round(screenOnlyIntegration) } : {}) }, // A2 — only when a screen-only system is touched (byte-identical otherwise)
     },
     payback,
     grossValue: round(grossScaled),
@@ -1440,6 +1511,8 @@ export function deIdentify(record, opts = {}) {
     ["time", "theo", "touch", "wait", "volume"].forEach(k => { if (s[k] != null) out[k] = s[k]; }); // metrics = KEPT
     if (s.waitKind) out.waitKind = s.waitKind;
     if (s.solutionShape) out.solutionShape = s.solutionShape; // shape is a category (A1) = KEPT
+    // A2 — a step's systems become CLASSES (the archetype the moat needs); the vendor id/name never pools.
+    if (Array.isArray(s.systems)) { const cls = uniq(s.systems.map(ref => resolveSystem(ref, r).class)); if (cls.length) out.systemClasses = cls; }
     if (Array.isArray(s.participants)) out.participants = s.participants.map(p => ({ actorId: p.actorId, part: p.part })); // PART + opaque ref, not a person
     if (s.control && s.control.type) out.control = { type: s.control.type, ...(s.control.distinct ? { distinct: s.control.distinct } : {}) }; // control TYPE only
     return out;
@@ -1456,6 +1529,8 @@ export function deIdentify(record, opts = {}) {
     recap: { confirmed: true },
   };
   if (Array.isArray(r.actors)) out.actors = r.actors.map(a => ({ id: a.id, role: a.role, department: a.department, line: a.line })); // role labels (categories), not names
+  // A2 — the pooled systems registry keeps only the system CLASS + reachability TRAITS, never the vendor name/id/dataSource.
+  if (Array.isArray(r.systems)) out.systems = r.systems.map(sys => ({ class: sys.class, reachability: sys.reachability }));
   if (Array.isArray(r.sharedRules)) out.sharedRules = r.sharedRules.map(rule => ({ id: rule.id, kind: rule.kind, bands: (rule.bands || []).map(b => ({ maxValue: b.maxValue, approver: b.approver })) })); // authority ladder = role refs, structural
   return out;
 }
@@ -2468,6 +2543,33 @@ function runTests() {
     ok("A1 capacity counts to the step as a whole — not divided per system", roleCapacity(normalizeIntake({ steps: threeSys }).steps, "Conservative").grossValue === roleCapacity(normalizeIntake({ steps: oneSys }).steps, "Conservative").grossValue, "");
     ok("A1 cost-to-serve is the step's, not split per system", costToServe(normalizeIntake({ steps: threeSys }).steps, "Conservative", "routed").annual === costToServe(normalizeIntake({ steps: oneSys }).steps, "Conservative", "routed").annual, "");
     ok("A1 explicit systems[] refs are read without dividing capacity", stepSystems({ systems: [{ ref: "sysA" }, { ref: "sysB" }] }).length === 2, "");
+  }
+
+  // A2 — systems registry + reachability: the screen-only cap + the TCO integration line + the pooled strip
+  {
+    const reconScreen = { ...RECON_INTAKE,
+      systems: [{ id: "caseMgr", name: "CIB Case Manager", class: "recon-engine", reachability: "screen-only", dataSource: "exception queue" },
+                { id: "erp", name: "Oracle GL", class: "ledger/GL", reachability: "batch", dataSource: "GL extract" }],
+      steps: RECON_INTAKE.steps.map((s, i) => i === 1 ? { ...s, systems: ["caseMgr", "erp"] } : s) };
+    ok("A2 the archetype taxonomy covers every system class", SYSTEM_CLASSES.every(c => SYSTEM_ARCHETYPES[c] && SYSTEM_ARCHETYPES[c].integrationDifficulty), "");
+    ok("A2 a screen-only system caps the realistic shape at human-in-loop", cappedSolutionShape({ solutionShape: "agentic", systems: ["caseMgr"] }, reconScreen).realistic === "human-in-loop", "");
+    ok("A2 the cap is flagged when an agentic plan was declared on a screen-only system", cappedSolutionShape({ solutionShape: "agentic", systems: ["caseMgr"] }, reconScreen).capped === true, "");
+    ok("A2 a batch/api system imposes NO shape cap", cappedSolutionShape({ solutionShape: "agentic", systems: ["erp"] }, reconScreen).capped === false, "");
+    // a screen-only system adds an integration line to TCO (and raises the one-time build)
+    const tScreen = buildTco(reconScreen), tBase = buildTco(RECON_INTAKE);
+    ok("A2 a screen-only system adds a TCO integration line", tScreen.tco.components.screenOnlyIntegration > 0, JSON.stringify(tScreen.tco.components));
+    ok("A2 the screen-only integration raises one-time build above the un-systemed TCO", tScreen.tco.buildOneTime.point > tBase.tco.buildOneTime.point, `${tScreen.tco.buildOneTime.point} vs ${tBase.tco.buildOneTime.point}`);
+    ok("A2 an un-systemed workflow's TCO has NO screen-only line (byte-identical)", tBase.tco.components.screenOnlyIntegration === undefined, JSON.stringify(tBase.tco.components));
+    // the pooled record keeps only class/traits — never the vendor name
+    const pooled = deIdentify(reconScreen);
+    ok("A2 the pooled record contains NO vendor system name", !JSON.stringify(pooled).includes("CIB Case Manager") && !JSON.stringify(pooled).includes("Oracle GL"), "");
+    ok("A2 the pooled systems registry keeps class + reachability traits", pooled.systems.every(s => SYSTEM_CLASSES.includes(s.class) && REACHABILITY.includes(s.reachability) && !s.name), JSON.stringify(pooled.systems));
+    ok("A2 the pooled step references system CLASSES, not vendor ids", pooled.steps[1].systemClasses.includes("recon-engine"), JSON.stringify(pooled.steps[1].systemClasses));
+    // enum integrity surfaced at intake; the valid record passes
+    ok("A2 an unknown system class is surfaced at intake", !validateIntake({ ...RECON_INTAKE, systems: [{ id: "x", class: "made-up", reachability: "api" }] }).ok, "");
+    ok("A2 an unknown reachability is surfaced at intake", !validateIntake({ ...RECON_INTAKE, systems: [{ id: "x", class: "CRM", reachability: "telepathy" }] }).ok, "");
+    ok("A2 an unresolved step system ref is surfaced at intake", !validateIntake({ ...RECON_INTAKE, systems: [{ id: "erp", class: "ledger/GL", reachability: "batch" }], steps: RECON_INTAKE.steps.map((s, i) => i === 0 ? { ...s, systems: ["ghost"] } : s) }).ok, "");
+    ok("A2 a well-formed systems registry validates clean", validateIntake(reconScreen).ok, JSON.stringify(validateIntake(reconScreen).errors));
   }
 
   // B1 — clean capture: combined-step split flag + the contradiction queue
