@@ -7544,6 +7544,13 @@ function engineWorkflowRoleCapacity(opts = {}) { const E = studioEngine(); if (!
 // no hand-offs (a single persona never hands off). The crossing math lives in the engine.
 function engineWorkflowHandoffs(opts = {}) { const E = studioEngine(); if (!E || typeof E.detectHandoffs !== "function") return null; return E.detectHandoffs(opts.record || appWorkflowToIntake(opts)); }
 
+// E3/F2 — the CONTROL-AWARE rail (four-eyes actors distinct; authority names a HUMAN approver; a
+// halt-on-flag is never auto-resolved). Same authority as the vocabulary rail; delegated to the
+// engine. Returns {ok, violations}; null when the engine isn't loaded (typeof-guarded, additive).
+function engineControlRail(opts = {}) { const E = studioEngine(); if (!E || typeof E.controlRail !== "function") return null; return E.controlRail(opts.record || appWorkflowToIntake(opts), opts); }
+// E3/F2 — resolve the value-banded approver for an authority-gated step from the write-once ladder.
+function engineResolveApprover(ref, value, opts = {}) { const E = studioEngine(); if (!E || typeof E.resolveAuthorityApprover !== "function") return null; return E.resolveAuthorityApprover(opts.record || appWorkflowToIntake(opts), ref, value); }
+
 // E2 — the spec's 7th field. The engine decides model-fit (permitted tier per class + data-tier
 // residency: PII/MNPI force a restricted/in-VPC pricing tier; confidential routes at its normal
 // class tier) and the cost-to-serve band. Returns the engine's modelFit prov triple (or
