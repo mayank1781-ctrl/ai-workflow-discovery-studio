@@ -42,13 +42,17 @@ export const CONFIG = {
   // 5/10/15% sliver). AI may prepare the lead-up, but that prep must be captured as a separate
   // upstream assembly/judgment SUPPORT step — never credited to the decision itself. Enforced
   // structurally too (stepPermitted clamps decision -> 0), so this is defence in depth.
+  // A4 — `restricted` is the GENERALIZED residency class the de-identified pooled library uses in place
+  // of PII / MNPI (so the moat never carries a literal PII/MNPI value). Factor = the MOST conservative
+  // of PII/MNPI on each profile, so the pooled (collective) numbers are conservative, never optimistic.
+  // Purely additive: existing records use public/internal/confidential/PII/MNPI and are byte-identical.
   profiles: {
     Conservative: { step: { assembly: 65, judgment: 20, decision: 0 },
-      tier: { public: 1, internal: 1, confidential: 0.9, PII: 0.5, MNPI: 0.3 }, mode: "draft-only" },
+      tier: { public: 1, internal: 1, confidential: 0.9, PII: 0.5, MNPI: 0.3, restricted: 0.3 }, mode: "draft-only" },
     Moderate: { step: { assembly: 80, judgment: 30, decision: 0 },
-      tier: { public: 1, internal: 1, confidential: 1, PII: 0.8, MNPI: 0.6 }, mode: "bounded agents" },
+      tier: { public: 1, internal: 1, confidential: 1, PII: 0.8, MNPI: 0.6, restricted: 0.6 }, mode: "bounded agents" },
     Progressive: { step: { assembly: 92, judgment: 40, decision: 0 },
-      tier: { public: 1, internal: 1, confidential: 1, PII: 0.9, MNPI: 0.8 }, mode: "supervised orchestration" },
+      tier: { public: 1, internal: 1, confidential: 1, PII: 0.9, MNPI: 0.8, restricted: 0.8 }, mode: "supervised orchestration" },
   },
 
   // model-fit routing by step class; decision stays human (no AI tier)
@@ -106,14 +110,16 @@ export const CONFIG = {
 };
 
 const CLASSES = ["assembly", "judgment", "decision"];
-const TIERS = ["public", "internal", "confidential", "PII", "MNPI"];
+// A4 — `restricted` is the de-identified pooled library's generalized residency class (PII/MNPI fold
+// into it). Additive: real intake still uses the five specific tiers; only pooled records use restricted.
+const TIERS = ["public", "internal", "confidential", "PII", "MNPI", "restricted"];
 // m1 — the controlled capability vocabulary (recurring assembly steps tag a capability so the
 // reuse / adjacency layer can cluster them). An unknown tag is SURFACED at intake, never silently
 // accepted — the same enum-integrity discipline as class/tier/part.
 const CAPABILITY_TAGS = ["classify-and-route", "extract-and-map", "reconcile-two-sources", "draft-from-template", "summarize-thread", "validate-against-rules", "research-and-synthesize", "assemble-evidence-pack", "schedule-and-coordinate", "screen-against-list", "spread-into-schema", "generate-report"];
 const LEVELS = ["low", "medium", "high"];
-const RESTRICTED_TIERS = ["confidential", "PII", "MNPI"]; // narrative: stays on approved / in-VPC models
-const RESIDENCY_FORCE = ["PII", "MNPI"];                   // forces a restricted (approved) PRICING tier; confidential routes normally
+const RESTRICTED_TIERS = ["confidential", "PII", "MNPI", "restricted"]; // narrative: stays on approved / in-VPC models
+const RESIDENCY_FORCE = ["PII", "MNPI", "restricted"];     // forces a restricted (approved) PRICING tier; confidential routes normally
 
 // A1 (M4) — the SOLUTION-SHAPE axis: the five ways AI can carry a step. This is a SECOND axis,
 // orthogonal to step class (assembly/judgment/decision). Class says "how human is the work";
@@ -735,7 +741,7 @@ export function deriveRoutes(record) {
 // =====================================================================
 // 3 · SPEC CANVAS (Generator B) — deterministic assembly, per workflow unit
 // =====================================================================
-const TIER_RANK = { public: 0, internal: 1, confidential: 2, PII: 3, MNPI: 4 };
+const TIER_RANK = { public: 0, internal: 1, confidential: 2, PII: 3, MNPI: 4, restricted: 4 }; // A4 — restricted ranks as most-sensitive (= MNPI)
 const uniq = a => [...new Set(a.filter(Boolean).map(s => String(s).trim()).filter(Boolean))];
 const dash = s => (s && String(s).trim()) ? String(s).trim() : "\u2014";
 const asm = steps => steps.filter(s => s.cls === "assembly");
@@ -992,6 +998,66 @@ export function buildLeaderView(records, opts = {}) {
 // on the units. Capacity + operating-model language ONLY — the reasons name controls / data tiers, never
 // people. Adjacency is a HYPOTHESIS for leaders, human-confirmed; never a reorg, never headcount.
 // =====================================================================
+
+// =====================================================================
+// A4 (two-tier discovery store) — DE-IDENTIFY pass for the POOLED cross-discovery library.
+// A confirmed discovery is persisted in TWO tiers:
+//   • per-engagement store — FULL fidelity (PII / confidential allowed), scoped to one engagement;
+//   • pooled cross-discovery library — written through this de-identify pass, which keeps ONLY the
+//     de-identified shape the collective views need (roles, capabilities, data-tier CLASS, step-classes,
+//     metrics) and STRIPS names, PII / MNPI content, and proprietary free-text. The pool is the moat.
+// The pooled record retains enough STRUCTURE (non-sensitive placeholders) to pass isConfirmed, so the
+// whole derived layer (role view / capability map / adjacency / leader view) runs over the pool directly.
+// =====================================================================
+const POOL_REDACT = "[de-identified]";
+// generalize a captured tier to the pooled residency class (PII/MNPI -> restricted; never a literal
+// PII/MNPI value survives into the pool). public/internal/confidential pass through (not sensitive content).
+function pooledTier(t) { return (t === "PII" || t === "MNPI") ? "restricted" : (TIERS.includes(t) ? t : "internal"); }
+// deterministic opaque id (no Date.now/Math.random) from the de-identified SHAPE only — never the name.
+function pooledId(r) {
+  const basis = JSON.stringify((r.steps || []).map(s => [s.cls, pooledTier(s.data), s.capability || ""])) + "|" + (r.header?.dept || "") + "|" + (r.trigger?.cadence || "");
+  let h = 0; for (let i = 0; i < basis.length; i++) h = (h * 31 + basis.charCodeAt(i)) | 0;
+  return "pooled-" + (h >>> 0).toString(36);
+}
+export function deIdentify(record, opts = {}) {
+  const r = reconcileIntake(record);
+  const id = opts.poolId || pooledId(r);
+  const steps = (r.steps || []).map((s, i) => {
+    const out = {
+      step: `${POOL_REDACT} step ${i + 1}`,                 // structural placeholder; the real text is proprietary
+      cls: s.cls, data: pooledTier(s.data),                 // step-class + (generalized) data tier = KEPT categories
+      capability: s.capability || capabilitySignature(s),    // capability signature = KEPT
+    };
+    ["time", "theo", "touch", "wait", "volume"].forEach(k => { if (s[k] != null) out[k] = s[k]; }); // metrics = KEPT
+    if (s.waitKind) out.waitKind = s.waitKind;
+    if (s.solutionShape) out.solutionShape = s.solutionShape; // shape is a category (A1) = KEPT
+    if (Array.isArray(s.participants)) out.participants = s.participants.map(p => ({ actorId: p.actorId, part: p.part })); // PART + opaque ref, not a person
+    if (s.control && s.control.type) out.control = { type: s.control.type, ...(s.control.distinct ? { distinct: s.control.distinct } : {}) }; // control TYPE only
+    return out;
+  });
+  const out = {
+    pooled: true, deIdentified: true, poolId: id,
+    // header: persona is a ROLE label (a category the moat needs) — kept; the proprietary workflow name (anchor) is replaced by the opaque id.
+    header: { persona: r.header?.persona || POOL_REDACT, dept: r.header?.dept || POOL_REDACT, anchor: id, lifecycle: r.header?.lifecycle || "confirmed" },
+    trigger: { trigger: POOL_REDACT, cadence: r.trigger?.cadence || POOL_REDACT, ...(r.trigger?.volume != null ? { volume: r.trigger.volume } : {}) },
+    steps,
+    seams: (Array.isArray(r.seams) && r.seams.length) ? r.seams.map(s => ({ friction: s.friction, latency: s.latency, crit: s.crit, type: s.type })) : [{ friction: "low", latency: "low", crit: "low", type: "seam" }],
+    judgment: { needs: POOL_REDACT, hard: POOL_REDACT, cues: POOL_REDACT, human: POOL_REDACT },
+    confirm: { acceptance: POOL_REDACT, escalation: POOL_REDACT, dataTier: pooledTier(r.confirm?.dataTier || maxTier(r) || "internal") },
+    recap: { confirmed: true },
+  };
+  if (Array.isArray(r.actors)) out.actors = r.actors.map(a => ({ id: a.id, role: a.role, department: a.department, line: a.line })); // role labels (categories), not names
+  if (Array.isArray(r.sharedRules)) out.sharedRules = r.sharedRules.map(rule => ({ id: rule.id, kind: rule.kind, bands: (rule.bands || []).map(b => ({ maxValue: b.maxValue, approver: b.approver })) })); // authority ladder = role refs, structural
+  return out;
+}
+// A4 — the two-tier WRITE for a confirmed discovery: full record -> engagement store; de-identified -> pool.
+export function splitDiscoveryTiers(record, opts = {}) {
+  return { engagement: record, pooled: deIdentify(record, opts) };
+}
+// A4 — build the pooled library from many discoveries (confirmed only). The derived layer runs over this.
+export function buildPooledLibrary(records) {
+  return (Array.isArray(records) ? records : []).filter(isConfirmed).map(r => deIdentify(r));
+}
 
 // F4 — freed capacity per ROLE across every confirmed workflow that role's doer touches, plus the
 // assembly -> judgment shift per role. Sums roleCapacityByActor across confirmed records by role label.
@@ -1770,6 +1836,27 @@ function runTests() {
     const roleB = { ...FPA_INTAKE, header: { ...FPA_INTAKE.header, persona: "Analyst", anchor: "B-mnpi" }, steps: FPA_INTAKE.steps.map(s => ({ ...s, data: "MNPI" })) };
     const adj2 = buildAdjacency([roleA, roleB]);
     ok("A3 role-only + different tier => NOT enabled (surfaced in why-blocked on data)", adj2.enabledCount === 0 && adj2.whyBlocked.some(c => c.blockedDimension === "data"), JSON.stringify(adj2.whyBlocked.map(c => c.blockedDimension)));
+  }
+
+  // A4 — two-tier store: the pooled de-identify pass strips PII/MNPI/names/free-text; derived layer runs over the pool
+  {
+    const dirty = { ...FPA_INTAKE,
+      header: { ...FPA_INTAKE.header, anchor: "Acme Corp Q3 close SECRET" },
+      steps: FPA_INTAKE.steps.map((s, i) => i === 0 ? { ...s, data: "PII", inputs: "John Smith SSN 123-45-6789", output: "acct 9988", tool: "AcmeSecretTool" } : s),
+      judgment: { ...FPA_INTAKE.judgment, human: "approve waiver for client X PROPRIETARY" },
+      confirm: { ...FPA_INTAKE.confirm, acceptance: "reconciles SECRETSAUCE", dataTier: "MNPI" } };
+    const pooled = deIdentify(dirty);
+    const json = JSON.stringify(pooled);
+    const leaks = ["Acme Corp", "SECRET", "John Smith", "123-45-6789", "9988", "AcmeSecretTool", "client X", "SECRETSAUCE", "PROPRIETARY"].filter(s => json.includes(s));
+    ok("A4 pooled record leaks NO PII/MNPI/name/proprietary free-text", leaks.length === 0, JSON.stringify(leaks));
+    ok("A4 pooled record never holds a literal PII/MNPI tier value (generalized to restricted)", !/"(PII|MNPI)"/.test(json), "");
+    ok("A4 pooled record keeps the de-identified shape (class/tier/capability/metrics)", pooled.steps[0].cls === "assembly" && pooled.steps[0].data === "restricted" && !!pooled.steps[0].capability && pooled.steps[0].time === 18, JSON.stringify(pooled.steps[0]));
+    ok("A4 pooled record still passes isConfirmed (placeholders, not sensitive)", isConfirmed(pooled), "");
+    const two = splitDiscoveryTiers(dirty);
+    ok("A4 split writes both tiers (full engagement + de-identified pooled)", two.engagement === dirty && two.pooled.deIdentified === true, "");
+    const pool = buildPooledLibrary([dirty, RECON_INTAKE]);
+    ok("A4 derived layer aggregates over the POOLED library (role/capability/leader)", buildRoleView(pool).confirmedCount === 2 && buildCapabilityMap(pool).confirmedCount === 2 && buildLeaderView(pool).confirmedCount === 2, "");
+    ok("A4 the whole pooled library carries no literal PII/MNPI value", !/"(PII|MNPI)"/.test(JSON.stringify(pool)), "");
   }
 
   // ---- Edition 3 \u00b7 F6 \u2014 confirm gate, control-aware (confirmBlockers / canHarden) ----
