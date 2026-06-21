@@ -7063,6 +7063,38 @@ function captureIntegrityHtml() {
   return `<div style="margin-top:12px;border-top:1px solid rgba(148,163,184,.18);padding-top:10px;">${head}${splitHtml}${queueHtml}${(!splits.length && !queue.length) ? `<div style="font-size:12px;color:#8aa0b8;">No split or contradiction flags — capture is internally consistent.</div>` : ""}</div>`;
 }
 
+// ===================================================================
+// B2 (Phase 2) — WORKBENCH: adversarial confirm + the protected-by-design artifact. Both delegate to
+// the engine (adversarialConfirmFlags / buildProtectedByDesign). The four flags are surfaced at the
+// confirm affordance; the protected-by-design list is a generated, confirmed artifact (Human Pink).
+// ===================================================================
+function engineAdversarialFlags(opts = {}) { const E = studioEngine(); if (!E || typeof E.adversarialConfirmFlags !== "function") return { flags: [], byKind: {}, count: 0, kinds: {}, engineMissing: true }; return E.adversarialConfirmFlags(opts.record || appWorkflowToIntake(opts)); }
+function engineProtectedByDesign(records, opts = {}) { const E = studioEngine(); if (!E || typeof E.buildProtectedByDesign !== "function") return { items: [], count: 0, note: "" }; return E.buildProtectedByDesign(records || (opts.record || appWorkflowToIntake(opts))); }
+
+// B2 — the four adversarial confirm flags rendered at the Workbench confirm affordance. Amber = a
+// skeptical flag to resolve before hardening; green when the gate finds nothing to break.
+function adversarialFlagsHtml(opts = {}) {
+  let af = { flags: [], kinds: {} };
+  try { af = engineAdversarialFlags(opts); } catch (_e) { af = { flags: [], kinds: {} }; }
+  const labels = { "implies-decision": "these words imply a decision", "inferred-value": "this value is inferred", "control-owner-missing": "this control owner is missing", "mixes-maker-checker": "this step mixes maker & checker" };
+  if (!af.flags.length) return `<div class="ds-micro" style="color:#00d4b4;">Adversarial confirm · nothing to break — capture is defensible.</div>`;
+  const rows = af.flags.map((f) => `<div style="font-size:12px;color:#f6c453;line-height:1.45;">⚑ <strong>${escapeHtml(labels[f.kind] || f.kind)}</strong>${f.step ? ` · ${escapeHtml(f.step)}` : ""} — ${escapeHtml(f.detail || "")}</div>`).join("");
+  return `<div style="margin-top:10px;"><div class="ds-micro" style="margin-bottom:4px;">Adversarial confirm · ${af.flags.length} flag(s) to resolve before hardening</div>${rows}</div>`;
+}
+
+// B2 — the PROTECTED-BY-DESIGN artifact (Human Pink): decision steps + high-criticality seams, human-held.
+// Reuses the canonical human-hold hue (HUMAN_HOLD_HUE) — initialized by render time.
+function protectedByDesignHtml(records, opts = {}) {
+  const pink = (typeof HUMAN_HOLD_HUE === "string") ? HUMAN_HOLD_HUE : "#FF4FD8";
+  let pbd = { items: [], count: 0, note: "" };
+  try { pbd = engineProtectedByDesign(records, opts); } catch (_e) { pbd = { items: [], count: 0, note: "" }; }
+  const rows = pbd.items.map((i) => `<div style="font-size:12px;line-height:1.5;"><span style="color:${pink};">🔒 ${escapeHtml(i.item)}</span> <span style="color:#8aa0b8;">— ${escapeHtml(i.why)}</span></div>`).join("");
+  return `<div class="ds-panel" style="padding:12px 14px;border:1px solid ${pink}33;border-radius:10px;">
+    <div class="ds-micro" style="color:${pink};margin-bottom:6px;">Protected by design · ${pbd.count} human-held</div>
+    ${rows || `<div style="font-size:12px;color:#8aa0b8;">${escapeHtml(pbd.note || "No decision steps or high-criticality seams captured yet.")}</div>`}
+  </div>`;
+}
+
 // Role footprint: { roleValue: [ {workflowId, workflowName, stepId, stepName, source,
 // confidence}, ... ] } — the steps tagged with each role ACROSS all workflows.
 // Provenance preserved per contributing step. Off-set tags never enter the footprint.
@@ -13619,18 +13651,23 @@ function renderAnalysisTabRecipe() {
 
   // E3/F6 — the confirm-the-map gate (controls enforced at confirm). Additive: empty unless the active
   // workflow carries multi-actor participants/controls. E3/F7 — the multi-actor recipe artifact, likewise.
-  let e3WorkbenchGate = "", e3MultiActorRecipe = "";
+  // B2 — the adversarial confirm flags + the protected-by-design artifact ride on the same e3rec.
+  let e3WorkbenchGate = "", e3MultiActorRecipe = "", b2Adversarial = "", b2Protected = "";
   try {
     if (typeof appWorkflowToIntake === "function") {
       const e3rec = appWorkflowToIntake();
       if (typeof workbenchControlGateHtml === "function") e3WorkbenchGate = workbenchControlGateHtml(e3rec) || "";
       if (typeof recipeMultiActorHtml === "function") e3MultiActorRecipe = recipeMultiActorHtml(e3rec) || "";
+      if (typeof adversarialFlagsHtml === "function") b2Adversarial = adversarialFlagsHtml({ record: e3rec }) || "";
+      if (typeof protectedByDesignHtml === "function") b2Protected = protectedByDesignHtml(e3rec) || "";
     }
-  } catch (_e) { e3WorkbenchGate = ""; e3MultiActorRecipe = ""; }
+  } catch (_e) { e3WorkbenchGate = ""; e3MultiActorRecipe = ""; b2Adversarial = ""; b2Protected = ""; }
   container.innerHTML =
     recipeWorkflowHeaderHtml() +
     artifactStudioHeaderHtml(steps) +
     e3WorkbenchGate +
+    b2Adversarial +
+    b2Protected +
     e3MultiActorRecipe +
     recipeBookHtml() +
     renderPolicyPanelHtml() +

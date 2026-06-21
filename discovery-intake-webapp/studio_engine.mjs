@@ -1575,6 +1575,66 @@ export function confirmBlockers(record) {
 export function canHarden(record) { return confirmBlockers(record).length === 0; }
 
 // =====================================================================
+// B2 (Phase 2) — ADVERSARIAL CONFIRM + the PROTECTED-BY-DESIGN artifact.
+// The confirm gate stops trusting the capture and actively tries to break it: four skeptical flags
+// raised BEFORE hardening. All four reuse Phase-1 primitives (decisionMislabelBlockers / the
+// per-field provenance / controlRail) — no parallel checker. The protected-by-design artifact is the
+// confirmed list of decision steps + high-criticality seams marked human-held (the deck's "feature,
+// not a limitation"), reusing the semantic class check + the readiness gate matrix.
+// =====================================================================
+
+// map a controlRail violation rule to its adversarial flag category.
+function controlFlagKind(rule) {
+  if (/four-eyes-distinct|ai-no-self-approve|segregation/.test(rule)) return "mixes-maker-checker";
+  if (/named|escalation-target|human-approver|halt-human-target|authority-rule-missing/.test(rule)) return "control-owner-missing";
+  return "control";
+}
+export function adversarialConfirmFlags(record) {
+  const r = record || {};
+  const steps = Array.isArray(r.steps) ? r.steps : [];
+  const nr = normalizeIntake(r);
+  const flags = [];
+  // (1) "these words imply a decision" — a step tagged assembly/judgment whose text commits the firm
+  decisionMislabelBlockers(r).forEach(b => flags.push({ kind: "implies-decision", step: b.step, detail: b.detail }));
+  // (2) "this value is inferred" — a relied-on number resting on a class default, not a stated value
+  nr.steps.forEach((s, i) => {
+    const which = [s._timeProv === "inferred" ? "effort/time" : null, s._theoProv === "inferred" ? "addressability" : null].filter(Boolean);
+    if (which.length) flags.push({ kind: "inferred-value", step: (steps[i] && steps[i].step) || s.step, detail: `${which.join(" + ")} is inferred (class default), not stated — confirm it or capture the real value before it hardens.` });
+  });
+  provenanceBlockers(r).forEach(b => flags.push({ kind: "inferred-value", detail: b.detail }));
+  // (3) "this control owner is missing" + (4) "this step mixes maker and checker" — from the control rail
+  controlRail(r).violations.forEach(v => flags.push({ kind: controlFlagKind(v.rule), step: v.step, rule: v.rule, detail: v.detail }));
+  const byKind = flags.reduce((m, f) => { (m[f.kind] = m[f.kind] || []).push(f); return m; }, {});
+  return { flags, byKind, count: flags.length,
+    kinds: { impliesDecision: (byKind["implies-decision"] || []).length, inferredValue: (byKind["inferred-value"] || []).length,
+      controlOwnerMissing: (byKind["control-owner-missing"] || []).length, mixesMakerChecker: (byKind["mixes-maker-checker"] || []).length } };
+}
+
+// B2 — the PROTECTED-BY-DESIGN artifact: every decision step (by class OR by committing language) and
+// every high-criticality seam, marked human-held and "never decomposed to AI". One record or many.
+export function buildProtectedByDesign(records) {
+  const list = Array.isArray(records) ? records : [records];
+  const items = [];
+  list.filter(Boolean).forEach(rec => {
+    const r = normalizeIntake(rec);
+    const wf = rec.header?.anchor || rec.header?.persona || "workflow";
+    (r.steps || []).forEach(s => {
+      if (s.cls === "decision" || stepDecisionLanguage(s)) {
+        // the readiness matrix's data/control gates describe WHY it stays human; we keep it minimal here.
+        items.push({ workflow: wf, kind: "decision-step", item: s.step, humanHeld: true,
+          why: s.cls === "decision" ? "a decision — AI must never own it (it commits the firm)" : "decision/commitment language — the call stays with the person; split the prep (AI) from the decision" });
+      }
+    });
+    (r.seams || []).filter(s => s.crit === "high").forEach(s => {
+      items.push({ workflow: wf, kind: "high-criticality-seam", item: `${s.from || "?"} → ${s.to || "?"}`, humanHeld: true,
+        why: `high-criticality seam${s.note ? `: ${s.note}` : ""} — do not compress past the human gate` });
+    });
+  });
+  return { items, count: items.length,
+    note: items.length ? "Protected by design — marked at the Workbench, never decomposed to AI. For a regulated firm this list is a feature, not a limitation." : "No decision steps or high-criticality seams captured yet." };
+}
+
+// =====================================================================
 // GOLDEN FIXTURE + SELF-TEST  (run: node studio_engine.mjs)
 // =====================================================================
 export const FPA_INTAKE = {
@@ -1928,6 +1988,24 @@ function runTests() {
     const sens = { steps: [{ step: "Pull client financials", cls: "assembly", data: "MNPI", time: 10, theo: 80 }], confirm: { dataTier: "internal" } };
     ok("B1 a sensitivity contradiction lands in the queue", detectContradictions(sens).some(c => c.kind === "sensitivity"), "");
     ok("B1 a clean capture has an EMPTY queue (no false conflicts)", detectContradictions(FPA_INTAKE).length === 0, JSON.stringify(detectContradictions(FPA_INTAKE)));
+  }
+
+  // B2 — adversarial confirm (4 flags) + the protected-by-design artifact
+  {
+    const mislabel = { ...RECON_INTAKE, steps: [{ step: "Approve the waiver and send it", cls: "assembly", data: "internal", time: 10, theo: 80, participants: [{ actorId: "maker", part: "doer" }] }, ...RECON_INTAKE.steps.slice(1)] };
+    const af = adversarialConfirmFlags(mislabel);
+    ok("B2 a decision-language step tagged assembly is FLAGGED at confirm", af.kinds.impliesDecision >= 1, JSON.stringify(af.kinds));
+    // a four-eyes step missing one named part -> control-owner-missing; an inferred number -> inferred-value
+    const noApprover = { steps: [{ step: "x", cls: "assembly", data: "internal", time: 10, control: { type: "authority", authorityRef: "ladder" } }] };
+    ok("B2 a missing control owner is flagged", adversarialConfirmFlags(noApprover).kinds.controlOwnerMissing >= 1, "");
+    const sameActor = { actors: [{ id: "ai", role: "Bot", line: "system", kind: "system" }], steps: [{ step: "self-approve", cls: "decision", data: "internal", time: 5, participants: [{ actorId: "ai", part: "doer" }, { actorId: "ai", part: "approver" }], control: { type: "four-eyes", distinct: ["doer", "approver"] } }] };
+    ok("B2 a maker==checker collision is flagged (mixes maker and checker)", adversarialConfirmFlags(sameActor).kinds.mixesMakerChecker >= 1, JSON.stringify(adversarialConfirmFlags(sameActor).flags.map(f => f.kind)));
+    ok("B2 an all-inferred capture raises an inferred-value flag", adversarialConfirmFlags({ steps: [{ step: "y", cls: "assembly", data: "internal", theo: 80 }] }).kinds.inferredValue >= 1, "");
+    // protected-by-design — decision steps + high-criticality seams, human-held
+    const pbd = buildProtectedByDesign(RECON_INTAKE);
+    ok("B2 protected-by-design lists the decision steps human-held", pbd.items.some(i => i.kind === "decision-step" && i.humanHeld), "");
+    ok("B2 protected-by-design lists high-criticality seams", pbd.items.some(i => i.kind === "high-criticality-seam"), "");
+    ok("B2 the mislabeled decision (assembly tag) appears in protected-by-design", buildProtectedByDesign(mislabel).items.some(i => /Approve the waiver/.test(i.item)), JSON.stringify(buildProtectedByDesign(mislabel).items.map(i => i.item)));
   }
 
   // ---- Edition 3 \u00b7 F6 \u2014 confirm gate, control-aware (confirmBlockers / canHarden) ----
