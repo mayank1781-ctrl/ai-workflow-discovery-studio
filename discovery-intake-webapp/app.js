@@ -7280,6 +7280,41 @@ function wireDashboardExports(container) {
   container.querySelector("#downloadRoadmapBtn")?.addEventListener("click", () => downloadRoadmap());
   container.querySelector("#downloadEvidencePackBtn")?.addEventListener("click", () => { if (typeof downloadEvidencePack === "function") downloadEvidencePack(); });
 }
+
+// ===================================================================
+// C4 (Phase 2) — the TECH & GOVERNANCE dashboard render + the audit-ready evidence-pack export.
+// ===================================================================
+function engineTechGovView(records, opts) { const E = studioEngine(); if (!E || typeof E.buildTechGovView !== "function") return null; return E.buildTechGovView(records, opts || {}); }
+function engineEvidencePack(records, opts) { const E = studioEngine(); if (!E || typeof E.buildEvidencePack !== "function") return null; return E.buildEvidencePack(records, opts || {}); }
+
+function techGovViewHtml(records, opts) {
+  const view = engineTechGovView(records, opts);
+  if (!view) return `<div class="ds-panel" style="padding:12px 14px;">The Tech &amp; Governance view is loading the Studio engine…</div>`;
+  if (!view.confirmedCount) return `<div class="ds-panel" style="padding:12px 14px;color:#8aa0b8;">${escapeHtml(view.note || "No confirmed units yet.")}</div>`;
+  const kpiCards = view.kpis.kpis.map((k) => {
+    const val = (k.unit === "mix") ? Object.entries(k.value || {}).map(([t, n]) => `${t}:${n}`).join(" ") : `${k.value}${k.unit === "%" ? "%" : ""}`;
+    return `<div style="background:#0d1b2e;border:1px solid #1e3350;border-radius:10px;padding:10px 12px;"><div style="font-size:10.5px;color:#8aa0b8;">${escapeHtml(k.label)}</div><div style="font-size:16px;font-weight:800;color:#00d4b4;">${escapeHtml(String(val))}</div></div>`;
+  }).join("");
+  const builds = view.builds.map((b) => `<div style="background:#0d1b2e;border:1px solid #1e3350;border-radius:10px;padding:10px 12px;margin-bottom:6px;">
+    <div style="font-size:13px;font-weight:700;color:#e2e8f0;">${escapeHtml(b.workflow)}</div>
+    <div style="font-size:11px;color:#aebfd4;">shape: ${escapeHtml(Object.keys(b.shapes || {}).join(", ") || "—")} · tiers: ${escapeHtml(b.tiers.join("/"))} · owner: ${escapeHtml(String(b.owner))}</div>
+    <div style="font-size:11px;color:${b.controlEvidence.ok ? "#00d4b4" : "#ff8da1"};">control evidence: ${b.controlEvidence.ok ? "PASS" : "BLOCKED — " + escapeHtml(b.controlEvidence.violations.map((v) => v.rule).join(", "))} · ${b.controlEvidence.controls.length} control(s)</div>
+  </div>`).join("");
+  const ladder = view.builderLadder.map((r) => `<div style="font-size:11px;color:#aebfd4;">Rung ${r.rung} · <strong>${escapeHtml(r.name)}</strong> — ${escapeHtml(r.detail)} <span style="color:#8aa0b8;">(realization ${Math.round(r.realization * 100)}%)</span></div>`).join("");
+  return `<div>
+    <div style="font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#5b7186;margin:0 0 6px;">G · Tech &amp; Governance — build · control evidence · AI-policy KPIs</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:12px;">${kpiCards}</div>
+    <div style="font-size:11px;color:#8aa0b8;margin-bottom:4px;">Build view (per recipe)</div>${builds}
+    <div style="font-size:11px;color:#8aa0b8;margin:10px 0 4px;">Realization / enablement — the builder ladder</div>${ladder}
+    <div style="margin-top:12px;"><button type="button" id="downloadEvidencePackBtn" class="secondary-button compact">⬇ Audit-ready evidence pack</button></div>
+  </div>`;
+}
+function downloadEvidencePack() {
+  const p = engineEvidencePack((typeof dashboardCurrentRecords === "function") ? dashboardCurrentRecords() : []);
+  if (!p) { if (typeof toast === "function") toast("Evidence pack unavailable — engine not loaded"); return false; }
+  if (typeof downloadTextFile === "function") downloadTextFile(p.filename, p.content, "text/markdown");
+  return true;
+}
 // confidence}, ... ] } — the steps tagged with each role ACROSS all workflows.
 // Provenance preserved per contributing step. Off-set tags never enter the footprint.
 // PURE over an array of workflows; no model call, no scorer, no headcount/FTE/%.
