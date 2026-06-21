@@ -129,6 +129,16 @@ export function validateIntake(record) {
     });
     // Edition 3 (F2) — a step control must be a known control type, when present.
     if (s.control && s.control.type && !CONTROL_TYPES.includes(s.control.type)) errors.push(`step ${i + 1}: unknown control type "${s.control.type}" (Edition 3)`);
+    // M1 — NUMERIC BOUNDS: a relied-on number must be a finite, non-negative value (and a
+    // percentage stays 0..100). A negative time/volume or a NaN is surfaced as invalid, never
+    // silently fed into the capacity / cost / flow math where it would distort the economics.
+    [["time", 0, Infinity], ["touch", 0, Infinity], ["wait", 0, Infinity], ["theo", 0, 100]].forEach(([k, lo, hi]) => {
+      if (s[k] == null) return;
+      const n = s[k];
+      if (typeof n !== "number" || !Number.isFinite(n)) errors.push(`step ${i + 1}: ${k} "${n}" is not a finite number`);
+      else if (n < lo || n > hi) errors.push(`step ${i + 1}: ${k} ${n} is out of bounds (${lo}..${hi === Infinity ? "∞" : hi})`);
+    });
+    if (s.volume != null && (typeof s.volume !== "number" || !Number.isFinite(s.volume) || s.volume < 0)) errors.push(`step ${i + 1}: volume "${s.volume}" is not a valid non-negative number`);
   });
   (record.seams || []).forEach((s, i) => ["friction", "latency", "crit"].forEach(k => {
     if (s[k] && !LEVELS.includes(s[k])) errors.push(`seam ${i + 1}: ${k} "${s[k]}" not in low|medium|high`);
@@ -170,8 +180,12 @@ export function isConfirmed(record) {
   if (record?.recap?.confirmed !== true) return false;
   return REQUIRED.every(([, t]) => !!t(record));
 }
+// M1 — the FULL hardening gate (not just recap+coverage): asserts canHarden, which now also
+// covers numeric bounds, per-field provenance (no all-inferred key value), the semantic class
+// check (B2), and the control rail. A hardened spec/recipe is built only past this.
 export function assertHardenable(record, what = "artifact") {
-  if (!isConfirmed(record)) throw new Error(`refused: cannot harden ${what} from an unconfirmed unit (Change 3)`);
+  const blockers = confirmBlockers(record);
+  if (blockers.length) throw new Error(`refused: cannot harden ${what} — ${blockers.map(b => b.detail || b.rule).join("; ")}`);
 }
 
 // =====================================================================
@@ -470,7 +484,10 @@ const maxTier = r => {
 };
 const sensitive = r => RESTRICTED_TIERS.includes(maxTier(r));
 
-export function buildSpec(record, opts = {}) {
+// M1 — DRAFT spec: a preview of a unit that may not be confirmed yet. Never asserts; tagged
+// draft:true so no surface mistakes it for a hardened, relied-upon artifact. The app's preview
+// adapters use this. buildSpec() (below) is the HARDENED path and refuses an unconfirmed unit.
+export function buildDraftSpec(record, opts = {}) {
   const r = normalizeIntake(record);
   const tiers = maxTier(r), tools = uniq((r.steps || []).flatMap(s => (s.tool || "").split(/[,/]/)));
   const inputs = uniq((r.steps || []).flatMap(s => (s.inputs || "").split(/[,;]/)));
@@ -506,7 +523,15 @@ export function buildSpec(record, opts = {}) {
     readiness: prov(`${rd.state} \u2014 ${rd.reason}`, "inferred"),
     evalCases: (r.confirm?.evals || "").split("\n").map(s => s.trim()).filter(Boolean).map(e => prov(e, "stated")),
     _capacity: cap, _cost: cost, _readiness: rd,           // attached for downstream/leaders (not worker-rendered)
+    draft: true,                                           // M1 — a draft preview, never a hardened recommendation
   };
+}
+
+// M1 — HARDENED spec. Refuses an unconfirmed / un-hardenable unit (full canHarden gate), so a
+// relied-upon spec can never be produced from a record that hasn't passed the confirm boundary.
+export function buildSpec(record, opts = {}) {
+  assertHardenable(record, "spec");
+  return { ...buildDraftSpec(record, opts), draft: false, hardened: true };
 }
 
 // =====================================================================
@@ -527,7 +552,9 @@ function recipeControl(step, record) {
   return out;
 }
 
-export function buildRecipe(record, opts = {}) {
+// M1 — DRAFT recipe: a preview of a unit that may not be confirmed. Never asserts; tagged
+// draft:true. buildRecipe() (below) is the HARDENED path and refuses an unconfirmed unit.
+export function buildDraftRecipe(record, opts = {}) {
   const r = normalizeIntake(record);
   const profile = opts.profile || "Conservative", mode = opts.mode || "routed";
   const totT = sum(r.steps.map(s => s.time)) || 1;
@@ -574,7 +601,13 @@ export function buildRecipe(record, opts = {}) {
     origin: opts.origin || "generation", orderedSteps: ordered, rankedUnits: ranked,
     // F1/F2/F3 \u2014 multi-actor overlays (empty/inert for a single-persona, linear, control-free workflow).
     handoffs: detectHandoffs(r), controls: r.steps.filter(s => s.control && s.control.type).map(s => ({ step: s.step, type: s.control.type })),
-    routes: deriveRoutes(r), rail: controlRail(r) };
+    routes: deriveRoutes(r), rail: controlRail(r), draft: true };
+}
+
+// M1 \u2014 HARDENED recipe. Refuses an unconfirmed / un-hardenable unit (full canHarden gate).
+export function buildRecipe(record, opts = {}) {
+  assertHardenable(record, "recipe");
+  return { ...buildDraftRecipe(record, opts), draft: false, hardened: true };
 }
 
 // =====================================================================
@@ -582,7 +615,7 @@ export function buildRecipe(record, opts = {}) {
 // =====================================================================
 export function buildProjections(record, opts = {}) {
   const r = normalizeIntake(record);
-  const spec = buildSpec(r, opts), human = humans(r.steps);
+  const spec = buildDraftSpec(r, opts), human = humans(r.steps); // M1 — projection is a narrative view, not the hardened artifact
   const flow = asm(r.steps).map(s => s.step).join(" \u2192 ") || "\u2014";
   const seamTxt = (r.seams || []).filter(s => s.from).map(s => `${s.from}\u2192${s.to} (${s.type || "seam"})`).join("; ") || "\u2014";
   const hd = r.judgment?.human || (human.length ? human.map(s => s.step).join(", ") : "the human decision");
@@ -1010,6 +1043,19 @@ export function controlRail(record, opts = {}) {
 // approver, halt not auto-resolved). This EXTENDS the no-bypass boundary (isConfirmed/assertHardenable)
 // — nothing hardens unconfirmed, and now nothing hardens with a broken control. Returns the blockers
 // (empty => hardenable), each a human-readable reason for the Workbench confirm affordance.
+// M1 — PER-FIELD PROVENANCE: a required quantitative value that is ENTIRELY inferred (no SME
+// ever stated it) cannot harden. The headline capacity weights every step by its time, so if
+// not a single step carries a stated time the numbers rest on class defaults alone — that is a
+// draft, not a defensible figure. Surfaced as a blocker so the consultant captures one real time.
+export function provenanceBlockers(record) {
+  const steps = Array.isArray(record?.steps) ? record.steps : [];
+  if (!steps.length) return [];
+  const out = [];
+  const statedTime = steps.some(s => s && typeof s.time === "number" && Number.isFinite(s.time) && s.time >= 0);
+  if (!statedTime) out.push({ rule: "all-inferred-time", detail: "no step has a stated effort/time — the capacity rests entirely on class defaults; capture at least one observed time before hardening" });
+  return out;
+}
+
 // B2 — one blocker per step whose declared class contradicts its decision/commitment text.
 // Surfaced at the Workbench confirm affordance so the consultant must split or override.
 export function decisionMislabelBlockers(record) {
@@ -1027,6 +1073,7 @@ export function confirmBlockers(record) {
   cov.errors.forEach(e => blockers.push({ rule: "invalid", detail: e }));
   controlRail(record).violations.forEach(v => blockers.push({ rule: v.rule, step: v.step, detail: v.detail }));
   decisionMislabelBlockers(record).forEach(b => blockers.push(b)); // B2 — semantic class check
+  provenanceBlockers(record).forEach(b => blockers.push(b));       // M1 — no all-inferred key value
   return blockers;
 }
 export function canHarden(record) { return confirmBlockers(record).length === 0; }
@@ -1301,7 +1348,8 @@ function runTests() {
   const mlStep = mislabelB2.steps.find(s => /Approve the write-off/.test(s.step));
   ok("B2 a decision-language step tagged assembly blocks hardening", !canHarden(mislabelB2) && confirmBlockers(mislabelB2).some(b => b.rule === "class-mismatch-decision"), JSON.stringify(confirmBlockers(mislabelB2)));
   ok("B2 the mislabeled step earns ZERO permitted automation (no fake capacity)", stepPermitted(mlStep, "Conservative") === 0 && roleCapacity(normalizeIntake({ steps: [mlStep] }).steps, "Conservative").grossValue === 0, String(stepPermitted(mlStep, "Conservative")));
-  ok("B2 buildRecipe renders the mislabel as a human checkpoint, not an ai-step", (() => { const st = buildRecipe(mislabelB2).orderedSteps.find(s => /Approve the write-off/.test(s.step)); return st && st.kind !== "ai-step"; })(), "");
+  ok("B2 the recipe renders the mislabel as a human checkpoint, not an ai-step (draft view)", (() => { const st = buildDraftRecipe(mislabelB2).orderedSteps.find(s => /Approve the write-off/.test(s.step)); return st && st.kind !== "ai-step"; })(), "");
+  ok("B2/M1 the HARDENED recipe REFUSES the mislabel outright (no bypass)", (() => { try { buildRecipe(mislabelB2); return false; } catch { return true; } })(), "");
   ok("B2 an explicit override rationale lets a genuine edge case through", stepDecisionLanguage({ ...mlStep, classOverride: "Control owner reviewed: rote posting, not a firm commitment." }) === false, "");
   ok("B2 a clean record still hardens — no false positive (additive)", canHarden(RECON_INTAKE) && canHarden(FPA_INTAKE), "");
 
@@ -1315,6 +1363,17 @@ function runTests() {
   ok("M3 an all-decision workflow yields ZERO AI capacity", decCap.permittedPct === 0 && decCap.grossValue === 0, JSON.stringify({ permittedPct: decCap.permittedPct, gross: decCap.grossValue }));
   ok("M3 an all-decision workflow has ZERO cost-to-serve (nothing routed to AI)", costToServe(normalizeIntake(allDecision).steps, "Progressive").annual === 0, "");
   ok("M3 assembly/judgment still earn capacity (decision-only change, additive)", stepPermitted({ cls: "assembly", data: "public", theo: 80 }, "Conservative") > 0 && stepPermitted({ cls: "judgment", data: "public", theo: 35 }, "Conservative") > 0, "");
+
+  // ---- P4 (M1) — harden gate refuses unconfirmed/draft; numeric bounds; per-field provenance ----
+  ok("M1 the HARDENED buildSpec REFUSES an unconfirmed unit (throws)", (() => { try { buildSpec({ ...FPA_INTAKE, recap: { confirmed: false } }); return false; } catch { return true; } })(), "");
+  ok("M1 the HARDENED buildRecipe REFUSES an unconfirmed unit (throws)", (() => { try { buildRecipe({ ...FPA_INTAKE, recap: { confirmed: false } }); return false; } catch { return true; } })(), "");
+  ok("M1 buildDraftSpec previews an unconfirmed unit WITHOUT asserting, and is tagged draft", (() => { const d = buildDraftSpec({ ...FPA_INTAKE, recap: { confirmed: false } }); return d && d.draft === true && !!d.modelFit; })(), "");
+  ok("M1 a confirmed unit DOES harden, and the spec/recipe are tagged hardened (not draft)", buildSpec(FPA_INTAKE).hardened === true && buildSpec(FPA_INTAKE).draft === false && buildRecipe(FPA_INTAKE).hardened === true, "");
+  ok("M1 a NEGATIVE time is rejected by validateIntake (never fed to the economics)", !validateIntake({ ...FPA_INTAKE, steps: [{ step: "x", cls: "assembly", data: "internal", time: -5 }] }).ok, "");
+  ok("M1 an out-of-range theo (>100%) is rejected", !validateIntake({ ...FPA_INTAKE, steps: [{ step: "x", cls: "assembly", data: "internal", theo: 140 }] }).ok, "");
+  ok("M1 a NaN time is rejected (not silently used)", !validateIntake({ ...FPA_INTAKE, steps: [{ step: "x", cls: "assembly", data: "internal", time: NaN }] }).ok, "");
+  ok("M1 an all-inferred (no stated time) confirmed-shaped record CANNOT harden", (() => { const r = { ...RECON_INTAKE, steps: RECON_INTAKE.steps.map(s => { const c = { ...s }; delete c.time; return c; }) }; return !canHarden(r) && confirmBlockers(r).some(b => b.rule === "all-inferred-time"); })(), "");
+  ok("M1 one stated time clears the provenance gate (FP&A/RECON still harden)", canHarden(FPA_INTAKE) && canHarden(RECON_INTAKE) && provenanceBlockers(FPA_INTAKE).length === 0, "");
 
   // ---- Edition 3 \u00b7 F8 \u2014 org-tier numbers: hand-off reduction + SLA dividend ----
   const hr = buildHandoffReduction([RECON_INTAKE]);

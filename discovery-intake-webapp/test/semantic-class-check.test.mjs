@@ -43,8 +43,10 @@ test("B2 — a confirmed record carrying the mislabel CANNOT harden, and the blo
   assert.match(b.detail, /decision|approval|commitment/i, "the reason explains the mismatch");
 });
 
-test("B2 — buildRecipe never renders the mislabel as an ai-step (it is a human checkpoint)", () => {
-  const rec = engine.buildRecipe({
+test("B2 — the recipe never renders the mislabel as an ai-step (it is a human checkpoint)", () => {
+  // The draft view (preview of an unconfirmed unit) still refuses to call it an AI step; the
+  // hardened buildRecipe refuses the unit entirely (covered in the harden-gate suite).
+  const rec = engine.buildDraftRecipe({
     header: { persona: "Ops", anchor: "x" }, trigger: { trigger: "t", cadence: "daily" },
     confirm: { acceptance: "a" }, steps: [PROBE],
   });

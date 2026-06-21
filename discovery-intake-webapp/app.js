@@ -7535,7 +7535,10 @@ function appWorkflowToIntake(opts = {}) {
 
 // Engine-backed compute wrappers — the calc layer the Recipe surface + Dashboard read. Each
 // returns null when the engine isn't loaded (additive). The math lives ONLY in the engine.
-function engineWorkflowSpec(opts = {}) { const E = studioEngine(); if (!E) return null; return E.buildSpec(opts.record || appWorkflowToIntake(opts), opts); }
+// M1 — preview/spec rendering uses the engine's DRAFT builder (never the hardened buildSpec,
+// which refuses an unconfirmed unit). A draft is clearly tagged draft:true so no surface mistakes
+// it for a relied-upon artifact; the hardened path is reserved for confirmed exports.
+function engineWorkflowSpec(opts = {}) { const E = studioEngine(); if (!E) return null; const build = E.buildDraftSpec || E.buildSpec; return build(opts.record || appWorkflowToIntake(opts), opts); }
 function engineWorkflowCapacity(opts = {}) { const E = studioEngine(); if (!E) return null; return E.roleCapacity(E.normalizeIntake(opts.record || appWorkflowToIntake(opts)).steps, opts.profile || "Conservative", opts); }
 function engineWorkflowCost(opts = {}) { const E = studioEngine(); if (!E) return null; return E.costToServe(E.normalizeIntake(opts.record || appWorkflowToIntake(opts)).steps, opts.profile || "Conservative", opts.mode || "routed", opts); }
 function engineWorkflowFlow(opts = {}) { const E = studioEngine(); if (!E) return null; return E.cycleTime(E.normalizeIntake(opts.record || appWorkflowToIntake(opts)).steps, opts); }
@@ -7812,15 +7815,19 @@ function recipeRailChecksHtml(rail) {
 // the multi-actor recipe artifact. ADDITIVE: returns "" for a single-actor, control-free, linear unit.
 function recipeMultiActorHtml(record) {
   const E = studioEngine();
-  if (!E || typeof E.buildRecipe !== "function") return "";
+  // M1 — preview rendering uses the engine's DRAFT recipe (the hardened buildRecipe refuses an
+  // unconfirmed unit); falls back to buildRecipe only if a draft builder isn't present.
+  const buildRec = (E && (E.buildDraftRecipe || E.buildRecipe)) || null;
+  if (!E || typeof buildRec !== "function") return "";
   const steps = Array.isArray(record && record.steps) ? record.steps : [];
   const hasMultiActor = steps.some((s) => Array.isArray(s.participants) || s.control) || (Array.isArray(record.routes) && record.routes.length) || (Array.isArray(record.actors) && record.actors.length);
   if (!hasMultiActor) return "";
-  const recipe = E.buildRecipe(record);
+  const recipe = buildRec(record);
   const stepRows = (recipe.orderedSteps || []).filter((s) => s.kind !== "seam-checkpoint").map((s, i) => recipeStepRowHtml(s, i)).join("");
   const routes = (recipe.routes || []);
   const routeRows = routes.length ? `<div style="margin-top:8px;"><div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--gray);margin-bottom:2px;">Routes (the recipe is not a straight line)</div>${routes.map(recipeRouteEdgeHtml).join("")}</div>` : "";
-  const spec = (typeof E.buildSpec === "function") ? E.buildSpec(record) : null;
+  const buildSp = E.buildDraftSpec || E.buildSpec; // M1 — preview path uses the draft builder
+  const spec = (typeof buildSp === "function") ? buildSp(record) : null;
   const modelFit = spec && spec.modelFit && spec.modelFit.value ? `<div style="font-size:11px;color:var(--gray);margin-top:8px;">Model-fit · cost-to-serve: ${recipeEsc(spec.modelFit.value)}</div>` : "";
   return `<section class="recipe-multiactor" style="margin:12px 0;padding:12px 14px;border:1px solid var(--sg-line);border-radius:10px;">
     <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--gray);margin-bottom:8px;">Multi-actor recipe — one process across many roles</div>
@@ -7839,7 +7846,8 @@ function engineModelFitForUnit(steps, opts = {}) {
   const list = Array.isArray(steps) ? steps : [steps];
   const record = appWorkflowToIntake({ ...opts, steps: list });
   if (!record.steps.length) return undefined;
-  const spec = E.buildSpec(record, opts);
+  const build = E.buildDraftSpec || E.buildSpec; // M1 — preview path uses the draft builder
+  const spec = build(record, opts);
   return spec ? spec.modelFit : undefined;
 }
 
