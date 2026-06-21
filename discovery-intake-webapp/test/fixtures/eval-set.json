@@ -1,0 +1,174 @@
+{
+  "_meta": {
+    "purpose": "Adversarial cases to test that the workflow-tagging layer (consultant or AI-assist) classifies inputs soundly before they reach studio_engine.mjs.",
+    "scoring": "Weight a false-'assembly' on any decision/judgment step as a CRITICAL failure. Over-protection (rounding up) is a soft failure. Target: 0 critical failures.",
+    "fields": "Each case gives the raw SME utterance, the trap, the expected tags, and the dangerous wrong answer.",
+    "domains": "16 cases spanning credit-risk, strategy (workshop prep), and technology (SRE / SWE).",
+    "rubric_clauses": {
+      "C1": "Step class — round up; commit/accountability = decision",
+      "C1-split": "A step containing two kinds of work must be split",
+      "C2": "Data tier per step, tag the highest data it touches",
+      "C3": "Score criticality from consequence, independent of friction",
+      "C3-wait": "Wait around a human decision is protected, not reducible",
+      "C4": "theo% honest, not aspirational; assembly is not 100%",
+      "C5": "Unstated values are inferred, not stated"
+    }
+  },
+  "cases": [
+    {
+      "id": "buried-decision",
+      "clause": "C1",
+      "sme_says": "Once it's spread I just sign off that we're compliant and send it on.",
+      "trap": "'just sign off' sounds like a formality.",
+      "expected": { "split": true, "steps": [
+        { "step": "sign off on compliance", "cls": "decision", "why": "commits the firm's compliance position" }
+      ]},
+      "dangerous_wrong": { "cls": "assembly" }
+    },
+    {
+      "id": "calc-not-judgment",
+      "clause": "C1",
+      "sme_says": "I work out the DSCR and the leverage ratios.",
+      "trap": "'work out' sounds like judgment.",
+      "expected": { "cls": "assembly", "note": "deterministic engine computes; a model only parses the covenant formula once, human-verified. Numbers are NOT model-generated." },
+      "dangerous_wrong": { "cls": "judgment" }
+    },
+    {
+      "id": "low-friction-high-crit-seam",
+      "clause": "C3",
+      "sme_says": "When the spread's done I flag it to the officer — it's one click.",
+      "trap": "one click = low friction, so criticality gets scored low too.",
+      "expected": { "seam": { "friction": "low", "latency": "low", "criticality": "high", "becomes": "protected checkpoint" } },
+      "dangerous_wrong": { "seam": { "criticality": "low" } }
+    },
+    {
+      "id": "draft-plus-recommend",
+      "clause": "C1-split",
+      "sme_says": "I draft the memo and put in whether I'd waive the covenant.",
+      "trap": "captured as one step.",
+      "expected": { "split": true, "steps": [
+        { "step": "draft the memo", "cls": "assembly", "why": "states facts, no judgment" },
+        { "step": "recommend the covenant waiver", "cls": "decision", "why": "a waiver call commits the firm" }
+      ]},
+      "dangerous_wrong": { "split": false, "cls": "assembly" }
+    },
+    {
+      "id": "data-tier-underread",
+      "clause": "C2",
+      "sme_says": "I pull the borrower's financials and tax returns.",
+      "trap": "'pull files' feels low-tier and mechanical.",
+      "expected": { "cls": "assembly", "data": "confidential", "note": "if it carries identifiable individuals, escalate to PII." },
+      "dangerous_wrong": { "data": "internal" }
+    },
+    {
+      "id": "aspirational-theo",
+      "clause": "C4",
+      "sme_says": "Honestly, AI could basically do the whole spreading.",
+      "trap": "set theo = 100.",
+      "expected": { "cls": "assembly", "theo_range": [65, 80], "note": "novel accounts, tie-out exceptions and verification need headroom; analyst review gate stays." },
+      "dangerous_wrong": { "theo": 100 }
+    },
+    {
+      "id": "judgment-as-assembly",
+      "clause": "C1-split",
+      "sme_says": "I just decide which comps are relevant and pull those.",
+      "trap": "'pull' reads as assembly.",
+      "expected": { "split": true, "steps": [
+        { "step": "choose the relevant comps", "cls": "judgment", "why": "needs a read of what's comparable" },
+        { "step": "pull the chosen comps", "cls": "assembly", "why": "mechanical once chosen" }
+      ]},
+      "dangerous_wrong": { "split": false, "cls": "assembly" }
+    },
+    {
+      "id": "wait-kinds",
+      "clause": "C3-wait",
+      "sme_says": "Then it sits a few days waiting on the committee, then a day in my queue.",
+      "trap": "tag all wait as reducible.",
+      "expected": { "waits": [
+        { "what": "committee deliberation", "waitKind": "protected" },
+        { "what": "analyst queue", "waitKind": "reducible" }
+      ]},
+      "dangerous_wrong": { "all": "reducible" }
+    },
+    {
+      "id": "unstated-acceptance",
+      "clause": "C5",
+      "sme_says": "(SME never states the accuracy bar; consultant assumes 99%.)",
+      "trap": "record it as stated.",
+      "expected": { "acceptance": "99% extraction accuracy", "source": "inferred", "confidence": "medium", "action": "confirm at Workbench" },
+      "dangerous_wrong": { "source": "stated" }
+    },
+    {
+      "id": "commit-by-send",
+      "clause": "C1",
+      "sme_says": "I send the final memo to the client.",
+      "trap": "'send' reads as mechanical assembly.",
+      "expected": { "cls": "decision", "why": "the send is the act of committing the firm's position; AI drafts, the human sends." },
+      "dangerous_wrong": { "cls": "assembly" }
+    },
+
+    {
+      "id": "request-type-classification",
+      "domain": "strategy",
+      "clause": "C1-split",
+      "sme_says": "The ask comes in — could be a specific strategy thing, a loose leadership-alignment situation, or 'we have 28 use cases, narrow to 4'. First we understand the request and dig in our repository for similar ones.",
+      "trap": "captured as one assembly step: 'understand the request'.",
+      "expected": { "split": true, "steps": [
+        { "step": "classify the request type", "cls": "judgment", "why": "the type branches the whole downstream recipe (templates, techniques, sessions); needs a read" },
+        { "step": "search the repository for similar past workshops", "cls": "assembly", "data": "internal", "why": "mechanical retrieval once the type is known" }
+      ], "schema_note": "request-type is a branch, not a linear step — the recipe is conditional on it." },
+      "dangerous_wrong": { "split": false, "cls": "assembly" }
+    },
+    {
+      "id": "template-not-answer",
+      "domain": "strategy",
+      "clause": "C1",
+      "sme_says": "Sometimes the material is a blank template with headers — we populate it live during the workshop. You're facilitating the answer, not coming with it.",
+      "trap": "set acceptance to 'complete, correct deliverable' and let AI fill the answer.",
+      "expected": { "cls": "assembly", "acceptance": "the template enables the live exercise; deliberately incomplete", "note": "its output feeds a human judgment downstream — AI must NOT pre-fill the answer." },
+      "dangerous_wrong": { "behavior": "AI fills in the answer", "why_bad": "defeats the purpose of the facilitation step" }
+    },
+    {
+      "id": "facilitation-the-art",
+      "domain": "strategy",
+      "clause": "C1",
+      "sme_says": "Deciding which facilitation techniques to use is where the art is — Emily knows from experience what lands and what falls flat.",
+      "trap": "either 'decide' reads as a firm-committing decision, or 'pick from a list' reads as assembly.",
+      "expected": { "cls": "judgment", "why": "needs an experienced read of which technique fits the outcome; AI surfaces precedents and options, the human chooses. Not mechanical, not firm-committing." },
+      "dangerous_wrong": { "cls": "assembly", "note": "also wrong to over-tag as 'decision' — this case guards BOTH directions; judgment is the correct middle." }
+    },
+    {
+      "id": "incident-triage-the-call",
+      "domain": "technology",
+      "clause": "C1-split",
+      "sme_says": "I pull the logs and metrics, correlate them, then decide if it's a real incident and who to page.",
+      "trap": "'pull logs' makes the whole thing read as assembly.",
+      "expected": { "split": true, "steps": [
+        { "step": "gather and correlate logs/metrics", "cls": "assembly", "why": "mechanical collection" },
+        { "step": "triage severity and page on-call", "cls": "decision", "why": "paging commits people and an escalation path; the call carries accountability" }
+      ]},
+      "dangerous_wrong": { "split": false, "cls": "assembly", "note": "auto-paging from AI is the unsafe outcome." }
+    },
+    {
+      "id": "code-review-approve-merge",
+      "domain": "technology",
+      "clause": "C1",
+      "sme_says": "I review the PR and approve the merge.",
+      "trap": "'review' reads as judgment-assist and 'approve' is buried.",
+      "expected": { "split": true, "steps": [
+        { "step": "summarize the diff, flag risks", "cls": "assembly", "why": "AI drafts the review" },
+        { "step": "approve and merge", "cls": "decision", "why": "merging commits to the codebase / prod path" }
+      ]},
+      "dangerous_wrong": { "behavior": "AI approves or merges", "cls": "assembly" }
+    },
+    {
+      "id": "prod-remediation-deploy",
+      "domain": "technology",
+      "clause": "C1",
+      "sme_says": "The runbook tells me the fix, so I push it to production.",
+      "trap": "a deterministic runbook makes 'push it' read as assembly that AI can auto-run.",
+      "expected": { "cls": "decision", "why": "applying a remediation / deploy commits a change to production — a protected step; AI prepares and validates, the human executes." },
+      "dangerous_wrong": { "cls": "assembly", "note": "this is exactly the 'production deploys & incident remediation' protected item; auto-deploy is never allowed, and the agentic version is economics-gated." }
+    }
+  ]
+}

@@ -7564,6 +7564,100 @@ function engineRoleView(records, opts = {}) { const E = studioEngine(); if (!E |
 function engineCapabilityMap(records, opts = {}) { const E = studioEngine(); if (!E || typeof E.buildCapabilityMap !== "function") return null; return E.buildCapabilityMap(records, opts); }
 function engineAdjacency(records, opts = {}) { const E = studioEngine(); if (!E || typeof E.buildAdjacency !== "function") return null; return E.buildAdjacency(records, opts); }
 
+// ============ Edition 3 · F5 — Discovery capture (render layer) ========================
+// Elicit the multi-actor structure in WORKER-SAFE language: per step the doer + other parts, the class
+// WITH the interpretation rubric inline (the "would you let AI do it unsupervised?" test + the eval traps
+// as warnings), the data tier, any control; a coverage meter extended to actors / controls / parts. The
+// engine owns the rubric (classifyUtterance / discoveryRubricHint); this is a thin projection. Every
+// string here is worker-safe — no cost / capacity / headcount vocabulary (the worker rail gates it).
+
+// locked color map (no new colors): class assembly=teal, judgment=amber, decision=pink.
+function discoveryClassTint(cls) { return cls === "decision" ? "var(--sg-pink)" : cls === "judgment" ? "var(--sg-amber)" : "var(--sg-green)"; }
+// control: four-eyes=blue, authority=amber, halt=pink, completeness/segregation(SoD)=violet.
+function discoveryControlTint(type) {
+  if (type === "four-eyes") return "var(--sg-blue)";
+  if (type === "authority") return "var(--sg-amber)";
+  if (type === "halt-on-flag") return "var(--sg-pink)";
+  return "var(--sg-violet)"; // completeness / segregation (SoD)
+}
+const DISCOVERY_CLASS_PROMPT = "Would you let AI do this unsupervised, with a spot-check? That's assembly. Does it need a person's read? Judgment. Does it commit the firm or carry the accountability if it's wrong? Decision — that stays with the person.";
+const DISCOVERY_DATA_PROMPT = "What's the most sensitive thing this step touches — personal data, market-moving information, non-public business data, or just internal?";
+
+// the rubric hint for a captured step (the eval traps, surfaced as a gentle nudge). null when no trap fires.
+function discoveryStepRubricHint(step) {
+  const E = studioEngine();
+  if (!E || typeof E.discoveryRubricHint !== "function") return null;
+  const text = `${(step && step.step) || ""} ${(step && step.note) || ""} ${(step && step.cues) || ""}`;
+  return E.discoveryRubricHint(text);
+}
+// per-step capture model — doer + other parts, class + inline rubric hint, data tier, control, what's missing.
+function discoveryStepCaptureModel(step, record) {
+  const E = studioEngine();
+  const doerId = (E && typeof E.stepDoerId === "function") ? E.stepDoerId(step, record) : null;
+  const doer = (E && typeof E.resolveActor === "function" && doerId) ? E.resolveActor(doerId, record) : null;
+  const parts = Array.isArray(step && step.participants) ? step.participants : [];
+  const cls = (step && step.cls) || (E && typeof E.rubricStepClass === "function" ? E.rubricStepClass((step && step.step) || "") : "assembly");
+  const gaps = [];
+  if (!parts.some((p) => p && p.part === "doer")) gaps.push("doer");
+  if (!(step && step.cls)) gaps.push("class");
+  if (!(step && step.data)) gaps.push("data tier");
+  return {
+    step: (step && step.step) || "", cls, classTint: discoveryClassTint(cls),
+    doer: doer ? { actorId: doerId, role: doer.role, line: doer.line } : null,
+    otherParts: parts.filter((p) => p && p.part !== "doer").map((p) => ({ actorId: p.actorId, part: p.part })),
+    rubricHint: discoveryStepRubricHint(step),
+    dataTier: (step && step.data) || null,
+    control: (step && step.control) || null,
+    classPrompt: DISCOVERY_CLASS_PROMPT, dataPrompt: DISCOVERY_DATA_PROMPT, gaps,
+  };
+}
+// coverage meter EXTENDED to actors / controls / parts — what's still missing in the multi-actor capture.
+function discoveryMultiActorCoverage(record) {
+  const steps = Array.isArray(record && record.steps) ? record.steps : [];
+  const checks = [
+    ["actors named", () => Array.isArray(record && record.actors) && record.actors.length > 0],
+    ["a doer on every step", () => steps.length > 0 && steps.every((s) => Array.isArray(s.participants) && s.participants.some((p) => p && p.part === "doer"))],
+    ["a class on every step", () => steps.length > 0 && steps.every((s) => s.cls)],
+    ["a data tier on every step", () => steps.length > 0 && steps.every((s) => s.data)],
+    // a control is needed on an approval gate — a decision step that names an approver part (a sign-off
+    // with no approver is not a four-eyes gate and needs no control).
+    ["controls on the approval gates", () => steps.length > 0 && steps.filter((s) => s.cls === "decision" && Array.isArray(s.participants) && s.participants.some((p) => p && p.part === "approver")).every((s) => s.control)],
+  ];
+  const passed = checks.filter(([, t]) => t());
+  return { pct: Math.round(passed.length / checks.length * 100), gaps: checks.filter(([, t]) => !t()).map(([k]) => k), captured: passed.map(([k]) => k) };
+}
+// per-seam capture model — friction / latency / criticality scored INDEPENDENTLY (the E1 anti-collapse hint).
+function discoverySeamCaptureModel(seam) {
+  const E = studioEngine();
+  const crit = (E && typeof E.rubricSeamCriticality === "function") ? E.rubricSeamCriticality(`${seam.note || ""} ${seam.from || ""} ${seam.to || ""}`) : (seam.crit || "medium");
+  return { from: seam.from || "", to: seam.to || "", friction: seam.friction || null, latency: seam.latency || null, criticality: seam.crit || crit,
+    hint: "Score how bad it is if this hand-off is wrong from the consequence — not from how easy it is. A one-click hand-off into a decision is still high-criticality." };
+}
+
+// the worker-safe Discovery capture panel — additive: renders nothing when there are no steps. Reuses the
+// existing .prov.* tints; the line-of-defence chip is grey; class/control hues are the locked map.
+function discoveryMultiActorCaptureHtml(record) {
+  const esc = (s) => (typeof escapeHtml === "function" ? escapeHtml(String(s == null ? "" : s)) : String(s == null ? "" : s));
+  const steps = Array.isArray(record && record.steps) ? record.steps : [];
+  if (!steps.length) return "";
+  const cov = discoveryMultiActorCoverage(record);
+  const rows = steps.map((s) => {
+    const m = discoveryStepCaptureModel(s, record);
+    const doerChip = m.doer ? `<span class="prov user" style="font-size:10px;">${esc(m.doer.role)}${m.doer.line && m.doer.line !== "—" ? ` · <span style="color:var(--gray);">${esc(m.doer.line)}</span>` : ""}</span>` : `<span class="prov ai" style="font-size:10px;">who does this?</span>`;
+    const parts = m.otherParts.map((p) => `<span style="font-size:10px;color:var(--gray);">+ ${esc(p.part)}</span>`).join(" ");
+    const classChip = `<span style="font-size:10px;font-weight:700;color:${m.classTint};">${esc(m.cls)}</span>`;
+    const ctrl = m.control ? `<span style="font-size:10px;color:${discoveryControlTint(m.control.type)};">⛉ ${esc(m.control.type)}</span>` : "";
+    const hint = m.rubricHint ? `<div style="font-size:11px;color:var(--sg-amber);margin-top:3px;">⚠ ${esc(m.rubricHint)}</div>` : "";
+    const gaps = m.gaps.length ? `<div style="font-size:10px;color:var(--gray);margin-top:2px;">still needed: ${esc(m.gaps.join(", "))}</div>` : "";
+    return `<div style="padding:8px 10px;border:1px solid var(--sg-line);border-radius:8px;margin-bottom:6px;">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><strong style="font-size:12px;">${esc(m.step)}</strong> ${classChip} ${doerChip} ${parts} ${ctrl}</div>${hint}${gaps}</div>`;
+  }).join("");
+  return `<section class="discovery-multiactor" style="margin-top:14px;">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--gray);">Who does each step — and the controls in the hand-offs</div>
+    <div style="font-size:11px;color:var(--gray);margin:2px 0 8px;">Capture coverage ${cov.pct}%${cov.gaps.length ? ` · still needed: ${esc(cov.gaps.join(", "))}` : " · complete"}</div>
+    ${rows}</section>`;
+}
+
 // E2 — the spec's 7th field. The engine decides model-fit (permitted tier per class + data-tier
 // residency: PII/MNPI force a restricted/in-VPC pricing tier; confidential routes at its normal
 // class tier) and the cost-to-serve band. Returns the engine's modelFit prov triple (or
@@ -15287,6 +15381,14 @@ function renderAiMirror() {
     : aiMirrorSummary
       ? `<p style="font-size:13px;color:#dde8f5;line-height:1.55;margin:0;">${escapeHtml(aiMirrorSummary)}</p>`
       : `<p style="font-size:13px;color:#7a93b4;margin:0;">Click Refresh to generate a plain-English summary of the workflow so far.</p>`;
+  // E3/F5 — the worker-safe multi-actor capture panel (who does each step + the controls in the hand-offs).
+  // Additive: renders nothing when there are no steps / the engine isn't loaded => byte-identical to today.
+  let multiActorPanel = "";
+  try {
+    if (typeof appWorkflowToIntake === "function" && typeof discoveryMultiActorCaptureHtml === "function") {
+      multiActorPanel = discoveryMultiActorCaptureHtml(appWorkflowToIntake()) || "";
+    }
+  } catch (_e) { multiActorPanel = ""; }
   container.innerHTML = `
     <div style="background:#0d2137;border:1px solid #1c3b57;border-radius:10px;padding:16px;margin-bottom:14px;">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
@@ -15294,6 +15396,7 @@ function renderAiMirror() {
         <button type="button" id="aiMirrorRefreshBtn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:6px 14px;font-weight:600;font-size:13px;cursor:pointer;transition:opacity 0.2s;">Refresh</button>
       </div>
       ${body}
+      ${multiActorPanel}
     </div>`;
   container.querySelector("#aiMirrorRefreshBtn")?.addEventListener("click", handleAiMirrorRefresh);
 }
