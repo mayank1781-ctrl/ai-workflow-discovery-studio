@@ -1162,6 +1162,8 @@ const defaultState = {
   capturePolicy: { profile: "Conservative", tiers: ["public", "internal", "confidential", "PII", "MNPI"], setAt: null },
   // C1: the shared dashboard slice — one control pivots all three dashboards. Default = no slice (all).
   dashboardSlice: { dimension: "all", value: "all" },
+  // C2/C3/C4: which of the three role-specific dashboards is shown (leadership | worker | tech).
+  dashboardAudience: "leadership",
   // V3-3: uploaded AI policy (a relied-on value). Shape:
   // { fileName, uploadedAt, clauses:[{id,ref,heading,text,source,confidence}] }.
   // null = no policy → artifacts use the generic advisory caution. Read-only at
@@ -7185,7 +7187,50 @@ function setDashboardSlice(dimension, value) {
   return s;
 }
 
-// Role footprint: { roleValue: [ {workflowId, workflowName, stepId, stepName, source,
+// ===================================================================
+// C2/C3/C4 (Phase 2) — the THREE role-specific dashboards over one engine, toggled by audience within
+// the dashboard surface. C2 = Worker (leverage only — no cost/headcount, the worker rail enforced);
+// C3 = Leadership (capacity/cost/flow); C4 = Tech & Governance. The shared slice (C1) pivots all three.
+// ===================================================================
+const DASHBOARD_AUDIENCES = ["leadership", "worker", "tech"];
+function ensureDashboardAudience() { if (!DASHBOARD_AUDIENCES.includes(state.dashboardAudience)) state.dashboardAudience = "leadership"; return state.dashboardAudience; }
+function setDashboardAudience(a) { if (DASHBOARD_AUDIENCES.includes(a)) state.dashboardAudience = a; return state.dashboardAudience; }
+function engineWorkerView(records, opts) { const E = studioEngine(); if (!E || typeof E.buildWorkerView !== "function") return null; return E.buildWorkerView(records, opts || {}); }
+function engineLeverageSummary(records, opts) { const E = studioEngine(); if (!E || typeof E.buildLeverageSummary !== "function") return null; return E.buildLeverageSummary(records, opts || {}); }
+
+// C2 — the audience selector rendered above every dashboard.
+function dashboardAudienceControlHtml() {
+  const a = ensureDashboardAudience();
+  const label = { leadership: "Leadership", worker: "Worker", tech: "Tech & Governance" };
+  const btns = DASHBOARD_AUDIENCES.map((x) => `<button type="button" data-dashboard-audience="${x}" style="background:${a === x ? "#00d4b4" : "#0d1b2e"};color:${a === x ? "#0d1b2e" : "#aebfd4"};border:1px solid #1e3350;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;">${escapeHtml(label[x])}</button>`).join("");
+  return `<div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;"><span class="ds-micro">Audience</span>${btns}</div>`;
+}
+
+// C2 — the WORKER dashboard: leverage framing only. Every rendered string is rail-clean (worker surface).
+function workerViewHtml(records) {
+  const wv = engineWorkerView(records);
+  if (!wv) return `<div class="ds-panel" style="padding:12px 14px;">The worker view is loading the Studio engine…</div>`;
+  if (!wv.confirmedCount) return `<div class="ds-panel" style="padding:12px 14px;color:#8aa0b8;">${escapeHtml(wv.note || "No confirmed work yet.")}</div>`;
+  const rows = wv.roles.map((r) => `<div class="ds-panel" style="padding:12px 14px;border:1px solid #1e3350;border-radius:10px;margin-bottom:8px;">
+    <div style="font-size:14px;font-weight:700;color:#e2e8f0;">${escapeHtml(r.role)}</div>
+    <div style="font-size:12px;color:#00d4b4;margin-top:4px;">✓ ${escapeHtml(r.aiCarries)}</div>
+    <div style="font-size:12px;color:#FF4FD8;margin-top:2px;">🔒 ${escapeHtml(r.staysMine)}</div>
+    <div style="font-size:12px;color:#aebfd4;margin-top:2px;">↩ Time given back: ${escapeHtml(r.givenBackTo)}</div>
+  </div>`).join("");
+  return `<div>
+    <div style="font-size:13px;color:#aebfd4;line-height:1.5;margin-bottom:10px;">${escapeHtml(wv.headline)}</div>
+    ${rows}
+    <div style="margin-top:10px;"><button type="button" id="downloadLeverageSummaryBtn" class="secondary-button compact">⬇ Download my leverage summary</button></div>
+  </div>`;
+}
+
+// C2 — the leverage-summary download (worker-safe export). Builds the engine content, then downloads it.
+function downloadLeverageSummary(records) {
+  const ls = engineLeverageSummary(records || (typeof dashboardRecords === "function" ? dashboardRecords() : []));
+  if (!ls) { if (typeof toast === "function") toast("Leverage summary unavailable — engine not loaded"); return false; }
+  if (typeof downloadTextFile === "function") downloadTextFile(ls.filename, ls.content, "text/markdown");
+  return true;
+}
 // confidence}, ... ] } — the steps tagged with each role ACROSS all workflows.
 // Provenance preserved per contributing step. Off-set tags never enter the footprint.
 // PURE over an array of workflows; no model call, no scorer, no headcount/FTE/%.
@@ -13605,19 +13650,33 @@ function renderAnalysisTabDashboard(recordsOverride, opts) {
   // multi-actor confirmed data). Bound to F4 + the F8 numbers; reshape language, leader rail.
   let e3OrgTier = "";
   try { if (typeof dashOrgTierHtml === "function") e3OrgTier = dashOrgTierHtml(records, opts) || ""; } catch (_e) { e3OrgTier = ""; }
-  // C1 — the shared slice control + the three-lenses tile (capacity never alone). allRecords drives the
-  // slice options; records are already sliced by dashboardModel.
-  let c1Slice = "", c1ThreeLens = "";
+  // C1/C2/C3/C4 — the shared slice + audience control; the audience picks which of the three dashboards renders.
+  let c1Slice = "", c2Audience = "", c1ThreeLens = "";
+  const audience = (typeof ensureDashboardAudience === "function") ? ensureDashboardAudience() : "leadership";
   try {
     const all = Array.isArray(recordsOverride) ? recordsOverride : (typeof dashboardRecords === "function" ? dashboardRecords() : records);
     if (typeof dashboardSliceControlHtml === "function") c1Slice = dashboardSliceControlHtml(all) || "";
-    if (typeof threeLensTileHtml === "function" && typeof engineThreeLenses === "function") c1ThreeLens = threeLensTileHtml(engineThreeLenses(records, opts)) || "";
-  } catch (_e) { c1Slice = ""; c1ThreeLens = ""; }
+    if (typeof dashboardAudienceControlHtml === "function") c2Audience = dashboardAudienceControlHtml() || "";
+    if (audience !== "worker" && typeof threeLensTileHtml === "function" && typeof engineThreeLenses === "function") c1ThreeLens = threeLensTileHtml(engineThreeLenses(records, opts)) || "";
+  } catch (_e) { c1Slice = ""; c2Audience = ""; c1ThreeLens = ""; }
+
+  // C2 — the WORKER dashboard: leverage only, NO cost/capacity/flow firewall content (the worker rail).
+  if (audience === "worker" && typeof workerViewHtml === "function") {
+    container.innerHTML = c2Audience + c1Slice + workerViewHtml(records);
+    wireDashboard(container);
+    return;
+  }
+  // C4 — the TECH & GOVERNANCE dashboard.
+  let techHtml = "";
+  if (audience === "tech" && typeof techGovViewHtml === "function") { try { techHtml = techGovViewHtml(records, opts) || ""; } catch (_e) { techHtml = ""; } }
+  // C3 — the LEADERSHIP dashboard sections (additive, computed guarded).
+  let c3Leadership = "";
+  if (audience === "leadership" && typeof leadershipSectionsHtml === "function") { try { c3Leadership = leadershipSectionsHtml(records, opts) || ""; } catch (_e) { c3Leadership = ""; } }
   container.innerHTML =
     `<div style="font-size:11px;color:${DASH.faint};margin:0 0 10px;padding:6px 10px;background:${DASH.panel};border:1px solid ${DASH.line};border-radius:8px;">FIREWALL · capacity / cost / flow live only on this surface · nothing here reaches capture / workbench / recipe</div>` +
-    c1Slice + c1ThreeLens +
-    e3OrgTier +
-    dashHeaderHtml(lv) + dashEvidenceChainHtml(lv, flow) + dashCapacityNetHtml(lv) + dashFlowHtml(lv, sample, flow) + dashAgendasHtml(lv);
+    c2Audience + c1Slice + c1ThreeLens +
+    (audience === "tech" ? techHtml :
+      (e3OrgTier + dashHeaderHtml(lv) + dashEvidenceChainHtml(lv, flow) + dashCapacityNetHtml(lv) + dashFlowHtml(lv, sample, flow) + dashAgendasHtml(lv) + c3Leadership));
   wireDashboard(container);
 }
 
@@ -13632,6 +13691,13 @@ function wireDashboard(container) {
   const val = container.querySelector("[data-dashboard-slice-val]");
   dim?.addEventListener("change", (e) => { setDashboardSlice(e.target.value, "all"); if (typeof persistState === "function") persistState(); renderAnalysisTabDashboard(); });
   val?.addEventListener("change", (e) => { setDashboardSlice(ensureDashboardSlice().dimension, e.target.value); if (typeof persistState === "function") persistState(); renderAnalysisTabDashboard(); });
+  // C2 — the audience selector switches between the three dashboards (Worker / Leadership / Tech & Gov).
+  container.querySelectorAll("[data-dashboard-audience]").forEach((btn) => btn.addEventListener("click", (e) => {
+    setDashboardAudience(e.currentTarget.getAttribute("data-dashboard-audience")); if (typeof persistState === "function") persistState(); renderAnalysisTabDashboard();
+  }));
+  container.querySelector("#downloadLeverageSummaryBtn")?.addEventListener("click", () => downloadLeverageSummary());
+  // C3/C4 — export buttons (real downloads) wired when those sections render.
+  if (typeof wireDashboardExports === "function") { try { wireDashboardExports(container); } catch (_e) { /* additive */ } }
 }
 
 function renderAnalysisTabRecipe() {
@@ -37446,6 +37512,7 @@ function normalizeLoadedState(parsed = {}) {
     contradictionQueue: Array.isArray(parsed.contradictionQueue) ? parsed.contradictionQueue : [],
     capturePolicy: parsed.capturePolicy && typeof parsed.capturePolicy === "object" ? parsed.capturePolicy : structuredClone(defaultState.capturePolicy),
     dashboardSlice: parsed.dashboardSlice && typeof parsed.dashboardSlice === "object" ? parsed.dashboardSlice : structuredClone(defaultState.dashboardSlice),
+    dashboardAudience: ["leadership", "worker", "tech"].includes(parsed.dashboardAudience) ? parsed.dashboardAudience : "leadership",
     // V3-9: backfill the guided first-run flag so sessions persisted before this
     // feature load cleanly (default: not yet dismissed → first-run can offer).
     onboarding: {
