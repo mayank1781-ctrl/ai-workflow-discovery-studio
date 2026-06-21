@@ -73,6 +73,12 @@ const LEVELS = ["low", "medium", "high"];
 const RESTRICTED_TIERS = ["confidential", "PII", "MNPI"]; // narrative: stays on approved / in-VPC models
 const RESIDENCY_FORCE = ["PII", "MNPI"];                   // forces a restricted (approved) PRICING tier; confidential routes normally
 
+// Edition 3 (F1) — identity is separate from the part played. PARTS = the part an actor plays in a
+// step (≈ RACI + approver/escalation-target); doer = the performer (a hand-off = where it changes).
+// LINES = the line-of-defence on a firm-level actor identity. Both used for enum-integrity surfacing.
+export const PARTS = ["doer", "accountable", "reviewer", "approver", "collaborator", "escalation-target", "informed"];
+export const LINES = ["1LoD", "2LoD", "3LoD", "—"];
+
 const prov = (value, source = "inferred", confidence = "medium") => ({ value, source, confidence });
 const round = (n, d = 0) => { const f = 10 ** d; return Math.round(n * f) / f; };
 const sum = a => a.reduce((x, y) => x + y, 0);
@@ -106,10 +112,18 @@ export function validateIntake(record) {
   (record.steps || []).forEach((s, i) => {
     if (s.cls && !CLASSES.includes(s.cls)) errors.push(`step ${i + 1}: unknown class "${s.cls}"`);
     if (s.data && !TIERS.includes(s.data)) errors.push(`step ${i + 1}: unknown data tier "${s.data}" (resolve before scoring — not assumed public)`);
+    // Edition 3 (F1) — a participant's part must be a known part; surfaced, never silently dropped.
+    (s.participants || []).forEach((p, j) => {
+      if (p && p.part && !PARTS.includes(p.part)) errors.push(`step ${i + 1} participant ${j + 1}: unknown part "${p.part}" (Edition 3)`);
+    });
   });
   (record.seams || []).forEach((s, i) => ["friction", "latency", "crit"].forEach(k => {
     if (s[k] && !LEVELS.includes(s[k])) errors.push(`seam ${i + 1}: ${k} "${s[k]}" not in low|medium|high`);
   }));
+  // Edition 3 (F1) — a firm-level actor's line-of-defence must be a known line, when present.
+  (record.actors || []).forEach((a, i) => {
+    if (a && a.line && !LINES.includes(a.line)) errors.push(`actor ${i + 1}: unknown line "${a.line}" (Edition 3)`);
+  });
   const passed = REQUIRED.filter(([, t]) => !!t(record));
   const gaps = REQUIRED.filter(([, t]) => !t(record)).map(([k]) => k);
   return { ok: errors.length === 0, errors, coverage: { pct: Math.round(passed.length / REQUIRED.length * 100), gaps } };
@@ -236,6 +250,103 @@ export function fmtDur(min) {
   const h = min / 60, wd = CONFIG.flow.workdayHours;
   const d = Math.floor(h / wd), rem = Math.round(h - d * wd);
   return d > 0 ? `${d}d ${rem}h` : `${Math.round(h)}h`;
+}
+
+// =====================================================================
+// 2.5 · EDITION 3 — MULTI-ACTOR MAP (F1 actors+parts · F2 controls/rail · F3 routes · F4 derived)
+// A workflow is one process across many roles; the controls live in the hand-offs. ALL additive:
+// a record with no actors/participants/control/sharedRules/routes behaves byte-identically to the
+// single-persona, linear, control-free workflow it was before. Identity (who) lives once in a
+// firm-level actors[] registry and is REFERENCED by id; the part (doer/approver/…) is per step.
+// =====================================================================
+
+// stable synthetic id for the implicit single-persona doer (absent participants => one doer = persona)
+const personaActorId = (persona) => `persona:${String(persona || "").trim().toLowerCase() || "performer"}`;
+
+// F1 — the participants of a step. Absent => one implicit doer = the workflow persona (additive,
+// so today's single-role math is unchanged: every step is "done" by the one persona).
+export function stepParticipants(step, record) {
+  if (step && Array.isArray(step.participants) && step.participants.length) return step.participants;
+  return [{ actorId: personaActorId(record?.header?.persona), part: "doer", implicit: true }];
+}
+// F1 — the actorId that PERFORMS the step (the doer). A hand-off is where this changes step-to-step.
+export function stepDoerId(step, record) {
+  const ps = stepParticipants(step, record);
+  const d = ps.find(p => p && p.part === "doer") || ps[0];
+  return d ? d.actorId : personaActorId(record?.header?.persona);
+}
+// F1 — resolve an actorId to its identity {id, role, department, line} from the firm-level registry.
+// An id not in the registry (the implicit persona doer, or an unregistered ref) resolves best-effort;
+// never throws (a missing actor is surfaced by validateIntake, not crashed on here).
+export function resolveActor(actorId, record) {
+  const reg = (record && Array.isArray(record.actors)) ? record.actors : [];
+  const found = reg.find(a => a && a.id === actorId);
+  if (found) return { id: found.id, role: found.role || found.id, department: found.department || "", line: found.line || "—", registered: true };
+  if (String(actorId || "").startsWith("persona:")) return { id: actorId, role: record?.header?.persona || "Performer", department: record?.header?.dept || "", line: "—", registered: false };
+  return { id: actorId, role: actorId || "Unknown", department: "", line: "—", registered: false };
+}
+// F1 — the role label the step's doer plays (for capacity roll-up by role).
+export function stepDoerRole(step, record) { return resolveActor(stepDoerId(step, record), record).role; }
+
+// F1 — a hand-off is where the doer changes between consecutive steps. Returns the crossings
+// (with role labels + whether the hand-off crosses a line-of-defence — where controls usually sit).
+export function detectHandoffs(record) {
+  const steps = (record && Array.isArray(record.steps)) ? record.steps : [];
+  const out = [];
+  for (let i = 1; i < steps.length; i++) {
+    const a = stepDoerId(steps[i - 1], record), b = stepDoerId(steps[i], record);
+    if (a !== b) {
+      const fa = resolveActor(a, record), fb = resolveActor(b, record);
+      out.push({ index: i, fromStep: steps[i - 1].step, toStep: steps[i].step,
+        fromActorId: a, toActorId: b, fromRole: fa.role, toRole: fb.role,
+        crossLine: fa.line !== fb.line });
+    }
+  }
+  return out;
+}
+
+// F1 — capacity scoped per doer. The workflow-level three-haircut chain is UNCHANGED; here it is
+// PARTITIONED by each step's doer so freed capacity attributes to the right role. Because the
+// decomposition is linear in each step's permitted-hours contribution, the per-role hours sum
+// EXACTLY to roleCapacity(allSteps) — the reconciliation guarantee (asserted in tests). A non-doer
+// part (approver/accountable/reviewer/…) is never a step's doer, so it contributes 0 freed: exactly
+// the "Checker/Manager are human-held, 0 freed" property. Additive: absent participants => one
+// implicit doer => a single role group == roleCapacity(allSteps).
+export function roleCapacityByActor(record, profile = "Conservative", opts = {}) {
+  const r = normalizeIntake(record);
+  const H = opts.weeklyHours ?? CONFIG.weeklyHours;
+  const ff = opts.freeingFactor ?? CONFIG.freeingFactor;
+  const rf = opts.realizationFactor ?? CONFIG.realizationFactor;
+  const W = opts.weeks ?? CONFIG.weeks, rate = opts.loadedRate ?? CONFIG.loadedRate;
+  const totT = sum(r.steps.map(s => s.time)) || 1;
+  const groups = new Map();
+  r.steps.forEach(s => {
+    const id = stepDoerId(s, r), actor = resolveActor(id, r);
+    if (!groups.has(id)) groups.set(id, { actorId: id, role: actor.role, department: actor.department, line: actor.line,
+      registered: actor.registered, theoHrs: 0, permittedHrs: 0, freedHrs: 0, realizedHrs: 0,
+      assemblyTime: 0, judgmentTime: 0, decisionTime: 0, time: 0, stepCount: 0 });
+    const g = groups.get(id);
+    const w = s.time / totT;                                   // this step's share of the whole workflow
+    const permH = w * stepPermitted(s, profile) * H;
+    g.theoHrs += w * (s.theo / 100) * H;
+    g.permittedHrs += permH;
+    g.freedHrs += permH * ff;
+    g.realizedHrs += permH * ff * rf;
+    g.time += s.time; g.stepCount += 1;
+    if (s.cls === "assembly") g.assemblyTime += s.time;
+    else if (s.cls === "judgment") g.judgmentTime += s.time;
+    else g.decisionTime += s.time;
+  });
+  const roles = [...groups.values()].map(g => ({
+    ...g,
+    grossValue: g.realizedHrs * W * rate,
+    policyGapHrs: g.theoHrs - g.permittedHrs,
+    realizationGapHrs: g.freedHrs - g.realizedHrs,
+    // the assembly -> judgment shift: the role's time on assembly (AI-carried) vs human-held work.
+    assemblyShareOfRole: g.time ? g.assemblyTime / g.time : 0,
+    humanHeldShareOfRole: g.time ? (g.judgmentTime + g.decisionTime) / g.time : 0,
+  })).sort((a, b) => b.freedHrs - a.freedHrs);
+  return { profile, roles, handoffs: detectHandoffs(r), totalFreedHrs: round(sum(roles.map(x => x.freedHrs)), 4) };
 }
 
 // =====================================================================
@@ -453,6 +564,64 @@ export const FPA_INTAKE = {
   recap: { corrections: "added the FX revaluation reconciling step", confirmed: true },
 };
 
+// Edition 3 multi-actor fixture — the recon exception SOP (CIB-OPS-SOP-0142), the worked example's
+// shape: identity in a firm-level actors[] registry, referenced per step; controls in the hand-offs;
+// an authority ladder written once in sharedRules; an authored AML halt route. Reused across F1–F8
+// tests. (control / sharedRules / routes are inert until F2/F3 — additive proof along the way.)
+export const RECON_INTAKE = {
+  header: { persona: "Ops Analyst", dept: "CIB Operations", anchor: "Reconciliation exception matching (SOP-0142)", lifecycle: "confirmed" },
+  trigger: { trigger: "exception queue populated after the engine auto-matches", cadence: "daily", volume: "~200/day" },
+  actors: [
+    { id: "maker", role: "Ops Analyst", department: "CIB Operations", line: "1LoD" },
+    { id: "checker", role: "Senior Analyst", department: "CIB Operations", line: "1LoD" },
+    { id: "teamLead", role: "Team Lead", department: "CIB Operations", line: "1LoD" },
+    { id: "opsManager", role: "Ops Manager", department: "CIB Operations", line: "1LoD" },
+    { id: "finance", role: "Product Control", department: "Finance", line: "1LoD" },
+    { id: "finCrime", role: "Financial Crime", department: "Financial Crime", line: "2LoD" },
+  ],
+  sharedRules: [
+    { id: "authorityMatrix:writeOff", kind: "authorityMatrix", bands: [
+      { maxValue: 100, approver: "checker" },
+      { maxValue: 1000, approver: "teamLead" },
+      { maxValue: 10000, approver: "opsManager" },
+      { maxValue: null, approver: "opsManager+finance" },
+    ] },
+  ],
+  steps: [
+    { step: "Allocate exception", cls: "assembly", data: "internal", time: 10, theo: 80, touch: 30, wait: 60, waitKind: "reducible",
+      inputs: "exception queue", output: "allocated case", tool: "case manager",
+      participants: [{ actorId: "teamLead", part: "doer" }],
+      control: { type: "completeness", rule: "every exception allocated within SLA; none left unassigned" } },
+    { step: "Investigate root cause", cls: "judgment", data: "confidential", time: 26, theo: 35, touch: 120, wait: 0, waitKind: "reducible",
+      inputs: "break detail, sub-ledger", output: "root cause", tool: "case manager, ERP",
+      participants: [{ actorId: "maker", part: "doer" }],
+      control: { type: "halt-on-flag", on: "AML indicator", escalateTo: "finCrime", negativeConstraint: "do not clear or return; preserve evidence; no tip-off" } },
+    { step: "Propose resolution", cls: "judgment", data: "confidential", time: 16, theo: 35, touch: 60, wait: 0, waitKind: "reducible",
+      inputs: "root cause", output: "proposed adjustment", tool: "case manager",
+      participants: [{ actorId: "maker", part: "doer" }] },
+    { step: "Approve adjustment", cls: "decision", data: "confidential", time: 12, theo: 10, touch: 30, wait: 240, waitKind: "protected",
+      inputs: "proposed adjustment", output: "approval", tool: "case manager",
+      participants: [{ actorId: "maker", part: "doer" }, { actorId: "checker", part: "approver" }],
+      control: { type: "four-eyes", distinct: ["doer", "approver"], authorityRef: "authorityMatrix:writeOff" } },
+    { step: "Post adjustment", cls: "assembly", data: "confidential", time: 14, theo: 75, touch: 30, wait: 0, waitKind: "reducible",
+      inputs: "approval", output: "posted entry", tool: "ERP",
+      participants: [{ actorId: "maker", part: "doer" }] },
+    { step: "Close & sign off", cls: "decision", data: "internal", time: 8, theo: 10, touch: 20, wait: 0, waitKind: "protected",
+      inputs: "posted entry", output: "closed case", tool: "case manager",
+      participants: [{ actorId: "teamLead", part: "doer" }, { actorId: "opsManager", part: "accountable" }] },
+  ],
+  seams: [
+    { from: "Team Lead", to: "Ops Analyst", type: "handoff", friction: "low", latency: "medium", crit: "medium", note: "Allocation respects SoD" },
+    { from: "Ops Analyst", to: "Senior Analyst", type: "handoff", friction: "low", latency: "medium", crit: "high", note: "Four-eyes approval gate; one click but the call commits" },
+  ],
+  routes: [
+    { kind: "onFlag", fromStep: "Investigate root cause", to: "finCrime", routeOrigin: "authored", negativeConstraint: "do not clear or return; preserve evidence; no tip-off" },
+  ],
+  judgment: { needs: "root cause and materiality", human: "the four-eyes approval and the AML referral call", hard: "a real break vs a timing difference", cues: "break code, value band" },
+  confirm: { acceptance: "every adjustment is four-eyes approved; AML flags are referred, never cleared", escalation: "value over band -> higher authority; AML indicator -> Financial Crime", dataTier: "confidential", evals: "clean break -> matched and posted\nAML indicator -> halted and referred" },
+  recap: { corrections: "split investigate from propose; named the four-eyes approver ladder", confirmed: true },
+};
+
 function runTests() {
   let pass = 0, fail = 0;
   const ok = (name, cond, got) => { if (cond) { pass++; } else { fail++; console.log(`  \u2717 ${name}  got=${got}`); } };
@@ -527,6 +696,27 @@ function runTests() {
   const lv2 = buildLeaderView([heavy]);
   ok("heavy-agentic MNPI -> economics-gated", lv2.kpis.find(k => k.id === "economics_gated").value === 1 && lv2.breakdown.gated.count === 1, "");
   ok("gated unit floored from net", lv2.kpis.find(k => k.id === "net_capacity").value === 0, lv2.kpis.find(k => k.id === "net_capacity").value);
+
+  // ---- Edition 3 \u00b7 F1 \u2014 firm-level actors + per-step parts ----
+  // identity REFERENCED, not embedded: a step holds only an actorId; the role comes from the registry
+  ok("F1 actor resolved from registry by reference", resolveActor("maker", RECON_INTAKE).role === "Ops Analyst", resolveActor("maker", RECON_INTAKE).role);
+  ok("F1 doer of a multi-part step is the doer, not the approver", stepDoerId(RECON_INTAKE.steps[3], RECON_INTAKE) === "maker", stepDoerId(RECON_INTAKE.steps[3], RECON_INTAKE));
+  const hos = detectHandoffs(RECON_INTAKE);
+  ok("F1 hand-off detected where the doer changes (teamLead->maker)", hos.some(h => h.fromActorId === "teamLead" && h.toActorId === "maker"), JSON.stringify(hos.map(h => `${h.fromActorId}>${h.toActorId}`)));
+  ok("F1 no hand-off within a same-doer run (investigate->propose, both maker)", !hos.some(h => h.fromStep === "Investigate root cause" && h.toStep === "Propose resolution"), "");
+  ok("F1 a 2LoD hand-off is flagged cross-line", detectHandoffs({ ...RECON_INTAKE, steps: [RECON_INTAKE.steps[1], { ...RECON_INTAKE.steps[1], step: "Refer", participants: [{ actorId: "finCrime", part: "doer" }] }] })[0].crossLine === true, "");
+  const rc = roleCapacityByActor(RECON_INTAKE, "Conservative");
+  ok("F1 capacity rolls up by doer-role (Ops Analyst freed > 0)", rc.roles.some(r => r.role === "Ops Analyst" && r.freedHrs > 0), JSON.stringify(rc.roles.map(r => r.role)));
+  ok("F1 a non-doer part frees 0 (Senior Analyst is approver-only => no doer-role group)", !rc.roles.some(r => r.role === "Senior Analyst"), JSON.stringify(rc.roles.map(r => r.role)));
+  const reconWhole = roleCapacity(normalizeIntake(RECON_INTAKE).steps, "Conservative");
+  ok("F1 per-role freed reconciles to the workflow freed (linear decomposition)", near(rc.totalFreedHrs, reconWhole.freedHrs, 0.01), `${rc.totalFreedHrs} vs ${reconWhole.freedHrs}`);
+  ok("F1 the assembly->judgment shift is per role (Team Lead carries assembly)", rc.roles.find(r => r.role === "Team Lead").assemblyShareOfRole > 0, "");
+  // ADDITIVE \u2014 a single-persona workflow (no participants) => ONE doer-role = the persona, math unchanged
+  const solo = roleCapacityByActor(FPA_INTAKE, "Conservative");
+  ok("F1 absent participants => single implicit doer = persona", solo.roles.length === 1 && solo.roles[0].role === "FP&A analyst", JSON.stringify(solo.roles.map(r => r.role)));
+  ok("F1 absent participants => freed == roleCapacity(allSteps) (byte-identical)", near(solo.roles[0].freedHrs, roleCapacity(normalizeIntake(FPA_INTAKE).steps, "Conservative").freedHrs, 0.001), `${solo.roles[0].freedHrs}`);
+  ok("F1 RECON intake is valid, coverage 100", validateIntake(RECON_INTAKE).ok && validateIntake(RECON_INTAKE).coverage.pct === 100, JSON.stringify(validateIntake(RECON_INTAKE).errors));
+  ok("F1 an unknown part is surfaced, never silently dropped", !validateIntake({ ...FPA_INTAKE, steps: [{ step: "x", cls: "assembly", data: "public", participants: [{ actorId: "a", part: "owner" }] }] }).ok, "");
 
   console.log(`\n${fail === 0 ? "\u2713 ALL PASS" : "\u2717 FAILURES"} \u2014 ${pass} passed, ${fail} failed`);
   return fail === 0;
