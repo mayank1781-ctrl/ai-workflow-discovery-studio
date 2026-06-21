@@ -11923,6 +11923,9 @@ function recipeUnitShape(unitId) {
       motivators: Array.isArray(seam.motivators) ? seam.motivators.slice() : [],
       handoffKind: handoffTag ? handoffTag.value : null,
       humanHeld: Boolean(seam.humanHeld),
+      // E6 — the E1 three-dimension seam read is part of the captured shape the matcher reads.
+      latency: (seam.latency && seam.latency.value) ? seam.latency.value : null,
+      criticality: (seam.criticality && seam.criticality.value) ? seam.criticality.value : null,
       toolTokens: connectionToolTokens(seam.fromId, seam.toId)
     };
   }
@@ -11984,6 +11987,16 @@ function matchLibraryRecipes(shape, library) {
         if (sv === m[f]) specificity += 1; else fit = false;
       }
     }
+    // E6 — the E1 seam dims (latency / criticality) are reconciled into the match vocabulary,
+    // but gate ONLY when the captured shape actually carries the dim: an older capture (pre-E1,
+    // dim undefined) is NOT rejected by an entry that declares it (additive). When present, the
+    // dim is an exact gate like the others.
+    for (const f of ["latency", "criticality"]) {
+      if (!fit) break;
+      if (typeof m[f] === "string" && shape[f] != null) {
+        if (shape[f] === m[f]) specificity += 1; else fit = false;
+      }
+    }
     if (!fit || specificity === 0) continue; // never match on unit-kind alone
 
     if (Array.isArray(m.tools_any) && m.tools_any.length) {
@@ -12004,6 +12017,12 @@ function matchLibraryRecipes(shape, library) {
       leverage: entry.leverage || "lo",
       humanHeld: Boolean(shape.humanHeld),
       confirmed: entry.confirmed === true,
+      // E6 — carry the enriched seed fields through the match (round-trip): the 7-field spec,
+      // the 3-dim seam read, and the lifecycle stage. Inferred provenance until a real
+      // confirm-pass sets confirmed:true.
+      spec: entry.spec || null,
+      seamDims: entry.seam_dims || null,
+      lifecycle: entry.lifecycle || "captured",
       specificity
     });
   }
@@ -12031,6 +12050,9 @@ function recipeUnitSource(unitId) {
         // Change 1: the unit also carries its spec canvas. Guarded so the boundary is
         // byte-identical when the builder isn't loaded; it never auto-hardens.
         if (typeof buildRecipeSpec === "function") unit.spec = buildRecipeSpec(unitId);
+        // E6: surface the matched seed entry's enriched fields (the 7-field seed spec, the
+        // 3-dim seam read, lifecycle) for round-trip — inferred until a real confirm-pass.
+        unit.seed = { id: matches[0].id, spec: matches[0].spec, seamDims: matches[0].seamDims, lifecycle: matches[0].lifecycle, confirmed: matches[0].confirmed === true };
         return unit;
       }
     }

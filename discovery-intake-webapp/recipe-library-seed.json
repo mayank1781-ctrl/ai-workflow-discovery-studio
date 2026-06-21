@@ -1,19 +1,23 @@
 {
   "_meta": {
     "artifact": "recipe-library-seed",
-    "version": "0.1",
+    "version": "0.2",
     "status": "SEED — illustrative library shapes, NOT confirmed from real captured workflows.",
-    "provenance_warning": "Every entry is confirmed:false on purpose. These are realistic, format-correct mappings whose only job is to let the library-match mechanism (recipeUnitSource) resolve and rank a fitting recipe for a captured unit. They were authored, not derived from a real confirm-pass over actual captured-and-confirmed workflows. BEFORE ANY PILOT: replace this file with the output of a real confirm-pass, and only then set confirmed:true. Do NOT present these to a client as confirmed/trusted recipes — that would misrepresent provenance, which the product forbids.",
-    "framing": "All recipe text is leverage / assist-not-replace. A human-held unit keeps the person approving and wears the reserved Human Pink. The economics-token family is excluded by construction.",
-    "match_vocabulary": "The match signatures key off the SAME shape inputs the Leverage Map detector already reads — they are NOT a parallel vocabulary. For a connection/span unit: 'motivators' is a subset of the detector's seam motivator kinds (shared-tool | manual-channel | system-switching | transition), 'handoff_kind' is one of HANDOFF_KINDS (role-to-role | human-to-system | system-to-human | system-to-system) and requires a 'transition' motivator. For a step unit: 'step_type' is one of STEP_TYPE_OPTIONS, 'friction' of FRICTION_KINDS, 'role' of ROLE_VALUES, 'decision' of DECISION_KINDS. 'human_held' mirrors the seam/step human-hold (held recipes fit held units only). 'tools_any' is a SOFT disambiguator (token overlap with the captured tool text); it never gates a fit, only ranks.",
+    "provenance_warning": "Every entry is confirmed:false on purpose. These are realistic, format-correct mappings whose only job is to let the library-match mechanism (recipeUnitSource -> matchLibraryRecipes) resolve and rank a fitting recipe for a captured unit. They were authored, not derived from a real confirm-pass over actual captured-and-confirmed workflows. The enriched spec / seam_dims / lifecycle fields are likewise illustrative. BEFORE ANY PILOT: replace this file with the output of a real confirm-pass, and only then set confirmed:true. Do NOT present these to a client as confirmed/trusted recipes — that would misrepresent provenance, which the product forbids.",
+    "edition_2_enrichment": "Each entry now carries (a) the 7-field spec (goal/context/constraints/acceptanceCriteria/decomposition/escalation/modelFit — Change 1 + E2), (b) seam_dims (the E1 three-dimension friction/latency/criticality, each low|medium|high) for connection/span units, and (c) a lifecycle stage (E4). Because every entry is confirmed:false, its lifecycle is 'captured' and its spec/seam_dims read as inferred provenance downstream — never stated. A real confirm-pass would set lifecycle to 'specified'+ and the spec fields to stated.",
+    "framing": "All recipe text is leverage / assist-not-replace. A human-held unit keeps the person approving and wears the reserved Human Pink. The economics-token family is excluded by construction; cost-to-serve / model-fit language lives only in the spec.modelFit field (a recipe-surface field).",
+    "match_vocabulary": "The match signatures key off the SAME shape inputs the Leverage Map detector already reads — NOT a parallel vocabulary. For a connection/span unit: 'motivators' is a subset of the detector's seam motivator kinds (shared-tool | manual-channel | system-switching | transition), 'handoff_kind' is one of HANDOFF_KINDS (role-to-role | human-to-system | system-to-human | system-to-system) and requires a 'transition' motivator, and the E1 'latency' / 'criticality' dims (low|medium|high) match the seam's three-dimension read. For a step unit: 'step_type' is one of STEP_TYPE_OPTIONS, 'friction' of FRICTION_KINDS, 'role' of ROLE_VALUES, 'decision' of DECISION_KINDS. 'human_held' mirrors the seam/step human-hold (held recipes fit held units only). 'tools_any' is a SOFT disambiguator (token overlap with the captured tool text); it never gates a fit, only ranks.",
     "schema": {
       "id": "stable identifier for the seed entry",
       "label": "human-readable name of the workflow shape",
       "unit_kind": "step | connection | span (Option A — a recipe unit is a step, a handoff, or a short span; a span entry fits a connection unit)",
-      "match": "the captured-shape signature, in the detector's real vocabulary, the matcher compares a unit against",
+      "match": "the captured-shape signature, in the detector's real vocabulary, the matcher compares a unit against (now including the E1 latency / criticality seam dims)",
       "leverage": "lo | md | hi — the rank used to order fitting recipes (never a percent, never an economics number)",
       "human_held": "true if the unit involves judgment a person must own; the recipe then keeps the person approving and wears reserved Human Pink (#FF4FD8)",
       "recipe": "the assist-not-replace recipe text",
+      "seam_dims": "E1 — { friction, latency, criticality } each low|medium|high, for connection/span units (illustrative until a real confirm-pass)",
+      "spec": "Change 1 + E2 — { goal, context, constraints, acceptanceCriteria, decomposition[], escalation, modelFit } (illustrative; inferred provenance until confirmed)",
+      "lifecycle": "E4 — captured | confirmed | specified | in-build | in-telemetry (always 'captured' here because confirmed:false)",
       "source": "always 'example' in this file; becomes 'library' (confirmed) only after a real confirm-pass",
       "confirmed": "always false in this file"
     }
@@ -23,14 +27,13 @@
       "id": "seam-export-reconcile",
       "label": "Export → manual reconciliation (controller close)",
       "unit_kind": "connection",
-      "match": {
-        "motivators": ["manual-channel", "system-switching"],
-        "human_held": false,
-        "tools_any": ["erp", "gl", "ledger", "reconcil", "spreadsheet", "excel"]
-      },
+      "match": { "motivators": ["manual-channel", "system-switching"], "human_held": false, "latency": "medium", "tools_any": ["erp", "gl", "ledger", "reconcil", "spreadsheet", "excel"] },
       "leverage": "hi",
       "human_held": false,
       "recipe": "AI assembles the reconciliation working file from both sources and surfaces the items that do not tie out, so the person reviews the exceptions instead of building the comparison by hand.",
+      "seam_dims": { "friction": "high", "latency": "medium", "criticality": "medium" },
+      "spec": { "goal": "A reconciliation working file with exceptions surfaced, for the controller.", "context": "Two source extracts (ERP + ledger); the person reviews the tie-out.", "constraints": "Confidential financials; draft-only up to human review; approved tools only.", "acceptanceCriteria": "Ties to both sources; every non-tie is flagged, none silently dropped.", "decomposition": ["Pull both extracts", "Build the comparison", "Surface the items that do not tie out"], "escalation": "Hand back any unexplained variance above threshold to the controller.", "modelFit": "Assembly → small tier; confidential data stays on approved / in-VPC models. Cost-to-serve is a band; route to the cheapest tier that clears acceptance." },
+      "lifecycle": "captured",
       "source": "example",
       "confirmed": false
     },
@@ -38,14 +41,13 @@
       "id": "seam-rekey-ledger",
       "label": "Spreadsheet → ledger re-key (accounts payable)",
       "unit_kind": "connection",
-      "match": {
-        "motivators": ["manual-channel"],
-        "human_held": false,
-        "tools_any": ["spreadsheet", "ledger", "erp", "excel"]
-      },
+      "match": { "motivators": ["manual-channel"], "human_held": false, "friction": null, "tools_any": ["spreadsheet", "ledger", "erp", "excel"] },
       "leverage": "hi",
       "human_held": false,
       "recipe": "AI drafts the ledger entries from the source export and flags mismatches for review, so the re-keying between the two systems is carried for the person rather than done by hand.",
+      "seam_dims": { "friction": "high", "latency": "low", "criticality": "medium" },
+      "spec": { "goal": "Draft ledger entries from the source export, mismatches flagged.", "context": "A spreadsheet export feeding the ledger; the person reviews before posting.", "constraints": "Internal/confidential financials; draft-only up to human review.", "acceptanceCriteria": "Every entry traces to a source row; mismatches flagged, none posted unreviewed.", "decomposition": ["Read the source export", "Draft the ledger entries", "Flag mismatches for review"], "escalation": "Stop and hand back if a mismatch can't be explained from the source.", "modelFit": "Assembly → small tier; draft-only. Cost-to-serve is a band; route to the cheapest tier that clears acceptance." },
+      "lifecycle": "captured",
       "source": "example",
       "confirmed": false
     },
@@ -53,15 +55,13 @@
       "id": "handoff-invoice-approval",
       "label": "Invoice routed for approval (accounts payable)",
       "unit_kind": "connection",
-      "match": {
-        "motivators": ["transition"],
-        "handoff_kind": "role-to-role",
-        "human_held": true,
-        "tools_any": ["invoice", "ap", "payable", "coding"]
-      },
+      "match": { "motivators": ["transition"], "handoff_kind": "role-to-role", "human_held": true, "criticality": "high", "tools_any": ["invoice", "ap", "payable", "coding"] },
       "leverage": "md",
       "human_held": true,
       "recipe": "AI packages the invoice with its supporting detail and a recommended coding and routes it to the approver; the person approves. Never removes the approval step.",
+      "seam_dims": { "friction": "low", "latency": "medium", "criticality": "high" },
+      "spec": { "goal": "A packaged invoice + recommended coding routed to the approver.", "context": "An invoice awaiting role-to-role approval; the person owns the decision.", "constraints": "Internal financials; the approval is human-held; no auto-approval.", "acceptanceCriteria": "The approver receives complete supporting detail; the decision stays a person's.", "decomposition": ["Package the invoice + supporting detail", "Propose a coding", "Route to the approver for the decision"], "escalation": "AI never approves; a person approves before payment proceeds.", "modelFit": "Judgment-adjacent → mid tier for the packaging; the decision stays human (no tier). Cost-to-serve is a band." },
+      "lifecycle": "captured",
       "source": "example",
       "confirmed": false
     },
@@ -69,14 +69,12 @@
       "id": "step-variance-summary",
       "label": "Package the variance summary for review (controller close)",
       "unit_kind": "step",
-      "match": {
-        "step_type": "data-op",
-        "human_held": false,
-        "tools_any": ["spreadsheet", "report", "excel", "variance"]
-      },
+      "match": { "step_type": "data-op", "human_held": false, "tools_any": ["spreadsheet", "report", "excel", "variance"] },
       "leverage": "md",
       "human_held": false,
       "recipe": "AI drafts the variance summary from the reconciled figures, groups the items for review, and notes what moved, so the person spends their attention on which variances matter.",
+      "spec": { "goal": "A grouped variance summary noting what moved, for review.", "context": "Reconciled figures feed the summary; the person judges materiality.", "constraints": "Confidential financials; draft-only up to human review.", "acceptanceCriteria": "Every material variance is grouped and explained; none omitted.", "decomposition": ["Read the reconciled figures", "Group the variances", "Note what moved and why"], "escalation": "Flag any variance the data can't explain to the reviewer.", "modelFit": "Assembly → small tier; confidential stays on approved / in-VPC models. Cost-to-serve is a band." },
+      "lifecycle": "captured",
       "source": "example",
       "confirmed": false
     },
@@ -84,14 +82,13 @@
       "id": "seam-forecast-inputs",
       "label": "Gather forecast inputs into the model (FP&A)",
       "unit_kind": "connection",
-      "match": {
-        "motivators": ["system-switching"],
-        "human_held": false,
-        "tools_any": ["erp", "warehouse", "model", "forecast", "spreadsheet"]
-      },
+      "match": { "motivators": ["system-switching"], "human_held": false, "latency": "high", "tools_any": ["erp", "warehouse", "model", "forecast", "spreadsheet"] },
       "leverage": "md",
       "human_held": false,
       "recipe": "AI gathers the forecast inputs from the source systems and assembles them into the model's input shape, so the person works on the assumptions rather than the collection.",
+      "seam_dims": { "friction": "medium", "latency": "high", "criticality": "medium" },
+      "spec": { "goal": "Forecast inputs assembled into the model's input shape.", "context": "Inputs span several source systems; the person owns the assumptions.", "constraints": "Confidential; draft-only; approved tools only.", "acceptanceCriteria": "Every model input is populated from a sourced value; gaps flagged.", "decomposition": ["Gather inputs across the source systems", "Map them to the model's input shape", "Flag missing inputs"], "escalation": "Hand back to the analyst when an input can't be sourced.", "modelFit": "Assembly → small tier. Cost-to-serve is a band; route to the cheapest tier that clears acceptance." },
+      "lifecycle": "captured",
       "source": "example",
       "confirmed": false
     },
@@ -99,14 +96,13 @@
       "id": "seam-collections-outreach",
       "label": "Flag overdue → collections outreach (accounts receivable)",
       "unit_kind": "connection",
-      "match": {
-        "motivators": ["manual-channel", "system-switching"],
-        "human_held": false,
-        "tools_any": ["aging", "ar", "receivable", "collection", "email"]
-      },
+      "match": { "motivators": ["manual-channel", "system-switching"], "human_held": false, "latency": "low", "tools_any": ["aging", "ar", "receivable", "collection", "email"] },
       "leverage": "hi",
       "human_held": false,
       "recipe": "AI drafts the collections outreach for each overdue item and prepares it for sending, so the person reviews and sends rather than composing each message from scratch.",
+      "seam_dims": { "friction": "high", "latency": "low", "criticality": "medium" },
+      "spec": { "goal": "Drafted collections outreach per overdue item, ready to review and send.", "context": "An aging report flags overdue items; the person reviews and sends.", "constraints": "Client-confidential; draft-only; no auto-send.", "acceptanceCriteria": "Each draft cites the correct overdue item and amount; none sent unreviewed.", "decomposition": ["Read the aging report", "Draft outreach per overdue item", "Prepare for the person to review and send"], "escalation": "Hand back any disputed or sensitive account to the person.", "modelFit": "Assembly → small tier; draft-only. Cost-to-serve is a band." },
+      "lifecycle": "captured",
       "source": "example",
       "confirmed": false
     },
@@ -114,14 +110,12 @@
       "id": "step-cash-position",
       "label": "Assemble the daily cash position (treasury)",
       "unit_kind": "step",
-      "match": {
-        "step_type": "data-op",
-        "human_held": false,
-        "tools_any": ["bank", "cash", "treasury", "feed"]
-      },
+      "match": { "step_type": "data-op", "human_held": false, "tools_any": ["bank", "cash", "treasury", "feed"] },
       "leverage": "md",
       "human_held": false,
       "recipe": "AI assembles the daily cash position from the account feeds and highlights anything unusual, so the person reviews a prepared position instead of compiling it.",
+      "spec": { "goal": "A daily cash position assembled from the account feeds, anomalies highlighted.", "context": "Several bank/account feeds; the person reviews the prepared position.", "constraints": "Confidential treasury data; approved tools only; draft-only.", "acceptanceCriteria": "Every account feed is reflected; anything unusual is highlighted.", "decomposition": ["Pull the account feeds", "Assemble the position", "Highlight anything unusual"], "escalation": "Flag a feed that didn't arrive or doesn't reconcile to the person.", "modelFit": "Assembly → small tier; confidential stays on approved / in-VPC models. Cost-to-serve is a band." },
+      "lifecycle": "captured",
       "source": "example",
       "confirmed": false
     },
@@ -129,14 +123,12 @@
       "id": "step-control-assessment",
       "label": "Assess a control (SOX compliance)",
       "unit_kind": "step",
-      "match": {
-        "step_type": "judgment",
-        "human_held": true,
-        "tools_any": ["control", "sox", "evidence", "assessment"]
-      },
+      "match": { "step_type": "judgment", "human_held": true, "tools_any": ["control", "sox", "evidence", "assessment"] },
       "leverage": "hi",
       "human_held": true,
       "recipe": "AI assembles and routes the control evidence with a draft assessment for review; the person makes the control assessment. Never removes the human assessment.",
+      "spec": { "goal": "Control evidence assembled with a draft assessment, for the person's call.", "context": "A SOX control under assessment; the person owns the conclusion.", "constraints": "Confidential/regulated; the assessment is human-held; no auto-conclusion.", "acceptanceCriteria": "All required evidence is attached; the human makes the assessment.", "decomposition": ["Assemble the control evidence", "Draft an assessment", "Route to the person for the call"], "escalation": "AI never concludes the control; the person assesses and signs off.", "modelFit": "Judgment-adjacent → mid tier for the packaging; the assessment stays human (no tier). Cost-to-serve is a band." },
+      "lifecycle": "captured",
       "source": "example",
       "confirmed": false
     },
@@ -144,14 +136,13 @@
       "id": "seam-pipeline-crosscheck",
       "label": "Export → cross-check for stale deals (revenue operations)",
       "unit_kind": "connection",
-      "match": {
-        "motivators": ["manual-channel"],
-        "human_held": true,
-        "tools_any": ["crm", "pipeline", "deal", "stale", "export"]
-      },
+      "match": { "motivators": ["manual-channel"], "human_held": true, "criticality": "high", "tools_any": ["crm", "pipeline", "deal", "stale", "export"] },
       "leverage": "md",
       "human_held": true,
       "recipe": "AI assembles the week-over-week comparison and proposes which deals look stale with the supporting signals; the person decides what counts as stale. Never removes the judgment.",
+      "seam_dims": { "friction": "medium", "latency": "low", "criticality": "high" },
+      "spec": { "goal": "A week-over-week comparison proposing stale deals, for the person's judgment.", "context": "A CRM pipeline export; the person decides what counts as stale.", "constraints": "Client-confidential; the judgment is human-held.", "acceptanceCriteria": "Each proposed-stale deal carries its supporting signals; the person decides.", "decomposition": ["Assemble the week-over-week comparison", "Propose which deals look stale", "Route to the person to decide"], "escalation": "AI never marks a deal dead; the person decides.", "modelFit": "Judgment-adjacent → mid tier; the decision stays human. Cost-to-serve is a band." },
+      "lifecycle": "captured",
       "source": "example",
       "confirmed": false
     },
@@ -159,14 +150,13 @@
       "id": "seam-owner-outreach",
       "label": "Stale deals → owner messaging and leadership summary (revenue operations)",
       "unit_kind": "span",
-      "match": {
-        "motivators": ["manual-channel", "system-switching"],
-        "human_held": false,
-        "tools_any": ["crm", "chat", "email", "doc", "outreach"]
-      },
+      "match": { "motivators": ["manual-channel", "system-switching"], "human_held": false, "latency": "medium", "tools_any": ["crm", "chat", "email", "doc", "outreach"] },
       "leverage": "hi",
       "human_held": false,
       "recipe": "AI drafts owner outreach for each flagged deal and the leadership summary and prepares them for sending, so the person reviews and routes rather than writing each one.",
+      "seam_dims": { "friction": "high", "latency": "medium", "criticality": "medium" },
+      "spec": { "goal": "Drafted owner outreach + a leadership summary, ready to review and route.", "context": "Flagged deals span CRM + comms; the person reviews and routes.", "constraints": "Client-confidential; draft-only; no auto-send.", "acceptanceCriteria": "Each draft names the correct deal/owner; the summary reconciles to the flags.", "decomposition": ["Draft owner outreach per flagged deal", "Draft the leadership summary", "Prepare for review and routing"], "escalation": "Hand back any sensitive account to the person before sending.", "modelFit": "Assembly → small tier; draft-only. Cost-to-serve is a band." },
+      "lifecycle": "captured",
       "source": "example",
       "confirmed": false
     },
@@ -174,15 +164,13 @@
       "id": "seam-procurement-intake",
       "label": "Intake request → route to category (procurement)",
       "unit_kind": "connection",
-      "match": {
-        "motivators": ["transition"],
-        "handoff_kind": "human-to-system",
-        "human_held": false,
-        "tools_any": ["intake", "procurement", "request", "category"]
-      },
+      "match": { "motivators": ["transition"], "handoff_kind": "human-to-system", "human_held": false, "latency": "low", "tools_any": ["intake", "procurement", "request", "category"] },
       "leverage": "md",
       "human_held": false,
       "recipe": "AI drafts the intake summary and proposes the routing category from the request detail, so the person confirms and forwards rather than triaging from scratch.",
+      "seam_dims": { "friction": "medium", "latency": "low", "criticality": "low" },
+      "spec": { "goal": "An intake summary + a proposed routing category, for the person to confirm.", "context": "A procurement request entering the system; the person confirms routing.", "constraints": "Internal; draft-only; the person confirms before forwarding.", "acceptanceCriteria": "The proposed category is justified from the request detail; the person confirms.", "decomposition": ["Read the request detail", "Draft the intake summary", "Propose the routing category"], "escalation": "Hand back an ambiguous request to the person to categorize.", "modelFit": "Assembly → small tier. Cost-to-serve is a band; route to the cheapest tier that clears acceptance." },
+      "lifecycle": "captured",
       "source": "example",
       "confirmed": false
     },
@@ -190,15 +178,13 @@
       "id": "handoff-approval-routing",
       "label": "Route an item for sign-off (general)",
       "unit_kind": "connection",
-      "match": {
-        "motivators": ["transition"],
-        "handoff_kind": "role-to-role",
-        "human_held": true,
-        "tools_any": []
-      },
+      "match": { "motivators": ["transition"], "handoff_kind": "role-to-role", "human_held": true, "criticality": "high", "tools_any": [] },
       "leverage": "md",
       "human_held": true,
       "recipe": "AI packages the item with its supporting detail and routes it to the right approver with a recommended decision; the person approves. Never removes the sign-off.",
+      "seam_dims": { "friction": "low", "latency": "medium", "criticality": "high" },
+      "spec": { "goal": "A packaged item routed to the right approver with a recommended decision.", "context": "An item awaiting role-to-role sign-off; the person owns the decision.", "constraints": "The sign-off is human-held; no auto-approval.", "acceptanceCriteria": "The approver gets complete supporting detail; the sign-off stays a person's.", "decomposition": ["Package the item + supporting detail", "Recommend a decision", "Route to the right approver"], "escalation": "AI never signs off; the person approves before it proceeds.", "modelFit": "Judgment-adjacent → mid tier for packaging; the sign-off stays human. Cost-to-serve is a band." },
+      "lifecycle": "captured",
       "source": "example",
       "confirmed": false
     }
