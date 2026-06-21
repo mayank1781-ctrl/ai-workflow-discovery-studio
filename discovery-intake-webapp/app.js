@@ -6325,6 +6325,7 @@ function renderAnalysisStudio() {
   else if (active === "leverage") renderAnalysisTabLeverage();
   else if (active === "recipe") renderAnalysisTabRecipe();
   else if (active === "engineering") renderAnalysisTabEngineering();
+  else if (active === "dashboard") renderAnalysisTabDashboard();
 }
 
 // --- TAB 1: Workflow Grid -----------------------------------------------------
@@ -12779,6 +12780,185 @@ function applyPolicyConstraintsToSpec(spec, gov, pc) {
     permittedAddressability: permitted,
     policyApplied: true
   };
+}
+
+// === E5 — Executive Dashboard (capacity net of cost-to-serve + flow) ===================
+// A firewalled, confirmed-only RENDER LAYER over the engine: every figure comes from
+// engine.buildLeaderView(records) (which filters with isConfirmed) + engine.cycleTime(); the
+// Dashboard computes NOTHING itself. All strings are surface:"dashboard" (the rail keeps
+// capacity/cost/flow vocabulary off worker surfaces). Provenance dots, labeled placeholders
+// where live telemetry is absent (never fabricated), never-a-dead-end empty state. Locked
+// tokens reused (no new colors): teal/positive #00d4b4, amber/caution #FFB454, pink/blocked
+// #FF4FD8, violet/program #a78bfa, blue/accent #3b82f6, wait-grey #5b7186.
+
+const DASH = { pos: "#00d4b4", cau: "#FFB454", blk: "#FF4FD8", prog: "#a78bfa", acc: "#3b82f6", wait: "#5b7186", ink: "#EAEFFF", dim: "#A6ADC4", faint: "#737A92", line: "#16263a", panel: "#0c1726" };
+const DASH_LIFE = ["captured", "confirmed", "specified", "in-build", "in-telemetry"];
+
+function dashFmtUsd(v) {
+  const a = Math.abs(Number(v) || 0);
+  const s = a >= 1000 ? (a / 1000).toFixed(a >= 100000 ? 0 : 1) + "k" : String(Math.round(a));
+  return ((Number(v) || 0) < 0 ? "-$" : "$") + s;
+}
+function dashKpi(lv, id) { return (lv && Array.isArray(lv.kpis)) ? (lv.kpis.find((k) => k.id === id) || null) : null; }
+function dashKpiVal(lv, id) { const k = dashKpi(lv, id); return k ? k.value : null; }
+// provenance dot — reuses the .prov vocabulary (stated=teal, inferred=grey)
+function dashProvDot(prov) { return `<span class="prov ${prov === "stated" ? "user" : "ai"}" style="padding:0;border:0;background:transparent;"><span class="pd"></span></span>`; }
+function dashPlaceholder(label) { return `<div class="dash-ph" style="border:1px dashed ${DASH.line};border-radius:8px;padding:7px 10px;font-size:10.5px;color:${DASH.faint};">${escapeHtml(label)} · awaiting telemetry</div>`; }
+
+// Best-effort: map the active workflow to an engine intake record. The engine filters to
+// isConfirmed, so a partially-captured workflow is skipped and the Dashboard shows its empty
+// state. Richer portfolio capture is the data step; the render is engine-driven + confirmed-only.
+function dashboardRecords() {
+  const records = [];
+  try {
+    if (typeof appWorkflowToIntake === "function") {
+      const view = (typeof confirmedView === "function") ? confirmedView() : { total: 0, unconfirmed: [] };
+      const allConfirmed = view.total > 0 && view.unconfirmed.length === 0;
+      records.push(appWorkflowToIntake({ recap: { confirmed: allConfirmed } }));
+    }
+  } catch (_e) { /* additive */ }
+  return records;
+}
+
+// The Dashboard data model — the single engine call. recordsOverride lets tests/fixtures
+// drive it; otherwise the app's confirmed workflows.
+function dashboardModel(recordsOverride, opts) {
+  const records = Array.isArray(recordsOverride) ? recordsOverride : dashboardRecords();
+  const lv = (typeof engineLeaderView === "function") ? engineLeaderView(records, opts || {}) : null;
+  return { lv, records, opts: opts || {} };
+}
+
+// A · program state + the V1 lifecycle funnel (cumulative — a funnel of the confirmed set).
+function dashHeaderHtml(lv) {
+  const funnel = dashKpiVal(lv, "lifecycle_funnel") || {};
+  const cum = DASH_LIFE.map((st, i) => DASH_LIFE.slice(i).reduce((n, s) => n + (funnel[s] || 0), 0));
+  const max = cum[0] || 1, bw = 188;
+  const tint = [DASH.pos, DASH.pos, DASH.acc, DASH.faint, DASH.faint];
+  const bars = DASH_LIFE.map((st, i) => {
+    const h = Math.max(12, Math.round(40 * cum[i] / max)), x = 10 + i * bw, y = 60 - h;
+    return `<rect x="${x}" y="${y}" width="${bw - 24}" height="${h}" rx="4" fill="${tint[i]}33"/><text x="${x + (bw - 24) / 2}" y="${y - 4}" text-anchor="middle" font-size="13" font-weight="700" fill="${tint[i]}">${cum[i]}</text><text x="${x + (bw - 24) / 2}" y="76" text-anchor="middle" font-size="10" fill="${DASH.faint}">${st}</text>`;
+  }).join("");
+  return `<section class="dash-sec" style="margin-bottom:14px;"><div style="font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${DASH.faint};margin:0 0 6px;">A · Program state</div>
+    <div style="background:${DASH.panel};border:1px solid ${DASH.line};border-radius:12px;padding:14px 16px;">
+      <div><span style="font-size:20px;font-weight:800;color:${DASH.ink};">${lv.confirmedCount}</span> <span style="font-size:12px;color:${DASH.dim};">confirmed units · ${lv.skippedUnconfirmed} unconfirmed skipped</span> ${dashProvDot("stated")} <span style="font-size:11px;color:${DASH.faint};">lifecycle funnel (units reaching each stage)</span></div>
+      <svg viewBox="0 0 960 84" style="display:block;width:100%;height:auto;margin-top:4px;">${bars}</svg>
+    </div></section>`;
+}
+
+// B · evidence chain (adoption -> fluency -> capacity & flow -> outcome); only "capacity &
+// flow" is engine-live, the rest are labeled placeholders (telemetry).
+function dashEvidenceChainHtml(lv, flow) {
+  const funnel = dashKpiVal(lv, "lifecycle_funnel") || {};
+  const adopt = lv.confirmedCount ? Math.round(((funnel["in-build"] || 0) + (funnel["in-telemetry"] || 0)) / lv.confirmedCount * 100) : 0;
+  const net = dashKpiVal(lv, "net_capacity"), cost = dashKpiVal(lv, "cost_to_serve"), gated = dashKpiVal(lv, "economics_gated");
+  const cell = (t, body) => `<div style="flex:1;min-width:0;padding:11px 13px;border-right:1px solid ${DASH.line};"><div style="font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:${DASH.faint};margin-bottom:6px;">${t}</div>${body}</div>`;
+  return `<section class="dash-sec" style="margin-bottom:14px;"><div style="font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${DASH.faint};margin:0 0 6px;">B · Evidence chain</div>
+    <div style="display:flex;background:${DASH.panel};border:1px solid ${DASH.line};border-radius:12px;overflow:hidden;">
+      ${cell("Adoption", `<div style="font-size:15px;font-weight:700;color:${DASH.ink};">${adopt}%</div><div style="font-size:10px;color:${DASH.faint};">units in build / telemetry</div>${dashPlaceholder("active users")}`)}
+      ${cell("Fluency", `<div style="font-size:15px;font-weight:700;color:${DASH.ink};">${Math.round((studioEngine() ? studioEngine().CONFIG.realizationFactor : 0.7) * 100)}%</div><div style="font-size:10px;color:${DASH.faint};">realization factor (modeled)</div>${dashPlaceholder("builder ladder")}`)}
+      <div style="flex:1;min-width:0;padding:11px 13px;border-right:1px solid ${DASH.line};background:${DASH.pos}14;"><div style="font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:${DASH.pos};margin-bottom:6px;">Capacity &amp; flow</div><div style="font-size:15px;font-weight:700;color:${DASH.pos};">${dashFmtUsd(net)}</div><div style="font-size:10px;color:${DASH.faint};">net capacity · cycle ${flow ? studioEngine().fmtDur(flow.cycleAfter) : "—"}</div><div style="font-size:10px;color:${DASH.faint};margin-top:4px;">cost ${dashFmtUsd(cost)} · gated ${gated}</div></div>
+      <div style="flex:1;min-width:0;padding:11px 13px;"><div style="font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:${DASH.faint};margin-bottom:6px;">Outcome</div><div style="font-size:13px;font-weight:700;color:${DASH.pos};">held</div><div style="font-size:10px;color:${DASH.faint};">quality guardrail (target)</div>${dashPlaceholder("error / quality")}</div>
+    </div></section>`;
+}
+
+// C · capacity -> net (the V2 three-haircut waterfall + KPI tiles + the V3 routed-vs-frontier bar).
+function dashCapacityNetHtml(lv) {
+  const ch = (lv.breakdown && lv.breakdown.deployable && lv.breakdown.deployable.chain) || { theoHrs: 0, permittedHrs: 0, freedHrs: 0, realizedHrs: 0 };
+  const gross = dashKpiVal(lv, "gross_capacity"), cost = dashKpiVal(lv, "cost_to_serve"), net = dashKpiVal(lv, "net_capacity"), lever = dashKpiVal(lv, "model_fit_lever"), gatedK = dashKpi(lv, "economics_gated");
+  const hmax = ch.theoHrs || 1, R = (v) => Math.round(Number(v) || 0);
+  const bar = (label, val, col) => `<div style="display:flex;align-items:center;gap:8px;margin:5px 0;"><div style="width:82px;font-size:10.5px;color:${DASH.faint};text-align:right;">${label}</div><div style="flex:1;height:16px;background:#0a1422;border-radius:4px;overflow:hidden;"><div style="height:100%;width:${Math.round(100 * val / hmax)}%;background:${col};border-radius:4px;"></div></div><div style="width:54px;font-size:11px;font-weight:700;color:${DASH.ink};">${R(val)}h</div></div>`;
+  const cascade = bar("theoretical", ch.theoHrs, DASH.acc)
+    + `<div style="font-size:10px;color:${DASH.acc};margin:0 0 0 90px;">↳ policy-gap (governance) −${R(ch.theoHrs - ch.permittedHrs)}h</div>`
+    + bar("permitted", ch.permittedHrs, DASH.acc)
+    + bar("freed", ch.freedHrs, DASH.pos)
+    + `<div style="font-size:10px;color:${DASH.cau};margin:0 0 0 90px;">↳ realization-gap (L&amp;D) −${R(ch.freedHrs - ch.realizedHrs)}h</div>`
+    + bar("realized", ch.realizedHrs, DASH.pos);
+  const nf = (Number(net) || 0) - (Number(lever) || 0); // net(frontier) = net(routed) − lever
+  const nmax = Math.max(Number(net) || 0, nf, 1);
+  const tile = (k, v, hero, sub) => `<div style="background:${DASH.panel};border:1px solid ${hero ? DASH.pos + "66" : DASH.line};border-radius:11px;padding:13px 15px;"><div style="font-size:11px;color:${DASH.faint};font-weight:600;margin-bottom:4px;">${dashProvDot("inferred")} ${k}</div><div style="font-size:${hero ? 28 : 20}px;font-weight:800;color:${hero ? DASH.pos : DASH.ink};letter-spacing:-.5px;">${dashFmtUsd(v)}</div>${sub ? `<div style="font-size:10.5px;color:${DASH.faint};margin-top:3px;">${sub}</div>` : ""}</div>`;
+  const gatedCallout = (gatedK && gatedK.value > 0)
+    ? `<div style="margin-top:12px;background:${DASH.blk}1c;border:1px solid ${DASH.blk}55;border-radius:10px;padding:10px 13px;font-size:12px;color:${DASH.blk};">⚠ <b>${gatedK.value} unit${gatedK.value > 1 ? "s" : ""} economics-gated</b> — net ≤ 0 at the permitted tier; floored out of net. Route to a lower tier, compress context, or defer.</div>`
+    : "";
+  return `<section class="dash-sec" style="margin-bottom:14px;"><div style="font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${DASH.faint};margin:0 0 6px;">C · Capacity → net</div>
+    <div style="background:${DASH.panel};border:1px solid ${DASH.line};border-radius:12px;padding:15px 17px;">
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:11px;margin-bottom:13px;">${tile("Net capacity value", net, true, "✓ outcome quality held")}${tile("Cost-to-serve (routed)", cost, false, "annual")}${tile("Gross potential", gross, false, "all addressable units")}</div>
+      <div style="font-size:11px;color:${DASH.dim};margin-bottom:4px;">From possible to defensible — deployable hours/week</div>
+      ${cascade}
+      <div style="margin-top:13px;font-size:11px;color:${DASH.dim};">Net: routed <b style="color:${DASH.pos};">${dashFmtUsd(net)}</b> vs frontier <b style="color:${DASH.cau};">${dashFmtUsd(nf)}</b> · <span style="color:${DASH.faint};">model-fit lever</span> <b style="color:${DASH.ink};">${dashFmtUsd(lever)}/yr</b>
+        <svg viewBox="0 0 420 50" style="display:block;width:100%;max-width:420px;margin-top:4px;"><rect x="0" y="6" width="${Math.round(400 * (Number(net) || 0) / nmax)}" height="14" rx="3" fill="${DASH.pos}"/><rect x="0" y="28" width="${Math.round(400 * nf / nmax)}" height="14" rx="3" fill="${DASH.cau}"/></svg></div>
+      ${gatedCallout}
+    </div></section>`;
+}
+
+// D · flow / cycle-time (the V4 before/after timeline) — from the representative confirmed
+// record's steps + engine.cycleTime. The protected (decision) wait is never drawn to zero.
+function dashFlowHtml(lv, sampleSteps, flow) {
+  const E = studioEngine();
+  if (!E || !flow || !Array.isArray(sampleSteps) || !sampleSteps.length) return `<section class="dash-sec" style="margin-bottom:14px;"><div style="font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${DASH.faint};margin:0 0 6px;">D · Flow / cycle-time</div><div style="background:${DASH.panel};border:1px solid ${DASH.line};border-radius:12px;padding:14px 16px;">${dashPlaceholder("cycle-time — no confirmed workflow sample")}</div></section>`;
+  const total = flow.cycleBefore || 1, L = 6, W = 470, wx = (m) => (m / total) * (W - L);
+  const tRed = E.CONFIG.flow.assemblyTouchReduction, wRed = E.CONFIG.flow.reducibleWaitReduction, lRed = E.CONFIG.flow.decisionLeadReduction;
+  let xb = L, segB = "", xa = L, segA = "";
+  sampleSteps.forEach((s) => {
+    segB += `<rect x="${xb}" y="16" width="${wx(s.touch)}" height="13" fill="${DASH.pos}"/>`; xb += wx(s.touch);
+    if (s.wait > 0) { segB += `<rect x="${xb}" y="16" width="${wx(s.wait)}" height="13" fill="${s.waitKind === "protected" ? DASH.cau : DASH.wait}"/>`; xb += wx(s.wait); }
+    const ta = s.cls === "assembly" ? s.touch * (1 - tRed) : s.touch;
+    segA += `<rect x="${xa}" y="44" width="${wx(ta)}" height="13" fill="${DASH.pos}"/>`; xa += wx(ta);
+    if (s.wait > 0) { const wa = s.waitKind === "protected" ? s.wait * (1 - lRed) : s.wait * (1 - wRed); segA += `<rect x="${xa}" y="44" width="${wx(wa)}" height="13" fill="${s.waitKind === "protected" ? DASH.cau : DASH.wait}"/>`; xa += wx(wa); }
+  });
+  return `<section class="dash-sec" style="margin-bottom:14px;"><div style="font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${DASH.faint};margin:0 0 6px;">D · Flow / cycle-time</div>
+    <div style="background:${DASH.panel};border:1px solid ${DASH.line};border-radius:12px;padding:15px 17px;">
+      <div style="display:flex;gap:18px;margin-bottom:8px;"><div><div style="font-size:20px;font-weight:800;color:${DASH.ink};">${Math.round(flow.azReductionPct)}%</div><div style="font-size:10.5px;color:${DASH.faint};">A–Z reduction · ${E.fmtDur(flow.cycleBefore)} → ${E.fmtDur(flow.cycleAfter)}</div></div><div><div style="font-size:20px;font-weight:800;color:${DASH.ink};">${Math.round(flow.flowEffBefore)}%→${Math.round(flow.flowEffAfter)}%</div><div style="font-size:10.5px;color:${DASH.faint};">flow efficiency (touch ÷ cycle)</div></div></div>
+      <svg viewBox="0 0 482 66" style="display:block;width:100%;height:auto;"><text x="${L}" y="12" font-size="10" fill="${DASH.faint}" font-weight="700">Before</text>${segB}<text x="${L}" y="40" font-size="10" fill="${DASH.faint}" font-weight="700">With AI</text>${segA}</svg>
+      <div style="font-size:10px;color:${DASH.faint};margin-top:4px;"><span style="color:${DASH.pos};">■</span> touch <span style="color:${DASH.wait};">■</span> reducible wait <span style="color:${DASH.cau};">■</span> protected wait (decision)</div>
+      <div style="margin-top:10px;background:${DASH.pos}14;border-radius:10px;padding:9px 12px;font-size:11.5px;color:${DASH.pos};">~${Math.round(flow.pctSavingFromWait)}% of the A–Z saving is <b>wait</b>, not hands-on work — the protected decision block barely moves. Freeing hours ≠ faster delivery unless you attack wait.</div>
+    </div></section>`;
+}
+
+// E · the agendas (policy-gap -> governance, realization-gap -> L&D) + the V5 readiness-mix bar.
+function dashAgendasHtml(lv) {
+  const mix = dashKpiVal(lv, "readiness_mix") || {}, pg = dashKpiVal(lv, "policy_gap"), rg = dashKpiVal(lv, "realization_gap");
+  const tot = Object.values(mix).reduce((a, b) => a + b, 0) || 1, W = 960;
+  const segs = [["now", mix.now || 0, DASH.pos], ["gated-policy", mix["gated-policy"] || 0, DASH.cau], ["gated-economics", mix["gated-economics"] || 0, DASH.blk], ["future-capability", mix["future-capability"] || 0, DASH.prog]];
+  let x = 0; const bar = segs.filter((s) => s[1] > 0).map(([k, v, c]) => { const w = Math.round(W * v / tot); const r = `<rect x="${x}" y="0" width="${Math.max(0, w - 2)}" height="30" rx="4" fill="${c}"/><text x="${x + w / 2}" y="20" text-anchor="middle" font-size="13" font-weight="700" fill="#0d1b2e">${v}</text>`; x += w; return r; }).join("");
+  const key = segs.map(([k, v, c]) => `<span style="font-size:10.5px;color:${DASH.dim};margin-right:13px;"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${c};vertical-align:-1px;margin-right:4px;"></span>${k} ${v}</span>`).join("");
+  const tile = (label, v, sub) => `<div style="background:${DASH.panel};border:1px solid ${DASH.line};border-radius:11px;padding:13px 15px;"><div style="font-size:11px;color:${DASH.faint};font-weight:600;margin-bottom:4px;">${dashProvDot("inferred")} ${label}</div><div style="font-size:20px;font-weight:800;color:${DASH.ink};">${Math.round(Number(v) || 0)} h/wk</div><div style="font-size:10.5px;color:${DASH.faint};margin-top:3px;">${sub}</div></div>`;
+  return `<section class="dash-sec"><div style="font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${DASH.faint};margin:0 0 6px;">E · The agendas</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:11px;margin-bottom:12px;">${tile("Policy-gap → governance", pg, "theoretical − permitted, capped by policy")}${tile("Realization-gap → L&amp;D", rg, "freed − realized, gated by fluency")}</div>
+    <div style="background:${DASH.panel};border:1px solid ${DASH.line};border-radius:12px;padding:14px 16px;"><div style="font-size:11px;color:${DASH.dim};margin-bottom:8px;">${dashProvDot("stated")} Readiness mix — each state maps to a next move</div><svg viewBox="0 0 960 32" style="display:block;width:100%;height:auto;">${bar}</svg><div style="margin-top:9px;">${key}</div></div></section>`;
+}
+
+function dashEmptyHtml(lv) {
+  const note = (lv && lv.note) || "No confirmed units yet — confirm units on the Workbench to populate.";
+  return `<div style="background:${DASH.panel};border:1px solid ${DASH.line};border-radius:12px;padding:22px 24px;color:${DASH.dim};font-size:13px;line-height:1.6;">
+    <div style="font-size:15px;font-weight:700;color:${DASH.ink};margin-bottom:4px;">Executive Dashboard</div>
+    <div>${escapeHtml(note)}</div>
+    <div style="margin-top:12px;"><button type="button" class="primary-button compact" data-dashboard-to-workbench="1">Go to the Workbench</button></div>
+  </div>`;
+}
+
+function renderAnalysisTabDashboard(recordsOverride, opts) {
+  const container = document.getElementById("analysis-tab-dashboard");
+  if (!container) return;
+  if (!studioEngine()) { container.innerHTML = dashEmptyHtml({ note: "The executive Dashboard is loading the Studio engine…" }); return; }
+  const { lv, records } = dashboardModel(recordsOverride, opts);
+  if (!lv || lv.note || !lv.confirmedCount) { container.innerHTML = dashEmptyHtml(lv); wireDashboard(container); return; }
+  const E = studioEngine();
+  // representative confirmed record for the cycle-time view (the first confirmed one)
+  const confirmed = (Array.isArray(records) ? records : []).filter((r) => E.isConfirmed(r));
+  const sample = confirmed.length ? E.normalizeIntake(confirmed[0]).steps : null;
+  const flow = sample ? E.cycleTime(sample) : null;
+  container.innerHTML =
+    `<div style="font-size:11px;color:${DASH.faint};margin:0 0 10px;padding:6px 10px;background:${DASH.panel};border:1px solid ${DASH.line};border-radius:8px;">FIREWALL · capacity / cost / flow live only on this surface · nothing here reaches capture / workbench / recipe</div>` +
+    dashHeaderHtml(lv) + dashEvidenceChainHtml(lv, flow) + dashCapacityNetHtml(lv) + dashFlowHtml(lv, sample, flow) + dashAgendasHtml(lv);
+  wireDashboard(container);
+}
+
+function wireDashboard(container) {
+  if (!container) return;
+  container.querySelector("[data-dashboard-to-workbench]")?.addEventListener("click", () => {
+    if (typeof setAnalysisTab === "function") setAnalysisTab("leverage");
+    else if (typeof renderAnalysisTabLeverage === "function") renderAnalysisTabLeverage();
+  });
 }
 
 function renderAnalysisTabRecipe() {
