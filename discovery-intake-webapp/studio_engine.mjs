@@ -624,6 +624,142 @@ export function buildLeaderView(records, opts = {}) {
 }
 
 // =====================================================================
+// 5.5 · EDITION 3 — DERIVED LEADER LAYER (F4): role roll-up · capability map · adjacency
+// Pure derived views over CONFIRMED multi-actor workflows (no new schema), the way buildLeaderView sits
+// on the units. Capacity + operating-model language ONLY — the reasons name controls / data tiers, never
+// people. Adjacency is a HYPOTHESIS for leaders, human-confirmed; never a reorg, never headcount.
+// =====================================================================
+
+// F4 — freed capacity per ROLE across every confirmed workflow that role's doer touches, plus the
+// assembly -> judgment shift per role. Sums roleCapacityByActor across confirmed records by role label.
+export function buildRoleView(records, opts = {}) {
+  const profile = opts.profile || "Conservative";
+  const all = Array.isArray(records) ? records : [];
+  const confirmed = all.filter(isConfirmed);
+  const H = opts.weeklyHours ?? CONFIG.weeklyHours;
+  const byRole = new Map();
+  confirmed.forEach(rec => {
+    const rc = roleCapacityByActor(rec, profile, opts);
+    const wf = rec.header?.anchor || rec.header?.persona || "workflow";
+    rc.roles.forEach(role => {
+      const key = role.role;
+      if (!byRole.has(key)) byRole.set(key, { role: key, line: role.line, freedHrs: 0, realizedHrs: 0, theoHrs: 0, permittedHrs: 0, grossValue: 0, assemblyTime: 0, judgmentTime: 0, decisionTime: 0, time: 0, workflows: new Set() });
+      const g = byRole.get(key);
+      g.freedHrs += role.freedHrs; g.realizedHrs += role.realizedHrs; g.theoHrs += role.theoHrs; g.permittedHrs += role.permittedHrs; g.grossValue += role.grossValue;
+      g.assemblyTime += role.assemblyTime; g.judgmentTime += role.judgmentTime; g.decisionTime += role.decisionTime; g.time += role.time;
+      g.workflows.add(wf);
+    });
+  });
+  const roles = [...byRole.values()].map(g => ({
+    role: g.role, line: g.line,
+    freedHrs: round(g.freedHrs, 3), freedFTE: round(g.freedHrs / H, 3),
+    realizedHrs: round(g.realizedHrs, 3), grossValue: round(g.grossValue), workflowCount: g.workflows.size,
+    assemblyShare: g.time ? round(g.assemblyTime / g.time, 3) : 0,
+    humanHeldShare: g.time ? round((g.judgmentTime + g.decisionTime) / g.time, 3) : 0,
+    // the reshaping headline: the role spends less time assembling, more on judgment (NEVER headcount)
+    shift: g.time ? `assembly ${Math.round(g.assemblyTime / g.time * 100)}% → judgment/decision ${Math.round((g.judgmentTime + g.decisionTime) / g.time * 100)}%` : "—",
+  })).sort((a, b) => b.freedHrs - a.freedHrs);
+  return { profile, confirmedCount: confirmed.length, skippedUnconfirmed: all.length - confirmed.length, roles,
+    note: confirmed.length ? null : "No confirmed multi-actor units yet — confirm units on the Workbench to populate the role view." };
+}
+
+// F4 — recurring assembly steps grouped into capabilities (by verb / output shape); ranked by combined
+// leverage; a build-once reuse factor (one build cost amortised across N workflows — the library moat at
+// capability level). Confirmed-only.
+const CAPABILITY_VERBS = [
+  ["classify", /\b(classif|categor|triage|tag\b|label)/i],
+  ["reconcile", /\b(reconcil|tie[- ]?out|match\b|compare)/i],
+  ["extract", /\b(extract|gather|collect|retriev)/i],
+  ["draft", /\b(draft|compose|narrat|write[- ]?up)/i],
+  ["summarize", /\b(summar|digest|condens)/i],
+  ["compute", /\b(comput|calculat|spread\b|model\b)/i],
+  ["populate", /\b(populat|format|map\b|fill\b)/i],
+  ["route", /\b(rout|allocat|assign|dispatch)/i],
+  ["post", /\b(post\b|book\b|enter\b|record\b)/i],
+];
+function capabilitySignature(step) {
+  const text = `${(step && step.step) || ""} ${(step && step.output) || ""}`;
+  for (const [cap, re] of CAPABILITY_VERBS) if (re.test(text)) return cap;
+  const w = String((step && step.step) || "").trim().toLowerCase().split(/\s+/)[0];
+  return w || "misc";
+}
+export function buildCapabilityMap(records, opts = {}) {
+  const profile = opts.profile || "Conservative";
+  const confirmed = (Array.isArray(records) ? records : []).filter(isConfirmed);
+  const caps = new Map();
+  confirmed.forEach(rec => {
+    const r = normalizeIntake(rec);
+    const totT = sum(r.steps.map(s => s.time)) || 1;
+    const wf = rec.header?.anchor || rec.header?.persona || "workflow";
+    r.steps.filter(s => s.cls === "assembly").forEach(s => {
+      const sig = capabilitySignature(s);
+      if (!caps.has(sig)) caps.set(sig, { capability: sig, occurrences: [], workflows: new Set(), combinedLeverage: 0 });
+      const c = caps.get(sig);
+      c.occurrences.push({ workflow: wf, step: s.step });
+      c.workflows.add(wf);
+      c.combinedLeverage += stepPermitted(s, profile) * (s.time / totT);
+    });
+  });
+  const capabilities = [...caps.values()].map(c => ({
+    capability: c.capability, occurrenceCount: c.occurrences.length, reuseCount: c.workflows.size,
+    workflows: [...c.workflows], occurrences: c.occurrences, combinedLeverage: round(c.combinedLeverage, 4),
+    buildOnce: c.workflows.size >= 2, // build once, light up many workflows
+  })).sort((a, b) => b.combinedLeverage - a.combinedLeverage);
+  return { profile, confirmedCount: confirmed.length, capabilities,
+    note: confirmed.length ? null : "No confirmed units yet — confirm units to surface shared capabilities." };
+}
+
+// the four-eyes doer-roles vs approver-roles of a workflow (where SoD lives) — used by adjacency.
+function fourEyesRoles(rec) {
+  const doerRoles = new Set(), approverRoles = new Set();
+  (rec.steps || []).forEach(s => {
+    const c = s.control; if (!c || (c.type !== "four-eyes" && c.type !== "segregation")) return;
+    const d = stepPartActor(s, "doer"), a = stepPartActor(s, "approver");
+    if (d) doerRoles.add(resolveActor(d, rec).role);
+    if (a) approverRoles.add(resolveActor(a, rec).role);
+  });
+  return { doerRoles, approverRoles };
+}
+// F4 — adjacency: cluster confirmed workflows that share role / capability / data tier / hand-off; tag
+// each pair enabled or control-blocked (a combine that would break four-eyes/SoD or cross a data-tier
+// boundary), with the blocking reason. A single workflow => no clusters (no false adjacency).
+export function buildAdjacency(records, opts = {}) {
+  const confirmed = (Array.isArray(records) ? records : []).filter(isConfirmed);
+  if (confirmed.length < 2) {
+    return { clusters: [], confirmedCount: confirmed.length,
+      note: "Adjacency needs ≥2 confirmed workflows — thin at this breadth; it sharpens as the library grows." };
+  }
+  const meta = confirmed.map(rec => {
+    const rc = roleCapacityByActor(rec, opts.profile || "Conservative", opts);
+    return { rec, name: rec.header?.anchor || rec.header?.persona || "workflow",
+      roles: new Set(rc.roles.map(r => r.role)),
+      caps: new Set(buildCapabilityMap([rec], opts).capabilities.map(c => c.capability)),
+      tier: maxTier(rec) || "internal", handoffs: detectHandoffs(rec).map(h => `${h.fromRole}>${h.toRole}`),
+      fourEyes: fourEyesRoles(rec), freedHrs: rc.totalFreedHrs };
+  });
+  const inter = (a, b) => [...a].filter(x => b.has(x));
+  const clusters = [];
+  for (let i = 0; i < meta.length; i++) for (let j = i + 1; j < meta.length; j++) {
+    const A = meta[i], B = meta[j];
+    const sharedRoles = inter(A.roles, B.roles), sharedCaps = inter(A.caps, B.caps);
+    const sharedHandoffs = A.handoffs.filter(h => B.handoffs.includes(h));
+    if (!sharedRoles.length && !sharedCaps.length) continue; // not adjacent — no false cluster
+    let status = "enabled", reason = `shared ${sharedCaps.length ? `capability (${sharedCaps.join(", ")})` : `role (${sharedRoles.join(", ")})`} — build the capability once, reuse across both: a more capable, less fragmented team.`;
+    const rankA = TIER_RANK[A.tier] ?? 1, rankB = TIER_RANK[B.tier] ?? 1;
+    if (A.tier !== B.tier && Math.max(rankA, rankB) >= TIER_RANK.confidential) {
+      status = "control-blocked"; reason = `combining would cross a ${A.tier} ↔ ${B.tier} data boundary — raise the ceiling first (the control bounds the combine).`;
+    } else {
+      const sod = inter(A.fourEyes.doerRoles, B.fourEyes.approverRoles).concat(inter(A.fourEyes.approverRoles, B.fourEyes.doerRoles));
+      if (sod.length) { status = "control-blocked"; reason = `combining would break the four-eyes — ${sod[0]} can't be both maker and checker (separation of duties).`; }
+    }
+    clusters.push({ workflows: [A.name, B.name], sharedRoles, sharedCapabilities: sharedCaps, sharedHandoffs, status, reason, combinedFreedHrs: round(A.freedHrs + B.freedHrs, 3) });
+  }
+  clusters.sort((a, b) => b.combinedFreedHrs - a.combinedFreedHrs);
+  return { clusters, confirmedCount: confirmed.length,
+    note: clusters.length ? null : "No adjacency yet — these confirmed workflows don't share a role or capability." };
+}
+
+// =====================================================================
 // 6 · RAIL (Change 4) — surface-aware, deterministic, gating
 // =====================================================================
 export const RAIL = {
@@ -919,6 +1055,33 @@ function runTests() {
   ok("F3 the rail blocks an auto-resolve past a halt route", !controlRail({ ...RECON_INTAKE, steps: [{ ...RECON_INTAKE.steps[1], autoResolve: true }] }).ok, "");
   ok("F3 buildRecipe carries routes; the FP&A single-persona recipe stays linear (no routes)", buildRecipe(RECON_INTAKE).routes.length >= 3 && buildRecipe(FPA_INTAKE).routes.length === 0, "");
   ok("F3 unknown route kind is surfaced", !validateIntake({ ...RECON_INTAKE, routes: [{ kind: "onWhatever" }] }).ok, "");
+
+  // ---- Edition 3 \u00b7 F4 \u2014 derived leader layer: role \u00b7 capability \u00b7 adjacency ----
+  const RECON2 = { ...RECON_INTAKE, header: { ...RECON_INTAKE.header, anchor: "Payment investigations (SOP-0117)" } };
+  // role view \u2014 confirmed-only, freed per role across all the role's workflows, the assembly->judgment shift
+  const rv = buildRoleView([RECON_INTAKE, RECON2, { ...RECON_INTAKE, recap: { confirmed: false } }]);
+  ok("F4 role view is confirmed-only (drops the unconfirmed unit)", rv.confirmedCount === 2 && rv.skippedUnconfirmed === 1, `${rv.confirmedCount}/${rv.skippedUnconfirmed}`);
+  ok("F4 role view sums freed across both workflows (Ops Analyst = 2x single)", (() => { const one = roleCapacityByActor(RECON_INTAKE).roles.find(r => r.role === "Ops Analyst").freedHrs; const both = rv.roles.find(r => r.role === "Ops Analyst").freedHrs; return near(both, 2 * one, 0.01); })(), "");
+  ok("F4 role view reports freedFTE + the assembly->judgment shift, never headcount", (() => { const a = rv.roles.find(r => r.role === "Ops Analyst"); return a.freedFTE > 0 && /assembly .* judgment/.test(a.shift); })(), "");
+  // (the rail bans the literal "fte"/"headcount" everywhere — F8 renders freedFTE as a role-week, never the banned token)
+  ok("F4 leader capacity language passes the dashboard rail, fails on a worker surface", railCheck("freed capacity this quarter", "dashboard").ok && !railCheck("freed capacity this quarter", "workbench").ok, "");
+  ok("F4 the literal 'FTE' token is banned everywhere (so the render must phrase it as a role-week)", !railCheck("0.6 FTE freed", "dashboard").ok, "");
+  // capability map \u2014 group a shared assembly capability across >=2 workflows, ranked by leverage, build-once
+  const cm = buildCapabilityMap([RECON_INTAKE, RECON2]);
+  ok("F4 capability map groups a shared assembly capability across 2 workflows (buildOnce)", cm.capabilities.some(c => c.reuseCount === 2 && c.buildOnce), JSON.stringify(cm.capabilities.map(c => `${c.capability}:${c.reuseCount}`)));
+  ok("F4 capability map is ranked by combined leverage desc", cm.capabilities.every((c, i, a) => i === 0 || a[i - 1].combinedLeverage >= c.combinedLeverage), "");
+  // adjacency \u2014 single => none; shared => enabled; data boundary / SoD => control-blocked with a reason
+  ok("F4 a single workflow yields NO adjacency (no false clusters)", buildAdjacency([RECON_INTAKE]).clusters.length === 0, "");
+  ok("F4 thin adjacency returns a labeled placeholder", /needs \u22652 confirmed/.test(buildAdjacency([RECON_INTAKE]).note || ""), "");
+  ok("F4 two workflows sharing role/capability cluster as ENABLED", buildAdjacency([RECON_INTAKE, RECON2]).clusters.some(c => c.status === "enabled" && c.sharedCapabilities.length), "");
+  const PAY_MNPI = { ...RECON2, steps: RECON2.steps.map(s => ({ ...s, data: s.data === "confidential" ? "MNPI" : s.data })) };
+  ok("F4 a data-tier boundary combine is CONTROL-BLOCKED with a reason", buildAdjacency([RECON_INTAKE, PAY_MNPI]).clusters.some(c => c.status === "control-blocked" && /data boundary/.test(c.reason)), "");
+  const SOD = { ...RECON_INTAKE, header: { ...RECON_INTAKE.header, anchor: "QA second review (SOP-9)" }, steps: [
+    { step: "Allocate QA case", cls: "assembly", data: "internal", time: 20, theo: 80, participants: [{ actorId: "maker", part: "doer" }] },
+    { step: "QA approve", cls: "decision", data: "confidential", time: 10, theo: 10, participants: [{ actorId: "checker", part: "doer" }, { actorId: "opsManager", part: "approver" }], control: { type: "four-eyes", distinct: ["doer", "approver"] } },
+  ] };
+  ok("F4 a four-eyes/SoD collision is CONTROL-BLOCKED with a reason", buildAdjacency([RECON_INTAKE, SOD]).clusters.some(c => c.status === "control-blocked" && /four-eyes|separation of duties/.test(c.reason)), JSON.stringify(buildAdjacency([RECON_INTAKE, SOD]).clusters.map(c => `${c.status}:${c.reason}`)));
+  ok("F4 the derived layer never emits headcount/cut vocabulary", [JSON.stringify(rv), JSON.stringify(cm), JSON.stringify(buildAdjacency([RECON_INTAKE, PAY_MNPI]))].every(s => !/headcount|cut staff|lay ?off|eliminate role|reduce role/i.test(s)), "");
 
   console.log(`\n${fail === 0 ? "\u2713 ALL PASS" : "\u2717 FAILURES"} \u2014 ${pass} passed, ${fail} failed`);
   return fail === 0;

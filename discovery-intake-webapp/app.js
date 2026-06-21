@@ -7556,6 +7556,14 @@ function engineResolveApprover(ref, value, opts = {}) { const E = studioEngine()
 // happy-path cycleTime is unchanged. null when the engine isn't loaded (typeof-guarded, additive).
 function engineWorkflowRoutes(opts = {}) { const E = studioEngine(); if (!E || typeof E.deriveRoutes !== "function") return null; return E.deriveRoutes(opts.record || appWorkflowToIntake(opts)); }
 
+// E3/F4 — the DERIVED leader layer over CONFIRMED multi-actor workflows (no new schema): freed capacity
+// per role (+ the assembly->judgment shift), the shared-capability map (build once / reuse N), and
+// adjacency clusters (enabled | control-blocked + reason). Confirmed-only, capacity/operating-model
+// language. The math lives ONLY in the engine; each returns null when the engine isn't loaded.
+function engineRoleView(records, opts = {}) { const E = studioEngine(); if (!E || typeof E.buildRoleView !== "function") return null; return E.buildRoleView(records, opts); }
+function engineCapabilityMap(records, opts = {}) { const E = studioEngine(); if (!E || typeof E.buildCapabilityMap !== "function") return null; return E.buildCapabilityMap(records, opts); }
+function engineAdjacency(records, opts = {}) { const E = studioEngine(); if (!E || typeof E.buildAdjacency !== "function") return null; return E.buildAdjacency(records, opts); }
+
 // E2 — the spec's 7th field. The engine decides model-fit (permitted tier per class + data-tier
 // residency: PII/MNPI force a restricted/in-VPC pricing tier; confidential routes at its normal
 // class tier) and the cost-to-serve band. Returns the engine's modelFit prov triple (or
