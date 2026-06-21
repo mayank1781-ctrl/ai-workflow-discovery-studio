@@ -62,6 +62,22 @@ export const CONFIG = {
 
   cost: { avgTaskMin: 20, baseInTokens: 8000, baseOutTokens: 1500, agenticMultiplier: 6, retryFactor: 1.3 },
 
+  // A1 (M4) — per-SHAPE cost + proof profile. The v3 model applies ONE global agentic multiplier to
+  // every run; a prompt-only step and a multi-tool agentic loop look identical but differ radically in
+  // cost / eval effort / controls / readiness. `loop`/`retry` REPLACE the global cost.agenticMultiplier
+  // / retryFactor *only when a step carries an explicit solutionShape*; an absent shape keeps the global
+  // multipliers, so every existing number is byte-identical. `agentic` reproduces the global (6× · 1.3×)
+  // exactly, so an all-agentic workflow equals today's numbers. prompt / deterministic-tool do NOT apply
+  // the loop multiplier (the cornerstone distinction). evalEffort / needs* / controlEvidence drive the
+  // recipe's proof requirements (B3), the eval-evidence readiness gate, and the control-evidence ask.
+  shapeProfiles: {
+    "prompt":             { loop: 1,   retry: 1.0, evalEffort: "light",    needsHarness: false, needsObservability: false, needsRollback: false, controlEvidence: "low" },
+    "rag":                { loop: 1.5, retry: 1.1, evalEffort: "standard", needsHarness: true,  needsObservability: false, needsRollback: false, controlEvidence: "medium" },
+    "deterministic-tool": { loop: 1,   retry: 1.0, evalEffort: "light",    needsHarness: false, needsObservability: true,  needsRollback: true,  controlEvidence: "medium" },
+    "agentic":            { loop: 6,   retry: 1.3, evalEffort: "heavy",    needsHarness: true,  needsObservability: true,  needsRollback: true,  controlEvidence: "high" },
+    "human-in-loop":      { loop: 1,   retry: 1.0, evalEffort: "standard", needsHarness: false, needsObservability: false, needsRollback: false, controlEvidence: "high" },
+  },
+
   flow: { assemblyTouchReduction: 0.18, reducibleWaitReduction: 0.30, decisionLeadReduction: 0.12, workdayHours: 8 },
 
   econMarginPerYr: 0, // netValue <= this at the permitted tier => gated-economics
@@ -80,6 +96,14 @@ const CAPABILITY_TAGS = ["classify-and-route", "extract-and-map", "reconcile-two
 const LEVELS = ["low", "medium", "high"];
 const RESTRICTED_TIERS = ["confidential", "PII", "MNPI"]; // narrative: stays on approved / in-VPC models
 const RESIDENCY_FORCE = ["PII", "MNPI"];                   // forces a restricted (approved) PRICING tier; confidential routes normally
+
+// A1 (M4) — the SOLUTION-SHAPE axis: the five ways AI can carry a step. This is a SECOND axis,
+// orthogonal to step class (assembly/judgment/decision). Class says "how human is the work";
+// shape says "what kind of AI build it is" — and the two differ radically in cost, eval effort,
+// controls, and readiness. Absent on a step => the engine behaves exactly as before (byte-identical).
+// An unknown value is SURFACED at intake (enum integrity), never silently coerced — same discipline
+// as class / tier / part / capability.
+export const SOLUTION_SHAPES = ["prompt", "rag", "deterministic-tool", "agentic", "human-in-loop"];
 
 // Edition 3 (F1) — identity is separate from the part played. PARTS = the part an actor plays in a
 // step (≈ RACI + approver/escalation-target); doer = the performer (a hand-off = where it changes).
@@ -165,6 +189,9 @@ export function validateIntake(rawRecord) {
     // m1 — a step's capability tag (when present) must resolve to the controlled vocabulary; an
     // unresolved / typo'd tag is surfaced here, never silently accepted (it would break clustering).
     if (s.capability && !CAPABILITY_TAGS.includes(s.capability)) errors.push(`step ${i + 1}: unresolved capability tag "${s.capability}" (not in the controlled vocabulary)`);
+    // A1 — a step's solution shape (when present) must resolve to the controlled vocabulary; an
+    // unknown shape is surfaced here, never silently accepted (it would mis-price cost-to-serve).
+    if (s.solutionShape && !SOLUTION_SHAPES.includes(s.solutionShape)) errors.push(`step ${i + 1}: unknown solution shape "${s.solutionShape}" (not in ${SOLUTION_SHAPES.join("|")})`);
     if (s.volume != null && (typeof s.volume !== "number" || !Number.isFinite(s.volume) || s.volume < 0)) errors.push(`step ${i + 1}: volume "${s.volume}" is not a valid non-negative number`);
   });
   (record.seams || []).forEach((s, i) => ["friction", "latency", "crit"].forEach(k => {
@@ -291,9 +318,17 @@ export function modelTier(stepClass, dataTier, mode = "routed", policyException 
   if (RESIDENCY_FORCE.includes(dataTier) && !validPolicyException(policyException, dataTier)) tier = "restricted";
   return tier;
 }
-function costPerRun(tier, c = CONFIG.cost) {
-  const inE = c.baseInTokens * c.agenticMultiplier * c.retryFactor;
-  const outE = c.baseOutTokens * c.agenticMultiplier * c.retryFactor;
+// A1 — cost per run is SHAPE-DRIVEN. The loop multiplier and retry factor come from the step's
+// solution shape (agentic re-sends context in a loop → 6×; prompt / deterministic-tool do not →
+// 1×). An ABSENT shape falls back to the global cost.agenticMultiplier / retryFactor, so an
+// unshaped step is priced byte-identically to before. A shape not in the profile table also falls
+// back to the global (safe). `agentic` is calibrated to equal the global (6× · 1.3×).
+function costPerRun(tier, c = CONFIG.cost, shape) {
+  const sp = shape != null ? CONFIG.shapeProfiles[shape] : null;
+  const loop = sp ? sp.loop : c.agenticMultiplier;
+  const retry = sp ? sp.retry : c.retryFactor;
+  const inE = c.baseInTokens * loop * retry;
+  const outE = c.baseOutTokens * loop * retry;
   const p = CONFIG.tierPrice[tier] || CONFIG.tierPrice.mid;
   return (inE * p[0] + outE * p[1]) / 1e6;
 }
@@ -306,9 +341,41 @@ export function costToServe(steps, profile, mode = "routed", opts = {}) {
   const aiPermHrs = sum(permHrsByStep.map(x => x.hrs));
   if (aiPermHrs <= 0) return { runsPerYr: 0, blendedCostPerRun: 0, annual: 0 };
   const runsPerYr = aiPermHrs * 60 / c.avgTaskMin * W;
-  const blended = sum(permHrsByStep.map(({ s, hrs }) =>
-    hrs * costPerRun(modelTier(s.cls, s.data, mode, opts.policyException), c))) / aiPermHrs;
+  const blended = sum(permHrsByStep.map(({ s, hrs }) =>           // A1 — thread each step's shape into its per-run cost
+    hrs * costPerRun(modelTier(s.cls, s.data, mode, opts.policyException), c, s.solutionShape))) / aiPermHrs;
   return { runsPerYr, blendedCostPerRun: blended, annual: runsPerYr * blended };
+}
+
+// A1 — the proof / control requirements a solution shape carries. An agentic flow needs an eval
+// harness, run observability, and a rollback path before it is trustworthy; a prompt does not.
+// Drives the recipe's "how you prove it" (B3), the eval-evidence readiness gate, and the control
+// ask. Unknown / absent shape => a conservative middle (standard eval effort, no hard requirements).
+export function shapeRequirements(shape) {
+  const sp = (shape != null && CONFIG.shapeProfiles[shape]) || null;
+  if (!sp) return { shape: shape || null, evalEffort: "standard", needsHarness: false, needsObservability: false, needsRollback: false, controlEvidence: "medium", requiredEvidence: [] };
+  const req = [];
+  if (sp.needsHarness) req.push("eval harness (golden set + thresholds)");
+  if (sp.needsObservability) req.push("run observability / logging");
+  if (sp.needsRollback) req.push("rollback / fallback path");
+  if (sp.controlEvidence === "high") req.push("control evidence (owner, halts, four-eyes)");
+  return { shape, evalEffort: sp.evalEffort, needsHarness: sp.needsHarness, needsObservability: sp.needsObservability, needsRollback: sp.needsRollback, controlEvidence: sp.controlEvidence, requiredEvidence: req };
+}
+
+// A1 — roll the per-step shapes of a workflow into a profile: which shapes appear, the heaviest
+// eval effort any shaped step demands, and the union of required evidence. INERT when no step
+// carries a shape (shaped:0, empty maps/lists) so an unshaped workflow's outputs are byte-identical.
+const SHAPE_EFFORT_RANK = { none: 0, light: 1, standard: 2, heavy: 3 };
+export function buildShapeProfile(steps) {
+  const list = (Array.isArray(steps) ? steps : []).filter(s => s && s.solutionShape);
+  const byShape = {};
+  list.forEach(s => { byShape[s.solutionShape] = (byShape[s.solutionShape] || 0) + 1; });
+  let maxEvalEffort = "none"; const evidence = new Set();
+  list.forEach(s => {
+    const rq = shapeRequirements(s.solutionShape);
+    if ((SHAPE_EFFORT_RANK[rq.evalEffort] ?? 0) > (SHAPE_EFFORT_RANK[maxEvalEffort] ?? 0)) maxEvalEffort = rq.evalEffort;
+    rq.requiredEvidence.forEach(e => evidence.add(e));
+  });
+  return { shaped: list.length, byShape, maxEvalEffort, requiredEvidence: [...evidence], hasAgentic: !!byShape.agentic };
 }
 
 export const netValue = (grossValue, annualCost) => grossValue - annualCost;
@@ -359,7 +426,13 @@ export function readinessGates(unit = {}) {
       : GATE("ok", "realization within range");
   })();
 
-  const evidence = u.evidenceInferred === true
+  // A1 — solution shape can move a unit to EVIDENCE-gated: an agentic / RAG flow needs an eval
+  // harness, observability, and a rollback path that a prompt does not. If the shape demands
+  // evidence the unit hasn't supplied, the evidence gate blocks (independent of the value provenance).
+  const shapeMissing = Array.isArray(u.shapeEvidenceMissing) ? u.shapeEvidenceMissing.filter(Boolean) : [];
+  const evidence = shapeMissing.length
+    ? GATE("blocked", `the ${u.solutionShape || "chosen"} solution shape needs evidence not yet supplied: ${shapeMissing.join("; ")}`)
+    : u.evidenceInferred === true
     ? GATE("blocked", "the headline values are all inferred — capture at least one stated value")
     : u.evidenceLow === true ? GATE("caution", "thin provenance — confirm the key values")
     : (u.evidenceInferred === false || u.evidenceConfirmed === true) ? GATE("ok", "key values are stated / confirmed")
@@ -624,14 +697,33 @@ export function buildDraftSpec(record, opts = {}) {
   const cap = roleCapacity(r.steps, profile, opts);
   const cost = costToServe(r.steps, profile, mode, opts);
   const ctrl = controlRail(r);
+  // A1 \u2014 solution-shape profile across the AI-addressable steps + the evidence the shape demands but
+  // the record hasn't supplied (an agentic flow needs an eval harness / observability / rollback a
+  // prompt doesn't). INERT when no step is shaped, so the spec is byte-identical for today's records.
+  const shapeProf = buildShapeProfile(aiSteps);
+  const evidenced = new Set();
+  if ((r.confirm?.evals || "").trim()) evidenced.add("eval harness (golden set + thresholds)");
+  if ((r.steps || []).some(s => s.control && s.control.type)) evidenced.add("control evidence (owner, halts, four-eyes)");
+  const shapeEvidenceMissing = shapeProf.requiredEvidence.filter(e => !evidenced.has(e));
   const rd = readiness({ theoPct: cap.theoPct, permittedPct: cap.permittedPct, grossValue: cap.grossValue, annualCost: cost.annual, tier: aiTiers.join("/"),
     dataTier: aiMaxTier || maxTier(r), controlOk: ctrl.ok, controlViolations: ctrl.violations,
-    freedHrs: cap.freedHrs, realizationGapHrs: cap.realizationGapHrs, evidenceInferred: provenanceBlockers(record).length > 0 });
+    freedHrs: cap.freedHrs, realizationGapHrs: cap.realizationGapHrs, evidenceInferred: provenanceBlockers(record).length > 0,
+    shapeEvidenceMissing, solutionShape: shapeProf.hasAgentic ? "agentic" : (Object.keys(shapeProf.byShape)[0] || null) });
 
   let constraints = `${tiers ? tiers + " tier" : "data tier \u2014"}; draft-only up to human review${tools.length ? `; allowed tools: ${tools.join(", ")}` : ""}.`;
   if (sensitive(r)) constraints += " Sensitive data stays on approved / in-VPC models (no external egress).";
 
+  // A1 \u2014 attach the shape fields ONLY when at least one step is shaped (empty spread otherwise => the
+  // returned object is byte-identical to the pre-A1 spec for every existing record).
+  const shapeFields = shapeProf.shaped > 0 ? {
+    solutionShapes: prov(Object.entries(shapeProf.byShape).map(([k, v]) => `${k}\u00d7${v}`).join(", "), "stated"),
+    shapeEvalEffort: prov(shapeProf.maxEvalEffort, "inferred"),
+    shapeProof: prov(shapeProf.requiredEvidence.join("; ") || "no additional shape evidence required", "inferred"),
+    _shapeProfile: shapeProf, _shapeEvidenceMissing: shapeEvidenceMissing,
+  } : {};
+
   return {
+    ...shapeFields,
     goal: prov(lastDeliv.output ? `${art} ${lastDeliv.output}${lastDeliv.consumer ? ` delivered to ${lastDeliv.consumer}` : ""}.` : "\u2014", "inferred"),
     context: prov(`${dash(r.trigger?.trigger)}${inputs.length ? `; inputs: ${inputs.join(", ")}` : ""}${tools.length ? `; tools: ${tools.join(", ")}` : ""}${r.trigger?.cadence ? `; cadence ${r.trigger.cadence}` : ""}.`, "inferred"),
     constraints: prov(constraints, "inferred"),
@@ -696,6 +788,9 @@ export function buildDraftRecipe(record, opts = {}) {
             ? `Human decision: ${s.step}. AI prepares the lead-up only; the call stays with the person.`
             : `Human judgment: ${s.step}. AI surfaces options/evidence; the person decides.`,
         };
+    // A1 \u2014 thread the solution shape onto the build step when captured (absent => field omitted =>
+    // byte-identical). Lets the recipe surface "prompt vs agentic" and B3 attach per-shape proof.
+    if (s.solutionShape) base.solutionShape = s.solutionShape;
     // ADDITIVE \u2014 a single-actor, control-free step renders byte-identically (no doer/control fields).
     if (!Array.isArray(s.participants) && !s.control) return base;
     const out = { ...base, doer: (() => { const id = stepDoerId(s, r), a = resolveActor(id, r); return { actorId: id, role: a.role, line: a.line }; })() };
@@ -711,13 +806,20 @@ export function buildDraftRecipe(record, opts = {}) {
   });
 
   // ranked addressable units by leverage = permitted fraction x time weight
-  const ranked = asm(r.steps).map(s => ({
-    step: s.step, tier: modelTier(s.cls, s.data, mode, opts.policyException),
-    leverage: round(stepPermitted(s, profile) * (s.time / totT), 4),
-  })).sort((a, b) => b.leverage - a.leverage);
+  const ranked = asm(r.steps).map(s => {
+    const u = { step: s.step, tier: modelTier(s.cls, s.data, mode, opts.policyException),
+      leverage: round(stepPermitted(s, profile) * (s.time / totT), 4) };
+    if (s.solutionShape) u.solutionShape = s.solutionShape; // A1 \u2014 carried when captured (else omitted => byte-identical)
+    return u;
+  }).sort((a, b) => b.leverage - a.leverage);
+
+  // A1 \u2014 workflow-level shape profile (INERT when no step is shaped, so the recipe object is
+  // byte-identical for today's records: the field is only added when shaped > 0).
+  const shapeProf = buildShapeProfile(r.steps);
 
   return { title: prov(`AI solution \u2014 ${dash(r.header?.persona)} / ${dash(r.header?.anchor)}`, "inferred"),
     origin: opts.origin || "generation", orderedSteps: ordered, rankedUnits: ranked,
+    ...(shapeProf.shaped > 0 ? { shapeProfile: shapeProf } : {}),
     // F1/F2/F3 \u2014 multi-actor overlays (empty/inert for a single-persona, linear, control-free workflow).
     handoffs: detectHandoffs(r), controls: r.steps.filter(s => s.control && s.control.type).map(s => ({ step: s.step, type: s.control.type })),
     routes: deriveRoutes(r), rail: controlRail(r), draft: true };
@@ -764,7 +866,8 @@ export function buildLeaderView(records, opts = {}) {
     const rd = readiness({ theoPct: cap.theoPct, permittedPct: cap.permittedPct, grossValue: cap.grossValue, annualCost: routed });
     return { gross: cap.grossValue, routed, frontier, netRouted: cap.grossValue - routed, netFrontier: cap.grossValue - frontier,
       theoHrs: cap.theoHrs, permittedHrs: cap.permittedHrs, freedHrs: cap.freedHrs, realizedHrs: cap.realizedHrs,
-      policyGapHrs: cap.policyGapHrs, realizationGapHrs: cap.realizationGapHrs, flow, readiness: rd.state };
+      policyGapHrs: cap.policyGapHrs, realizationGapHrs: cap.realizationGapHrs, flow, readiness: rd.state,
+      shape: buildShapeProfile(nr.steps) }; // A1 — per-unit solution-shape profile (inert when unshaped)
   });
   const S = k => sum(units.map(u => u[k]));
   const Spos = k => sum(units.map(u => Math.max(0, u[k]))); // deployable: net<=0 (economics-gated) contributes 0, flagged separately
@@ -781,6 +884,9 @@ export function buildLeaderView(records, opts = {}) {
       chain: { theoHrs: sumD("theoHrs"), permittedHrs: sumD("permittedHrs"), freedHrs: sumD("freedHrs"), realizedHrs: sumD("realizedHrs") } },
     gated: { count: gated.length, gross: round(sum(gated.map(u => u.gross))), cost: round(sum(gated.map(u => u.routed))) },
     flowSample: dep[0]?.flow || units[0]?.flow || null, // a representative confirmed workflow for the cycle-time view
+    // A1 — solution-shape mix across confirmed units (the dashboard slices on this; C1 wires the control).
+    // Empty {} when no unit is shaped, so an unshaped department reads exactly as before.
+    shapeMix: units.reduce((m, u) => { Object.entries(u.shape.byShape).forEach(([k, v]) => { m[k] = (m[k] || 0) + v; }); return m; }, {}),
   };
 
   return {
@@ -1357,6 +1463,33 @@ function runTests() {
   ok("net-negative -> gated-economics", readiness({ theoPct: .5, permittedPct: .5, grossValue: 1000, annualCost: 4000 }).state === "gated-economics", "");
   ok("policy-capped -> gated-policy", readiness({ theoPct: .8, permittedPct: .4, grossValue: 50000, annualCost: 200 }).state === "gated-policy", "");
   ok("clean -> now", readiness({ theoPct: .5, permittedPct: .5, grossValue: 50000, annualCost: 200 }).state === "now", "");
+
+  // A1 — SOLUTION SHAPE drives cost / eval / readiness; absent shape is byte-identical
+  {
+    const oneStep = (shape) => [{ step: "Reconcile two feeds", cls: "assembly", data: "internal", time: 100, theo: 80, ...(shape ? { solutionShape: shape } : {}) }];
+    const cPrompt = costToServe(normalizeIntake({ steps: oneStep("prompt") }).steps, "Conservative", "routed").annual;
+    const cAgentic = costToServe(normalizeIntake({ steps: oneStep("agentic") }).steps, "Conservative", "routed").annual;
+    const cAbsent = costToServe(normalizeIntake({ steps: oneStep(null) }).steps, "Conservative", "routed").annual;
+    ok("A1 prompt much cheaper than agentic", cAgentic > cPrompt * 5, `${round(cAgentic)} vs ${round(cPrompt)}`);
+    ok("A1 absent == agentic (global multiplier preserved)", near(cAbsent, cAgentic, 0.01), `${round(cAbsent, 2)} vs ${round(cAgentic, 2)}`);
+    ok("A1 deterministic-tool skips the loop multiplier", near(costToServe(normalizeIntake({ steps: oneStep("deterministic-tool") }).steps, "Conservative", "routed").annual, cPrompt, 0.01), "");
+    // eval / evidence requirement differs by shape
+    ok("A1 agentic demands an eval harness; prompt does not", shapeRequirements("agentic").requiredEvidence.length > 0 && shapeRequirements("prompt").requiredEvidence.length === 0, "");
+    ok("A1 agentic eval effort heavier than prompt", SHAPE_EFFORT_RANK[shapeRequirements("agentic").evalEffort] > SHAPE_EFFORT_RANK[shapeRequirements("prompt").evalEffort], "");
+    // readiness moves to evidence-gated when an agentic shape's evidence is missing
+    const gAgentic = readinessGates({ theoPct: .5, permittedPct: .5, grossValue: 50000, annualCost: 200, shapeEvidenceMissing: ["eval harness (golden set + thresholds)"], solutionShape: "agentic" });
+    ok("A1 missing shape evidence -> evidence gate blocked", gAgentic.gates.evidence.status === "blocked" && gAgentic.blocked.includes("evidence"), gAgentic.gates.evidence.status);
+    // schema: unknown shape surfaced, valid shape accepted, absent unchanged
+    ok("A1 unknown shape flagged", !validateIntake({ ...FPA_INTAKE, steps: [{ step: "x", cls: "assembly", data: "internal", solutionShape: "magic" }] }).ok, "");
+    ok("A1 valid shape accepted", validateIntake({ ...FPA_INTAKE, steps: FPA_INTAKE.steps.map((s, i) => i === 0 ? { ...s, solutionShape: "agentic" } : s) }).ok, "");
+    // byte-identical guarantee: an unshaped spec/recipe carries no shape fields
+    ok("A1 unshaped spec has no shapeProfile", buildDraftSpec(FPA_INTAKE)._shapeProfile === undefined, "");
+    ok("A1 unshaped recipe has no shapeProfile", buildDraftRecipe(FPA_INTAKE).shapeProfile === undefined, "");
+    ok("A1 shaped recipe carries the shape on its ranked unit", (() => {
+      const rec = buildDraftRecipe({ ...FPA_INTAKE, steps: FPA_INTAKE.steps.map((s, i) => i === 0 ? { ...s, solutionShape: "agentic" } : s) });
+      return rec.shapeProfile && rec.shapeProfile.hasAgentic && rec.rankedUnits.some(u => u.solutionShape === "agentic");
+    })(), "");
+  }
 
   // flow — reproduce 8d4h -> 7d2h, ~89% from wait
   const f = cycleTime(normalizeIntake(FPA_INTAKE).steps);
