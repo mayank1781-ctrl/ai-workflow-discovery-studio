@@ -78,6 +78,10 @@ const RESIDENCY_FORCE = ["PII", "MNPI"];                   // forces a restricte
 // LINES = the line-of-defence on a firm-level actor identity. Both used for enum-integrity surfacing.
 export const PARTS = ["doer", "accountable", "reviewer", "approver", "collaborator", "escalation-target", "informed"];
 export const LINES = ["1LoD", "2LoD", "3LoD", "—"];
+// Edition 3 (F2) — a step/hand-off control makes a "decision" graduated & structural. four-eyes /
+// segregation name two parts that MUST be different actors; authority references a sharedRules ladder;
+// halt-on-flag halts and routes to a human escalation-target with a negativeConstraint.
+export const CONTROL_TYPES = ["four-eyes", "segregation", "authority", "completeness", "halt-on-flag"];
 
 const prov = (value, source = "inferred", confidence = "medium") => ({ value, source, confidence });
 const round = (n, d = 0) => { const f = 10 ** d; return Math.round(n * f) / f; };
@@ -116,6 +120,8 @@ export function validateIntake(record) {
     (s.participants || []).forEach((p, j) => {
       if (p && p.part && !PARTS.includes(p.part)) errors.push(`step ${i + 1} participant ${j + 1}: unknown part "${p.part}" (Edition 3)`);
     });
+    // Edition 3 (F2) — a step control must be a known control type, when present.
+    if (s.control && s.control.type && !CONTROL_TYPES.includes(s.control.type)) errors.push(`step ${i + 1}: unknown control type "${s.control.type}" (Edition 3)`);
   });
   (record.seams || []).forEach((s, i) => ["friction", "latency", "crit"].forEach(k => {
     if (s[k] && !LEVELS.includes(s[k])) errors.push(`seam ${i + 1}: ${k} "${s[k]}" not in low|medium|high`);
@@ -349,6 +355,36 @@ export function roleCapacityByActor(record, profile = "Conservative", opts = {})
   return { profile, roles, handoffs: detectHandoffs(r), totalFreedHrs: round(sum(roles.map(x => x.freedHrs)), 4) };
 }
 
+// F2 — shared rules are written ONCE in workflow.sharedRules and REFERENCED by controls (never copied).
+export function sharedRule(record, id) {
+  return ((record && Array.isArray(record.sharedRules)) ? record.sharedRules : []).find(r => r && r.id === id) || null;
+}
+// F2 — resolve the approver for an authority-gated step from the value-banded ladder. Bands are read
+// in order; the first band whose ceiling (maxValue, null = no ceiling) covers the item's value wins.
+// Returns { approver, band } or null when the rule/bands are missing (surfaced, never assumed).
+export function resolveAuthorityApprover(record, ref, value) {
+  const rule = sharedRule(record, ref);
+  if (!rule || !Array.isArray(rule.bands) || !rule.bands.length) return null;
+  const v = Number(value);
+  for (const b of rule.bands) {
+    if (b.maxValue == null || (Number.isFinite(v) && v <= b.maxValue)) return { approver: b.approver, band: b };
+  }
+  const last = rule.bands[rule.bands.length - 1];
+  return { approver: last.approver, band: last };
+}
+// F2 — the actorId playing a given part on a step (null if no one plays it). Used by the control rail.
+export function stepPartActor(step, part) {
+  const p = ((step && Array.isArray(step.participants)) ? step.participants : []).find(pp => pp && pp.part === part);
+  return p ? p.actorId : null;
+}
+// F2 — is this actor a non-human (system / AI) performer? A registered actor with a human line-of-
+// defence is human; an id prefixed system/ai/bot, or a registry entry kind:"system"/line:"system", is not.
+function isNonHumanActor(actorId, record) {
+  if (/^(system|ai|bot)[:_-]?/i.test(String(actorId || ""))) return true;
+  const a = ((record && Array.isArray(record.actors)) ? record.actors : []).find(x => x && x.id === actorId);
+  return !!(a && (a.kind === "system" || a.line === "system"));
+}
+
 // =====================================================================
 // 3 · SPEC CANVAS (Generator B) — deterministic assembly, per workflow unit
 // =====================================================================
@@ -407,6 +443,21 @@ export function buildSpec(record, opts = {}) {
 // =====================================================================
 // 4 · RECIPE — the AI solution / step-by-step instructions
 // =====================================================================
+// F2 \u2014 project a step's control onto the recipe (resolving the referenced authority ladder + the
+// escalation-target's role), so the build artifact can render the gate inline (F7). Pure.
+function recipeControl(step, record) {
+  const c = step && step.control; if (!c || !c.type) return undefined;
+  const out = { type: c.type };
+  if (c.distinct) out.distinct = c.distinct;
+  if (c.note || c.rule) out.note = c.note || c.rule;
+  if (c.on) out.on = c.on;
+  if (c.escalateTo) { out.escalateTo = c.escalateTo; out.escalateToRole = resolveActor(c.escalateTo, record).role; }
+  if (c.negativeConstraint) out.negativeConstraint = c.negativeConstraint;
+  const ref = c.authorityRef || c.uses;
+  if (ref) { out.authorityRef = ref; const rule = sharedRule(record, ref); if (rule) out.authority = rule; }
+  return out;
+}
+
 export function buildRecipe(record, opts = {}) {
   const r = normalizeIntake(record);
   const profile = opts.profile || "Conservative", mode = opts.mode || "routed";
@@ -414,19 +465,24 @@ export function buildRecipe(record, opts = {}) {
 
   // ordered build steps: assembly -> an AI instruction at its tier; judgment/decision -> a human checkpoint
   const ordered = r.steps.map(s => {
-    if (s.cls === "assembly") {
-      return {
-        kind: "ai-step", step: s.step, tier: modelTier(s.cls, s.data, mode, opts.policyAllowsExternal),
-        action: `Assemble: ${dash(s.output) === "\u2014" ? s.step : dash(s.output)} from ${dash(s.inputs)} using ${dash(s.tool)}.`,
-        guardrail: r.confirm?.acceptance ? `Check against acceptance: ${r.confirm.acceptance}` : "Check against stated acceptance.",
-      };
-    }
-    return {
-      kind: "human-checkpoint", step: s.step, cls: s.cls,
-      action: s.cls === "decision"
-        ? `Human decision: ${s.step}. AI prepares the lead-up only; the call stays with the person.`
-        : `Human judgment: ${s.step}. AI surfaces options/evidence; the person decides.`,
-    };
+    const base = (s.cls === "assembly")
+      ? {
+          kind: "ai-step", step: s.step, tier: modelTier(s.cls, s.data, mode, opts.policyAllowsExternal),
+          action: `Assemble: ${dash(s.output) === "\u2014" ? s.step : dash(s.output)} from ${dash(s.inputs)} using ${dash(s.tool)}.`,
+          guardrail: r.confirm?.acceptance ? `Check against acceptance: ${r.confirm.acceptance}` : "Check against stated acceptance.",
+        }
+      : {
+          kind: "human-checkpoint", step: s.step, cls: s.cls,
+          action: s.cls === "decision"
+            ? `Human decision: ${s.step}. AI prepares the lead-up only; the call stays with the person.`
+            : `Human judgment: ${s.step}. AI surfaces options/evidence; the person decides.`,
+        };
+    // ADDITIVE \u2014 a single-actor, control-free step renders byte-identically (no doer/control fields).
+    if (!Array.isArray(s.participants) && !s.control) return base;
+    const out = { ...base, doer: (() => { const id = stepDoerId(s, r), a = resolveActor(id, r); return { actorId: id, role: a.role, line: a.line }; })() };
+    if (Array.isArray(s.participants)) out.participants = stepParticipants(s, r).map(p => ({ actorId: p.actorId, part: p.part, role: resolveActor(p.actorId, r).role }));
+    const control = recipeControl(s, r); if (control) out.control = control;
+    return out;
   });
 
   // high-criticality seams force an explicit checkpoint note
@@ -442,7 +498,9 @@ export function buildRecipe(record, opts = {}) {
   })).sort((a, b) => b.leverage - a.leverage);
 
   return { title: prov(`AI solution \u2014 ${dash(r.header?.persona)} / ${dash(r.header?.anchor)}`, "inferred"),
-    origin: opts.origin || "generation", orderedSteps: ordered, rankedUnits: ranked };
+    origin: opts.origin || "generation", orderedSteps: ordered, rankedUnits: ranked,
+    // F1/F2 \u2014 multi-actor overlays (empty/inert for a single-persona, control-free workflow).
+    handoffs: detectHandoffs(r), controls: r.steps.filter(s => s.control && s.control.type).map(s => ({ step: s.step, type: s.control.type })), rail: controlRail(r) };
 }
 
 // =====================================================================
@@ -532,12 +590,60 @@ export const RAIL = {
   leverage: ["leverage"],
 };
 export function railCheck(text, surface) {
+  // Edition 3 (F2) — ONE rail, two modes. Passed a record (an object with steps), railCheck runs the
+  // CONTROL-AWARE structural gating checks; passed a string, it runs the surface-aware vocabulary rail
+  // exactly as before (byte-identical — a string never has .steps).
+  if (text && typeof text === "object" && Array.isArray(text.steps)) return controlRail(text, surface);
   const t = String(text || "").toLowerCase(), v = [];
   RAIL.banned.forEach(w => { if (t.includes(w)) v.push({ term: w, rule: "banned-everywhere" }); });
   if (surface !== "dashboard") RAIL.capacityFamily.forEach(w => { if (new RegExp(`\\b${w}\\b`).test(t)) v.push({ term: w, rule: "capacity-dashboard-only" }); });
   if (!["recipe", "dashboard"].includes(surface)) RAIL.costFamily.forEach(w => { if (t.includes(w)) v.push({ term: w, rule: "cost-recipe+dashboard-only" }); });
   if (surface === "capture") RAIL.leverage.forEach(w => { if (new RegExp(`\\b${w}\\b`).test(t)) v.push({ term: w, rule: "leverage-not-on-capture" }); });
   return { ok: v.length === 0, violations: v };
+}
+
+// F2 — the CONTROL-AWARE rail: deterministic, gating, control-aware checks over a record. One place,
+// same authority as the vocabulary rail. Turns the eval set's conservative defaults into HARD rules:
+//   (1) four-eyes / segregation — the two named parts must be two DIFFERENT actors, and an AI/system
+//       actor may never be both doer and approver (no self-approval);
+//   (2) authority — the step must name a HUMAN approver, and its referenced ladder must exist;
+//   (3) halt-on-flag — must route to a HUMAN escalation-target, carry a negativeConstraint, and may
+//       NEVER be auto-resolved by AI.
+// Additive: a record with no controls has nothing to check => ok (a control-free workflow as today).
+export function controlRail(record, opts = {}) {
+  const r = record || {};
+  const steps = Array.isArray(r.steps) ? r.steps : [];
+  const v = [];
+  steps.forEach((s, i) => {
+    const c = s && s.control; if (!c || !c.type) return;
+    const label = (s && s.step) || `step ${i + 1}`;
+    if (c.type === "four-eyes" || c.type === "segregation") {
+      const parts = (Array.isArray(c.distinct) && c.distinct.length === 2) ? c.distinct : ["doer", "approver"];
+      const a = stepPartActor(s, parts[0]), b = stepPartActor(s, parts[1]);
+      if (!a || !b) v.push({ step: label, rule: "four-eyes-named", detail: `${c.type} needs both "${parts[0]}" and "${parts[1]}" named on the step` });
+      else if (a === b) v.push({ step: label, rule: "four-eyes-distinct", detail: `"${parts[0]}" and "${parts[1]}" are the same actor (${a}); ${c.type} requires two different actors` });
+      else {
+        // an AI/system actor may never be both doer and approver (no self-approval)
+        const doer = stepPartActor(s, "doer"), appr = stepPartActor(s, "approver");
+        if (doer && appr && doer === appr && isNonHumanActor(doer, r)) v.push({ step: label, rule: "ai-no-self-approve", detail: "an AI/system actor cannot be both doer and approver in a four-eyes control" });
+        if (appr && isNonHumanActor(appr, r)) v.push({ step: label, rule: "approver-must-be-human", detail: `the approver (${appr}) must be a human, not an AI/system actor` });
+      }
+    }
+    if (c.type === "authority" || c.authorityRef) {
+      const ref = c.authorityRef || c.uses;
+      const appr = stepPartActor(s, "approver");
+      if (!appr) v.push({ step: label, rule: "authority-named-approver", detail: "an authority-gated step must name a human approver" });
+      else if (isNonHumanActor(appr, r)) v.push({ step: label, rule: "authority-human-approver", detail: `the authority approver (${appr}) must be human, at/above the item's band` });
+      if (ref && !sharedRule(r, ref)) v.push({ step: label, rule: "authority-rule-missing", detail: `authority references a missing sharedRule "${ref}"` });
+    }
+    if (c.type === "halt-on-flag") {
+      if (!c.escalateTo) v.push({ step: label, rule: "halt-escalation-target", detail: "a halt-on-flag must name an escalation-target" });
+      else if (isNonHumanActor(c.escalateTo, r)) v.push({ step: label, rule: "halt-human-target", detail: `a halt must escalate to a human (${c.escalateTo} is AI/system)` });
+      if (!c.negativeConstraint) v.push({ step: label, rule: "halt-negative-constraint", detail: "a halt-on-flag must carry a negativeConstraint (what AI must not do)" });
+      if (s.autoResolve === true || c.autoResolve === true) v.push({ step: label, rule: "halt-no-auto-resolve", detail: "a halt-on-flag step may never be auto-resolved by AI" });
+    }
+  });
+  return { ok: v.length === 0, surface: opts.surface || "control", violations: v };
 }
 
 // =====================================================================
@@ -717,6 +823,37 @@ function runTests() {
   ok("F1 absent participants => freed == roleCapacity(allSteps) (byte-identical)", near(solo.roles[0].freedHrs, roleCapacity(normalizeIntake(FPA_INTAKE).steps, "Conservative").freedHrs, 0.001), `${solo.roles[0].freedHrs}`);
   ok("F1 RECON intake is valid, coverage 100", validateIntake(RECON_INTAKE).ok && validateIntake(RECON_INTAKE).coverage.pct === 100, JSON.stringify(validateIntake(RECON_INTAKE).errors));
   ok("F1 an unknown part is surfaced, never silently dropped", !validateIntake({ ...FPA_INTAKE, steps: [{ step: "x", cls: "assembly", data: "public", participants: [{ actorId: "a", part: "owner" }] }] }).ok, "");
+
+  // ---- Edition 3 \u00b7 F2 \u2014 controls + shared rules + control-aware rail ----
+  // authority resolves the right approver per value band, from the write-once ladder
+  ok("F2 authority band <= $100 -> checker", resolveAuthorityApprover(RECON_INTAKE, "authorityMatrix:writeOff", 50)?.approver === "checker", "");
+  ok("F2 authority band ~ $5k -> opsManager", resolveAuthorityApprover(RECON_INTAKE, "authorityMatrix:writeOff", 5000)?.approver === "opsManager", "");
+  ok("F2 authority above ceiling -> opsManager + finance", resolveAuthorityApprover(RECON_INTAKE, "authorityMatrix:writeOff", 50000)?.approver === "opsManager+finance", "");
+  ok("F2 missing shared rule -> null (surfaced, never assumed)", resolveAuthorityApprover(RECON_INTAKE, "authorityMatrix:none", 10) === null, "");
+  // the control-aware rail PASSES on the clean recon SOP (four-eyes maker!=checker; halt to a human; completeness)
+  ok("F2 controlRail passes on the clean recon SOP", controlRail(RECON_INTAKE).ok, JSON.stringify(controlRail(RECON_INTAKE).violations));
+  // (1) four-eyes requires two DIFFERENT actors
+  const sameActor = { ...RECON_INTAKE, steps: [{ ...RECON_INTAKE.steps[3], participants: [{ actorId: "maker", part: "doer" }, { actorId: "maker", part: "approver" }] }] };
+  ok("F2 four-eyes with the same actor is a violation", controlRail(sameActor).violations.some(x => x.rule === "four-eyes-distinct"), "");
+  // (1b) an AI/system actor may never be the approver
+  const aiApprover = { ...RECON_INTAKE, steps: [{ ...RECON_INTAKE.steps[3], participants: [{ actorId: "maker", part: "doer" }, { actorId: "system:autoApprove", part: "approver" }] }] };
+  ok("F2 an AI/system approver in a four-eyes is a violation", controlRail(aiApprover).violations.some(x => x.rule === "approver-must-be-human"), "");
+  // (2) an authority step missing its approver is a violation
+  const noAppr = { ...RECON_INTAKE, steps: [{ ...RECON_INTAKE.steps[3], participants: [{ actorId: "maker", part: "doer" }] }] };
+  ok("F2 authority/four-eyes missing the approver is a violation", !controlRail(noAppr).ok, "");
+  // (3) a halt-on-flag may NEVER be auto-resolved by AI
+  const autoHalt = { ...RECON_INTAKE, steps: [{ ...RECON_INTAKE.steps[1], autoResolve: true }] };
+  ok("F2 an auto-resolvable halt-on-flag is a violation", controlRail(autoHalt).violations.some(x => x.rule === "halt-no-auto-resolve"), "");
+  const haltNoTarget = { ...RECON_INTAKE, steps: [{ ...RECON_INTAKE.steps[1], control: { type: "halt-on-flag", on: "AML", negativeConstraint: "no tip-off" } }] };
+  ok("F2 a halt with no escalation-target is a violation", controlRail(haltNoTarget).violations.some(x => x.rule === "halt-escalation-target"), "");
+  // railCheck is ONE entry point: passed a record it delegates to the control rail; the text rail is unchanged
+  ok("F2 railCheck(record) delegates to controlRail", railCheck(RECON_INTAKE).ok === controlRail(RECON_INTAKE).ok, "");
+  ok("F2 railCheck(text) is byte-identical (capacity still blocked off-dashboard)", !railCheck("capacity freed", "capture").ok && railCheck("capacity freed", "dashboard").ok, "");
+  ok("F2 unknown control type is surfaced", !validateIntake({ ...FPA_INTAKE, steps: [{ step: "x", cls: "assembly", data: "public", control: { type: "rubber-stamp" } }] }).ok, "");
+  // ADDITIVE \u2014 a control-free workflow has nothing to gate; the recipe single-actor steps are unchanged
+  ok("F2 controlRail on a control-free workflow passes (additive)", controlRail(FPA_INTAKE).ok, "");
+  ok("F2 buildRecipe single-actor step stays byte-identical (no doer/control fields)", (() => { const st = buildRecipe(FPA_INTAKE).orderedSteps[0]; return !("doer" in st) && !("control" in st); })(), "");
+  ok("F2 buildRecipe surfaces the four-eyes control + resolved authority ladder on the recon approve step", (() => { const st = buildRecipe(RECON_INTAKE).orderedSteps.find(s => s.step === "Approve adjustment"); return st && st.control && st.control.type === "four-eyes" && st.control.authority && Array.isArray(st.control.authority.bands); })(), "");
 
   console.log(`\n${fail === 0 ? "\u2713 ALL PASS" : "\u2717 FAILURES"} \u2014 ${pass} passed, ${fail} failed`);
   return fail === 0;
