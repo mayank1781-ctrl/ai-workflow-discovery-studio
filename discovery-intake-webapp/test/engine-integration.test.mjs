@@ -68,13 +68,15 @@ test("the adapter maps an app workflow to the engine intake (steps + 3-dim seams
   assert.equal(engine.validateIntake(intake).ok, true, JSON.stringify(engine.validateIntake(intake).errors));
 });
 
-test("app capacity / cost / net == engine for the FP&A fixture (gross ~$20,849; cost ~$161; net ~$20,688)", () => {
+test("app capacity / cost / net == engine for the FP&A fixture (gross ~$20,778; cost ~$161; net ~$20,617)", () => {
+  // M3 — decision permitted ceiling is now 0 (was 5%), so the MNPI advisory decision no longer
+  // credits its ~$71 sliver: gross 20849 -> 20778, net 20688 -> 20617. Same tolerances.
   const sb = adapterSandbox();
   const cap = sb.engineWorkflowCapacity({ steps: FPA_STEPS });
   const cost = sb.engineWorkflowCost({ steps: FPA_STEPS });
-  assert.ok(near(cap.grossValue, 20849, 30), `gross ${cap.grossValue}`);
+  assert.ok(near(cap.grossValue, 20778, 30), `gross ${cap.grossValue}`);
   assert.ok(near(cost.annual, 161, 8), `cost ${cost.annual}`);
-  assert.ok(near(cap.grossValue - cost.annual, 20688, 35), `net ${cap.grossValue - cost.annual}`);
+  assert.ok(near(cap.grossValue - cost.annual, 20617, 35), `net ${cap.grossValue - cost.annual}`);
   // the wrapper truly delegates: it equals a direct engine call on the same intake
   const direct = engine.roleCapacity(engine.normalizeIntake(sb.appWorkflowToIntake({ steps: FPA_STEPS })).steps, "Conservative");
   assert.equal(cap.grossValue, direct.grossValue);

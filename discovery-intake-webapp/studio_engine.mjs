@@ -38,12 +38,16 @@ export const CONFIG = {
   realizationFactor: 0.70, // freed -> realized (fluency / builder ladder)
 
   // policy profiles: step ceilings (% of a step AI may carry) and data-tier factors
+  // M3 — a DECISION is never given to AI: its permitted ceiling is 0 on EVERY profile (no
+  // 5/10/15% sliver). AI may prepare the lead-up, but that prep must be captured as a separate
+  // upstream assembly/judgment SUPPORT step — never credited to the decision itself. Enforced
+  // structurally too (stepPermitted clamps decision -> 0), so this is defence in depth.
   profiles: {
-    Conservative: { step: { assembly: 65, judgment: 20, decision: 5 },
+    Conservative: { step: { assembly: 65, judgment: 20, decision: 0 },
       tier: { public: 1, internal: 1, confidential: 0.9, PII: 0.5, MNPI: 0.3 }, mode: "draft-only" },
-    Moderate: { step: { assembly: 80, judgment: 30, decision: 10 },
+    Moderate: { step: { assembly: 80, judgment: 30, decision: 0 },
       tier: { public: 1, internal: 1, confidential: 1, PII: 0.8, MNPI: 0.6 }, mode: "bounded agents" },
-    Progressive: { step: { assembly: 92, judgment: 40, decision: 15 },
+    Progressive: { step: { assembly: 92, judgment: 40, decision: 0 },
       tier: { public: 1, internal: 1, confidential: 1, PII: 0.9, MNPI: 0.8 }, mode: "supervised orchestration" },
   },
 
@@ -196,6 +200,7 @@ export function stepDecisionLanguage(step) {
 
 // permitted addressability for one step (fraction 0..1) = min(theoretical, policy ceiling)
 export function stepPermitted(step, profile) {
+  if (step.cls === "decision") return 0;    // M3 — a decision is NEVER given to AI (defence in depth, independent of the profile config)
   if (stepDecisionLanguage(step)) return 0; // B2 — a decision in disguise earns NO automation
   const theo = (step.theo ?? 0) / 100;
   return Math.min(theo, stepCeilingFraction(step.cls, step.data, profile));
@@ -1126,14 +1131,14 @@ function runTests() {
   ok("permitted ~46%", near(cap.permittedPct * 100, 45.6, 0.6), round(cap.permittedPct * 100, 2));
   ok("permitted hrs ~18.2", near(cap.permittedHrs, 18.25, 0.2), round(cap.permittedHrs, 2));
   ok("realized hrs ~5.1", near(cap.realizedHrs, 5.11, 0.1), round(cap.realizedHrs, 2));
-  ok("gross ~$20,849", near(cap.grossValue, 20849, 30), round(cap.grossValue));
+  ok("gross ~$20,778", near(cap.grossValue, 20778, 30), round(cap.grossValue)); // M3 — decision ceiling 0 (was ~$20,849 at 5%)
 
   // cost-to-serve + net
   const routed = costToServe(normalizeIntake(FPA_INTAKE).steps, "Conservative", "routed");
   const frontier = costToServe(normalizeIntake(FPA_INTAKE).steps, "Conservative", "frontier");
   ok("routed cost ~$161", near(routed.annual, 161, 8), round(routed.annual));
   ok("frontier cost ~$1,583", near(frontier.annual, 1583, 25), round(frontier.annual));
-  ok("net routed ~$20,688", near(netValue(cap.grossValue, routed.annual), 20688, 30), round(netValue(cap.grossValue, routed.annual)));
+  ok("net routed ~$20,617", near(netValue(cap.grossValue, routed.annual), 20617, 30), round(netValue(cap.grossValue, routed.annual))); // M3 — decision ceiling 0
 
   // readiness states
   ok("net-negative -> gated-economics", readiness({ theoPct: .5, permittedPct: .5, grossValue: 1000, annualCost: 4000 }).state === "gated-economics", "");
@@ -1299,6 +1304,17 @@ function runTests() {
   ok("B2 buildRecipe renders the mislabel as a human checkpoint, not an ai-step", (() => { const st = buildRecipe(mislabelB2).orderedSteps.find(s => /Approve the write-off/.test(s.step)); return st && st.kind !== "ai-step"; })(), "");
   ok("B2 an explicit override rationale lets a genuine edge case through", stepDecisionLanguage({ ...mlStep, classOverride: "Control owner reviewed: rote posting, not a firm commitment." }) === false, "");
   ok("B2 a clean record still hardens — no false positive (additive)", canHarden(RECON_INTAKE) && canHarden(FPA_INTAKE), "");
+
+  // ---- P3 (M3) — a decision is NEVER given to AI: zero permitted automation, zero capacity ----
+  const allDecision = { steps: [
+    { step: "Approve the write-off", cls: "decision", data: "confidential", time: 20, theo: 15 },
+    { step: "Sign off on the close", cls: "decision", data: "internal", time: 20, theo: 12 },
+  ] };
+  const decCap = roleCapacity(normalizeIntake(allDecision).steps, "Progressive"); // most permissive profile
+  ok("M3 a decision earns ZERO permitted automation on every profile (no 5/10/15% sliver)", ["Conservative", "Moderate", "Progressive"].every(p => stepPermitted({ cls: "decision", data: "public", theo: 99 }, p) === 0), "");
+  ok("M3 an all-decision workflow yields ZERO AI capacity", decCap.permittedPct === 0 && decCap.grossValue === 0, JSON.stringify({ permittedPct: decCap.permittedPct, gross: decCap.grossValue }));
+  ok("M3 an all-decision workflow has ZERO cost-to-serve (nothing routed to AI)", costToServe(normalizeIntake(allDecision).steps, "Progressive").annual === 0, "");
+  ok("M3 assembly/judgment still earn capacity (decision-only change, additive)", stepPermitted({ cls: "assembly", data: "public", theo: 80 }, "Conservative") > 0 && stepPermitted({ cls: "judgment", data: "public", theo: 35 }, "Conservative") > 0, "");
 
   // ---- Edition 3 \u00b7 F8 \u2014 org-tier numbers: hand-off reduction + SLA dividend ----
   const hr = buildHandoffReduction([RECON_INTAKE]);

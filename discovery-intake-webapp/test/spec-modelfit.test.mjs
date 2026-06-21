@@ -56,7 +56,9 @@ test("netValue helper = engine.netValue(gross, cost) for the fixture", () => {
   ];
   const nv = sb.engineWorkflowNetValue({ steps: FPA });
   assert.ok(Math.abs(nv.value - (nv.grossValue - nv.annualCost)) < 0.001, "net = gross - cost");
-  assert.ok(Math.abs(nv.value - 20688) < 35, `net ~20688, got ${nv.value}`);
+  // M3 — decision permitted ceiling 0 (was 5%): the MNPI advisory decision no longer credits its
+  // ~$71 sliver, so net 20688 -> 20617. Same tolerance.
+  assert.ok(Math.abs(nv.value - 20617) < 35, `net ~20617, got ${nv.value}`);
 });
 
 test("the cost-to-serve / model-fit rail family: allowed on recipe + dashboard, denied on capture + workbench; reduction denied everywhere", () => {
