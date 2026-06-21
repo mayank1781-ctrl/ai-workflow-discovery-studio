@@ -238,11 +238,30 @@ export function roleCapacity(steps, profile, opts = {}) {
   };
 }
 
-// model tier for a unit: routing by class, lowered by data-tier residency
-export function modelTier(stepClass, dataTier, mode = "routed", policyAllowsExternal = false) {
+// M2 — a FORMAL residency exception. PII/MNPI restriction is NON-BYPASSABLE except by a real,
+// complete, unexpired exception object: a named approver, a jurisdiction, the dataClass it covers
+// (must match the step's restricted tier), and a future expiry. A bare boolean (the old bypass),
+// a partial object, an expired one, or one for the wrong data class is NOT an exception — the
+// data stays restricted. Deterministic when the caller supplies exc.asOf (else the wall clock).
+export function validPolicyException(exc, dataTier) {
+  if (!exc || typeof exc !== "object" || Array.isArray(exc)) return false;
+  const approver = typeof exc.approver === "string" ? exc.approver.trim() : "";
+  const jurisdiction = typeof exc.jurisdiction === "string" ? exc.jurisdiction.trim() : "";
+  if (!approver || !jurisdiction) return false;
+  if (exc.dataClass !== dataTier) return false;              // must explicitly cover THIS restricted class
+  const exp = Date.parse(exc.expiry);
+  if (Number.isNaN(exp)) return false;
+  const now = exc.asOf != null ? Date.parse(exc.asOf) : Date.now();
+  if (Number.isNaN(now) || exp <= now) return false;         // must be unexpired
+  return true;
+}
+
+// model tier for a unit: routing by class, FORCED to restricted by data-tier residency unless a
+// valid, formal policy exception lifts it (M2 — a bare boolean can no longer downgrade PII/MNPI).
+export function modelTier(stepClass, dataTier, mode = "routed", policyException = false) {
   if (stepClass === "decision") return "human";
   let tier = CONFIG.routing[mode][stepClass] || "mid";
-  if (RESIDENCY_FORCE.includes(dataTier) && !policyAllowsExternal) tier = "restricted";
+  if (RESIDENCY_FORCE.includes(dataTier) && !validPolicyException(policyException, dataTier)) tier = "restricted";
   return tier;
 }
 function costPerRun(tier, c = CONFIG.cost) {
@@ -261,7 +280,7 @@ export function costToServe(steps, profile, mode = "routed", opts = {}) {
   if (aiPermHrs <= 0) return { runsPerYr: 0, blendedCostPerRun: 0, annual: 0 };
   const runsPerYr = aiPermHrs * 60 / c.avgTaskMin * W;
   const blended = sum(permHrsByStep.map(({ s, hrs }) =>
-    hrs * costPerRun(modelTier(s.cls, s.data, mode, opts.policyAllowsExternal), c))) / aiPermHrs;
+    hrs * costPerRun(modelTier(s.cls, s.data, mode, opts.policyException), c))) / aiPermHrs;
   return { runsPerYr, blendedCostPerRun: blended, annual: runsPerYr * blended };
 }
 
@@ -499,7 +518,7 @@ export function buildDraftSpec(record, opts = {}) {
   // model-fit: tier per AI-addressable class; residency note from AI-addressable steps only (not the human decision)
   const aiSteps = (r.steps || []).filter(s => s.cls !== "decision");
   let aiMaxTier = "", _mx = -1; aiSteps.forEach(s => { if (s.data && TIER_RANK[s.data] > _mx) { _mx = TIER_RANK[s.data]; aiMaxTier = s.data; } });
-  const aiTiers = uniq(asm(r.steps).map(s => modelTier(s.cls, s.data, mode, opts.policyAllowsExternal)));
+  const aiTiers = uniq(asm(r.steps).map(s => modelTier(s.cls, s.data, mode, opts.policyException)));
   let modelFit = `Routed \u2014 assembly \u2192 ${aiTiers.join("/") || "small"}; judgment-adjacent \u2192 mid; decision stays human.`;
   if (RESTRICTED_TIERS.includes(aiMaxTier)) modelFit += ` ${aiMaxTier} data stays on approved / in-VPC models (no external egress)${RESIDENCY_FORCE.includes(aiMaxTier) ? " \u2014 restricted pricing tier" : ""}.`;
   modelFit += " Cost-to-serve is a band; route to the cheapest tier that clears acceptance.";
@@ -565,7 +584,7 @@ export function buildDraftRecipe(record, opts = {}) {
     // it falls through to a human checkpoint that says split prep from the decision.
     const base = (s.cls === "assembly" && !stepDecisionLanguage(s))
       ? {
-          kind: "ai-step", step: s.step, tier: modelTier(s.cls, s.data, mode, opts.policyAllowsExternal),
+          kind: "ai-step", step: s.step, tier: modelTier(s.cls, s.data, mode, opts.policyException),
           action: `Assemble: ${dash(s.output) === "\u2014" ? s.step : dash(s.output)} from ${dash(s.inputs)} using ${dash(s.tool)}.`,
           guardrail: r.confirm?.acceptance ? `Check against acceptance: ${r.confirm.acceptance}` : "Check against stated acceptance.",
         }
@@ -593,7 +612,7 @@ export function buildDraftRecipe(record, opts = {}) {
 
   // ranked addressable units by leverage = permitted fraction x time weight
   const ranked = asm(r.steps).map(s => ({
-    step: s.step, tier: modelTier(s.cls, s.data, mode, opts.policyAllowsExternal),
+    step: s.step, tier: modelTier(s.cls, s.data, mode, opts.policyException),
     leverage: round(stepPermitted(s, profile) * (s.time / totT), 4),
   })).sort((a, b) => b.leverage - a.leverage);
 
@@ -1374,6 +1393,17 @@ function runTests() {
   ok("M1 a NaN time is rejected (not silently used)", !validateIntake({ ...FPA_INTAKE, steps: [{ step: "x", cls: "assembly", data: "internal", time: NaN }] }).ok, "");
   ok("M1 an all-inferred (no stated time) confirmed-shaped record CANNOT harden", (() => { const r = { ...RECON_INTAKE, steps: RECON_INTAKE.steps.map(s => { const c = { ...s }; delete c.time; return c; }) }; return !canHarden(r) && confirmBlockers(r).some(b => b.rule === "all-inferred-time"); })(), "");
   ok("M1 one stated time clears the provenance gate (FP&A/RECON still harden)", canHarden(FPA_INTAKE) && canHarden(RECON_INTAKE) && provenanceBlockers(FPA_INTAKE).length === 0, "");
+
+  // ---- P5 (M2) — PII/MNPI residency is non-bypassable without a FORMAL policy exception ----
+  const validExc = { approver: "CISO", jurisdiction: "EU", dataClass: "PII", expiry: "2099-01-01", asOf: "2026-06-21" };
+  ok("M2 a bare boolean true CANNOT downgrade PII off restricted (the audit bypass is closed)", modelTier("assembly", "PII", "routed", true) === "restricted", modelTier("assembly", "PII", "routed", true));
+  ok("M2 MNPI with a bare true stays restricted", modelTier("assembly", "MNPI", "routed", true) === "restricted", "");
+  ok("M2 a partial exception (missing jurisdiction/expiry) does NOT lift residency", modelTier("assembly", "PII", "routed", { approver: "CISO", dataClass: "PII" }) === "restricted", "");
+  ok("M2 an EXPIRED exception does NOT lift residency", modelTier("assembly", "PII", "routed", { ...validExc, expiry: "2020-01-01" }) === "restricted", "");
+  ok("M2 an exception for the WRONG data class does NOT lift residency", modelTier("assembly", "MNPI", "routed", validExc) === "restricted", "");
+  ok("M2 a VALID, complete, unexpired exception (approver+jurisdiction+dataClass+expiry) DOES lift PII", modelTier("assembly", "PII", "routed", validExc) === "small", modelTier("assembly", "PII", "routed", validExc));
+  ok("M2 confidential is unaffected (routes normally, never forced)", modelTier("assembly", "confidential", "routed") === "small", "");
+  ok("M2 the default (no exception) forces PII/MNPI to restricted", modelTier("assembly", "PII", "routed") === "restricted" && modelTier("assembly", "MNPI", "routed") === "restricted", "");
 
   // ---- Edition 3 \u00b7 F8 \u2014 org-tier numbers: hand-off reduction + SLA dividend ----
   const hr = buildHandoffReduction([RECON_INTAKE]);
