@@ -57,8 +57,9 @@ test("C4 — the evidence pack produces a real file with control evidence + the 
 // ---- app: the render + the evidence-pack download ----
 function sandbox(downloads) {
   return buildSandbox(source, {
-    functions: ["studioEngine", "engineTechGovView", "engineEvidencePack", "techGovViewHtml", "downloadEvidencePack", "dashboardCurrentRecords", "escapeHtml"],
+    functions: ["studioEngine", "engineTechGovView", "engineEvidencePack", "techGovViewHtml", "downloadEvidencePack", "dashboardCurrentRecords", "exportOpts", "exportProvenanceHtml", "escapeHtml"],
     globals: {
+      state: { realConfirmedSeed: false },
       window: { StudioEngine: engine },
       dashboardModel: () => ({ records: [withExc] }),
       downloadTextFile: (filename, content, mime) => { if (downloads) downloads.push({ filename, content, mime }); },

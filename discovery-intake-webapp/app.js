@@ -1164,6 +1164,9 @@ const defaultState = {
   dashboardSlice: { dimension: "all", value: "all" },
   // C2/C3/C4: which of the three role-specific dashboards is shown (leadership | worker | tech).
   dashboardAudience: "leadership",
+  // D3: false = the calibrated/illustrative seed (every export carries the marker); flip to true only
+  // when a REAL confirmed pilot seed is loaded (drops the marker). Default conservative: illustrative.
+  realConfirmedSeed: false,
   // V3-3: uploaded AI policy (a relied-on value). Shape:
   // { fileName, uploadedAt, clauses:[{id,ref,heading,text,source,confidence}] }.
   // null = no policy → artifacts use the generic advisory caution. Read-only at
@@ -7283,13 +7286,24 @@ function leadershipSectionsHtml(records, opts) {
         <button type="button" id="downloadCapacityPackBtn" class="secondary-button compact">⬇ Board-ready capacity pack</button>
         <button type="button" id="downloadRoadmapBtn" class="secondary-button compact" style="margin-left:8px;">⬇ Land → Expand → Retain roadmap</button>
       </div>
+      ${(typeof exportProvenanceHtml === "function") ? exportProvenanceHtml() : ""}
     </div></section>`;
 }
 
 // C3 — the two real downloads + the role-redefinition section download.
 function dashboardCurrentRecords() { return (typeof dashboardModel === "function") ? (dashboardModel().records || []) : []; }
-function downloadCapacityPack() { const p = engineCapacityPack(dashboardCurrentRecords()); if (!p) { if (typeof toast === "function") toast("Capacity pack unavailable — engine not loaded"); return false; } if (typeof downloadTextFile === "function") downloadTextFile(p.filename, p.content, "text/markdown"); return true; }
-function downloadRoadmap() { const p = engineRoadmapExport(dashboardCurrentRecords()); if (!p) { if (typeof toast === "function") toast("Roadmap unavailable — engine not loaded"); return false; } if (typeof downloadTextFile === "function") downloadTextFile(p.filename, p.content, "text/markdown"); return true; }
+// D3 — export options carry the real-confirmed-seed flag from state (default: calibrated seed -> marker shown).
+function exportOpts() { return { realConfirmedSeed: state && state.realConfirmedSeed === true }; }
+// D3 — the visible "illustrative — calibrated seed" provenance marker shown beside the export buttons
+// until a real confirmed seed is loaded. Reads the engine's single-source marker.
+function exportProvenanceHtml() {
+  if (state && state.realConfirmedSeed === true) return "";
+  const E = studioEngine();
+  const marker = (E && E.CALIBRATED_SEED_MARKER) || "Illustrative — calibrated seed, not a confirmed pilot.";
+  return `<div style="font-size:11px;color:#f6c453;margin-top:8px;">⚑ ${escapeHtml(marker)} Exports carry this marker until a real confirmed pilot seed is loaded.</div>`;
+}
+function downloadCapacityPack() { const p = engineCapacityPack(dashboardCurrentRecords(), exportOpts()); if (!p) { if (typeof toast === "function") toast("Capacity pack unavailable — engine not loaded"); return false; } if (typeof downloadTextFile === "function") downloadTextFile(p.filename, p.content, "text/markdown"); return true; }
+function downloadRoadmap() { const p = engineRoadmapExport(dashboardCurrentRecords(), exportOpts()); if (!p) { if (typeof toast === "function") toast("Roadmap unavailable — engine not loaded"); return false; } if (typeof downloadTextFile === "function") downloadTextFile(p.filename, p.content, "text/markdown"); return true; }
 
 // C3/C4 — wire the dashboard export buttons (called from wireDashboard).
 function wireDashboardExports(container) {
@@ -7325,10 +7339,11 @@ function techGovViewHtml(records, opts) {
     <div style="font-size:11px;color:#8aa0b8;margin-bottom:4px;">Build view (per recipe)</div>${builds}
     <div style="font-size:11px;color:#8aa0b8;margin:10px 0 4px;">Realization / enablement — the builder ladder</div>${ladder}
     <div style="margin-top:12px;"><button type="button" id="downloadEvidencePackBtn" class="secondary-button compact">⬇ Audit-ready evidence pack</button></div>
+    ${(typeof exportProvenanceHtml === "function") ? exportProvenanceHtml() : ""}
   </div>`;
 }
 function downloadEvidencePack() {
-  const p = engineEvidencePack((typeof dashboardCurrentRecords === "function") ? dashboardCurrentRecords() : []);
+  const p = engineEvidencePack((typeof dashboardCurrentRecords === "function") ? dashboardCurrentRecords() : [], (typeof exportOpts === "function") ? exportOpts() : {});
   if (!p) { if (typeof toast === "function") toast("Evidence pack unavailable — engine not loaded"); return false; }
   if (typeof downloadTextFile === "function") downloadTextFile(p.filename, p.content, "text/markdown");
   return true;
@@ -37615,6 +37630,7 @@ function normalizeLoadedState(parsed = {}) {
     capturePolicy: parsed.capturePolicy && typeof parsed.capturePolicy === "object" ? parsed.capturePolicy : structuredClone(defaultState.capturePolicy),
     dashboardSlice: parsed.dashboardSlice && typeof parsed.dashboardSlice === "object" ? parsed.dashboardSlice : structuredClone(defaultState.dashboardSlice),
     dashboardAudience: ["leadership", "worker", "tech"].includes(parsed.dashboardAudience) ? parsed.dashboardAudience : "leadership",
+    realConfirmedSeed: parsed.realConfirmedSeed === true,
     // V3-9: backfill the guided first-run flag so sessions persisted before this
     // feature load cleanly (default: not yet dismissed → first-run can offer).
     onboarding: {
