@@ -286,16 +286,83 @@ export function costToServe(steps, profile, mode = "routed", opts = {}) {
 
 export const netValue = (grossValue, annualCost) => grossValue - annualCost;
 
-// readiness for an addressable unit: now / gated-policy / gated-economics / future-capability
+// M6 — INDEPENDENT GATE MATRIX. The single 4-state verdict collapses too much: ordering economics
+// before policy lets weak economics MASK a policy block. This computes six gates independently —
+// policy · data · control · economics · adoption · evidence — each status ok | caution | blocked |
+// n-a, plus a one-line summary. A red policy gate shows regardless of the economics gate. Every
+// input is optional and defaults to n-a, so a caller that only knows economics still gets a matrix.
+const GATE = (status, reason) => ({ status, reason });
+export function readinessGates(unit = {}) {
+  const u = unit || {};
+  const net = u.netValue ?? ((u.grossValue ?? 0) - (u.annualCost ?? 0));
+  const margin = u.econMargin ?? CONFIG.econMarginPerYr;
+  const policyGap = (u.theoPct ?? 0) - (u.permittedPct ?? 0);
+
+  const policy = policyGap > 0.01
+    ? GATE("blocked", `policy ceiling caps ${round(policyGap * 100)}pts of addressability — governance agenda`)
+    : GATE("ok", "policy-permitted at the appropriate tier");
+
+  const economics = (u.grossValue == null && u.annualCost == null && u.netValue == null)
+    ? GATE("n-a", "economics not computed")
+    : net <= margin
+      ? GATE("blocked", `net ${round(net)} at ${u.tier || "permitted"} tier — route to a lower tier, compress context, or await cheaper capability`)
+      : GATE("ok", `net-positive (${round(net)}/yr) at an appropriate tier`);
+
+  const data = (() => {
+    const t = u.dataTier;
+    if (t && !TIERS.includes(t)) return GATE("blocked", `unknown data tier "${t}" — resolve before relying on the figure`);
+    if (RESIDENCY_FORCE.includes(t)) return GATE("caution", `${t} forces a restricted / in-VPC model (no external egress)`);
+    if (t === "confidential") return GATE("caution", "confidential — stays on approved models");
+    if (!t) return GATE("n-a", "data tier not captured");
+    return GATE("ok", `${t} routes normally`);
+  })();
+
+  const control = (Array.isArray(u.controlViolations) && u.controlViolations.length)
+    ? GATE("blocked", `${u.controlViolations.length} control check(s) unresolved`)
+    : u.controlOk === false ? GATE("blocked", "a control check is unresolved")
+    : u.controlOk === true ? GATE("ok", "four-eyes / authority / halt controls pass")
+    : GATE("n-a", "no controls to check");
+
+  const adoption = (() => {
+    const freed = u.freedHrs, gap = u.realizationGapHrs;
+    if (freed == null || gap == null) return GATE("n-a", "realization not modeled");
+    if (freed <= 0) return GATE("n-a", "nothing freed to realize");
+    return (gap / freed) > 0.25
+      ? GATE("caution", `${round((gap / freed) * 100)}% of the freed time needs an enablement (L&D) push`)
+      : GATE("ok", "realization within range");
+  })();
+
+  const evidence = u.evidenceInferred === true
+    ? GATE("blocked", "the headline values are all inferred — capture at least one stated value")
+    : u.evidenceLow === true ? GATE("caution", "thin provenance — confirm the key values")
+    : (u.evidenceInferred === false || u.evidenceConfirmed === true) ? GATE("ok", "key values are stated / confirmed")
+    : GATE("n-a", "provenance not assessed");
+
+  const gates = { policy, data, control, economics, adoption, evidence };
+  const order = ["policy", "data", "control", "economics", "adoption", "evidence"];
+  const blocked = order.filter(k => gates[k].status === "blocked");
+  const caution = order.filter(k => gates[k].status === "caution");
+  const summary = blocked.length
+    ? `Blocked on ${blocked.join(", ")} — gates are independent (economics never masks policy).`
+    : caution.length ? `Usable with caution on ${caution.join(", ")}.`
+    : "All gates clear.";
+  return { gates, blocked, caution, summary };
+}
+
+// readiness for an addressable unit: now / gated-policy / gated-economics / future-capability.
+// M6 — the OLD 4-state verdict (state + reason) is preserved EXACTLY (additive); the independent
+// gate matrix + one-line summary are attached so nothing downstream breaks.
 export function readiness(unit) {
-  if (unit.futureCapability) return { state: "future-capability", reason: unit.futureReason || "needs a capability not yet available" };
+  const matrix = readinessGates(unit);
+  const attach = (base) => ({ ...base, gates: matrix.gates, gateSummary: matrix.summary, gatesBlocked: matrix.blocked });
+  if (unit.futureCapability) return attach({ state: "future-capability", reason: unit.futureReason || "needs a capability not yet available" });
   const policyCapped = (unit.theoPct ?? 0) - (unit.permittedPct ?? 0) > 0.01;
   const net = unit.netValue ?? (unit.grossValue - unit.annualCost);
   if (net <= (unit.econMargin ?? CONFIG.econMarginPerYr))
-    return { state: "gated-economics", reason: `net ${round(net)} at ${unit.tier || "permitted"} tier — route to a lower tier, compress context, or await cheaper capability` };
+    return attach({ state: "gated-economics", reason: `net ${round(net)} at ${unit.tier || "permitted"} tier — route to a lower tier, compress context, or await cheaper capability` });
   if (policyCapped)
-    return { state: "gated-policy", reason: `policy ceiling caps ${round((unit.theoPct - unit.permittedPct) * 100)}pts of addressability — governance agenda` };
-  return { state: "now", reason: "addressable, policy-permitted, net-positive at an appropriate tier" };
+    return attach({ state: "gated-policy", reason: `policy ceiling caps ${round((unit.theoPct - unit.permittedPct) * 100)}pts of addressability — governance agenda` });
+  return attach({ state: "now", reason: "addressable, policy-permitted, net-positive at an appropriate tier" });
 }
 
 // flow / cycle-time — touch + wait, with the protected (human-decision) wait preserved
@@ -523,10 +590,16 @@ export function buildDraftSpec(record, opts = {}) {
   if (RESTRICTED_TIERS.includes(aiMaxTier)) modelFit += ` ${aiMaxTier} data stays on approved / in-VPC models (no external egress)${RESIDENCY_FORCE.includes(aiMaxTier) ? " \u2014 restricted pricing tier" : ""}.`;
   modelFit += " Cost-to-serve is a band; route to the cheapest tier that clears acceptance.";
 
-  // readiness for the workflow's addressable portion
+  // readiness for the workflow's addressable portion — M6: feed the independent gate matrix the
+  // data tier (residency), the control-rail result, the realization gap, and whether the headline
+  // values are all-inferred, so the spec carries policy · data · control · economics · adoption ·
+  // evidence gates (not just economics). Provenance is read off the RAW record (pre-normalize).
   const cap = roleCapacity(r.steps, profile, opts);
   const cost = costToServe(r.steps, profile, mode, opts);
-  const rd = readiness({ theoPct: cap.theoPct, permittedPct: cap.permittedPct, grossValue: cap.grossValue, annualCost: cost.annual, tier: aiTiers.join("/") });
+  const ctrl = controlRail(r);
+  const rd = readiness({ theoPct: cap.theoPct, permittedPct: cap.permittedPct, grossValue: cap.grossValue, annualCost: cost.annual, tier: aiTiers.join("/"),
+    dataTier: aiMaxTier || maxTier(r), controlOk: ctrl.ok, controlViolations: ctrl.violations,
+    freedHrs: cap.freedHrs, realizationGapHrs: cap.realizationGapHrs, evidenceInferred: provenanceBlockers(record).length > 0 });
 
   let constraints = `${tiers ? tiers + " tier" : "data tier \u2014"}; draft-only up to human review${tools.length ? `; allowed tools: ${tools.join(", ")}` : ""}.`;
   if (sensitive(r)) constraints += " Sensitive data stays on approved / in-VPC models (no external egress).";
@@ -1404,6 +1477,17 @@ function runTests() {
   ok("M2 a VALID, complete, unexpired exception (approver+jurisdiction+dataClass+expiry) DOES lift PII", modelTier("assembly", "PII", "routed", validExc) === "small", modelTier("assembly", "PII", "routed", validExc));
   ok("M2 confidential is unaffected (routes normally, never forced)", modelTier("assembly", "confidential", "routed") === "small", "");
   ok("M2 the default (no exception) forces PII/MNPI to restricted", modelTier("assembly", "PII", "routed") === "restricted" && modelTier("assembly", "MNPI", "routed") === "restricted", "");
+
+  // ---- P6 (M6) — independent readiness gate matrix: economics never masks policy ----
+  const p0 = readiness({ theoPct: 0.8, permittedPct: 0.4, grossValue: 100, annualCost: 5000 }); // policy-capped AND net-negative
+  ok("M6 a policy-blocked + weak-economics unit shows the POLICY gate red regardless of economics", p0.gates.policy.status === "blocked" && p0.gates.economics.status === "blocked", JSON.stringify({ policy: p0.gates.policy.status, economics: p0.gates.economics.status }));
+  ok("M6 the old single 4-state verdict is preserved (additive)", p0.state === "gated-economics" && typeof p0.reason === "string", p0.state); // old field still present
+  ok("M6 a clean unit has all gates clear and a summary", (() => { const r = readiness({ theoPct: 0.5, permittedPct: 0.5, grossValue: 50000, annualCost: 200, dataTier: "internal", controlOk: true, evidenceInferred: false }); return r.gates.policy.status === "ok" && r.gates.economics.status === "ok" && /clear/i.test(r.gateSummary); })(), "");
+  ok("M6 PII data raises the DATA gate to caution independently", readiness({ theoPct: 0.5, permittedPct: 0.5, grossValue: 50000, annualCost: 200, dataTier: "PII" }).gates.data.status === "caution", "");
+  ok("M6 a control violation raises the CONTROL gate to blocked independently", readiness({ theoPct: 0.5, permittedPct: 0.5, grossValue: 50000, annualCost: 200, controlViolations: [{ rule: "x" }] }).gates.control.status === "blocked", "");
+  ok("M6 an all-inferred unit raises the EVIDENCE gate to blocked", readiness({ theoPct: 0.5, permittedPct: 0.5, grossValue: 50000, annualCost: 200, evidenceInferred: true }).gates.evidence.status === "blocked", "");
+  ok("M6 the six gates are always present and named", (() => { const g = readiness({ grossValue: 1, annualCost: 0 }).gates; return ["policy", "data", "control", "economics", "adoption", "evidence"].every(k => g[k] && typeof g[k].status === "string"); })(), "");
+  ok("M6 the buildSpec carries the gate matrix on its readiness object", (() => { const sp = buildSpec(FPA_INTAKE); return sp._readiness && sp._readiness.gates && sp._readiness.gates.data && typeof sp._readiness.gateSummary === "string"; })(), "");
 
   // ---- Edition 3 \u00b7 F8 \u2014 org-tier numbers: hand-off reduction + SLA dividend ----
   const hr = buildHandoffReduction([RECON_INTAKE]);

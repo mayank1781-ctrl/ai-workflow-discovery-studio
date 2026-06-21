@@ -12748,10 +12748,12 @@ function buildRecipeSpec(unitId, policyInput) {
   // E3 — when the engine is loaded, readiness becomes the engine's 4-state
   // (now / gated-policy / gated-economics / future-capability) with a reason + remedy,
   // overriding the Change 1/2 readiness. Additive: skipped when the engine isn't present.
+  // M6 — also carry the INDEPENDENT gate matrix (policy · data · control · economics · adoption ·
+  // evidence) + one-line summary, so a policy block shows even when economics look weak.
   try {
     if (typeof engineSpecReadiness === "function") {
       const rd = engineSpecReadiness(unitId);
-      if (rd && rd.state) spec = { ...spec, readiness: rd.state, readinessReason: rd.reason };
+      if (rd && rd.state) spec = { ...spec, readiness: rd.state, readinessReason: rd.reason, readinessGates: rd.gates || null, readinessGateSummary: rd.gateSummary || "" };
     }
   } catch (_e) {
     // keep the Change 1/2 readiness
@@ -12769,6 +12771,28 @@ function buildRecipeSpec(unitId, policyInput) {
 // inferred field is shown as an honest empty state WITH a confirm affordance
 // (data-spec-confirm) — never a blocked state. Flat hues + text labels only: no gradient,
 // no new color, Human Pink stays reserved.
+// M6 — the INDEPENDENT readiness gate matrix (policy · data · control · economics · adoption ·
+// evidence) as flat-fill status chips with a one-line summary. Status is carried in TEXT + a glyph
+// (not colour alone — accessibility), with an existing-token hue as a secondary cue. Human Pink is
+// never used. Returns "" when the engine didn't attach gates, so the canvas stays byte-identical.
+function recipeReadinessGatesHtml(gates, summary) {
+  if (!gates || typeof gates !== "object") return "";
+  const order = ["policy", "data", "control", "economics", "adoption", "evidence"];
+  const style = {
+    blocked: { hue: "var(--sg-danger,#F2545B)", glyph: "✕" },
+    caution: { hue: "var(--sg-amber,#FFB454)", glyph: "⚠" },
+    ok: { hue: "var(--sg-green,#30D5A7)", glyph: "✓" },
+    "n-a": { hue: "var(--txt-faint,#737A92)", glyph: "·" },
+  };
+  const chips = order.filter((k) => gates[k] && gates[k].status).map((k) => {
+    const g = gates[k]; const s = style[g.status] || style["n-a"];
+    return `<span title="${escapeHtml(String(g.reason || ""))}" style="display:inline-flex;align-items:center;gap:5px;background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line-soft,rgba(255,255,255,.10));border-radius:999px;padding:2px 9px;font-size:10px;font-weight:700;color:${s.hue};"><span aria-hidden="true">${s.glyph}</span>${escapeHtml(k)} · ${escapeHtml(String(g.status).toUpperCase())}</span>`;
+  }).join(" ");
+  if (!chips) return "";
+  const sum = summary ? `<div style="margin-top:4px;font-size:11px;color:var(--txt-faint,#737A92);">${escapeHtml(String(summary))}</div>` : "";
+  return `<div class="recipe-readiness-gates" data-readiness-gates="1" style="margin:4px 0 8px;"><div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;color:var(--txt-faint,#737A92);margin-bottom:4px;">Readiness gates — independent</div><div style="display:flex;flex-wrap:wrap;gap:5px;">${chips}</div>${sum}</div>`;
+}
+
 function recipeSpecCanvasHtml(spec, unitId, gateState, nextLifecycle) {
   if (!spec || typeof spec !== "object") return "";
   const uid = escapeHtml(String(unitId || ""));
@@ -12827,6 +12851,7 @@ function recipeSpecCanvasHtml(spec, unitId, gateState, nextLifecycle) {
     <div style="margin-top:6px;">
       ${gateBanner}
       ${spec.readinessReason ? `<div style="margin-bottom:6px;font-size:11px;line-height:1.5;color:var(--txt-faint,#737A92);">Readiness note: ${escapeHtml(String(spec.readinessReason))}</div>` : ""}
+      ${typeof recipeReadinessGatesHtml === "function" ? recipeReadinessGatesHtml(spec.readinessGates, spec.readinessGateSummary) : ""}
       ${fieldRow("goal", "Goal", spec.goal)}
       ${fieldRow("context", "Context", spec.context)}
       ${fieldRow("constraints", "Constraints", spec.constraints)}
