@@ -7730,6 +7730,97 @@ function workbenchControlGateHtml(record) {
     <div style="margin-top:8px;"><button type="button" data-workbench-confirm style="background:var(--sg-cyan);color:#08111f;border:none;border-radius:6px;padding:6px 14px;font-weight:700;font-size:12px;cursor:pointer;${muted}">Confirm the map</button>${note}</div></section>`;
 }
 
+// ============ Edition 3 · F7 — Recipe (the multi-actor build artifact) ===============================
+// Render the recipe as the worked example shows: ordered steps with the doer/part; control gates inline
+// (four-eyes badge, the authority matrix from sharedRules, halt with its negativeConstraint); routes as
+// loop/halt/escalation edges; the rail checks visible; cost/model-fit (this is the ENGINEERING surface,
+// so the cost family is allowed). All the structure comes from engine.buildRecipe — no fork. ADDITIVE: a
+// single-actor, control-free, linear unit has no multi-actor overlay and renders as today.
+
+function recipeEsc(s) { return (typeof escapeHtml === "function" ? escapeHtml(String(s == null ? "" : s)) : String(s == null ? "" : s)); }
+// locked control tint: four-eyes=blue, authority=amber, halt=pink, completeness/segregation(SoD)=violet.
+function recipeControlTint(type) { return type === "four-eyes" ? "var(--sg-blue)" : type === "authority" ? "var(--sg-amber)" : type === "halt-on-flag" ? "var(--sg-pink)" : "var(--sg-violet)"; }
+function recipeKindTint(s) {
+  if (s.kind === "ai-step") return "var(--sg-green)";        // assembly — AI carries
+  if (s.kind === "human-checkpoint") return s.cls === "decision" ? "var(--sg-pink)" : "var(--sg-amber)"; // decision pink / judgment amber
+  return "var(--gray)";
+}
+// the control gate, inline: four-eyes badge, the resolved authority matrix, halt + its negativeConstraint.
+function recipeControlGateHtml(control) {
+  if (!control || !control.type) return "";
+  const tint = recipeControlTint(control.type);
+  let inner = "";
+  if (control.type === "four-eyes" || control.type === "segregation") {
+    const parts = Array.isArray(control.distinct) ? control.distinct.join(" ≠ ") : "doer ≠ approver";
+    inner = `<span style="font-size:10px;font-weight:700;color:${tint};">⛉ ${recipeEsc(control.type === "four-eyes" ? "4-EYES" : "SoD")}</span> <span style="font-size:10px;color:var(--gray);">${recipeEsc(parts)} (distinct actors)</span>`;
+    if (control.authority && Array.isArray(control.authority.bands)) {
+      const ladder = control.authority.bands.map((b) => `<tr><td style="padding:1px 8px 1px 0;color:var(--gray);">${b.maxValue == null ? "&gt; ceiling" : "≤ $" + recipeEsc(b.maxValue)}</td><td style="padding:1px 0;color:var(--sg-amber);">${recipeEsc(b.approver)}</td></tr>`).join("");
+      inner += `<table style="margin-top:4px;border-collapse:collapse;font-size:10px;"><tbody>${ladder}</tbody></table>`;
+    }
+  } else if (control.type === "authority") {
+    inner = `<span style="font-size:10px;font-weight:700;color:${tint};">⚖ AUTHORITY</span> <span style="font-size:10px;color:var(--gray);">${recipeEsc(control.authorityRef || "value-banded approver")}</span>`;
+  } else if (control.type === "halt-on-flag") {
+    inner = `<span style="font-size:10px;font-weight:700;color:${tint};">⛔ HALT</span> <span style="font-size:10px;color:var(--gray);">${recipeEsc(control.on || "flag")} → ${recipeEsc(control.escalateToRole || control.escalateTo || "escalation-target")}</span>` +
+      (control.negativeConstraint ? `<div style="font-size:10px;color:var(--sg-pink);margin-top:2px;">do not: ${recipeEsc(control.negativeConstraint)}</div>` : "");
+  } else {
+    inner = `<span style="font-size:10px;font-weight:700;color:${tint};">⛉ ${recipeEsc(control.type)}</span>${control.note ? ` <span style="font-size:10px;color:var(--gray);">${recipeEsc(control.note)}</span>` : ""}`;
+  }
+  return `<div style="margin-top:4px;padding:5px 8px;border-left:2px solid ${tint};background:var(--deep2);border-radius:4px;">${inner}</div>`;
+}
+// one ordered recipe step: number, name, the doer + part chips, the class/kind tint, the control gate.
+function recipeStepRowHtml(s, i) {
+  const tint = recipeKindTint(s);
+  const num = String(i + 1).padStart(2, "0");
+  const doer = s.doer ? `<span class="prov user" style="font-size:10px;">${recipeEsc(s.doer.role)}${s.doer.line && s.doer.line !== "—" ? ` · <span style="color:var(--gray);">${recipeEsc(s.doer.line)}</span>` : ""}</span>` : "";
+  const others = Array.isArray(s.participants) ? s.participants.filter((p) => p.part !== "doer").map((p) => `<span style="font-size:10px;color:var(--gray);">${recipeEsc(p.part)}: ${recipeEsc(p.role || p.actorId)}</span>`).join(" · ") : "";
+  const kindLabel = s.kind === "ai-step" ? `AI · ${recipeEsc(s.tier || "small")}` : (s.cls ? recipeEsc(s.cls) : "human");
+  return `<div style="padding:8px 10px;border:1px solid var(--sg-line);border-radius:8px;margin-bottom:6px;">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <span style="font-size:11px;color:var(--gray);font-variant-numeric:tabular-nums;">${num}</span>
+      <strong style="font-size:12px;">${recipeEsc(s.step)}</strong>
+      <span style="font-size:10px;font-weight:700;color:${tint};">${kindLabel}</span>
+      ${doer}${others ? ` <span style="font-size:10px;color:var(--gray);">${others}</span>` : ""}
+    </div>
+    <div style="font-size:11px;color:var(--gray);margin-top:3px;">${recipeEsc(s.action || "")}</div>
+    ${recipeControlGateHtml(s.control)}</div>`;
+}
+// a route edge: reject loop / AML halt / SLA escalation, with its derived|authored origin.
+function recipeRouteEdgeHtml(r) {
+  const icon = r.kind === "onReject" ? "↩" : r.kind === "onFlag" ? "⛔" : "⏱";
+  const tint = r.kind === "onFlag" ? "var(--sg-pink)" : r.kind === "onReject" ? "var(--gray)" : "var(--sg-amber)";
+  const target = r.toStep ? `${recipeEsc(r.fromStep)} → ${recipeEsc(r.toStep)}` : `${recipeEsc(r.fromStep || "")} → ${recipeEsc(r.toRole || r.to || "")}`;
+  const origin = `<span style="font-size:9px;color:var(--gray);border:1px solid var(--sg-line);border-radius:4px;padding:0 4px;">${recipeEsc(r.routeOrigin)}</span>`;
+  const neg = r.negativeConstraint ? `<span style="font-size:10px;color:var(--sg-pink);"> · do not: ${recipeEsc(r.negativeConstraint)}</span>` : "";
+  return `<div style="font-size:11px;color:${tint};padding:3px 0;"><span style="font-weight:700;">${icon} ${recipeEsc(r.kind)}</span> ${target} ${origin}${neg}</div>`;
+}
+// the three control rail checks, made visible on the artifact.
+function recipeRailChecksHtml(rail) {
+  if (!rail) return "";
+  const ok = rail.ok;
+  if (ok) return `<div style="font-size:11px;color:var(--sg-green);">✓ Rail: no AI step is doer+approver in a four-eyes · authority names a human approver · a halt is never auto-resolved</div>`;
+  return `<div style="font-size:11px;color:var(--sg-pink);">✕ Rail: ${(rail.violations || []).map((v) => recipeEsc(`${v.step}: ${v.detail}`)).join(" · ")}</div>`;
+}
+// the multi-actor recipe artifact. ADDITIVE: returns "" for a single-actor, control-free, linear unit.
+function recipeMultiActorHtml(record) {
+  const E = studioEngine();
+  if (!E || typeof E.buildRecipe !== "function") return "";
+  const steps = Array.isArray(record && record.steps) ? record.steps : [];
+  const hasMultiActor = steps.some((s) => Array.isArray(s.participants) || s.control) || (Array.isArray(record.routes) && record.routes.length) || (Array.isArray(record.actors) && record.actors.length);
+  if (!hasMultiActor) return "";
+  const recipe = E.buildRecipe(record);
+  const stepRows = (recipe.orderedSteps || []).filter((s) => s.kind !== "seam-checkpoint").map((s, i) => recipeStepRowHtml(s, i)).join("");
+  const routes = (recipe.routes || []);
+  const routeRows = routes.length ? `<div style="margin-top:8px;"><div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--gray);margin-bottom:2px;">Routes (the recipe is not a straight line)</div>${routes.map(recipeRouteEdgeHtml).join("")}</div>` : "";
+  const spec = (typeof E.buildSpec === "function") ? E.buildSpec(record) : null;
+  const modelFit = spec && spec.modelFit && spec.modelFit.value ? `<div style="font-size:11px;color:var(--gray);margin-top:8px;">Model-fit · cost-to-serve: ${recipeEsc(spec.modelFit.value)}</div>` : "";
+  return `<section class="recipe-multiactor" style="margin:12px 0;padding:12px 14px;border:1px solid var(--sg-line);border-radius:10px;">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--gray);margin-bottom:8px;">Multi-actor recipe — one process across many roles</div>
+    ${stepRows}
+    ${routeRows}
+    <div style="margin-top:8px;">${recipeRailChecksHtml(recipe.rail)}</div>
+    ${modelFit}</section>`;
+}
+
 // E2 — the spec's 7th field. The engine decides model-fit (permitted tier per class + data-tier
 // residency: PII/MNPI force a restricted/in-VPC pricing tier; confidential routes at its normal
 // class tier) and the cost-to-serve band. Returns the engine's modelFit prov triple (or
