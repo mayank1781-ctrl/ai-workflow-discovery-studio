@@ -1,0 +1,361 @@
+{
+  "schema": "pooled-cross-discovery-library/v1",
+  "note": "De-identified pooled cross-discovery library (A4). Each record is the de-identified SHAPE only — roles, capabilities, generalized data-tier class, step-classes, and metrics. NO names, PII/MNPI content, or proprietary free-text. This is the moat; the per-engagement store holds full fidelity. Seeded from the calibrated RECON + FP&A fixtures; grows as confirmed discoveries are pooled.",
+  "illustrative": true,
+  "records": [
+    {
+      "pooled": true,
+      "deIdentified": true,
+      "poolId": "pooled-bey755",
+      "header": {
+        "persona": "Ops Analyst",
+        "dept": "CIB Operations",
+        "anchor": "pooled-bey755",
+        "lifecycle": "confirmed"
+      },
+      "trigger": {
+        "trigger": "[de-identified]",
+        "cadence": "daily",
+        "volume": "~200/day"
+      },
+      "steps": [
+        {
+          "step": "[de-identified] step 1",
+          "cls": "assembly",
+          "data": "internal",
+          "capability": "route",
+          "time": 10,
+          "theo": 80,
+          "touch": 30,
+          "wait": 60,
+          "waitKind": "reducible",
+          "participants": [
+            {
+              "actorId": "teamLead",
+              "part": "doer"
+            }
+          ],
+          "control": {
+            "type": "completeness"
+          }
+        },
+        {
+          "step": "[de-identified] step 2",
+          "cls": "judgment",
+          "data": "confidential",
+          "capability": "investigate",
+          "time": 26,
+          "theo": 35,
+          "touch": 120,
+          "wait": 0,
+          "waitKind": "reducible",
+          "participants": [
+            {
+              "actorId": "maker",
+              "part": "doer"
+            }
+          ],
+          "control": {
+            "type": "halt-on-flag"
+          }
+        },
+        {
+          "step": "[de-identified] step 3",
+          "cls": "judgment",
+          "data": "confidential",
+          "capability": "propose",
+          "time": 16,
+          "theo": 35,
+          "touch": 60,
+          "wait": 0,
+          "waitKind": "reducible",
+          "participants": [
+            {
+              "actorId": "maker",
+              "part": "doer"
+            }
+          ]
+        },
+        {
+          "step": "[de-identified] step 4",
+          "cls": "decision",
+          "data": "confidential",
+          "capability": "approve",
+          "time": 12,
+          "theo": 10,
+          "touch": 30,
+          "wait": 240,
+          "waitKind": "protected",
+          "participants": [
+            {
+              "actorId": "maker",
+              "part": "doer"
+            },
+            {
+              "actorId": "checker",
+              "part": "approver"
+            }
+          ],
+          "control": {
+            "type": "four-eyes",
+            "distinct": [
+              "doer",
+              "approver"
+            ]
+          }
+        },
+        {
+          "step": "[de-identified] step 5",
+          "cls": "assembly",
+          "data": "confidential",
+          "capability": "post",
+          "time": 14,
+          "theo": 75,
+          "touch": 30,
+          "wait": 0,
+          "waitKind": "reducible",
+          "participants": [
+            {
+              "actorId": "maker",
+              "part": "doer"
+            }
+          ]
+        },
+        {
+          "step": "[de-identified] step 6",
+          "cls": "decision",
+          "data": "internal",
+          "capability": "close",
+          "time": 8,
+          "theo": 10,
+          "touch": 20,
+          "wait": 0,
+          "waitKind": "protected",
+          "participants": [
+            {
+              "actorId": "teamLead",
+              "part": "doer"
+            },
+            {
+              "actorId": "opsManager",
+              "part": "accountable"
+            }
+          ]
+        }
+      ],
+      "seams": [
+        {
+          "friction": "low",
+          "latency": "medium",
+          "crit": "medium",
+          "type": "handoff"
+        },
+        {
+          "friction": "low",
+          "latency": "medium",
+          "crit": "high",
+          "type": "handoff"
+        }
+      ],
+      "judgment": {
+        "needs": "[de-identified]",
+        "hard": "[de-identified]",
+        "cues": "[de-identified]",
+        "human": "[de-identified]"
+      },
+      "confirm": {
+        "acceptance": "[de-identified]",
+        "escalation": "[de-identified]",
+        "dataTier": "confidential"
+      },
+      "recap": {
+        "confirmed": true
+      },
+      "actors": [
+        {
+          "id": "maker",
+          "role": "Ops Analyst",
+          "department": "CIB Operations",
+          "line": "1LoD"
+        },
+        {
+          "id": "checker",
+          "role": "Senior Analyst",
+          "department": "CIB Operations",
+          "line": "1LoD"
+        },
+        {
+          "id": "teamLead",
+          "role": "Team Lead",
+          "department": "CIB Operations",
+          "line": "1LoD"
+        },
+        {
+          "id": "opsManager",
+          "role": "Ops Manager",
+          "department": "CIB Operations",
+          "line": "1LoD"
+        },
+        {
+          "id": "finance",
+          "role": "Product Control",
+          "department": "Finance",
+          "line": "1LoD"
+        },
+        {
+          "id": "finCrime",
+          "role": "Financial Crime",
+          "department": "Financial Crime",
+          "line": "2LoD"
+        }
+      ],
+      "sharedRules": [
+        {
+          "id": "authorityMatrix:writeOff",
+          "kind": "authorityMatrix",
+          "bands": [
+            {
+              "maxValue": 100,
+              "approver": "checker"
+            },
+            {
+              "maxValue": 1000,
+              "approver": "teamLead"
+            },
+            {
+              "maxValue": 10000,
+              "approver": "opsManager"
+            },
+            {
+              "maxValue": null,
+              "approver": "opsManager+finance"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "pooled": true,
+      "deIdentified": true,
+      "poolId": "pooled-14o0f4k",
+      "header": {
+        "persona": "FP&A analyst",
+        "dept": "Finance",
+        "anchor": "pooled-14o0f4k",
+        "lifecycle": "confirmed"
+      },
+      "trigger": {
+        "trigger": "[de-identified]",
+        "cadence": "monthly",
+        "volume": "~12/yr"
+      },
+      "steps": [
+        {
+          "step": "[de-identified] step 1",
+          "cls": "assembly",
+          "data": "confidential",
+          "capability": "extract",
+          "time": 18,
+          "theo": 85,
+          "touch": 90,
+          "wait": 0,
+          "waitKind": "reducible"
+        },
+        {
+          "step": "[de-identified] step 2",
+          "cls": "assembly",
+          "data": "confidential",
+          "capability": "reconcile",
+          "time": 16,
+          "theo": 70,
+          "touch": 120,
+          "wait": 240,
+          "waitKind": "reducible"
+        },
+        {
+          "step": "[de-identified] step 3",
+          "cls": "assembly",
+          "data": "confidential",
+          "capability": "compute",
+          "time": 14,
+          "theo": 55,
+          "touch": 90,
+          "wait": 0,
+          "waitKind": "reducible"
+        },
+        {
+          "step": "[de-identified] step 4",
+          "cls": "judgment",
+          "data": "confidential",
+          "capability": "variance",
+          "time": 14,
+          "theo": 30,
+          "touch": 60,
+          "wait": 0,
+          "waitKind": "reducible"
+        },
+        {
+          "step": "[de-identified] step 5",
+          "cls": "assembly",
+          "data": "confidential",
+          "capability": "draft",
+          "time": 16,
+          "theo": 60,
+          "touch": 60,
+          "wait": 480,
+          "waitKind": "reducible"
+        },
+        {
+          "step": "[de-identified] step 6",
+          "cls": "assembly",
+          "data": "confidential",
+          "capability": "forecast",
+          "time": 12,
+          "theo": 50,
+          "touch": 45,
+          "wait": 2880,
+          "waitKind": "protected"
+        },
+        {
+          "step": "[de-identified] step 7",
+          "cls": "decision",
+          "data": "restricted",
+          "capability": "stakeholder",
+          "time": 10,
+          "theo": 10,
+          "touch": 30,
+          "wait": 0,
+          "waitKind": "reducible"
+        }
+      ],
+      "seams": [
+        {
+          "friction": "high",
+          "latency": "low",
+          "crit": "medium",
+          "type": "re-key"
+        },
+        {
+          "friction": "low",
+          "latency": "high",
+          "crit": "high",
+          "type": "handoff"
+        }
+      ],
+      "judgment": {
+        "needs": "[de-identified]",
+        "hard": "[de-identified]",
+        "cues": "[de-identified]",
+        "human": "[de-identified]"
+      },
+      "confirm": {
+        "acceptance": "[de-identified]",
+        "escalation": "[de-identified]",
+        "dataTier": "restricted"
+      },
+      "recap": {
+        "confirmed": true
+      }
+    }
+  ]
+}
