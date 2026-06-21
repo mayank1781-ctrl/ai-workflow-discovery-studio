@@ -27,11 +27,16 @@
     <script type="module">
       globalThis.process = globalThis.process || { argv: [] };
       try {
-        const E = await import("./studio_engine.mjs?v=20260620-e2");
+        const E = await import("./studio_engine.mjs?v=20260621-p1");
         window.StudioEngine = E;
         if (typeof window.onStudioEngineReady === "function") window.onStudioEngineReady();
       } catch (err) {
-        console.warn("Studio engine failed to load; engine-backed figures are unavailable.", err);
+        // B1 — FAIL CLOSED. The engine is the single source of truth for the figures AND the
+        // safety rails. If it can't load we must surface a visible error state, never a silent
+        // pass: leave window.StudioEngine unset (so the rails fail closed) and raise the alert.
+        window.__studioEngineFailed = true;
+        console.error("Studio engine failed to load — failing closed (B1).", err);
+        if (typeof window.onStudioEngineError === "function") window.onStudioEngineError(err);
       }
     </script>
     <link rel="stylesheet" href="design-system.css">

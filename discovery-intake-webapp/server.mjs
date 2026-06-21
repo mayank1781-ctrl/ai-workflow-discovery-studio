@@ -589,6 +589,11 @@ const mimeTypes = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".js": "application/javascript; charset=utf-8",
+  // B1 — ES modules MUST be served with a JavaScript MIME type or strict browsers refuse the
+  // import. studio_engine.mjs (the single source of truth + safety rails) loads via `import`,
+  // so an octet-stream default would silently break the engine in the browser. Serve it as
+  // text/javascript (the WHATWG-recommended module type).
+  ".mjs": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".png": "image/png",
   ".svg": "image/svg+xml",

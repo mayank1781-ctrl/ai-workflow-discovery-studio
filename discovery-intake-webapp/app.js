@@ -7427,13 +7427,18 @@ function studioEngine() {
 }
 
 // THE surface-aware rail (Change 4), delegated to the engine — one authority, gating. Returns
-// {ok, violations}. When the engine isn't loaded it reports engineMissing (callers treat that
-// as "unchecked"; the per-module test rails still hold).
+// {ok, violations}. B1 — FAIL CLOSED: the engine is the single rail authority; if it isn't
+// loaded we cannot verify the surface is safe, so the rail must NOT report ok. A missing engine
+// is an error state (surfaced visibly via onStudioEngineError), never a silent fake-OK pass.
 function railCheck(text, surface) {
   const E = studioEngine();
   if (E && typeof E.railCheck === "function") return E.railCheck(text, surface);
-  return { ok: true, violations: [], engineMissing: true };
+  return { ok: false, violations: [{ term: "", rule: "engine-unavailable", detail: "the Studio engine (rail authority) is not loaded — failing closed (B1)" }], engineMissing: true };
 }
+
+// B1 — is the engine (single source of truth + rail authority) actually loaded? Surfaces drive
+// a visible error state off this instead of silently rendering un-verified figures/rails.
+function studioEngineReady() { return !!studioEngine(); }
 
 // Unwrap a .prov.* triple (or a bare value) to its value — so engine intake fields stay plain.
 function engineProvValue(t) {
@@ -7899,6 +7904,28 @@ if (typeof window !== "undefined") {
         if (document.getElementById("analysis-tab-dashboard") && typeof renderAnalysisTabDashboard === "function") renderAnalysisTabDashboard();
       }
     } catch (_e) { /* additive */ }
+  };
+
+  // B1 — FAIL CLOSED on engine-load failure. The engine is the single source of truth for the
+  // figures AND the safety rails; if it can't load we must show a visible, non-dismissable error
+  // state, never let the app appear to be producing valid results. index.html's module-import
+  // catch calls this; the rails already fail closed (see railCheck above).
+  window.onStudioEngineError = function (err) {
+    try {
+      if (typeof console !== "undefined" && console.error) console.error("Studio engine unavailable — failing closed (B1).", err);
+      if (typeof document === "undefined" || !document.getElementById) return;
+      const pill = document.getElementById("aiStatus");
+      if (pill) { pill.textContent = "Engine unavailable"; pill.classList && pill.classList.add("status-error"); }
+      if (!document.getElementById("engine-load-error")) {
+        const banner = document.createElement("div");
+        banner.id = "engine-load-error";
+        banner.setAttribute("role", "alert");
+        banner.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99999;background:#7f1d1d;color:#fff;padding:10px 16px;font:600 13px/1.45 system-ui,-apple-system,sans-serif;text-align:center;";
+        banner.textContent = "Studio engine failed to load — analysis figures and safety rails are unavailable. This is an error state, not a result. Reload the page; if it persists, the engine module is not being served as text/javascript.";
+        const mount = () => { if (document.body && !document.getElementById("engine-load-error")) document.body.prepend(banner); else if (document.body) document.body.prepend(banner); };
+        if (document.body) mount(); else document.addEventListener("DOMContentLoaded", mount);
+      }
+    } catch (_e) { /* never let the error handler itself throw */ }
   };
 }
 

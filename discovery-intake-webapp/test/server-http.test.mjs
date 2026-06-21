@@ -155,6 +155,19 @@ test("/api/business-case computes a snapshot with computedAt on explicit request
   assert.equal(bad.status, 400);
 });
 
+test("B1 — studio_engine.mjs is served with a JavaScript MIME type (the browser import works)", async () => {
+  // Regression for the audit blocker: .mjs was served as application/octet-stream, so strict
+  // browsers refused to import the engine — window.StudioEngine never set, rails failed soft.
+  const res = await fetch(`${server.base}/studio_engine.mjs`);
+  assert.equal(res.status, 200, "the engine module is served");
+  const ct = res.headers.get("content-type") || "";
+  assert.match(ct, /^text\/javascript\b/, `.mjs must be a JS module MIME, got "${ct}"`);
+  assert.doesNotMatch(ct, /octet-stream/, ".mjs must not be served as octet-stream (browsers refuse the import)");
+  // A classic .js asset still serves with a JS MIME (no regression).
+  const js = await fetch(`${server.base}/app.js`);
+  assert.match(js.headers.get("content-type") || "", /javascript/, "app.js still serves as JavaScript");
+});
+
 test("/health returns ok and bypasses the auth gate", async () => {
   const authServer = await bootServer({
     PORT: String(AUTH_PORT),
