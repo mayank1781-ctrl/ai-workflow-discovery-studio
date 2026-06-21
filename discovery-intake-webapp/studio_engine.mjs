@@ -1083,21 +1083,29 @@ function fourEyesRoles(rec) {
   });
   return { doerRoles, approverRoles };
 }
-// F4 — adjacency: cluster confirmed workflows that share role / capability / data tier / hand-off; tag
-// each pair enabled or control-blocked (a combine that would break four-eyes/SoD or cross a data-tier
-// boundary), with the blocking reason. A single workflow => no clusters (no false adjacency).
+// F4 + A3 (M8) — STRICTER adjacency. A shared role/capability makes two confirmed workflows
+// CANDIDATES, but they only ENABLE as one build when they are ALSO compatible on data tier, controls
+// (four-eyes / SoD), CADENCE, and TOOLING / SOLUTION-SHAPE. A shared role alone is not enough — that
+// looseness produced thousands of phantom clusters (~4,916 on the stress set). Incompatible candidates
+// are NOT dropped: each is surfaced in `whyBlocked` with the dimension and reason (never-a-dead-end).
+// `clusters` keeps the full candidate list tagged enabled | control-blocked (backward-compatible);
+// `enabledClusters` is the small actionable set the looseness used to drown. A single workflow => none.
 export function buildAdjacency(records, opts = {}) {
   const confirmed = (Array.isArray(records) ? records : []).filter(isConfirmed);
   if (confirmed.length < 2) {
-    return { clusters: [], confirmedCount: confirmed.length,
+    return { clusters: [], enabledClusters: [], whyBlocked: [], enabledCount: 0, blockedCount: 0, candidateCount: 0, confirmedCount: confirmed.length,
       note: "Adjacency needs ≥2 confirmed workflows — thin at this breadth; it sharpens as the library grows." };
   }
+  const lc = s => String(s || "").trim().toLowerCase();
   const meta = confirmed.map(rec => {
     const rc = roleCapacityByActor(rec, opts.profile || "Conservative", opts);
     return { rec, name: rec.header?.anchor || rec.header?.persona || "workflow",
       roles: new Set(rc.roles.map(r => r.role)),
       caps: new Set(buildCapabilityMap([rec], opts).capabilities.map(c => c.capability)),
       tier: maxTier(rec) || "internal", handoffs: detectHandoffs(rec).map(h => `${h.fromRole}>${h.toRole}`),
+      cadence: lc(rec.trigger?.cadence),                                          // A3 — operational envelope
+      tools: new Set(uniq((rec.steps || []).flatMap(s => (s.tool || "").split(/[,/]/))).map(lc)), // A3 — integration surface
+      shapes: new Set((rec.steps || []).map(s => s.solutionShape).filter(Boolean)),                // A3 — solution shape
       fourEyes: fourEyesRoles(rec), freedHrs: rc.totalFreedHrs };
   });
   const inter = (a, b) => [...a].filter(x => b.has(x));
@@ -1106,20 +1114,35 @@ export function buildAdjacency(records, opts = {}) {
     const A = meta[i], B = meta[j];
     const sharedRoles = inter(A.roles, B.roles), sharedCaps = inter(A.caps, B.caps);
     const sharedHandoffs = A.handoffs.filter(h => B.handoffs.includes(h));
-    if (!sharedRoles.length && !sharedCaps.length) continue; // not adjacent — no false cluster
-    let status = "enabled", reason = `shared ${sharedCaps.length ? `capability (${sharedCaps.join(", ")})` : `role (${sharedRoles.join(", ")})`} — build the capability once, reuse across both: a more capable, less fragmented team.`;
+    if (!sharedRoles.length && !sharedCaps.length) continue; // not even a candidate — no false adjacency
+    let status = "enabled", dimension = null;
+    let reason = `shared ${sharedCaps.length ? `capability (${sharedCaps.join(", ")})` : `role (${sharedRoles.join(", ")})`} — and compatible on data, controls, cadence & tooling: build the capability once, reuse across both (a more capable, less fragmented team).`;
     const rankA = TIER_RANK[A.tier] ?? 1, rankB = TIER_RANK[B.tier] ?? 1;
+    const sod = inter(A.fourEyes.doerRoles, B.fourEyes.approverRoles).concat(inter(A.fourEyes.approverRoles, B.fourEyes.doerRoles));
+    // priority-ordered compatibility — the FIRST incompatible dimension is the why-blocked reason.
     if (A.tier !== B.tier && Math.max(rankA, rankB) >= TIER_RANK.confidential) {
-      status = "control-blocked"; reason = `combining would cross a ${A.tier} ↔ ${B.tier} data boundary — raise the ceiling first (the control bounds the combine).`;
-    } else {
-      const sod = inter(A.fourEyes.doerRoles, B.fourEyes.approverRoles).concat(inter(A.fourEyes.approverRoles, B.fourEyes.doerRoles));
-      if (sod.length) { status = "control-blocked"; reason = `combining would break the four-eyes — ${sod[0]} can't be both maker and checker (separation of duties).`; }
+      status = "control-blocked"; dimension = "data"; reason = `combining would cross a ${A.tier} ↔ ${B.tier} data boundary — raise the ceiling first (the control bounds the combine).`;
+    } else if (sod.length) {
+      status = "control-blocked"; dimension = "control"; reason = `combining would break the four-eyes — ${sod[0]} can't be both maker and checker (separation of duties).`;
+    } else if (A.cadence && B.cadence && A.cadence !== B.cadence) {
+      status = "control-blocked"; dimension = "cadence"; reason = `shared role/capability but different cadence (${A.cadence} vs ${B.cadence}) — a different operational envelope; sequence separately, don't co-build.`;
+    } else if (A.tools.size && B.tools.size && !inter(A.tools, B.tools).length) {
+      status = "control-blocked"; dimension = "tooling"; reason = `shared role/capability but no shared tooling (${[...A.tools].slice(0, 2).join("/")} vs ${[...B.tools].slice(0, 2).join("/")}) — a different integration surface, not a reuse.`;
+    } else if (A.shapes.size && B.shapes.size && !inter(A.shapes, B.shapes).length) {
+      status = "control-blocked"; dimension = "shape"; reason = `shared role/capability but a different solution shape (${[...A.shapes].join("/")} vs ${[...B.shapes].join("/")}) — the capability isn't one build.`;
     }
-    clusters.push({ workflows: [A.name, B.name], sharedRoles, sharedCapabilities: sharedCaps, sharedHandoffs, status, reason, combinedFreedHrs: round(A.freedHrs + B.freedHrs, 3) });
+    const entry = { workflows: [A.name, B.name], sharedRoles, sharedCapabilities: sharedCaps, sharedHandoffs, status, reason, combinedFreedHrs: round(A.freedHrs + B.freedHrs, 3) };
+    if (dimension) entry.blockedDimension = dimension;
+    clusters.push(entry);
   }
   clusters.sort((a, b) => b.combinedFreedHrs - a.combinedFreedHrs);
-  return { clusters, confirmedCount: confirmed.length,
-    note: clusters.length ? null : "No adjacency yet — these confirmed workflows don't share a role or capability." };
+  const enabledClusters = clusters.filter(c => c.status === "enabled");
+  const whyBlocked = clusters.filter(c => c.status !== "enabled");
+  return { clusters, enabledClusters, whyBlocked,
+    enabledCount: enabledClusters.length, blockedCount: whyBlocked.length, candidateCount: clusters.length, confirmedCount: confirmed.length,
+    note: clusters.length
+      ? `${enabledClusters.length} actionable cluster(s); ${whyBlocked.length} candidate pair(s) blocked on data / controls / cadence / tooling / shape (surfaced as why-blocked, not dropped).`
+      : "No adjacency yet — these confirmed workflows don't share a role or capability." };
 }
 
 // F8 — cross-role hand-off reduction (a leader org-tier number). A hand-off is where the doer changes;
@@ -1724,6 +1747,30 @@ function runTests() {
   ] };
   ok("F4 a four-eyes/SoD collision is CONTROL-BLOCKED with a reason", buildAdjacency([RECON_INTAKE, SOD]).clusters.some(c => c.status === "control-blocked" && /four-eyes|separation of duties/.test(c.reason)), JSON.stringify(buildAdjacency([RECON_INTAKE, SOD]).clusters.map(c => `${c.status}:${c.reason}`)));
   ok("F4 the derived layer never emits headcount/cut vocabulary", [JSON.stringify(rv), JSON.stringify(cm), JSON.stringify(buildAdjacency([RECON_INTAKE, PAY_MNPI]))].every(s => !/headcount|cut staff|lay ?off|eliminate role|reduce role/i.test(s)), "");
+
+  // A3 — STRICTER adjacency: shared role alone is not enough; the loose count collapses to a handful
+  {
+    // 100 confirmed clones of the recon SOP, all sharing the SAME roles + capabilities (so EVERY pair
+    // is a loose candidate ~ C(100,2)=4950). Only 8 "twin" pairs are fully compatible (a unique shared
+    // cadence); everyone else differs in cadence => why-blocked, never dropped.
+    const N = 100, base = RECON_INTAKE;
+    const stress = Array.from({ length: N }, (_, i) => {
+      const bucket = i < 16 ? Math.floor(i / 2) : 1000 + i;       // 8 twin-pairs (0..15) + uniques
+      return { ...base, header: { ...base.header, anchor: `STRESS-${i}` }, trigger: { ...base.trigger, cadence: `cad-${bucket}` } };
+    });
+    const adj = buildAdjacency(stress);
+    const loose = adj.candidateCount; // pairs sharing role/capability under the OLD rule
+    ok("A3 loose candidate count is in the thousands (the ~4,916 problem)", loose > 4000, loose);
+    ok("A3 enabled clusters collapse to a handful (<=25)", adj.enabledCount <= 25 && adj.enabledCount > 0, adj.enabledCount);
+    ok("A3 enabled is exactly the 8 compatible twin-pairs", adj.enabledCount === 8, adj.enabledCount);
+    ok("A3 nothing dropped — enabled + blocked = all loose candidates", adj.enabledCount + adj.blockedCount === loose, `${adj.enabledCount}+${adj.blockedCount} vs ${loose}`);
+    ok("A3 every blocked pair names its dimension + reason", adj.whyBlocked.every(c => c.blockedDimension && c.reason), "");
+    // two workflows sharing ONLY a role but differing in data tier do NOT cluster
+    const roleA = { ...FPA_INTAKE, header: { ...FPA_INTAKE.header, persona: "Analyst", anchor: "A-internal" }, steps: FPA_INTAKE.steps.map(s => ({ ...s, data: "internal" })), confirm: { ...FPA_INTAKE.confirm, dataTier: "internal" } };
+    const roleB = { ...FPA_INTAKE, header: { ...FPA_INTAKE.header, persona: "Analyst", anchor: "B-mnpi" }, steps: FPA_INTAKE.steps.map(s => ({ ...s, data: "MNPI" })) };
+    const adj2 = buildAdjacency([roleA, roleB]);
+    ok("A3 role-only + different tier => NOT enabled (surfaced in why-blocked on data)", adj2.enabledCount === 0 && adj2.whyBlocked.some(c => c.blockedDimension === "data"), JSON.stringify(adj2.whyBlocked.map(c => c.blockedDimension)));
+  }
 
   // ---- Edition 3 \u00b7 F6 \u2014 confirm gate, control-aware (confirmBlockers / canHarden) ----
   ok("F6 a clean confirmed multi-actor unit can harden", canHarden(RECON_INTAKE), JSON.stringify(confirmBlockers(RECON_INTAKE)));
