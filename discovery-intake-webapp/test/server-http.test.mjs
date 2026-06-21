@@ -8,13 +8,29 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import * as XLSX from "xlsx";
+import { extractFunction } from "./helpers/extract.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(__dirname, "..", "server.mjs");
+
+// Build a real .xlsx buffer (ZIP container) for the upload-isolation tests.
+function xlsxBuffer() {
+  const sheet = XLSX.utils.aoa_to_sheet([["Step", "Owner"], ["Reconcile", "Ops"], ["Approve", "Manager"]]);
+  const book = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(book, sheet, "Tracker");
+  return XLSX.write(book, { type: "buffer", bookType: "xlsx" });
+}
+async function uploadFile(base, route, buffer, filename) {
+  const fd = new FormData();
+  fd.append("file", new Blob([buffer]), filename);
+  const res = await fetch(`${base}${route}`, { method: "POST", body: fd });
+  return { status: res.status, body: await res.json().catch(() => ({})) };
+}
 const PORT = Number(process.env.TEST_PORT || 5199);
 const AUTH_PORT = PORT - 1;
 
@@ -166,6 +182,45 @@ test("B1 — studio_engine.mjs is served with a JavaScript MIME type (the browse
   // A classic .js asset still serves with a JS MIME (no regression).
   const js = await fetch(`${server.base}/app.js`);
   assert.match(js.headers.get("content-type") || "", /javascript/, "app.js still serves as JavaScript");
+});
+
+test("M10 — looksLikeSpreadsheet only accepts real ZIP/OLE2 magic (format restriction)", async () => {
+  const src = await readFile(SERVER, "utf8");
+  const looksLikeSpreadsheet = eval(`(${extractFunction(src, "looksLikeSpreadsheet")})`);
+  const zip = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]);          // PK\x03\x04 (.xlsx)
+  const ole2 = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]); // legacy .xls
+  assert.equal(looksLikeSpreadsheet(zip), true, "a ZIP container is accepted");
+  assert.equal(looksLikeSpreadsheet(ole2), true, "an OLE2 container is accepted");
+  assert.equal(looksLikeSpreadsheet(Buffer.from("not a spreadsheet at all")), false, "arbitrary text is rejected");
+  assert.equal(looksLikeSpreadsheet(Buffer.from([0x50, 0x4b])), false, "a too-short buffer is rejected");
+  assert.equal(looksLikeSpreadsheet(Buffer.from([0x25, 0x50, 0x44, 0x46, 0, 0, 0, 0])), false, "a PDF magic is not a spreadsheet");
+});
+
+test("M10 — a VALID spreadsheet is parsed (in an isolated worker), end to end", async () => {
+  const { status, body } = await uploadFile(server.base, "/api/extract-policy", xlsxBuffer(), "tracker.xlsx");
+  assert.equal(status, 200);
+  assert.equal(body.success, true, "a real workbook still parses");
+  assert.match(body.text, /Reconcile/, "the cell content comes through");
+  assert.match(body.text, /Sheet: Tracker/, "the sheet is labelled");
+});
+
+test("M10 — a MALFORMED spreadsheet is rejected safely, not parsed", async () => {
+  // Declared .xlsx, but the bytes are not a ZIP/OLE2 container — the format check rejects it
+  // before the parser ever sees it.
+  const junk = Buffer.from("this is absolutely not a spreadsheet, just plain bytes ".repeat(50));
+  const { status, body } = await uploadFile(server.base, "/api/extract-policy", junk, "evil.xlsx");
+  assert.equal(status, 200);
+  assert.equal(body.success, false, "the malformed workbook is rejected");
+  assert.ok(/couldn'?t read|could not|reject/i.test(body.error || ""), "a safe error message, not a crash");
+});
+
+test("M10 — an OVERSIZED spreadsheet is rejected (size cap before parsing)", async () => {
+  // A buffer that starts with a valid ZIP magic but exceeds the 8 MB spreadsheet cap.
+  const big = Buffer.alloc(9_000_000, 0x41);
+  big[0] = 0x50; big[1] = 0x4b; big[2] = 0x03; big[3] = 0x04;
+  const { status, body } = await uploadFile(server.base, "/api/extract-policy", big, "huge.xlsx");
+  assert.equal(status, 200);
+  assert.equal(body.success, false, "the oversized workbook is rejected");
 });
 
 test("M9 — demo mode is visibly flagged and REFUSES runtime key-setting (no health flip)", async () => {
