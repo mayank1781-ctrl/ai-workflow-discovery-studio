@@ -168,6 +168,27 @@ test("B1 — studio_engine.mjs is served with a JavaScript MIME type (the browse
   assert.match(js.headers.get("content-type") || "", /javascript/, "app.js still serves as JavaScript");
 });
 
+test("M9 — demo mode is visibly flagged and REFUSES runtime key-setting (no health flip)", async () => {
+  // The default test server runs AUTH_ENABLED=false (demo / unauthenticated).
+  const h0 = await (await fetch(`${server.base}/api/health`)).json();
+  assert.equal(h0.demoMode, true, "demo mode is surfaced to the client");
+
+  // An unauthenticated runtime key-set is REJECTED (the audit's planted-key probe). The old
+  // behaviour returned 200 {ok:true} and mutated the runtime key; now it is 403.
+  const res = await fetch(`${server.base}/api/settings/apikey`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apiKey: "sk-planted-fake-key-1234567890" })
+  });
+  assert.equal(res.status, 403, "unauthenticated key-set is rejected");
+  const body = await res.json();
+  assert.equal(body.error, "auth_required");
+
+  // The rejected request did NOT change the configured state (no planted-key flip).
+  const h1 = await (await fetch(`${server.base}/api/health`)).json();
+  assert.equal(h1.aiConfigured, h0.aiConfigured, "the rejected key-set did not flip health");
+});
+
 test("/health returns ok and bypasses the auth gate", async () => {
   const authServer = await bootServer({
     PORT: String(AUTH_PORT),
@@ -198,6 +219,17 @@ test("/health returns ok and bypasses the auth gate", async () => {
       body: JSON.stringify({ steps: [{ cells: {} }] })
     });
     assert.equal(gatedBc.status, 401, "/api/business-case requires auth when the gate is armed");
+
+    // M9 — the runtime key-setter is also behind the gate when auth is armed (no cookie -> 401),
+    // and AUTH_ENABLED=true is NOT demo mode.
+    const gatedKey = await fetch(`${authServer.base}/api/settings/apikey`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: "sk-planted-fake-key-1234567890" })
+    });
+    assert.equal(gatedKey.status, 401, "key-setting requires auth when the gate is armed");
+    const armedHealth = await (await fetch(`${authServer.base}/api/health`)).json();
+    assert.equal(armedHealth.demoMode, false, "auth-enabled is not demo mode");
   } finally {
     await stopServer(authServer);
   }
