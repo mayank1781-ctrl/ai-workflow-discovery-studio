@@ -73,6 +73,10 @@ export const CONFIG = {
 
 const CLASSES = ["assembly", "judgment", "decision"];
 const TIERS = ["public", "internal", "confidential", "PII", "MNPI"];
+// m1 — the controlled capability vocabulary (recurring assembly steps tag a capability so the
+// reuse / adjacency layer can cluster them). An unknown tag is SURFACED at intake, never silently
+// accepted — the same enum-integrity discipline as class/tier/part.
+const CAPABILITY_TAGS = ["classify-and-route", "extract-and-map", "reconcile-two-sources", "draft-from-template", "summarize-thread", "validate-against-rules", "research-and-synthesize", "assemble-evidence-pack", "schedule-and-coordinate", "screen-against-list", "spread-into-schema", "generate-report"];
 const LEVELS = ["low", "medium", "high"];
 const RESTRICTED_TIERS = ["confidential", "PII", "MNPI"]; // narrative: stays on approved / in-VPC models
 const RESIDENCY_FORCE = ["PII", "MNPI"];                   // forces a restricted (approved) PRICING tier; confidential routes normally
@@ -116,7 +120,27 @@ export const REQUIRED = [
   ["recap.confirmed", r => r.recap?.confirmed === true],
 ];
 
-export function validateIntake(record) {
+// m2 — F0 RECONCILE. Accept a dataset / capture record whose field names DRIFTED from the engine's
+// canonical intake names, mapping them WITHOUT clobbering an already-canonical field:
+//   header.department -> header.dept ; seam.criticality -> seam.crit ; judgmentCore -> judgment.
+// Idempotent + additive: a record already in the engine shape round-trips byte-identically, so
+// every existing caller is unaffected. Used at the top of validateIntake + normalizeIntake.
+export function reconcileIntake(record) {
+  if (!record || typeof record !== "object") return record;
+  // Only clone (and reconcile) when a drift field is actually present — keeps the common path cheap.
+  const hasDrift = (record.header && record.header.department != null && record.header.dept == null)
+    || (record.judgmentCore != null && record.judgment == null)
+    || (Array.isArray(record.seams) && record.seams.some(s => s && s.criticality != null && s.crit == null));
+  if (!hasDrift) return record;
+  const r = structuredClone(record);
+  if (r.header && r.header.department != null && r.header.dept == null) r.header.dept = r.header.department;
+  if (r.judgmentCore != null && r.judgment == null) r.judgment = r.judgmentCore;
+  (r.seams || []).forEach(s => { if (s && s.criticality != null && s.crit == null) s.crit = s.criticality; });
+  return r;
+}
+
+export function validateIntake(rawRecord) {
+  const record = reconcileIntake(rawRecord); // m2 — F0 field-name reconcile (additive)
   const errors = [];
   if (!record || typeof record !== "object") return { ok: false, errors: ["record missing"], coverage: { pct: 0, gaps: [] } };
   // enum integrity — never silently coerce; an unknown data tier is surfaced, never assumed permissive
@@ -138,6 +162,9 @@ export function validateIntake(record) {
       if (typeof n !== "number" || !Number.isFinite(n)) errors.push(`step ${i + 1}: ${k} "${n}" is not a finite number`);
       else if (n < lo || n > hi) errors.push(`step ${i + 1}: ${k} ${n} is out of bounds (${lo}..${hi === Infinity ? "∞" : hi})`);
     });
+    // m1 — a step's capability tag (when present) must resolve to the controlled vocabulary; an
+    // unresolved / typo'd tag is surfaced here, never silently accepted (it would break clustering).
+    if (s.capability && !CAPABILITY_TAGS.includes(s.capability)) errors.push(`step ${i + 1}: unresolved capability tag "${s.capability}" (not in the controlled vocabulary)`);
     if (s.volume != null && (typeof s.volume !== "number" || !Number.isFinite(s.volume) || s.volume < 0)) errors.push(`step ${i + 1}: volume "${s.volume}" is not a valid non-negative number`);
   });
   (record.seams || []).forEach((s, i) => ["friction", "latency", "crit"].forEach(k => {
@@ -158,7 +185,7 @@ export function validateIntake(record) {
 
 // Fill the quantitative layer by class where the consultant didn't state it. Inferred values are tagged.
 export function normalizeIntake(record) {
-  const r = structuredClone(record);
+  const r = structuredClone(reconcileIntake(record)); // m2 — F0 field-name reconcile before normalizing
   const n = (r.steps || []).length || 1;
   (r.steps || []).forEach(s => {
     s._timeProv = s.time != null ? "stated" : "inferred";
@@ -1546,6 +1573,15 @@ function runTests() {
   ok("M7 NO over-block: innocent words containing 'fte' as a substring pass (softer/drafter/lifted)", railCheck("a softer drafter lifted the tone", "capture").ok, "");
   ok("M7 the rail FAILS CLOSED if it cannot run (railCheck never returns ok on an internal error)", (() => { const real = RAIL.bannedPatterns; try { RAIL.bannedPatterns = { forEach() { throw new Error("boom"); } }; const r = railCheck("anything", "capture"); return r.ok === false && r.railError === true; } finally { RAIL.bannedPatterns = real; } })(), "");
   ok("M7 surface families still hold (capacity dashboard-only; cost recipe+dashboard; leverage off capture)", railCheck("capacity freed", "dashboard").ok && !railCheck("capacity freed", "capture").ok && railCheck("cost-to-serve", "recipe").ok && !railCheck("leverage", "capture").ok, "");
+
+  // ---- P10 (m1 + m2) — F0 reconcile of drifted field names + capability-vocabulary integrity ----
+  const drift = { ...RECON_INTAKE, header: { persona: "Ops Analyst", department: "CIB Operations", anchor: "Recon (drifted)", lifecycle: "confirmed" }, judgmentCore: RECON_INTAKE.judgment, seams: RECON_INTAKE.seams.map(s => { const c = { ...s, criticality: s.crit }; delete c.crit; return c; }) };
+  const recDrift = reconcileIntake(drift);
+  ok("m2 F0 reconcile maps department->dept, criticality->crit, judgmentCore->judgment", recDrift.header.dept === "CIB Operations" && recDrift.seams.every(s => s.crit) && recDrift.judgment && recDrift.judgment.needs, JSON.stringify({ dept: recDrift.header.dept, crit: recDrift.seams.map(s => s.crit) }));
+  ok("m2 a drifted-but-otherwise-clean record now VALIDATES (coverage 100) and hardens", validateIntake(drift).coverage.pct === 100 && canHarden(drift), JSON.stringify(validateIntake(drift).coverage.gaps));
+  ok("m2 reconcile is idempotent + additive (a canonical record is returned unchanged, same ref)", reconcileIntake(RECON_INTAKE) === RECON_INTAKE, "");
+  ok("m1 an unresolved capability tag is SURFACED at intake (not silently accepted)", !validateIntake({ ...RECON_INTAKE, steps: [{ ...RECON_INTAKE.steps[0], capability: "frobnicate-widgets" }] }).ok, "");
+  ok("m1 a capability tag IN the controlled vocabulary is accepted", validateIntake({ ...RECON_INTAKE, steps: RECON_INTAKE.steps.map((s, i) => i === 0 ? { ...s, capability: "reconcile-two-sources" } : s) }).ok, JSON.stringify(validateIntake({ ...RECON_INTAKE, steps: [{ ...RECON_INTAKE.steps[0], capability: "reconcile-two-sources" }] }).errors));
 
   // ---- Edition 3 \u00b7 F8 \u2014 org-tier numbers: hand-off reduction + SLA dividend ----
   const hr = buildHandoffReduction([RECON_INTAKE]);
