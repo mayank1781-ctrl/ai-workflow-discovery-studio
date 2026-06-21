@@ -1232,7 +1232,9 @@ export function buildRoleRedefinition(records, opts = {}) {
   const rv = buildRoleView(records, opts);
   return { confirmedCount: rv.confirmedCount,
     individual: rv.roles.map(r => ({ role: r.role, shift: r.shift, was: "assembler", becomes: "spends the freed time on the judgment that was always theirs" })),
-    team: "from throughput to coverage — the same team takes on more at the same headcount, and reviews more consistently",
+    // D2 — reshape framing, rail-clean: the literal "headcount" is banned everywhere; the same team
+    // takes on more WITHOUT GROWING (the deck's "same team" idea, expressed so the collective rail passes).
+    team: "from throughput to coverage — the same team takes on more without growing, and reviews more consistently because every number traces to a source",
     department: "from cost center to capability — a truthful map of where AI helps, a governance agenda with dollars attached, and a builder ladder that compounds" };
 }
 
@@ -1920,6 +1922,25 @@ export function controlRail(record, opts = {}) {
   return { ok: v.length === 0, surface: opts.surface || "control", violations: v };
 }
 
+// D2 (Phase 2) — the rail extends to the COLLECTIVE / aggregate surfaces (the leadership + collective
+// heatmap text), the highest-risk place for "leverage" to drift into "headcount reduction". Runs the
+// Phase-1 hardened rail (normalize Unicode + tokenize + synonym/risk phrases) over EVERY aggregate
+// string and FAILS CLOSED: if any string carries banned vocab, or the rail itself can't run, ok=false
+// so the surface refuses to render un-checked aggregate text. Reshape framing only; never headcount.
+export function railGuardCollective(texts, surface = "dashboard") {
+  const list = Array.isArray(texts) ? texts : [texts];
+  const violations = [];
+  let railError = false;
+  for (const t of list) {
+    let r;
+    try { r = railCheck(t, surface); } catch (_e) { railError = true; continue; } // fail closed on a throw
+    if (r && r.railError) railError = true;
+    if (r && !r.ok) violations.push({ text: typeof t === "string" ? String(t).slice(0, 80) : "", violations: r.violations });
+  }
+  return { ok: violations.length === 0 && !railError, violations, railError,
+    detail: railError ? "the collective-view rail could not run — failing closed (D2)" : (violations.length ? "banned vocabulary on the collective surface — blocked (D2)" : "") };
+}
+
 // F6 — the confirm/harden gate, now CONTROL-AWARE. A unit hardens only when it is confirmed (recap +
 // every required field) AND its controls pass the rail (four-eyes distinct, authority names a human
 // approver, halt not auto-resolved). This EXTENDS the no-bypass boundary (isConfirmed/assertHardenable)
@@ -2505,6 +2526,17 @@ function runTests() {
     ok("D1 the model-fit lever IS frontier-everywhere minus routed (computed)", near(proof.modelFitLever.delta, round(frontier - routed), 1) && proof.modelFitLever.delta > 0, `${proof.modelFitLever.delta} vs ${round(frontier - routed)}`);
     // a zero-policy-gap set unlocks nothing (the unlock tracks the actual gap, not a fixed figure)
     ok("D1 governance unlock tracks the ACTUAL gap (a no-gap set unlocks ~0)", governanceUnlock([{ steps: [{ step: "x", cls: "assembly", data: "internal", time: 10, theo: 30 }], recap: { confirmed: true }, header: { persona: "p", dept: "d", anchor: "a" }, trigger: { trigger: "t", cadence: "daily" }, seams: [{ friction: "low", latency: "low", crit: "low" }], judgment: { needs: "n", hard: "h", cues: "c", human: "h" }, confirm: { acceptance: "a", escalation: "e", dataTier: "internal" } }], { fromProfile: "Conservative", toProfile: "Moderate" }).unlockDollars === 0, "");
+  }
+
+  // D2 — the rail extends to the COLLECTIVE / aggregate surfaces and FAILS CLOSED
+  {
+    ok("D2 collective rail BLOCKS headcount vocab on the aggregate surface", !railGuardCollective(["reduce headcount across the department"], "dashboard").ok, "");
+    ok("D2 collective rail BLOCKS a unicode-obfuscated variant", !railGuardCollective(["rеduce hеadcount"], "dashboard").ok, ""); // Cyrillic е folds to Latin
+    ok("D2 collective rail BLOCKS synonym variants (workforce reduction / role elimination / FTE)", !railGuardCollective(["workforce reduction"], "dashboard").ok && !railGuardCollective(["role elimination plan"], "dashboard").ok && !railGuardCollective(["cut 3 FTE"], "dashboard").ok, "");
+    ok("D2 collective rail PASSES clean reshape framing", railGuardCollective(["AI carries the assembly; the team reshapes toward judgment work"], "dashboard").ok && railGuardCollective(["freed capacity reinvested into coverage; the line stays human"], "dashboard").ok, "");
+    ok("D2 the actual collective heatmap text is rail-clean", (() => { const heat = buildCollectiveHeatmap(buildPooledLibrary([RECON_INTAKE, RECON_INTAKE])); const texts = [heat.note, ...heat.rows.map(r => `${r.role} n=${r.n} ${r.confidence} ${r.coverage}`)].filter(Boolean); return railGuardCollective(texts, "dashboard").ok; })(), "");
+    ok("D2 the leadership aggregate text is rail-clean (mix + sequencing + uplift + unlock)", (() => { const set = [RECON_INTAKE, { ...RECON_INTAKE, header: { ...RECON_INTAKE.header, dept: "Tech", anchor: "t" } }]; const texts = [buildAiHybridHumanMix(set).whereTheLineSits, buildCrossGroupSequencing(set).note, realizationUplift(set).headline, governanceUnlock(set).note, buildRoleRedefinition(set).team, buildRoleRedefinition(set).department]; return railGuardCollective(texts, "dashboard").ok; })(), "");
+    ok("D2 FAILS CLOSED if the rail itself throws (never a fake-OK on the collective surface)", railGuardCollective([{ toString() { throw new Error("boom"); } }], "dashboard").ok === false, "");
   }
 
   // ---- Edition 3 \u00b7 F6 \u2014 confirm gate, control-aware (confirmBlockers / canHarden) ----
