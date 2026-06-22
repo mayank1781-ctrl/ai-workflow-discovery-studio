@@ -33,6 +33,15 @@ function producesDangerousWrong(c, r) {
   if (dw.all === "reducible") return !r.waits.some((w) => w.waitKind === "protected");
   // an inferred value recorded as stated
   if (dw.source === "stated") return r.acceptanceSource === "stated";
+  // --- Phase 3 (v3) — the four new dangerous errors, against the engine's real rubric reads ---
+  // (1) a write-in-place / approve action under-read as a read (same system, opposite automatability)
+  if (dw.action === "read") return r.action === "read";
+  // (2) a screen-only system called agentic (an un-buildable plan that looks cheap on paper)
+  if (dw.shape === "agentic") return r.realisticShape === "agentic";
+  // (3) elevated write/approve on sensitive data scored low-value (the access wasn't captured)
+  if (dw.value === "low") return r.highValue !== true;
+  // (4) a shared system name treated as evidence two workflows combine (absent shared action+data+access)
+  if (dw.combine === true) return r.combinable === true;
   // unsafe behavior: AI fills the answer / AI approves or merges
   if (dw.behavior) {
     if (/fill/i.test(dw.behavior)) return r.aiMustNotPrefill !== true;          // template must flag "AI must not pre-fill"
@@ -53,7 +62,7 @@ test("GATING — the rubric produces ZERO dangerous-wrong outcomes across all ev
   const failures = [];
   for (const c of EVAL.cases) {
     const r = engine.classifyUtterance(c.sme_says);
-    if (producesDangerousWrong(c, r)) failures.push({ id: c.id, clause: c.clause, dangerous: c.dangerous_wrong, got: { cls: r.cls, split: r.split, seamCriticality: r.seamCriticality, dataTier: r.dataTier, theoRange: r.theoRange, acceptanceSource: r.acceptanceSource, aiMustNotPrefill: r.aiMustNotPrefill } });
+    if (producesDangerousWrong(c, r)) failures.push({ id: c.id, clause: c.clause, dangerous: c.dangerous_wrong, got: { cls: r.cls, split: r.split, seamCriticality: r.seamCriticality, dataTier: r.dataTier, theoRange: r.theoRange, acceptanceSource: r.acceptanceSource, aiMustNotPrefill: r.aiMustNotPrefill, action: r.action, entitlement: r.entitlement, reachability: r.reachability, realisticShape: r.realisticShape, highValue: r.highValue, combinable: r.combinable } });
   }
   const total = EVAL.cases.length, passed = total - failures.length;
   // build-log line: the eval pass-rate (target 0 dangerous-wrong)
@@ -130,4 +139,33 @@ test("an auto-resolvable halt is a hard rail violation (the eval's halt trap)", 
   const RECON = engine.RECON_INTAKE;
   const autoHalt = { ...RECON, steps: [{ ...RECON.steps[1], autoResolve: true }] };
   assert.equal(engine.controlRail(autoHalt).ok, false);
+});
+
+// ---- Phase 3 (v3) — the four new cases get the CORRECT read, not merely "not the wrong one" ----
+test("v3 — a write-in-place is read as write-in-place / write, never under-read as a read", () => {
+  const c = EVAL.cases.find((x) => x.id === "write-in-place-as-read");
+  const r = engine.classifyUtterance(c.sme_says);
+  assert.equal(r.action, "write-in-place");
+  assert.equal(r.entitlement, "write");
+});
+
+test("v3 — a screen-only system's realistic shape is human-in-loop, never agentic", () => {
+  const c = EVAL.cases.find((x) => x.id === "screen-only-as-agentic");
+  const r = engine.classifyUtterance(c.sme_says);
+  assert.equal(r.reachability, "screen-only");
+  assert.equal(r.realisticShape, "human-in-loop");
+});
+
+test("v3 — elevated approve on sensitive (client) data reads high-value, never low", () => {
+  const c = EVAL.cases.find((x) => x.id === "low-value-elevated-access");
+  const r = engine.classifyUtterance(c.sme_says);
+  assert.equal(r.entitlement, "approve");
+  assert.ok(TIER_RANK[r.dataTier] >= TIER_RANK.confidential, `tier ${r.dataTier}`);
+  assert.equal(r.highValue, true);
+});
+
+test("v3 — a shared system name alone is NOT combinable (needs shared action + data + access)", () => {
+  const c = EVAL.cases.find((x) => x.id === "shared-system-false-combine");
+  const r = engine.classifyUtterance(c.sme_says);
+  assert.equal(r.combinable, false);
 });

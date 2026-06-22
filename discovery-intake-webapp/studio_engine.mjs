@@ -2247,13 +2247,67 @@ export function rubricAcceptanceSource(text) {
   return "stated";
 }
 
+// Phase 3 (A4) — entitlement, read UP (read < write < approve). approve/sign-off/authorize/waive ->
+// approve; a write-in-place into a system (post/write/book/key/enter/amend in/overwrite) -> write; else
+// read. Same system, opposite work: under-reading a write/approve as a read is the v3 dangerous error.
+export function rubricEntitlement(text) {
+  const t = String(text || "").toLowerCase();
+  if (/\b(approv|sign[\s-]?off|signs?\s+(?:it|them|off)|authori[sz]e|waiv|countersign)\b/.test(t)) return "approve";
+  if (/\b(post(?:ed|s|ing)?\s+(?:it\s+|the\s+\w+\s+)?(?:to|into)|writ(?:e|ing|es)\s+(?:it\s+|the\s+\w+\s+)?(?:to|into|in)\b|book(?:ed|ing)?\s+the\s+entry|key(?:ed|ing)?\s+(?:it\s+)?(?:in|into)|enter(?:ed|ing)?\s+(?:it\s+)?(?:in|into)|amend\w*\b[^.]*\bin\b|overwrit|updat\w*\b[^.]*\bin\s+place)\b/.test(t)) return "write";
+  return "read";
+}
+// Phase 3 (A3) — action verb, coherent with the entitlement (write -> write-in-place, approve -> approve).
+export function rubricActionVerb(text) {
+  const ent = rubricEntitlement(text);
+  if (ent === "approve") return "approve";
+  if (ent === "write") return "write-in-place";
+  const t = String(text || "").toLowerCase();
+  if (/\b(notif\w*|send(?:s|ing)?\s+(?:a\s+)?(?:reminder|notification|alert|email))\b/.test(t)) return "notify";
+  if (/\b(generat\w*|draft\w*|produc\w*\s+(?:the\s+)?output)\b/.test(t)) return "generate-output";
+  if (/\b(download\w*|export\w*)\b/.test(t)) return "download";
+  if (/\b(transform|reformat|reconcil\w*|normali[sz]\w*)\b/.test(t)) return "transform";
+  return "read";
+}
+// Phase 3 (A2) — reachability of the system the step touches; bounds the realistic solution shape.
+export function rubricReachability(text) {
+  const t = String(text || "").toLowerCase();
+  if (/\b(screen[\s-]?only|no api|without an? api|by hand|on the screen|manual portal|copy\s+from\s+the\s+screen|screen[\s-]?scrap\w*|scrape|\brpa\b)\b/.test(t)) return "screen-only";
+  if (/\b(batch|overnight (?:file|run)|file[\s-]?drop|sftp|nightly file)\b/.test(t)) return "batch";
+  if (/\b(api|webhook|endpoint)\b/.test(t)) return "api";
+  return null;
+}
+// Phase 3 (A2) — a screen-only system cannot honestly be agentic; its realistic shape is human-in-loop.
+export function rubricRealisticShape(text) {
+  return rubricReachability(text) === "screen-only" ? "human-in-loop" : null;
+}
+// Phase 3 (Section 2) — system != work. A shared system NAME alone is never evidence two workflows
+// combine — the truer signals are shared action + data + access. null when no combine claim is made;
+// false when a combine claim rests on a shared system/app without those; true only with all three.
+export function rubricCombinable(text) {
+  const t = String(text || "").toLowerCase();
+  const claimsCombine = /\b(combin\w*|merg\w*|same build|one build|same recipe|one recipe|same workflow|do them together|build (?:it )?once for both)\b/.test(t);
+  if (!claimsCombine) return null;
+  const sharedAction = /\bsame (?:action|task|work|verb|step)\b/.test(t);
+  const sharedData = /\bsame (?:data|records?|dataset|feed|source)\b/.test(t);
+  const sharedAccess = /\bsame (?:access|entitlement|permission|approval)\b/.test(t);
+  return (sharedAction && sharedData && sharedAccess) ? true : false;
+}
+
 // classifyUtterance — the rubric's full read of one SME utterance. The eval set runs each case through
 // this and asserts the dangerous_wrong never occurs (gating). This IS the rubric, executable.
 export function classifyUtterance(text) {
   const c = rubricClassify(text);
-  return { ...c, dataTier: rubricDataTier(text), theoRange: rubricTheoRange(c.cls),
+  const entitlement = rubricEntitlement(text);
+  const dataTier = rubricDataTier(text);
+  // A4 — the high-value, human-held core: elevated write/approve access on sensitive (>= confidential)
+  // data. Reading it as low-value because the access wasn't captured mis-prices both value and risk.
+  const highValue = (entitlement === "write" || entitlement === "approve") && (TIER_RANK[dataTier] ?? 0) >= TIER_RANK.confidential;
+  return { ...c, dataTier, theoRange: rubricTheoRange(c.cls),
     seamFriction: rubricSeamFriction(text), seamCriticality: rubricSeamCriticality(text),
-    waits: rubricWaits(text), acceptanceSource: rubricAcceptanceSource(text) };
+    waits: rubricWaits(text), acceptanceSource: rubricAcceptanceSource(text),
+    // Phase 3 — the v3 rubric reads (additive; the existing fields above are unchanged):
+    action: rubricActionVerb(text), entitlement, reachability: rubricReachability(text),
+    realisticShape: rubricRealisticShape(text), highValue, combinable: rubricCombinable(text) };
 }
 
 // F5 (render) — the eval traps as inline warnings on a Discovery capture string. null when no trap fires.
@@ -3379,6 +3433,15 @@ function runTests() {
   ok("C2 accessibleStatus resolves the real status sets (readiness / gap / confidence / provenance)", !!accessibleStatus("readiness", "gated-policy") && !!accessibleStatus("gap", "red") && !!accessibleStatus("confidence", "directional") && !!accessibleStatus("provenance", "inferred"), "");
   ok("C2 a status cue's label is distinguishable without color (non-empty text beyond the icon)", (() => { const c = accessibleStatus("readiness", "gated-policy"); return c && c.label.replace(/[^A-Za-z]/g, "").length >= 3; })(), "");
   ok("C2 accessibleStatus is additive \u2014 an unknown kind / value returns null, no throw", accessibleStatus("nope", "x") === null && accessibleStatus("readiness", "nope") === null, "");
+
+  // ---- Phase 3 \u00b7 D3 \u2014 the rubric reads the v3 dimensions (the four new dangerous-error guards) ----
+  ok("D3 a write-in-place is NOT under-read as a read (action write-in-place / entitlement write)", (() => { const r = classifyUtterance("after it's checked I post it into the GL myself \u2014 it's a write straight into the ledger, not just a lookup"); return r.action === "write-in-place" && r.entitlement === "write"; })(), JSON.stringify(classifyUtterance("post it into the GL").action));
+  ok("D3 a screen-only system's realistic shape is human-in-loop, never agentic", (() => { const r = classifyUtterance("the state licensing portal is screen-only \u2014 there's no API at all, so I key it in by hand on the screen"); return r.reachability === "screen-only" && r.realisticShape === "human-in-loop"; })(), "");
+  ok("D3 elevated approve on sensitive (client) data is flagged high-value, not low", (() => { const r = classifyUtterance("I approve write-offs up to ten thousand dollars on client accounts and sign them off myself"); return r.entitlement === "approve" && r.highValue === true; })(), "");
+  ok("D3 a shared system NAME alone is NOT combinable (needs shared action + data + access)", classifyUtterance("both teams work in the same CRM, so these two workflows are the same build \u2014 just combine them").combinable === false, "");
+  ok("D3 a genuine shared action + data + access DOES read as combinable", classifyUtterance("same task, same data, same access on both \u2014 one build for both, combine them").combinable === true, "");
+  ok("D3 read-only on a report stays a read (no false write/approve, not high-value)", (() => { const r = classifyUtterance("I just read the report and pull the figures into a summary"); return r.action === "read" && r.entitlement === "read" && r.highValue === false; })(), "");
+  ok("D3 the v3 reads are additive \u2014 the existing fields are unchanged (a clean assembly still reads assembly)", (() => { const r = classifyUtterance("reconcile the two ledgers"); return r.cls === "assembly" && Array.isArray(r.theoRange) && r.combinable === null; })(), "");
 
   console.log(`\n${fail === 0 ? "\u2713 ALL PASS" : "\u2717 FAILURES"} \u2014 ${pass} passed, ${fail} failed`);
   return fail === 0;

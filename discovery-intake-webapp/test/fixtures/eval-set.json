@@ -3,7 +3,7 @@
     "purpose": "Adversarial cases to test that the workflow-tagging layer (consultant or AI-assist) classifies inputs soundly before they reach studio_engine.mjs.",
     "scoring": "Weight a false-'assembly' on any decision/judgment step as a CRITICAL failure. Over-protection (rounding up) is a soft failure. Target: 0 critical failures.",
     "fields": "Each case gives the raw SME utterance, the trap, the expected tags, and the dangerous wrong answer.",
-    "domains": "16 cases spanning credit-risk, strategy (workshop prep), and technology (SRE / SWE).",
+    "domains": "20 cases spanning credit-risk, strategy (workshop prep), technology (SRE / SWE), and the v3 capture model (action / reachability / entitlement / adjacency) across banking, insurance, capital markets, and fraud-risk.",
     "rubric_clauses": {
       "C1": "Step class — round up; commit/accountability = decision",
       "C1-split": "A step containing two kinds of work must be split",
@@ -11,7 +11,11 @@
       "C3": "Score criticality from consequence, independent of friction",
       "C3-wait": "Wait around a human decision is protected, not reducible",
       "C4": "theo% honest, not aspirational; assembly is not 100%",
-      "C5": "Unstated values are inferred, not stated"
+      "C5": "Unstated values are inferred, not stated",
+      "V3-action": "Action on data — a write-in-place / approve is not a read (same system, opposite automatability)",
+      "V3-reachability": "Reachability bounds the shape — a screen-only system cannot honestly be agentic",
+      "V3-entitlement": "Entitlement x sensitivity — elevated write/approve on sensitive data is high-value, not low",
+      "V3-combine": "System != work — a shared system name is not evidence two workflows combine"
     }
   },
   "cases": [
@@ -169,6 +173,42 @@
       "trap": "a deterministic runbook makes 'push it' read as assembly that AI can auto-run.",
       "expected": { "cls": "decision", "why": "applying a remediation / deploy commits a change to production — a protected step; AI prepares and validates, the human executes." },
       "dangerous_wrong": { "cls": "assembly", "note": "this is exactly the 'production deploys & incident remediation' protected item; auto-deploy is never allowed, and the agentic version is economics-gated." }
+    },
+    {
+      "id": "write-in-place-as-read",
+      "domain": "capital-markets",
+      "clause": "V3-action",
+      "sme_says": "After it's checked, I post it into the GL myself — it's a write straight into the ledger, not just a lookup.",
+      "trap": "the action is a write-in-place on the GL (controlled, often human-held); reading it as a 'read' under-states the risk and over-states automatability in the very same system.",
+      "expected": { "action": "write-in-place", "entitlement": "write", "why": "posting an entry into the ledger is a write-in-place; the action verb (not the system name) drives controls + automatability." },
+      "dangerous_wrong": { "action": "read", "note": "under-reading a write/approve as a read — same system, opposite automatability and control (the v3 action error)." }
+    },
+    {
+      "id": "screen-only-as-agentic",
+      "domain": "insurance",
+      "clause": "V3-reachability",
+      "sme_says": "The state licensing portal is screen-only — there's no API at all, so I key everything in by hand on the screen.",
+      "trap": "a screen-only system has no API; an 'agentic' plan over it is un-buildable and only looks cheap on paper — the realistic shape is human-in-loop with a large integration cost in TCO.",
+      "expected": { "reachability": "screen-only", "shape": "human-in-loop", "why": "reachability bounds the realistic solution shape; screen-only cannot honestly be agentic." },
+      "dangerous_wrong": { "shape": "agentic", "note": "calling a screen-only system agentic — an un-buildable plan that looks cheap on paper (the v3 reachability error)." }
+    },
+    {
+      "id": "low-value-elevated-access",
+      "domain": "banking",
+      "clause": "V3-entitlement",
+      "sme_says": "I approve write-offs up to ten thousand dollars on client accounts — I sign them off myself, no one above me checks.",
+      "trap": "elevated approve entitlement on confidential client data, paired with a decision, is the firm's high-value human-held core; scoring it low because the access wasn't captured mis-prices both value and risk.",
+      "expected": { "cls": "decision", "entitlement": "approve", "value": "high", "why": "entitlement x sensitivity: elevated approve on >= confidential data + a decision is the high-value, human-held core." },
+      "dangerous_wrong": { "value": "low", "note": "scoring elevated write/approve on sensitive data as low-value because the access wasn't captured (the v3 entitlement error)." }
+    },
+    {
+      "id": "shared-system-false-combine",
+      "domain": "fraud-risk",
+      "clause": "V3-combine",
+      "sme_says": "Both my team and the payments team work in the same CRM, so really these two workflows are the same build — we should just combine them.",
+      "trap": "a shared application name alone is not evidence of combinable work; the truer signals are the action, the data, and the access — absent those, combining over-grants and forces a false reuse.",
+      "expected": { "combine": false, "why": "system != work; two people in the same app doing different actions on different data with different access are not the same build." },
+      "dangerous_wrong": { "combine": true, "note": "treating a shared system name as evidence two workflows combine, absent shared action + data + access (the v3 adjacency error)." }
     }
   ]
 }
