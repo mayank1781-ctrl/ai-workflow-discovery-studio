@@ -1825,6 +1825,76 @@ export function buildAdjacency(records, opts = {}) {
       : "No adjacency yet — these confirmed workflows don't share a role or capability." };
 }
 
+// =====================================================================
+// B2 · ECOSYSTEM & CONVERGENCE MAP — derived from the AGGREGATE across discoveries.
+// Where adjacency asks "do two workflows combine into one build", the ecosystem map asks "which
+// SYSTEMS does the whole portfolio converge on" — workflows linked by shared data source / system
+// class / entitlement profile. The high-degree (bottleneck) systems are the integrate-once leverage:
+// "N workflows across M departments depend on the same GL feed -> integrate once, unlock N." HONEST
+// at any n (no hard floor): a single-n node is labelled DIRECTIONAL (one person's picture), sharper at
+// n=20. Two audience projections: Leadership = the integrate-once economics; Tech & Governance = the
+// dependency / single-point-of-failure / risk-concentration view. Confirmed-only; pure.
+// =====================================================================
+export function buildEcosystemMap(records, opts = {}) {
+  const profile = opts.profile || "Conservative";
+  const confirmed = (Array.isArray(records) ? records : []).filter(isConfirmed);
+  const nodes = new Map(); // node = a SYSTEM (class [+ dataSource]); the portfolio converges on these
+  const freedByWf = new Map();
+  confirmed.forEach(rec => {
+    const wf = rec.header?.anchor || rec.header?.persona || "workflow";
+    const dept = rec.header?.dept || "—";
+    let entProfile = "read";
+    try { entProfile = buildEntitlementRisk(rec, opts).profile.join("+") || "read"; } catch (_e) { /* additive: ignore */ }
+    try { freedByWf.set(wf, roleCapacityByActor(rec, profile, opts).totalFreedHrs || 0); } catch (_e) { freedByWf.set(wf, 0); }
+    (Array.isArray(rec.systems) ? rec.systems : []).forEach(sys => {
+      if (!sys || !sys.class) return;
+      const key = sys.class + (sys.dataSource ? `:${sys.dataSource}` : "");
+      if (!nodes.has(key)) nodes.set(key, { key, systemClass: sys.class, dataSource: sys.dataSource || null, workflows: new Set(), departments: new Set(), entitlementProfiles: new Set(), reachability: new Set() });
+      const n = nodes.get(key);
+      n.workflows.add(wf); n.departments.add(dept); n.entitlementProfiles.add(entProfile);
+      if (sys.reachability) n.reachability.add(sys.reachability);
+    });
+  });
+  const systems = [...nodes.values()].map(n => {
+    const workflows = [...n.workflows];
+    return { key: n.key, systemClass: n.systemClass, dataSource: n.dataSource,
+      workflowCount: workflows.length, departmentCount: n.departments.size,
+      workflows, departments: [...n.departments], entitlementProfiles: [...n.entitlementProfiles], reachability: [...n.reachability],
+      combinedFreedHrs: round(sum(workflows.map(w => freedByWf.get(w) || 0)), 3),
+      bottleneck: workflows.length >= 2,        // depended on by 2+ workflows = a convergence point
+      directional: workflows.length <= 1 };      // n=1 cell — one person's picture, not asserted
+  }).sort((a, b) => b.workflowCount - a.workflowCount || b.departmentCount - a.departmentCount);
+  return { confirmedCount: confirmed.length, systems, bottlenecks: systems.filter(s => s.bottleneck),
+    directional: confirmed.length <= 1,
+    note: systems.length
+      ? (confirmed.length <= 1 ? "directional — one person's picture; the convergence sharpens across the library (n→20)" : null)
+      : "No confirmed workflows carry a systems registry yet — the ecosystem map is empty (it derives from the aggregate)." };
+}
+// B2 — LEADERSHIP projection: the integrate-once economics. For each bottleneck system, "N workflows
+// across M departments depend on it -> integrate once, unlock N", with the combined freed capacity.
+export function buildEcosystemLeadership(records, opts = {}) {
+  const eco = buildEcosystemMap(records, opts);
+  const integrateOnce = eco.bottlenecks.map(b => ({
+    system: b.dataSource || b.systemClass, systemClass: b.systemClass,
+    workflowCount: b.workflowCount, departmentCount: b.departmentCount, combinedFreedHrs: b.combinedFreedHrs, directional: b.directional,
+    headline: `${b.workflowCount} workflow${b.workflowCount === 1 ? "" : "s"} across ${b.departmentCount} department${b.departmentCount === 1 ? "" : "s"} depend on the ${b.dataSource || b.systemClass} — integrate once, unlock ${b.workflowCount}.${b.directional ? " (directional — one person's picture)" : ""}` }));
+  return { lens: "leadership", confirmedCount: eco.confirmedCount, directional: eco.directional, integrateOnce, systems: eco.systems, note: eco.note,
+    guardrail: "integrate-once is a leverage hypothesis — human-confirmed; never a reorg or headcount." };
+}
+// B2 — TECH & GOVERNANCE projection: the dependency / single-point-of-failure / risk-concentration
+// view. A high-degree system is a SPOF: N workflows fail if it fails; screen-only reachability raises
+// integration + continuity risk; a wide entitlement spread on one system is access-risk concentration.
+export function buildEcosystemTechGov(records, opts = {}) {
+  const eco = buildEcosystemMap(records, opts);
+  const dependencies = eco.bottlenecks.map(b => ({
+    system: b.dataSource || b.systemClass, systemClass: b.systemClass,
+    workflowCount: b.workflowCount, departmentCount: b.departmentCount, reachability: b.reachability, entitlementProfiles: b.entitlementProfiles,
+    singlePointOfFailure: b.workflowCount >= 2, directional: b.directional,
+    risk: `${b.workflowCount} workflows depend on the ${b.dataSource || b.systemClass} — a single point of failure / risk concentration${b.reachability.includes("screen-only") ? "; screen-only (no API) raises integration + continuity risk" : ""}.${b.directional ? " (directional)" : ""}` }));
+  return { lens: "tech-governance", confirmedCount: eco.confirmedCount, directional: eco.directional, dependencies, systems: eco.systems, note: eco.note,
+    guardrail: "a dependency map is a risk view — it never asserts a single-n cell; it sharpens across the library." };
+}
+
 // F8 — cross-role hand-off reduction (a leader org-tier number). A hand-off is where the doer changes;
 // AI carrying the assembly collapses the swivel-chair hand-offs INTO pure-assembly steps, while the
 // human-held gates + controls STAY. baseline = every cross-role hand-off; remaining = the hand-offs into a
@@ -2682,6 +2752,27 @@ function runTests() {
     const adjEnt = buildAdjacency([entBase("ent-read", "read"), entBase("ent-approve", "approve")]);
     ok("B1 a shared role with a different ENTITLEMENT profile does not combine (why-blocked on entitlement)", adjEnt.enabledCount === 0 && adjEnt.whyBlocked.some(c => c.blockedDimension === "entitlement"), JSON.stringify(adjEnt.whyBlocked.map(c => c.blockedDimension)));
     ok("B1 enabled + blocked still = all candidates (nothing dropped by the new legs)", adjSys.enabledCount + adjSys.blockedCount === adjSys.candidateCount, "");
+  }
+
+  // B2 — ecosystem & convergence map: bottleneck systems + honest at n=1 + two audience projections
+  {
+    const glSys = { id: "gl", name: "Oracle GL", class: "ledger/GL", reachability: "screen-only", dataSource: "GL feed" };
+    const wfWith = (anchor, dept) => ({ ...RECON_INTAKE, header: { ...RECON_INTAKE.header, anchor, dept }, systems: [glSys], steps: RECON_INTAKE.steps.map((s, i) => i === 1 ? { ...s, systems: ["gl"] } : s) });
+    const a = wfWith("recon-A", "CIB Operations"), b = wfWith("recon-B", "CIB Operations"), c = wfWith("recon-C", "Finance");
+    const eco = buildEcosystemMap([a, b, c]);
+    ok("B2 a system shared by several workflows surfaces as a convergence/bottleneck with its count", eco.bottlenecks.some(s => s.systemClass === "ledger/GL" && s.workflowCount === 3 && s.departmentCount === 2), JSON.stringify(eco.bottlenecks.map(s => `${s.systemClass}:${s.workflowCount}/${s.departmentCount}`)));
+    ok("B2 a single-n cell is labelled DIRECTIONAL, not asserted", buildEcosystemMap([a]).systems[0].directional === true && buildEcosystemMap([a]).directional === true, "");
+    ok("B2 a single-n system is NOT a bottleneck (no false convergence)", buildEcosystemMap([a]).bottlenecks.length === 0, "");
+    // leadership projection — the integrate-once economics
+    const lead = buildEcosystemLeadership([a, b, c]);
+    ok("B2 Leadership: integrate-once headline names N workflows across M departments -> unlock N", lead.integrateOnce[0] && /3 workflows across 2 departments/.test(lead.integrateOnce[0].headline) && /integrate once, unlock 3/.test(lead.integrateOnce[0].headline), JSON.stringify(lead.integrateOnce[0] || {}));
+    ok("B2 Leadership: the integrate-once node carries combined freed capacity", lead.integrateOnce[0].combinedFreedHrs >= 0, "");
+    // tech & governance projection — dependency / SPOF / risk concentration
+    const tg = buildEcosystemTechGov([a, b, c]);
+    ok("B2 Tech&Gov: the shared system is a single point of failure", tg.dependencies[0] && tg.dependencies[0].singlePointOfFailure === true, "");
+    ok("B2 Tech&Gov: a screen-only dependency raises the integration/continuity risk", /screen-only/.test(tg.dependencies[0].risk), tg.dependencies[0].risk);
+    ok("B2 honest at n=1: the tech-gov map is directional, never asserted", buildEcosystemTechGov([a]).directional === true, "");
+    ok("B2 additive: a workflow with no systems registry yields an empty ecosystem map", buildEcosystemMap([RECON_INTAKE]).systems.length === 0, "");
   }
 
   // A4 — two-tier store: the pooled de-identify pass strips PII/MNPI/names/free-text; derived layer runs over the pool
