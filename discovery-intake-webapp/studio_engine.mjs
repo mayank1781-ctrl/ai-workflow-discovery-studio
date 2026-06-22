@@ -1457,6 +1457,24 @@ export function buildHonestUnderPressure(records, opts = {}) {
 // evidence, roadmap) carries this visible marker; opts.realConfirmedSeed === true drops it. Single source.
 export const CALIBRATED_SEED_MARKER = "Illustrative — calibrated seed, not a confirmed pilot.";
 export function illustrativeMarker(opts) { return (opts && opts.realConfirmedSeed === true) ? null : CALIBRATED_SEED_MARKER; }
+// D4 (Phase 3) — the REAL-SEED INGESTION PATH. The illustrative marker drops ONLY when a GENUINE
+// confirmed pilot discovery is supplied — never on a bare flag, and never for the calibrated seed.
+// ingestRealSeed validates a candidate: it must NOT declare itself illustrative/calibrated, must
+// validate cleanly, be a confirmed discovery, and harden (controls + provenance — canHarden already
+// folds in the "at least one observed time" provenance gate). Only then is realConfirmedSeed true and
+// the marker null. Until a real pilot is supplied, no candidate is accepted and exports stay
+// illustrative — the path exists and is validated, but it never fabricates a real seed. Pure; additive.
+export function ingestRealSeed(record) {
+  const reject = (reasons) => ({ accepted: false, realConfirmedSeed: false, marker: CALIBRATED_SEED_MARKER, reasons });
+  if (!record || typeof record !== "object") return reject(["no candidate seed supplied"]);
+  const reasons = [];
+  if (record.calibrated === true || record.illustrative === true) reasons.push("the candidate declares itself illustrative/calibrated — not a real confirmed pilot");
+  if (!validateIntake(record).ok) reasons.push("does not validate — resolve the enum / bounds errors first");
+  if (!isConfirmed(record)) reasons.push("not a confirmed discovery — needs recap.confirmed + the required fields");
+  if (!canHarden(record)) reasons.push(`cannot harden — ${confirmBlockers(record).map(b => b.rule).join(", ") || "control / provenance gate"}`);
+  if (reasons.length) return reject(reasons);
+  return { accepted: true, realConfirmedSeed: true, marker: null, reasons: [] };
+}
 export function buildCapacityPack(records, opts = {}) {
   const lv = buildLeaderView(records, opts), mix = buildAiHybridHumanMix(records, opts), tiles = buildGapTiles(records, opts), up = realizationUplift(records, opts);
   const k = id => { const kpi = lv.kpis.find(x => x.id === id); return kpi ? kpi.value : 0; };
@@ -3442,6 +3460,19 @@ function runTests() {
   ok("D3 a genuine shared action + data + access DOES read as combinable", classifyUtterance("same task, same data, same access on both \u2014 one build for both, combine them").combinable === true, "");
   ok("D3 read-only on a report stays a read (no false write/approve, not high-value)", (() => { const r = classifyUtterance("I just read the report and pull the figures into a summary"); return r.action === "read" && r.entitlement === "read" && r.highValue === false; })(), "");
   ok("D3 the v3 reads are additive \u2014 the existing fields are unchanged (a clean assembly still reads assembly)", (() => { const r = classifyUtterance("reconcile the two ledgers"); return r.cls === "assembly" && Array.isArray(r.theoRange) && r.combinable === null; })(), "");
+
+  // ---- Phase 3 \u00b7 D4 \u2014 the real-seed ingestion path (the marker drops only on a genuine confirmed pilot) ----
+  ok("D4 a genuine confirmed seed is ACCEPTED \u2014 realConfirmedSeed flips true, marker null", (() => { const r = ingestRealSeed(RECON_INTAKE); return r.accepted === true && r.realConfirmedSeed === true && r.marker === null; })(), JSON.stringify(ingestRealSeed(RECON_INTAKE).reasons));
+  ok("D4 a candidate marked illustrative/calibrated is REJECTED (never fake a real seed)", (() => { const r = ingestRealSeed({ ...RECON_INTAKE, calibrated: true }); return r.accepted === false && r.realConfirmedSeed === false && r.marker === CALIBRATED_SEED_MARKER; })(), "");
+  ok("D4 an UNCONFIRMED candidate is REJECTED (flag stays false, marker stays)", ingestRealSeed({ ...RECON_INTAKE, recap: { confirmed: false } }).realConfirmedSeed === false, "");
+  ok("D4 a non-record / empty candidate is REJECTED with a reason (no throw)", ingestRealSeed(null).accepted === false && ingestRealSeed(null).reasons.length > 0, "");
+  ok("D4 the marker is driven by the flag: default keeps it, an accepted ingestion drops it across every export", (() => {
+    const set = [RECON_INTAKE, FPA_INTAKE];
+    const flag = ingestRealSeed(RECON_INTAKE).realConfirmedSeed; // true
+    const def = buildCapacityPack(set), real = buildCapacityPack(set, { realConfirmedSeed: flag });
+    return def.illustrative === true && def.content.includes(CALIBRATED_SEED_MARKER) && real.illustrative === false && !real.content.includes(CALIBRATED_SEED_MARKER);
+  })(), "");
+  ok("D4 the SHIPPED default stays illustrative \u2014 no opts means the marker is present (never faked real)", illustrativeMarker({}) === CALIBRATED_SEED_MARKER && illustrativeMarker(undefined) === CALIBRATED_SEED_MARKER, "");
 
   console.log(`\n${fail === 0 ? "\u2713 ALL PASS" : "\u2717 FAILURES"} \u2014 ${pass} passed, ${fail} failed`);
   return fail === 0;
