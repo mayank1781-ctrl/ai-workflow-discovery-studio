@@ -171,6 +171,18 @@ export const SYSTEM_ARCHETYPES = {
 // surfaced at intake. Additive: absent step.action, every output is byte-identical.
 export const ACTION_VERBS = ["read", "download", "transform", "write-in-place", "generate-output", "notify", "approve"];
 
+// A4 — ENTITLEMENT: the access level a step holds on its data, layered on the data tier. The truer
+// value/risk signal than tier alone — nearly everyone can READ common systems, but elevated WRITE /
+// APPROVE entitlement on SENSITIVE data, paired with a DECISION, is where the firm's high-value,
+// human-held work lives. Captured light: infer-then-confirm (the engine infers from action verb +
+// class; the human confirms at the Workbench). Enum-integrity surfaced at intake.
+export const ENTITLEMENTS = ["read", "write", "approve"];
+const ENTITLEMENT_RANK = { read: 1, write: 2, approve: 3 };
+// sensitivity multiplier per data tier (the value/risk weight, not the policy ceiling). public/internal
+// are low; confidential is elevated; PII/MNPI/restricted are the most sensitive.
+const TIER_SENSITIVITY = { public: 1, internal: 1, confidential: 2, PII: 3, MNPI: 3, restricted: 3 };
+const ENTITLEMENT_DECISION_MULT = 1.5; // a decision multiplies value/risk (the commit is the crown jewel)
+
 const prov = (value, source = "inferred", confidence = "medium") => ({ value, source, confidence });
 const round = (n, d = 0) => { const f = 10 ** d; return Math.round(n * f) / f; };
 const sum = a => a.reduce((x, y) => x + y, 0);
@@ -248,6 +260,8 @@ export function validateIntake(rawRecord) {
     // A3 — a step's action verb (when present) must resolve to the fixed set; the rare exception goes
     // in step.actionNote (freeform). An unknown verb is surfaced, never silently accepted.
     if (s.action != null && !ACTION_VERBS.includes(s.action)) errors.push(`step ${i + 1}: unknown action "${s.action}" (not in ${ACTION_VERBS.join("|")}; use step.actionNote for the rare exception)`);
+    // A4 — a step's entitlement (when stated) must resolve to read|write|approve; surfaced, never coerced.
+    if (s.entitlement != null && !ENTITLEMENTS.includes(s.entitlement)) errors.push(`step ${i + 1}: unknown entitlement "${s.entitlement}" (not in ${ENTITLEMENTS.join("|")})`);
     if (s.volume != null && (typeof s.volume !== "number" || !Number.isFinite(s.volume) || s.volume < 0)) errors.push(`step ${i + 1}: volume "${s.volume}" is not a valid non-negative number`);
     // A2 — a step's system refs must resolve to the systems[] registry (when a registry exists); an
     // unresolved ref is surfaced, never silently assumed reachable (it would mis-shape the build).
@@ -340,6 +354,49 @@ export function actionProfile(action) {
 // byte-identical. (approve is also caught upstream by stepDecisionLanguage; the 0 here is defence-in-depth.)
 const ACTION_CEILING = { "read": 1, "download": 1, "transform": 1, "generate-output": 1, "notify": 1, "write-in-place": 0.6, "approve": 0 };
 export function actionCeilingFactor(action) { return action != null && ACTION_CEILING[action] != null ? ACTION_CEILING[action] : 1; }
+
+// A4 — INFER the access entitlement of a step from its action verb + class when not stated (round to
+// the floor — read — and flag it for confirm; the human rounds UP at the Workbench). A stated
+// step.entitlement is honoured as-is. approve action / decision class / a four-eyes control => approve;
+// write-in-place => write; otherwise read.
+export function inferEntitlement(step) {
+  if (!step) return "read";
+  if (step.entitlement && ENTITLEMENTS.includes(step.entitlement)) return step.entitlement;
+  if (step.action === "approve" || step.cls === "decision" || (step.control && step.control.type === "four-eyes")) return "approve";
+  if (step.action === "write-in-place") return "write";
+  return "read";
+}
+// A4 — the resolved entitlement as a provenance pair: stated when the consultant set it, else inferred.
+export function entitlementOf(step) {
+  const stated = step && step.entitlement && ENTITLEMENTS.includes(step.entitlement);
+  return { value: inferEntitlement(step), source: stated ? "stated" : "inferred" };
+}
+// A4 — the VALUE/RISK weight of a step = entitlement rank × data-tier sensitivity, with a DECISION as
+// a multiplier. read-only on confidential scores below write/approve on the same tier; elevated
+// entitlement on sensitive data + a decision is the highest-weight, human-held core. Pure & additive.
+export function stepValueRisk(step) {
+  if (!step) return 0;
+  const ent = ENTITLEMENT_RANK[entitlementOf(step).value] || 1;
+  const sens = TIER_SENSITIVITY[step.data] ?? 1;
+  const mult = step.cls === "decision" ? ENTITLEMENT_DECISION_MULT : 1;
+  return round(ent * sens * mult, 3);
+}
+// A4 — the entitlement × sensitivity profile of a workflow: per-step value/risk, the high-value
+// human-held core (elevated entitlement on sensitive data + a decision), and the inferred-entitlement
+// confirm queue (infer-then-confirm). The "entitlement profile" set feeds the B1 adjacency leg.
+export function buildEntitlementRisk(record, opts = {}) {
+  const r = normalizeIntake(record);
+  const steps = r.steps.map(s => {
+    const ent = entitlementOf(s);
+    return { step: s.step, entitlement: ent.value, source: ent.source, dataTier: s.data, cls: s.cls, valueRisk: stepValueRisk(s) };
+  });
+  const highValueCore = steps.filter(s => (ENTITLEMENT_RANK[s.entitlement] || 1) >= 2 && (TIER_SENSITIVITY[s.dataTier] ?? 1) >= 2 && s.cls === "decision");
+  const confirmQueue = steps.filter(s => s.source === "inferred").map(s => ({ step: s.step, inferredEntitlement: s.entitlement }));
+  return { steps, highValueCore, confirmQueue, inferredCount: confirmQueue.length,
+    maxValueRisk: steps.length ? Math.max(...steps.map(s => s.valueRisk)) : 0,
+    profile: uniq(steps.map(s => s.entitlement)).sort(), // the entitlement profile (B1 adjacency leg)
+    note: confirmQueue.length ? "inferred entitlements — confirm (round up) at the Workbench before they count" : null };
+}
 // B2 — SEMANTIC CLASS CHECK. A step whose TEXT reads as a firm decision/commitment (approve /
 // waive / authorize / sign-off / send-final / sanction — scored by the SAME eval-gated rubric the
 // rest of the app uses, rubricStepClass) but is DECLARED assembly/judgment is a mislabel: left
@@ -1546,6 +1603,8 @@ export function deIdentify(record, opts = {}) {
     if (s.solutionShape) out.solutionShape = s.solutionShape; // shape is a category (A1) = KEPT
     // A2 — a step's systems become CLASSES (the archetype the moat needs); the vendor id/name never pools.
     if (Array.isArray(s.systems)) { const cls = uniq(s.systems.map(ref => resolveSystem(ref, r).class)); if (cls.length) out.systemClasses = cls; }
+    if (s.entitlement) out.entitlement = s.entitlement; // A4 — entitlement is a CATEGORY (the truest adjacency leg) = KEPT
+    if (s.action) out.action = s.action;                 // A3 — action-on-data class = KEPT category
     if (Array.isArray(s.participants)) out.participants = s.participants.map(p => ({ actorId: p.actorId, part: p.part })); // PART + opaque ref, not a person
     if (s.control && s.control.type) out.control = { type: s.control.type, ...(s.control.distinct ? { distinct: s.control.distinct } : {}) }; // control TYPE only
     return out;
@@ -2621,6 +2680,30 @@ function runTests() {
     // enum integrity surfaced; valid verb + freeform note both accepted
     ok("A3 an unknown action is surfaced at intake", !validateIntake({ ...RECON_INTAKE, steps: RECON_INTAKE.steps.map((s, i) => i === 0 ? { ...s, action: "frobnicate" } : s) }).ok, "");
     ok("A3 a valid action + a freeform actionNote validate clean", validateIntake({ ...RECON_INTAKE, steps: RECON_INTAKE.steps.map((s, i) => i === 0 ? { ...s, action: "read", actionNote: "screen-scrape exception list" } : s) }).ok, "");
+  }
+
+  // A4 — entitlement × sensitivity: the truer value/risk signal; infer-then-confirm
+  {
+    const conf = { cls: "assembly", data: "confidential", theo: 80, time: 10 };
+    const vrRead = stepValueRisk({ ...conf, entitlement: "read" });
+    const vrWrite = stepValueRisk({ ...conf, entitlement: "write" });
+    const vrApprove = stepValueRisk({ ...conf, cls: "decision", entitlement: "approve" });
+    ok("A4 read-only on confidential scores LOWER value/risk than write on the same tier", vrRead < vrWrite, `${vrRead} vs ${vrWrite}`);
+    ok("A4 elevated entitlement + a decision is the highest value/risk", vrApprove > vrWrite && vrApprove > vrRead, `${vrApprove}`);
+    // inference (infer-then-confirm): decision -> approve; write-in-place -> write; default read
+    ok("A4 inferEntitlement: a decision infers approve", inferEntitlement({ cls: "decision" }) === "approve", "");
+    ok("A4 inferEntitlement: a write-in-place action infers write", inferEntitlement({ cls: "assembly", action: "write-in-place" }) === "write", "");
+    ok("A4 inferEntitlement: nothing stated infers read (the floor — round up at confirm)", inferEntitlement({ cls: "assembly" }) === "read", "");
+    ok("A4 a stated entitlement is sourced 'stated'; an inferred one 'inferred'", entitlementOf({ entitlement: "write" }).source === "stated" && entitlementOf({ cls: "assembly" }).source === "inferred", "");
+    // the high-value human-held core (elevated entitlement on sensitive data + a decision)
+    const er = buildEntitlementRisk(RECON_INTAKE);
+    ok("A4 the high-value core is the decision on sensitive data (human-held)", er.highValueCore.some(s => /Approve adjustment/.test(s.step) && s.cls === "decision"), JSON.stringify(er.highValueCore.map(s => s.step)));
+    ok("A4 inferred entitlements are flagged for confirm", er.inferredCount > 0 && er.confirmQueue.length === er.inferredCount, `${er.inferredCount}`);
+    ok("A4 the entitlement profile is the set of distinct levels (the B1 adjacency leg)", Array.isArray(er.profile) && er.profile.every(e => ENTITLEMENTS.includes(e)), JSON.stringify(er.profile));
+    // enum integrity + additive
+    ok("A4 an unknown entitlement is surfaced at intake", !validateIntake({ ...RECON_INTAKE, steps: RECON_INTAKE.steps.map((s, i) => i === 0 ? { ...s, entitlement: "superuser" } : s) }).ok, "");
+    ok("A4 a stated entitlement validates clean", validateIntake({ ...RECON_INTAKE, steps: RECON_INTAKE.steps.map((s, i) => i === 0 ? { ...s, entitlement: "read" } : s) }).ok, "");
+    ok("A4 additive: value/risk is a separate lens — capacity is unchanged by entitlement", roleCapacity(normalizeIntake({ steps: [{ ...conf, entitlement: "write" }] }).steps, "Conservative").grossValue === roleCapacity(normalizeIntake({ steps: [conf] }).steps, "Conservative").grossValue, "");
   }
 
   // B1 — clean capture: combined-step split flag + the contradiction queue
