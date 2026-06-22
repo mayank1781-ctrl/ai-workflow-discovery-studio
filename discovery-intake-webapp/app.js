@@ -7236,12 +7236,37 @@ function firstEncounterStripHtml() {
   return `<section class="dash-sec" style="margin-top:14px;"><div style="font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${DASH.faint};margin:0 0 6px;">New here? — what these ideas mean</div>${cards}</section>`;
 }
 
-// C2 — the audience selector rendered above every dashboard.
+// ===================================================================
+// C2 (Phase 3) — ACCESSIBILITY render: status by MORE than color (icon + text + tone), labeled
+// controls, and tagged export affordances. The engine carries the status semantics; these helpers
+// render them with the icon, text, color, and an aria-label so a status is never color-alone and
+// assistive tech can read it. Guarded + additive ("" when an older engine lacks the function).
+// ===================================================================
+function engineAccessibleStatus(kind, value) { const E = studioEngine(); if (!E || typeof E.accessibleStatus !== "function") return null; return E.accessibleStatus(kind, value); }
+// tone -> the dashboard palette. The color is DERIVED; the icon + text carry the status without it.
+const A11Y_TONE = { positive: "#00d4b4", caution: "#FFB454", blocked: "#FF4FD8", neutral: "#A6ADC4", info: "#3b82f6" };
+// an accessible status chip: icon (aria-hidden) + text label + color + role=status + aria-label. The
+// status is legible without color (icon + words); "" for an unknown status (additive).
+function statusCueHtml(kind, value) {
+  const c = engineAccessibleStatus(kind, value);
+  if (!c) return "";
+  const color = A11Y_TONE[c.tone] || "#A6ADC4";
+  return `<span class="status-cue" role="status" aria-label="${escapeHtml(c.label)}" style="display:inline-flex;align-items:center;gap:4px;color:${color};font-size:11px;font-weight:700;"><span aria-hidden="true">${c.icon}</span>${escapeHtml(c.label)}</span>`;
+}
+// an accessible "tag" describing an export for its download control (a labeled / tagged export).
+function exportTagLabel(name, surface, illustrative) {
+  return `Download ${name} — ${surface} export${illustrative ? " (illustrative — calibrated seed)" : ""}, structured Markdown`;
+}
+// C2 — true when the active seed is illustrative (drives the export tag + the marker). Default: yes.
+function exportIsIllustrative() { return !(typeof state !== "undefined" && state && state.realConfirmedSeed === true); }
+
+// C2 — the audience selector rendered above every dashboard. Labeled as a group; each button carries an
+// aria-label + aria-pressed so the active surface is announced (keyboard-reachable real <button>s).
 function dashboardAudienceControlHtml() {
   const a = ensureDashboardAudience();
   const label = { leadership: "Leadership", worker: "Worker", tech: "Tech & Governance" };
-  const btns = DASHBOARD_AUDIENCES.map((x) => `<button type="button" data-dashboard-audience="${x}" style="background:${a === x ? "#00d4b4" : "#0d1b2e"};color:${a === x ? "#0d1b2e" : "#aebfd4"};border:1px solid #1e3350;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;">${escapeHtml(label[x])}</button>`).join("");
-  return `<div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;"><span class="ds-micro">Audience</span>${btns}</div>`;
+  const btns = DASHBOARD_AUDIENCES.map((x) => `<button type="button" data-dashboard-audience="${x}" aria-pressed="${a === x ? "true" : "false"}" aria-label="View the ${escapeHtml(label[x])} dashboard" style="background:${a === x ? "#00d4b4" : "#0d1b2e"};color:${a === x ? "#0d1b2e" : "#aebfd4"};border:1px solid #1e3350;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;">${escapeHtml(label[x])}</button>`).join("");
+  return `<div role="group" aria-label="Dashboard audience" style="display:flex;gap:6px;align-items:center;margin-bottom:10px;"><span class="ds-micro" id="dash-audience-label">Audience</span>${btns}</div>`;
 }
 
 // C2 — the WORKER dashboard: leverage framing only. Every rendered string is rail-clean (worker surface).
@@ -7259,7 +7284,7 @@ function workerViewHtml(records) {
     <div style="font-size:13px;color:#aebfd4;line-height:1.5;margin-bottom:10px;">${escapeHtml(wv.headline)}</div>
     ${rows}
     ${(typeof plainLanguageWorkerHtml === "function") ? plainLanguageWorkerHtml() : ""}
-    <div style="margin-top:10px;"><button type="button" id="downloadLeverageSummaryBtn" class="secondary-button compact">⬇ Download my leverage summary</button></div>
+    <div style="margin-top:10px;"><button type="button" id="downloadLeverageSummaryBtn" class="secondary-button compact" ${(typeof exportTagLabel === "function") ? `aria-label="${escapeHtml(exportTagLabel("my leverage summary", "worker", false))}"` : ""}>⬇ Download my leverage summary</button></div>
   </div>`;
 }
 
@@ -7307,7 +7332,7 @@ function leadershipSectionsHtml(records, opts) {
   }
   const pill = (label, v, c) => `<span style="display:inline-block;background:${c}22;color:${c};border:1px solid ${c}55;border-radius:99px;padding:2px 10px;font-size:11px;font-weight:700;margin-right:6px;">${escapeHtml(label)} ${v}%</span>`;
   const tile = (t) => `<div style="background:${DASH.panel};border:1px solid ${t.status === "red" ? "#ff4f6d66" : t.status === "amber" ? "#f6c45366" : DASH.line};border-radius:11px;padding:12px 14px;"><div style="font-size:11px;color:${DASH.faint};font-weight:600;text-transform:uppercase;">${escapeHtml(t.lens)} gap${t.status === "red" ? " · <span style=\"color:#ff4f6d;\">RED</span>" : ""}</div><div style="font-size:18px;font-weight:800;color:${DASH.ink};">${t.hrs} h/wk</div><div style="font-size:11px;color:${DASH.dim};margin-top:3px;">${escapeHtml(t.remedy)}</div></div>`;
-  const heatRows = (heat && heat.rows || []).map((r) => `<div style="font-size:12px;color:${DASH.dim};">${escapeHtml(r.role)} · n=${r.n} · <span style="color:${r.lowConfidence ? "#f6c453" : "#00d4b4"};">${escapeHtml(r.confidence)}</span></div>`).join("") || `<div style="font-size:12px;color:${DASH.faint};">${escapeHtml((heat && heat.note) || "No pooled discoveries yet.")}</div>`;
+  const heatRows = (heat && heat.rows || []).map((r) => `<div style="font-size:12px;color:${DASH.dim};">${escapeHtml(r.role)} · n=${r.n} · ${(typeof statusCueHtml === "function") ? statusCueHtml("confidence", r.confidence) : `<span style="color:${r.lowConfidence ? "#f6c453" : "#00d4b4"};">${escapeHtml(r.confidence)}</span>`}</div>`).join("") || `<div style="font-size:12px;color:${DASH.faint};">${escapeHtml((heat && heat.note) || "No pooled discoveries yet.")}</div>`;
   return `<section class="dash-sec" style="margin-top:14px;">
     <div style="font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${DASH.faint};margin:0 0 6px;">L · Leadership — mix · gaps · sequencing · collective</div>
     <div style="background:${DASH.panel};border:1px solid ${DASH.line};border-radius:12px;padding:14px 16px;">
@@ -7321,8 +7346,8 @@ function leadershipSectionsHtml(records, opts) {
       ${(typeof ecosystemLeadershipHtml === "function") ? ecosystemLeadershipHtml(records, opts) : ""}
       ${(typeof firstEncounterStripHtml === "function") ? firstEncounterStripHtml() : ""}
       <div style="margin-top:12px;">
-        <button type="button" id="downloadCapacityPackBtn" class="secondary-button compact">⬇ Board-ready capacity pack</button>
-        <button type="button" id="downloadRoadmapBtn" class="secondary-button compact" style="margin-left:8px;">⬇ Land → Expand → Retain roadmap</button>
+        <button type="button" id="downloadCapacityPackBtn" class="secondary-button compact" ${(typeof exportTagLabel === "function") ? `aria-label="${escapeHtml(exportTagLabel("the board-ready capacity pack", "leadership", (typeof exportIsIllustrative === "function") ? exportIsIllustrative() : false))}"` : ""}>⬇ Board-ready capacity pack</button>
+        <button type="button" id="downloadRoadmapBtn" class="secondary-button compact" style="margin-left:8px;" ${(typeof exportTagLabel === "function") ? `aria-label="${escapeHtml(exportTagLabel("the Land → Expand → Retain roadmap", "leadership", (typeof exportIsIllustrative === "function") ? exportIsIllustrative() : false))}"` : ""}>⬇ Land → Expand → Retain roadmap</button>
       </div>
       ${(typeof exportProvenanceHtml === "function") ? exportProvenanceHtml() : ""}
     </div></section>`;
@@ -7403,7 +7428,7 @@ function techGovViewHtml(records, opts) {
     <div style="font-size:11px;color:#8aa0b8;margin:10px 0 4px;">Realization / enablement — the builder ladder</div>${ladder}
     ${(typeof ecosystemTechGovHtml === "function") ? ecosystemTechGovHtml(records, opts) : ""}
     ${(typeof firstEncounterStripHtml === "function") ? firstEncounterStripHtml() : ""}
-    <div style="margin-top:12px;"><button type="button" id="downloadEvidencePackBtn" class="secondary-button compact">⬇ Audit-ready evidence pack</button></div>
+    <div style="margin-top:12px;"><button type="button" id="downloadEvidencePackBtn" class="secondary-button compact" ${(typeof exportTagLabel === "function") ? `aria-label="${escapeHtml(exportTagLabel("the audit-ready evidence pack", "tech & governance", (typeof exportIsIllustrative === "function") ? exportIsIllustrative() : false))}"` : ""}>⬇ Audit-ready evidence pack</button></div>
     ${(typeof exportProvenanceHtml === "function") ? exportProvenanceHtml() : ""}
   </div>`;
 }
@@ -13621,7 +13646,7 @@ function dashFmtUsd(v) {
 function dashKpi(lv, id) { return (lv && Array.isArray(lv.kpis)) ? (lv.kpis.find((k) => k.id === id) || null) : null; }
 function dashKpiVal(lv, id) { const k = dashKpi(lv, id); return k ? k.value : null; }
 // provenance dot — reuses the .prov vocabulary (stated=teal, inferred=grey)
-function dashProvDot(prov) { return `<span class="prov ${prov === "stated" ? "user" : "ai"}" style="padding:0;border:0;background:transparent;"><span class="pd"></span></span>`; }
+function dashProvDot(prov) { const lbl = prov === "stated" ? "Stated" : "Inferred"; return `<span class="prov ${prov === "stated" ? "user" : "ai"}" role="img" aria-label="${lbl}" title="${lbl}" style="padding:0;border:0;background:transparent;"><span class="pd"></span></span>`; }
 function dashPlaceholder(label) { return `<div class="dash-ph" style="border:1px dashed ${DASH.line};border-radius:8px;padding:7px 10px;font-size:10.5px;color:${DASH.faint};">${escapeHtml(label)} · awaiting telemetry</div>`; }
 
 // Best-effort: map the active workflow to an engine intake record. The engine filters to

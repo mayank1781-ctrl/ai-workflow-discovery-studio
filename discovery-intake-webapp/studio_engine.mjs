@@ -1630,6 +1630,53 @@ export function explainersRailClean() {
 }
 
 // =====================================================================
+// C2 (Phase 3) — ACCESSIBILITY: status encoded by MORE than color. accessibleStatus(kind, value)
+// returns a status as a {label, icon, tone} triple — a TEXT label and an ICON glyph alongside the tone
+// (the color the surface derives) — so a status is never distinguishable by color alone, and assistive
+// tech reads the label. Pure + additive: an unknown kind/value returns null, nothing else changes. The
+// values match the engine's real status sets (readiness states · gap tile status · heatmap confidence ·
+// provenance). The accessible labels / focus rings / reduced-motion CSS live on the surfaces (app + CSS).
+// =====================================================================
+export const STATUS_TONES = ["positive", "caution", "blocked", "neutral", "info"];
+export const STATUS_CUES = {
+  readiness: {
+    now: { label: "Ready now", icon: "✓", tone: "positive" },
+    "gated-policy": { label: "Gated — policy", icon: "⚑", tone: "blocked" },
+    "gated-economics": { label: "Gated — economics", icon: "⚠", tone: "caution" },
+    "future-capability": { label: "Future capability", icon: "◷", tone: "neutral" },
+  },
+  gap: {
+    ok: { label: "On track", icon: "✓", tone: "positive" },
+    amber: { label: "Watch", icon: "▲", tone: "caution" },
+    red: { label: "Action needed", icon: "⚠", tone: "blocked" },
+  },
+  confidence: {
+    established: { label: "Established", icon: "●●●", tone: "positive" },
+    indicative: { label: "Indicative", icon: "●●", tone: "caution" },
+    directional: { label: "Directional", icon: "●", tone: "neutral" },
+  },
+  provenance: {
+    stated: { label: "Stated", icon: "◆", tone: "positive" },
+    inferred: { label: "Inferred", icon: "◇", tone: "caution" },
+    computed: { label: "Computed", icon: "∑", tone: "info" },
+  },
+};
+export function accessibleStatus(kind, value) {
+  const byKind = STATUS_CUES[kind];
+  const c = byKind && byKind[value];
+  if (!c) return null;
+  return { kind, value, label: c.label, icon: c.icon, tone: c.tone };
+}
+// C2 — the non-color invariant, ENFORCED: every status cue carries a non-empty text label AND a
+// non-empty icon (legible without color) and a known tone. Checked by the self-test + the suite.
+export function statusCuesNonColor() {
+  return Object.keys(STATUS_CUES).every(kind => Object.keys(STATUS_CUES[kind]).every(v => {
+    const c = accessibleStatus(kind, v);
+    return c && typeof c.label === "string" && c.label.length > 0 && typeof c.icon === "string" && c.icon.length > 0 && STATUS_TONES.includes(c.tone);
+  }));
+}
+
+// =====================================================================
 // C4 (Phase 2) — the TECH & GOVERNANCE dashboard. Build view (shape · model tier · eval plan · owner
 // per recipe) · control evidence (four-eyes / authority / halts + the Phase-1 gate-matrix status) · the
 // six AI-policy KPIs · the builder ladder (Use -> Shape -> Evaluate). One real export: the audit-ready
@@ -3326,6 +3373,12 @@ function runTests() {
   ok("C1 first-encounter explainers exist for all five richer concepts (what-it-is + why-it-changes-the-number)", ["solutionShape", "tco", "adjacency", "entitlement", "ecosystem"].every(id => { const f = firstEncounterExplainer(id); return f && f.whatItIs && f.whyItChangesTheNumber; }), JSON.stringify(listFirstEncounterExplainers().map(f => f.id)));
   ok("C1 honesty markers read in plain terms (confirmed / inferred / illustrative / directional / discoveries)", ["confirmed", "inferred", "illustrative", "directional", "nDiscoveries"].every(id => { const m = explainHonestyMarker(id); return m && m.means.length >= 24 && /\.$/.test(m.means.trim()) && !/provenance|addressabilit|\btheo\b|\bn=\b|de-identif/i.test(m.means) && railCheck(m.means, "dashboard").ok; }), "");
   ok("C1 the plain-language layer is additive \u2014 an unknown figure / concept / marker returns null, no throw", explainFigure("nope", "leader") === null && firstEncounterExplainer("nope") === null && explainHonestyMarker("nope") === null && buildExplainers("nope").length === 0, "");
+
+  // ---- Phase 3 \u00b7 C2 \u2014 accessibility: status encoded by MORE than color ----
+  ok("C2 every status cue carries a text label + an icon (status is legible without color)", statusCuesNonColor(), "");
+  ok("C2 accessibleStatus resolves the real status sets (readiness / gap / confidence / provenance)", !!accessibleStatus("readiness", "gated-policy") && !!accessibleStatus("gap", "red") && !!accessibleStatus("confidence", "directional") && !!accessibleStatus("provenance", "inferred"), "");
+  ok("C2 a status cue's label is distinguishable without color (non-empty text beyond the icon)", (() => { const c = accessibleStatus("readiness", "gated-policy"); return c && c.label.replace(/[^A-Za-z]/g, "").length >= 3; })(), "");
+  ok("C2 accessibleStatus is additive \u2014 an unknown kind / value returns null, no throw", accessibleStatus("nope", "x") === null && accessibleStatus("readiness", "nope") === null, "");
 
   console.log(`\n${fail === 0 ? "\u2713 ALL PASS" : "\u2717 FAILURES"} \u2014 ${pass} passed, ${fail} failed`);
   return fail === 0;

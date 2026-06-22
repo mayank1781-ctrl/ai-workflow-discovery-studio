@@ -187,3 +187,24 @@ body[data-app-mode="interview"] .workspace{
    chrome, never a data fill. De-pinked to the locked chrome gradient. */
 #analysis-tab-engineering .ds-grad-bar,
 #analysis-tab-engineering .ds-grad-bar-v{ background:var(--grad); }
+
+/* =================================================================
+   C2 (Phase 3) — ACCESSIBILITY FLOOR. signal-glass.css loads last, so this fills the
+   visible-focus + reduced-motion gap for the Studio + Discovery surfaces (cockpit.css /
+   design-system.css / this file carry none). The bare :focus-visible has low specificity, so
+   the more specific focus rules already in styles.css / future.css still win where they exist —
+   this only covers the controls that had no visible focus at all. Presentation only; additive. */
+:focus-visible{ outline:2px solid var(--sg-cyan, #42E8FF); outline-offset:2px; border-radius:3px; }
+/* never remove focus without a visible replacement (keyboard reachability must stay legible) */
+a:focus-visible, button:focus-visible, [role="button"]:focus-visible,
+input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible{
+  outline:2px solid var(--sg-cyan, #42E8FF); outline-offset:2px;
+}
+@media (prefers-reduced-motion: reduce){
+  *, *::before, *::after{
+    animation-duration:0.001ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:0.001ms !important;
+    scroll-behavior:auto !important;
+  }
+}
