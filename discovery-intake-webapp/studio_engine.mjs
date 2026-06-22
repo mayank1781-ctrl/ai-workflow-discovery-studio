@@ -1743,10 +1743,27 @@ function fourEyesRoles(rec) {
 // are NOT dropped: each is surfaced in `whyBlocked` with the dimension and reason (never-a-dead-end).
 // `clusters` keeps the full candidate list tagged enabled | control-blocked (backward-compatible);
 // `enabledClusters` is the small actionable set the looseness used to drown. A single workflow => none.
+// B1 — GROUP the enabled pairwise edges into connected components (union-find), so the leader view
+// shows a handful of actionable CLUSTERS, not hundreds of pairs. Each group = a set of workflows that
+// transitively combine into one build; combinedFreedHrs sums the distinct members. Pure.
+function groupEnabled(edges, freedByName) {
+  const parent = new Map();
+  const find = x => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
+  const ensure = x => { if (!parent.has(x)) parent.set(x, x); };
+  edges.forEach(e => { const [a, b] = e.workflows; ensure(a); ensure(b); parent.set(find(a), find(b)); });
+  const byRoot = new Map();
+  edges.forEach(e => { const root = find(e.workflows[0]); if (!byRoot.has(root)) byRoot.set(root, { members: new Set(), edges: 0 }); const g = byRoot.get(root); e.workflows.forEach(w => g.members.add(w)); g.edges += 1; });
+  return [...byRoot.values()].map(g => {
+    const workflows = [...g.members];
+    return { workflows, size: workflows.length, edgeCount: g.edges,
+      combinedFreedHrs: round(sum(workflows.map(w => freedByName.get(w) || 0)), 3),
+      reason: `${workflows.length} workflows combine — build the capability once, reuse across the cluster (a less fragmented team); compatible on data, controls, cadence, tooling, shape, system class & entitlement.` };
+  }).sort((a, b) => b.combinedFreedHrs - a.combinedFreedHrs);
+}
 export function buildAdjacency(records, opts = {}) {
   const confirmed = (Array.isArray(records) ? records : []).filter(isConfirmed);
   if (confirmed.length < 2) {
-    return { clusters: [], enabledClusters: [], whyBlocked: [], enabledCount: 0, blockedCount: 0, candidateCount: 0, confirmedCount: confirmed.length,
+    return { clusters: [], enabledClusters: [], enabledGroups: [], groupCount: 0, whyBlocked: [], enabledCount: 0, blockedCount: 0, candidateCount: 0, confirmedCount: confirmed.length,
       note: "Adjacency needs ≥2 confirmed workflows — thin at this breadth; it sharpens as the library grows." };
   }
   const lc = s => String(s || "").trim().toLowerCase();
@@ -1759,6 +1776,8 @@ export function buildAdjacency(records, opts = {}) {
       cadence: lc(rec.trigger?.cadence),                                          // A3 — operational envelope
       tools: new Set(uniq((rec.steps || []).flatMap(s => (s.tool || "").split(/[,/]/))).map(lc)), // A3 — integration surface
       shapes: new Set((rec.steps || []).map(s => s.solutionShape).filter(Boolean)),                // A3 — solution shape
+      systemClasses: new Set((rec.systems || []).map(s => s && s.class).filter(Boolean)),          // B1 — shared system archetype leg
+      entGov: ["read", "write", "approve"][Math.max(1, ...(rec.steps || []).map(s => ENTITLEMENT_RANK[inferEntitlement(s)] || 1)) - 1], // B1 — governing entitlement profile leg
       fourEyes: fourEyesRoles(rec), freedHrs: rc.totalFreedHrs };
   });
   const inter = (a, b) => [...a].filter(x => b.has(x));
@@ -1783,6 +1802,12 @@ export function buildAdjacency(records, opts = {}) {
       status = "control-blocked"; dimension = "tooling"; reason = `shared role/capability but no shared tooling (${[...A.tools].slice(0, 2).join("/")} vs ${[...B.tools].slice(0, 2).join("/")}) — a different integration surface, not a reuse.`;
     } else if (A.shapes.size && B.shapes.size && !inter(A.shapes, B.shapes).length) {
       status = "control-blocked"; dimension = "shape"; reason = `shared role/capability but a different solution shape (${[...A.shapes].join("/")} vs ${[...B.shapes].join("/")}) — the capability isn't one build.`;
+    } else if (A.systemClasses.size && B.systemClasses.size && !inter(A.systemClasses, B.systemClasses).length) {
+      // B1 — shared system CLASS is a truer combine signal than a shared role: different archetypes aren't one build.
+      status = "control-blocked"; dimension = "system-class"; reason = `shared role/capability but no shared system class (${[...A.systemClasses].join("/")} vs ${[...B.systemClasses].join("/")}) — different system archetypes; not one build.`;
+    } else if (A.entGov && B.entGov && A.entGov !== B.entGov) {
+      // B1 — a shared role with a DIFFERENT entitlement profile is opposite access/risk; combining over-grants.
+      status = "control-blocked"; dimension = "entitlement"; reason = `shared role/capability but a different entitlement profile (${A.entGov} vs ${B.entGov}) — opposite access/risk; combining would over-grant access. Keep them separate.`;
     }
     const entry = { workflows: [A.name, B.name], sharedRoles, sharedCapabilities: sharedCaps, sharedHandoffs, status, reason, combinedFreedHrs: round(A.freedHrs + B.freedHrs, 3) };
     if (dimension) entry.blockedDimension = dimension;
@@ -1791,10 +1816,12 @@ export function buildAdjacency(records, opts = {}) {
   clusters.sort((a, b) => b.combinedFreedHrs - a.combinedFreedHrs);
   const enabledClusters = clusters.filter(c => c.status === "enabled");
   const whyBlocked = clusters.filter(c => c.status !== "enabled");
-  return { clusters, enabledClusters, whyBlocked,
+  // B1 — the GROUPED view: connected components over the enabled pairs (the leader surface renders these).
+  const enabledGroups = groupEnabled(enabledClusters, new Map(meta.map(m => [m.name, m.freedHrs])));
+  return { clusters, enabledClusters, enabledGroups, groupCount: enabledGroups.length, whyBlocked,
     enabledCount: enabledClusters.length, blockedCount: whyBlocked.length, candidateCount: clusters.length, confirmedCount: confirmed.length,
     note: clusters.length
-      ? `${enabledClusters.length} actionable cluster(s); ${whyBlocked.length} candidate pair(s) blocked on data / controls / cadence / tooling / shape (surfaced as why-blocked, not dropped).`
+      ? `${enabledGroups.length} actionable cluster(s) (${enabledClusters.length} enabled pair(s) grouped); ${whyBlocked.length} candidate pair(s) blocked on data / controls / cadence / tooling / shape / system class / entitlement (surfaced as why-blocked, not dropped).`
       : "No adjacency yet — these confirmed workflows don't share a role or capability." };
 }
 
@@ -2640,6 +2667,21 @@ function runTests() {
     const roleB = { ...FPA_INTAKE, header: { ...FPA_INTAKE.header, persona: "Analyst", anchor: "B-mnpi" }, steps: FPA_INTAKE.steps.map(s => ({ ...s, data: "MNPI" })) };
     const adj2 = buildAdjacency([roleA, roleB]);
     ok("A3 role-only + different tier => NOT enabled (surfaced in why-blocked on data)", adj2.enabledCount === 0 && adj2.whyBlocked.some(c => c.blockedDimension === "data"), JSON.stringify(adj2.whyBlocked.map(c => c.blockedDimension)));
+
+    // B1 — GROUPED clusters (connected components over enabled pairs) + the two new compatibility legs
+    ok("B1 the enabled pairs GROUP into connected components (a handful, not raw pairs)", adj.groupCount === 8 && adj.enabledGroups.length === 8, `${adj.groupCount}`);
+    ok("B1 each twin group has the two compatible workflows", adj.enabledGroups.every(g => g.size === 2 && g.workflows.length === 2), JSON.stringify(adj.enabledGroups.map(g => g.size)));
+    ok("B1 a fully-compatible pair forms ONE group of two", (() => { const a = buildAdjacency([RECON_INTAKE, { ...RECON_INTAKE, header: { ...RECON_INTAKE.header, anchor: "recon-2" } }]); return a.groupCount === 1 && a.enabledGroups[0].size === 2; })(), "");
+    // shared role but DIFFERENT system class => not a combine (why-blocked on system-class)
+    const sysGL = { ...RECON_INTAKE, header: { ...RECON_INTAKE.header, anchor: "recon-GL" }, systems: [{ id: "gl", class: "ledger/GL", reachability: "batch" }] };
+    const sysCRM = { ...RECON_INTAKE, header: { ...RECON_INTAKE.header, anchor: "recon-CRM" }, systems: [{ id: "crm", class: "CRM", reachability: "api" }] };
+    const adjSys = buildAdjacency([sysGL, sysCRM]);
+    ok("B1 a shared role with a different SYSTEM CLASS does not combine (why-blocked on system-class)", adjSys.enabledCount === 0 && adjSys.whyBlocked.some(c => c.blockedDimension === "system-class"), JSON.stringify(adjSys.whyBlocked.map(c => c.blockedDimension)));
+    // shared role but DIFFERENT entitlement profile => not a combine (why-blocked on entitlement)
+    const entBase = (anchor, ent) => ({ ...FPA_INTAKE, header: { ...FPA_INTAKE.header, persona: "Analyst", anchor }, steps: FPA_INTAKE.steps.map(s => ({ ...s, entitlement: ent })) });
+    const adjEnt = buildAdjacency([entBase("ent-read", "read"), entBase("ent-approve", "approve")]);
+    ok("B1 a shared role with a different ENTITLEMENT profile does not combine (why-blocked on entitlement)", adjEnt.enabledCount === 0 && adjEnt.whyBlocked.some(c => c.blockedDimension === "entitlement"), JSON.stringify(adjEnt.whyBlocked.map(c => c.blockedDimension)));
+    ok("B1 enabled + blocked still = all candidates (nothing dropped by the new legs)", adjSys.enabledCount + adjSys.blockedCount === adjSys.candidateCount, "");
   }
 
   // A4 — two-tier store: the pooled de-identify pass strips PII/MNPI/names/free-text; derived layer runs over the pool
