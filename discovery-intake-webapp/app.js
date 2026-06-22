@@ -13726,15 +13726,24 @@ function dashOrgTierHtml(records, opts) {
     `<div style="font-size:12px;font-weight:700;color:${DASH.ink};">${escapeHtml(c.capability)}</div>
      <div style="font-size:13px;font-weight:700;color:${c.buildOnce ? DASH.pos : DASH.dim};">${c.buildOnce ? `build once · reuse across ${c.reuseCount}` : `seen in ${c.reuseCount}`}</div>
      <div style="font-size:10px;color:${DASH.faint};">combined leverage ${c.combinedLeverage}</div>`)).join("");
-  // adjacency clusters — enabled / control-blocked (+ reason). RESHAPE language, never headcount.
-  const adjRows = (adj.clusters || []).slice(0, 4).map((c) => {
-    const tint = c.status === "enabled" ? DASH.pos : DASH.blk;
-    return `<div style="padding:6px 0;border-top:1px solid ${DASH.line};"><span style="font-size:11px;font-weight:700;color:${tint};">${c.status === "enabled" ? "✓ enabled" : "⛉ control-blocked"}</span>
+  // B1 — the leader surface renders GROUPED clusters (connected components over the enabled pairs),
+  // not raw pairs; the incompatible pairs stay surfaced as why-blocked (+ reason). RESHAPE language,
+  // never headcount. Falls back to the flat enabled pairs if an older engine returns no groups.
+  const groups = (adj.enabledGroups && adj.enabledGroups.length) ? adj.enabledGroups
+    : (adj.enabledClusters || []).map((c) => ({ workflows: c.workflows, size: (c.workflows || []).length, reason: c.reason }));
+  const groupRows = groups.slice(0, 4).map((g) => {
+    return `<div style="padding:6px 0;border-top:1px solid ${DASH.line};"><span style="font-size:11px;font-weight:700;color:${DASH.pos};">✓ enabled${g.size ? ` · ${g.size} workflows` : ""}</span>
+      <span style="font-size:11px;color:${DASH.dim};">${escapeHtml((g.workflows || []).join(" + "))}</span>
+      <div style="font-size:10px;color:${DASH.faint};">${escapeHtml(g.reason || "")}</div></div>`;
+  }).join("");
+  const blockedRows = (adj.whyBlocked || []).slice(0, 3).map((c) => {
+    return `<div style="padding:6px 0;border-top:1px solid ${DASH.line};"><span style="font-size:11px;font-weight:700;color:${DASH.blk};">⛉ control-blocked${c.blockedDimension ? ` · ${escapeHtml(c.blockedDimension)}` : ""}</span>
       <span style="font-size:11px;color:${DASH.dim};">${escapeHtml((c.workflows || []).join(" + "))}</span>
       <div style="font-size:10px;color:${DASH.faint};">${escapeHtml(c.reason || "")}</div></div>`;
   }).join("");
-  const adjBlock = (adj.clusters || []).length
-    ? `${tile(`<div style="font-size:12px;font-weight:700;color:${DASH.ink};">Adjacency clusters <span style="font-size:11px;color:${DASH.faint};">(${adj.clusters.length})</span></div>${adjRows}<div style="font-size:10px;color:${DASH.faint};margin-top:4px;">a hypothesis for leaders — human-confirmed; never a reorg</div>`)}`
+  const adjCount = (adj.groupCount != null) ? adj.groupCount : groups.length;
+  const adjBlock = (groups.length || (adj.whyBlocked || []).length)
+    ? `${tile(`<div style="font-size:12px;font-weight:700;color:${DASH.ink};">Adjacency clusters <span style="font-size:11px;color:${DASH.faint};">(${adjCount} grouped${(adj.whyBlocked || []).length ? ` · ${adj.whyBlocked.length} why-blocked` : ""})</span></div>${groupRows}${blockedRows}<div style="font-size:10px;color:${DASH.faint};margin-top:4px;">a hypothesis for leaders — human-confirmed; never a reorg</div>`)}`
     : tile(`<div style="font-size:12px;font-weight:700;color:${DASH.ink};">Adjacency clusters</div><div style="font-size:11px;color:${DASH.faint};">${escapeHtml(adj.note || "none yet — sharpens as the library grows")}</div>`);
   // hand-off reduction (today -> with AI) + the risk/SLA dividend (freed capacity as backlog headroom)
   const handoffTile = tile(`<div style="font-size:12px;font-weight:700;color:${DASH.ink};">Cross-role hand-offs</div>
