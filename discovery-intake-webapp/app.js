@@ -7357,6 +7357,23 @@ function leadershipSectionsHtml(records, opts) {
 function dashboardCurrentRecords() { return (typeof dashboardModel === "function") ? (dashboardModel().records || []) : []; }
 // D3 — export options carry the real-confirmed-seed flag from state (default: calibrated seed -> marker shown).
 function exportOpts() { return { realConfirmedSeed: state && state.realConfirmedSeed === true }; }
+// D4 — the real-seed INGESTION path (app side). Validates a candidate pilot discovery through the engine
+// and flips state.realConfirmedSeed ONLY when it is a genuine confirmed pilot; otherwise the flag stays
+// false and exports keep the illustrative marker. Returns the engine verdict (for a toast). NEVER
+// auto-invoked on the calibrated seed — the default posture stays illustrative until a real pilot is fed.
+function engineIngestRealSeed(record) { const E = studioEngine(); if (!E || typeof E.ingestRealSeed !== "function") return null; return E.ingestRealSeed(record); }
+function applyRealSeed(record) {
+  const verdict = engineIngestRealSeed(record);
+  if (!verdict) { if (typeof toast === "function") toast("Real-seed ingestion unavailable — engine not loaded"); return null; }
+  if (typeof state !== "undefined" && state) state.realConfirmedSeed = verdict.realConfirmedSeed === true;
+  if (verdict.accepted) {
+    if (typeof persistState === "function") persistState();
+    if (typeof toast === "function") toast("Real confirmed pilot seed ingested — exports now drop the illustrative marker");
+  } else if (typeof toast === "function") {
+    toast(`Not a real confirmed pilot — ${(verdict.reasons && verdict.reasons[0]) || "rejected"}; exports stay illustrative`);
+  }
+  return verdict;
+}
 // D3 — the visible "illustrative — calibrated seed" provenance marker shown beside the export buttons
 // until a real confirmed seed is loaded. Reads the engine's single-source marker.
 function exportProvenanceHtml() {
