@@ -7282,6 +7282,7 @@ function leadershipSectionsHtml(records, opts) {
       ${seq ? `<div style="font-size:12px;color:${DASH.dim};margin-bottom:8px;"><strong>Sequencing:</strong> ${escapeHtml(seq.note)}</div>` : ""}
       <div style="font-size:11px;color:${DASH.faint};margin-bottom:4px;">Collective historical heatmap (pooled library · n + confidence)</div>${heatRows}
       ${honest ? `<div style="font-size:11px;color:${DASH.faint};margin-top:10px;border-top:1px solid ${DASH.line};padding-top:8px;">Honest under pressure: ${honest.disclosures.map((d) => escapeHtml(d)).join(" · ")}</div>` : ""}
+      ${(typeof ecosystemLeadershipHtml === "function") ? ecosystemLeadershipHtml(records, opts) : ""}
       <div style="margin-top:12px;">
         <button type="button" id="downloadCapacityPackBtn" class="secondary-button compact">⬇ Board-ready capacity pack</button>
         <button type="button" id="downloadRoadmapBtn" class="secondary-button compact" style="margin-left:8px;">⬇ Land → Expand → Retain roadmap</button>
@@ -7318,6 +7319,31 @@ function wireDashboardExports(container) {
 // ===================================================================
 function engineTechGovView(records, opts) { const E = studioEngine(); if (!E || typeof E.buildTechGovView !== "function") return null; return E.buildTechGovView(records, opts || {}); }
 function engineEvidencePack(records, opts) { const E = studioEngine(); if (!E || typeof E.buildEvidencePack !== "function") return null; return E.buildEvidencePack(records, opts || {}); }
+// B2 — ecosystem & convergence map adapters (per audience). The engine derives the map from the
+// aggregate; these surfaces render it. Null when an older engine lacks the function (additive).
+function engineEcosystemLeadership(records, opts) { const E = studioEngine(); if (!E || typeof E.buildEcosystemLeadership !== "function") return null; return E.buildEcosystemLeadership(records, opts || {}); }
+function engineEcosystemTechGov(records, opts) { const E = studioEngine(); if (!E || typeof E.buildEcosystemTechGov !== "function") return null; return E.buildEcosystemTechGov(records, opts || {}); }
+
+// B2 — Leadership lens: the integrate-once economics. "" when no bottleneck system has emerged yet.
+function ecosystemLeadershipHtml(records, opts) {
+  const eco = engineEcosystemLeadership(records, opts);
+  if (!eco || !eco.integrateOnce || !eco.integrateOnce.length) return "";
+  const rows = eco.integrateOnce.slice(0, 6).map((d) => `<div style="padding:6px 0;border-top:1px solid ${DASH.line};">
+    <div style="font-size:11px;font-weight:700;color:${DASH.acc};">${escapeHtml(d.system)} <span style="font-size:10px;color:${DASH.faint};">${d.workflowCount}× / ${d.departmentCount} dept</span></div>
+    <div style="font-size:10px;color:${DASH.faint};">${escapeHtml(d.headline)}</div></div>`).join("");
+  return `<section class="dash-sec" style="margin-top:14px;"><div style="font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${DASH.faint};margin:0 0 6px;">Ecosystem — integrate once, unlock many${eco.directional ? " (directional)" : ""}</div>
+    <div style="background:${DASH.panel};border:1px solid ${DASH.line};border-radius:12px;padding:10px 14px;">${rows}<div style="font-size:10px;color:${DASH.faint};margin-top:4px;">a leverage hypothesis — human-confirmed; never a reorg</div></div></section>`;
+}
+// B2 — Tech & Governance lens: the dependency / single-point-of-failure / risk-concentration view.
+function ecosystemTechGovHtml(records, opts) {
+  const eco = engineEcosystemTechGov(records, opts);
+  if (!eco || !eco.dependencies || !eco.dependencies.length) return "";
+  const rows = eco.dependencies.slice(0, 6).map((d) => `<div style="background:#0d1b2e;border:1px solid #1e3350;border-radius:10px;padding:8px 12px;margin-bottom:6px;">
+    <div style="font-size:12px;font-weight:700;color:#e2e8f0;">${escapeHtml(d.system)} <span style="font-size:10px;color:#8aa0b8;">${escapeHtml(d.systemClass)}</span></div>
+    <div style="font-size:11px;color:${d.singlePointOfFailure ? "#ff8da1" : "#aebfd4"};">${d.singlePointOfFailure ? "⚠ single point of failure" : "dependency"} · ${d.workflowCount} workflow(s) / ${d.departmentCount} dept(s)</div>
+    <div style="font-size:10px;color:#8aa0b8;">${escapeHtml(d.risk)}</div></div>`).join("");
+  return `<div style="margin-top:12px;"><div style="font-size:11px;color:#8aa0b8;margin-bottom:4px;">Ecosystem dependencies — single points of failure / risk concentration${eco.directional ? " (directional)" : ""}</div>${rows}</div>`;
+}
 
 function techGovViewHtml(records, opts) {
   const view = engineTechGovView(records, opts);
@@ -7338,6 +7364,7 @@ function techGovViewHtml(records, opts) {
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:12px;">${kpiCards}</div>
     <div style="font-size:11px;color:#8aa0b8;margin-bottom:4px;">Build view (per recipe)</div>${builds}
     <div style="font-size:11px;color:#8aa0b8;margin:10px 0 4px;">Realization / enablement — the builder ladder</div>${ladder}
+    ${(typeof ecosystemTechGovHtml === "function") ? ecosystemTechGovHtml(records, opts) : ""}
     <div style="margin-top:12px;"><button type="button" id="downloadEvidencePackBtn" class="secondary-button compact">⬇ Audit-ready evidence pack</button></div>
     ${(typeof exportProvenanceHtml === "function") ? exportProvenanceHtml() : ""}
   </div>`;
