@@ -183,6 +183,12 @@ const ENTITLEMENT_RANK = { read: 1, write: 2, approve: 3 };
 const TIER_SENSITIVITY = { public: 1, internal: 1, confidential: 2, PII: 3, MNPI: 3, restricted: 3 };
 const ENTITLEMENT_DECISION_MULT = 1.5; // a decision multiplies value/risk (the commit is the crown jewel)
 
+// A5 — a CROSS-SYSTEM HANDOFF is a seam attribute, not a step: an output in one system TRIGGERS work
+// in another (an email confirmation that sends the person back into the recon system, a notification,
+// a file drop). These swivel-chair handoffs are prime assembly to relieve — but a high-criticality one
+// is a hidden CONTROL and must never be compressed to zero. Trigger is enum-integrity surfaced.
+export const HANDOFF_TRIGGERS = ["email", "notification", "file-drop"];
+
 const prov = (value, source = "inferred", confidence = "medium") => ({ value, source, confidence });
 const round = (n, d = 0) => { const f = 10 ** d; return Math.round(n * f) / f; };
 const sum = a => a.reduce((x, y) => x + y, 0);
@@ -277,9 +283,13 @@ export function validateIntake(rawRecord) {
     if (sys && sys.class && !SYSTEM_CLASSES.includes(sys.class)) errors.push(`system ${i + 1}: unknown class "${sys.class}" (not in ${SYSTEM_CLASSES.join("|")})`);
     if (sys && sys.reachability && !REACHABILITY.includes(sys.reachability)) errors.push(`system ${i + 1}: unknown reachability "${sys.reachability}" (not in ${REACHABILITY.join("|")})`);
   });
-  (record.seams || []).forEach((s, i) => ["friction", "latency", "crit"].forEach(k => {
-    if (s[k] && !LEVELS.includes(s[k])) errors.push(`seam ${i + 1}: ${k} "${s[k]}" not in low|medium|high`);
-  }));
+  (record.seams || []).forEach((s, i) => {
+    ["friction", "latency", "crit"].forEach(k => {
+      if (s[k] && !LEVELS.includes(s[k])) errors.push(`seam ${i + 1}: ${k} "${s[k]}" not in low|medium|high`);
+    });
+    // A5 — a cross-system handoff's trigger (when present) must resolve to the fixed set; surfaced, never coerced.
+    if (s.handoff && s.handoff.trigger != null && !HANDOFF_TRIGGERS.includes(s.handoff.trigger)) errors.push(`seam ${i + 1}: unknown handoff trigger "${s.handoff.trigger}" (not in ${HANDOFF_TRIGGERS.join("|")})`);
+  });
   // Edition 3 (F1) — a firm-level actor's line-of-defence must be a known line, when present.
   (record.actors || []).forEach((a, i) => {
     if (a && a.line && !LINES.includes(a.line)) errors.push(`actor ${i + 1}: unknown line "${a.line}" (Edition 3)`);
@@ -1615,7 +1625,8 @@ export function deIdentify(record, opts = {}) {
     header: { persona: r.header?.persona || POOL_REDACT, dept: r.header?.dept || POOL_REDACT, anchor: id, lifecycle: r.header?.lifecycle || "confirmed" },
     trigger: { trigger: POOL_REDACT, cadence: r.trigger?.cadence || POOL_REDACT, ...(r.trigger?.volume != null ? { volume: r.trigger.volume } : {}) },
     steps,
-    seams: (Array.isArray(r.seams) && r.seams.length) ? r.seams.map(s => ({ friction: s.friction, latency: s.latency, crit: s.crit, type: s.type })) : [{ friction: "low", latency: "low", crit: "low", type: "seam" }],
+    seams: (Array.isArray(r.seams) && r.seams.length) ? r.seams.map(s => ({ friction: s.friction, latency: s.latency, crit: s.crit, type: s.type,
+      ...(s.handoff ? { handoff: { trigger: s.handoff.trigger || null, bridgeCount: Array.isArray(s.handoff.bridges) ? s.handoff.bridges.length : 0 } } : {}) })) : [{ friction: "low", latency: "low", crit: "low", type: "seam" }], // A5 — handoff PATTERN (trigger + bridge count) is a kept class; vendor system names never pool
     judgment: { needs: POOL_REDACT, hard: POOL_REDACT, cues: POOL_REDACT, human: POOL_REDACT },
     confirm: { acceptance: POOL_REDACT, escalation: POOL_REDACT, dataTier: pooledTier(r.confirm?.dataTier || maxTier(r) || "internal") },
     recap: { confirmed: true },
@@ -1805,6 +1816,39 @@ export function buildHandoffReduction(records) {
   });
   return { baseline, remaining, collapsed: baseline - remaining, confirmedCount: confirmed.length,
     guardrail: "the human-held gates and controls stay; only swivel-chair hand-offs into assembly collapse" };
+}
+
+// A5 — the CROSS-SYSTEM handoff seams of a workflow (seam.handoff present). Each = the systems bridged
+// + the trigger; `protected` when the seam is high-criticality (a control gate, not mechanical toil).
+export function seamHandoffs(record) {
+  const seams = Array.isArray(record?.seams) ? record.seams : [];
+  return seams.filter(s => s && s.handoff && (Array.isArray(s.handoff.bridges) || s.handoff.trigger != null))
+    .map(s => ({
+      bridges: Array.isArray(s.handoff.bridges) && s.handoff.bridges.length ? s.handoff.bridges : [s.from, s.to].filter(Boolean),
+      trigger: s.handoff.trigger || null,
+      friction: s.friction || "medium", crit: s.crit || "low",
+      protected: s.crit === "high",       // a high-criticality handoff is a hidden control — never compressed to zero
+      note: s.note || null,
+    }));
+}
+// A5 — the SWIVEL-CHAIR leverage number, derived from the cross-system handoff seams. The relievable
+// swivel-chair count is the mechanical re-entry AI collapses into assembly; the PROTECTED handoffs
+// (high-criticality control gates) are never compressed to zero. Honest at n=1 (directional). Counts the
+// captured handoff seams (not gated on confirmed — a single capture still surfaces its swivel-chair).
+export function buildSwivelChairRelief(records, opts = {}) {
+  const list = Array.isArray(records) ? records : [records];
+  const all = list.flatMap(r => seamHandoffs(r));
+  const relievable = all.filter(h => !h.protected);
+  const protectedHandoffs = all.filter(h => h.protected);
+  const byTrigger = {}; relievable.forEach(h => { if (h.trigger) byTrigger[h.trigger] = (byTrigger[h.trigger] || 0) + 1; });
+  const confirmedCount = list.filter(isConfirmed).length;
+  return {
+    handoffSeams: all.length,
+    swivelChairRelieved: relievable.length,       // the swivel-chair leverage number (mechanical re-entry collapsed)
+    protectedHandoffs: protectedHandoffs.length,  // control gates — never compressed to zero
+    byTrigger, confirmedCount, directional: confirmedCount <= 1,
+    guardrail: "swivel-chair re-entry collapses into assembly; the protected control handoffs stay (never compressed to zero)",
+    note: all.length ? (confirmedCount <= 1 ? "directional — one person's picture; sharpens across the library" : null) : "No cross-system handoff seams captured — the swivel-chair number is 0." };
 }
 
 // F8 — risk / SLA dividend (the recon-SOP lens). For ops workflows, freed capacity is headroom for the
@@ -2704,6 +2748,28 @@ function runTests() {
     ok("A4 an unknown entitlement is surfaced at intake", !validateIntake({ ...RECON_INTAKE, steps: RECON_INTAKE.steps.map((s, i) => i === 0 ? { ...s, entitlement: "superuser" } : s) }).ok, "");
     ok("A4 a stated entitlement validates clean", validateIntake({ ...RECON_INTAKE, steps: RECON_INTAKE.steps.map((s, i) => i === 0 ? { ...s, entitlement: "read" } : s) }).ok, "");
     ok("A4 additive: value/risk is a separate lens — capacity is unchanged by entitlement", roleCapacity(normalizeIntake({ steps: [{ ...conf, entitlement: "write" }] }).steps, "Conservative").grossValue === roleCapacity(normalizeIntake({ steps: [conf] }).steps, "Conservative").grossValue, "");
+  }
+
+  // A5 — cross-system handoffs as seam attributes; the swivel-chair leverage number
+  {
+    const reconHandoff = { ...RECON_INTAKE, seams: [
+      ...RECON_INTAKE.seams,
+      { from: "email", to: "recon engine", type: "handoff", friction: "high", latency: "medium", crit: "low", note: "email confirmation sends me back into the recon system", handoff: { bridges: ["email", "recon engine"], trigger: "email" } },
+      { from: "case manager", to: "FinCrime system", type: "handoff", friction: "low", latency: "low", crit: "high", note: "AML referral gate", handoff: { bridges: ["case manager", "FinCrime system"], trigger: "notification" } },
+    ] };
+    const hs = seamHandoffs(reconHandoff);
+    ok("A5 an 'email confirmation sends me back into system X' pattern is captured as a handoff seam", hs.some(h => h.trigger === "email" && h.bridges.length === 2), JSON.stringify(hs));
+    const sc = buildSwivelChairRelief([reconHandoff]);
+    ok("A5 the handoff seam counts toward the swivel-chair relief number", sc.swivelChairRelieved >= 1 && sc.byTrigger.email === 1, JSON.stringify(sc));
+    ok("A5 a high-criticality handoff is PROTECTED — never compressed to zero", sc.protectedHandoffs === 1 && sc.swivelChairRelieved === 1, JSON.stringify(sc));
+    ok("A5 the swivel-chair view is directional at n=1 (honest)", sc.directional === true, "");
+    // de-identify: the handoff PATTERN (trigger + bridge count) pools; vendor system names never do
+    const pooled = deIdentify(reconHandoff);
+    ok("A5 the pooled handoff keeps the trigger, not the vendor system name", JSON.stringify(pooled).includes("email") && !JSON.stringify(pooled).includes("FinCrime system"), "");
+    // enum integrity + additive
+    ok("A5 an unknown handoff trigger is surfaced at intake", !validateIntake({ ...RECON_INTAKE, seams: [{ ...RECON_INTAKE.seams[0], handoff: { bridges: ["a", "b"], trigger: "carrier-pigeon" } }] }).ok, "");
+    ok("A5 a valid handoff trigger validates clean", validateIntake({ ...RECON_INTAKE, seams: [{ ...RECON_INTAKE.seams[0], handoff: { bridges: ["a", "b"], trigger: "file-drop" } }, RECON_INTAKE.seams[1]] }).ok, JSON.stringify(validateIntake({ ...RECON_INTAKE, seams: [{ ...RECON_INTAKE.seams[0], handoff: { bridges: ["a", "b"], trigger: "file-drop" } }, RECON_INTAKE.seams[1]] }).errors));
+    ok("A5 additive: a workflow with no handoff seams has a swivel-chair number of 0", buildSwivelChairRelief([RECON_INTAKE]).handoffSeams === 0 && buildSwivelChairRelief([RECON_INTAKE]).swivelChairRelieved === 0, "");
   }
 
   // B1 — clean capture: combined-step split flag + the contradiction queue
