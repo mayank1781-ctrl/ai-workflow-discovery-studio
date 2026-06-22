@@ -7201,6 +7201,41 @@ function setDashboardAudience(a) { if (DASHBOARD_AUDIENCES.includes(a)) state.da
 function engineWorkerView(records, opts) { const E = studioEngine(); if (!E || typeof E.buildWorkerView !== "function") return null; return E.buildWorkerView(records, opts || {}); }
 function engineLeverageSummary(records, opts) { const E = studioEngine(); if (!E || typeof E.buildLeverageSummary !== "function") return null; return E.buildLeverageSummary(records, opts || {}); }
 
+// ===================================================================
+// C1 (Phase 3) — the PLAIN-LANGUAGE self-explaining layer (render). The engine is the single source of
+// the explainers (rail-respecting, audience-correct); these surfaces render them. Each adapter returns
+// null/"" when an older engine lacks the function, and every mount is guarded, so an un-explained
+// surface stays byte-identical (additive).
+// ===================================================================
+function engineExplainFigure(figureId, audience) { const E = studioEngine(); if (!E || typeof E.explainFigure !== "function") return null; return E.explainFigure(figureId, audience); }
+function engineFirstEncounters() { const E = studioEngine(); if (!E || typeof E.listFirstEncounterExplainers !== "function") return []; return E.listFirstEncounterExplainers(); }
+function engineExplainers(audience) { const E = studioEngine(); if (!E || typeof E.buildExplainers !== "function") return []; return E.buildExplainers(audience); }
+
+// a small "ⓘ what this means / how it's computed" disclosure for one figure, in its audience's words.
+function explainerNoteHtml(figureId, audience) {
+  const e = engineExplainFigure(figureId, audience);
+  if (!e) return "";
+  return `<details class="explainer-note" style="margin-top:4px;"><summary style="font-size:10.5px;color:#8aa0b8;cursor:pointer;">ⓘ ${escapeHtml(e.label || "What this means")}</summary>
+    <div style="font-size:11px;color:#aebfd4;line-height:1.45;margin-top:4px;"><div>${escapeHtml(e.whatThisMeans)}</div><div style="color:#8aa0b8;margin-top:3px;">How it's computed: ${escapeHtml(e.howComputed)}</div></div></details>`;
+}
+
+// the WORKER plain-language note — rail-clean (no cost / capacity / headcount); rendered under the worker view.
+function plainLanguageWorkerHtml() {
+  const note = explainerNoteHtml("time_given_back", "worker");
+  if (!note) return "";
+  return `<div style="margin-top:10px;border-top:1px solid #1e3350;padding-top:8px;">${note}</div>`;
+}
+
+// the first-encounter explainers strip (the five richer ideas — what each is + why it changes the
+// number), shown on the leadership / tech-governance surfaces where those concepts surface.
+function firstEncounterStripHtml() {
+  const list = engineFirstEncounters();
+  if (!list || !list.length) return "";
+  const cards = list.map((f) => `<details style="background:${DASH.panel};border:1px solid ${DASH.line};border-radius:8px;padding:6px 10px;margin-bottom:4px;"><summary style="font-size:11px;font-weight:700;color:${DASH.dim};cursor:pointer;">ⓘ ${escapeHtml(f.title)} — what this is</summary>
+    <div style="font-size:11px;color:${DASH.dim};line-height:1.45;margin-top:4px;"><div>${escapeHtml(f.whatItIs)}</div><div style="color:${DASH.faint};margin-top:3px;">Why it changes the number: ${escapeHtml(f.whyItChangesTheNumber)}</div></div></details>`).join("");
+  return `<section class="dash-sec" style="margin-top:14px;"><div style="font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${DASH.faint};margin:0 0 6px;">New here? — what these ideas mean</div>${cards}</section>`;
+}
+
 // C2 — the audience selector rendered above every dashboard.
 function dashboardAudienceControlHtml() {
   const a = ensureDashboardAudience();
@@ -7223,6 +7258,7 @@ function workerViewHtml(records) {
   return `<div>
     <div style="font-size:13px;color:#aebfd4;line-height:1.5;margin-bottom:10px;">${escapeHtml(wv.headline)}</div>
     ${rows}
+    ${(typeof plainLanguageWorkerHtml === "function") ? plainLanguageWorkerHtml() : ""}
     <div style="margin-top:10px;"><button type="button" id="downloadLeverageSummaryBtn" class="secondary-button compact">⬇ Download my leverage summary</button></div>
   </div>`;
 }
@@ -7283,6 +7319,7 @@ function leadershipSectionsHtml(records, opts) {
       <div style="font-size:11px;color:${DASH.faint};margin-bottom:4px;">Collective historical heatmap (pooled library · n + confidence)</div>${heatRows}
       ${honest ? `<div style="font-size:11px;color:${DASH.faint};margin-top:10px;border-top:1px solid ${DASH.line};padding-top:8px;">Honest under pressure: ${honest.disclosures.map((d) => escapeHtml(d)).join(" · ")}</div>` : ""}
       ${(typeof ecosystemLeadershipHtml === "function") ? ecosystemLeadershipHtml(records, opts) : ""}
+      ${(typeof firstEncounterStripHtml === "function") ? firstEncounterStripHtml() : ""}
       <div style="margin-top:12px;">
         <button type="button" id="downloadCapacityPackBtn" class="secondary-button compact">⬇ Board-ready capacity pack</button>
         <button type="button" id="downloadRoadmapBtn" class="secondary-button compact" style="margin-left:8px;">⬇ Land → Expand → Retain roadmap</button>
@@ -7365,6 +7402,7 @@ function techGovViewHtml(records, opts) {
     <div style="font-size:11px;color:#8aa0b8;margin-bottom:4px;">Build view (per recipe)</div>${builds}
     <div style="font-size:11px;color:#8aa0b8;margin:10px 0 4px;">Realization / enablement — the builder ladder</div>${ladder}
     ${(typeof ecosystemTechGovHtml === "function") ? ecosystemTechGovHtml(records, opts) : ""}
+    ${(typeof firstEncounterStripHtml === "function") ? firstEncounterStripHtml() : ""}
     <div style="margin-top:12px;"><button type="button" id="downloadEvidencePackBtn" class="secondary-button compact">⬇ Audit-ready evidence pack</button></div>
     ${(typeof exportProvenanceHtml === "function") ? exportProvenanceHtml() : ""}
   </div>`;

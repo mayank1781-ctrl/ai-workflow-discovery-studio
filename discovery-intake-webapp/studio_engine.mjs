@@ -1485,6 +1485,151 @@ export function buildRoadmapExport(records, opts = {}) {
 }
 
 // =====================================================================
+// C1 (Phase 3) — PLAIN-LANGUAGE SELF-EXPLAINING LAYER. Every figure explains itself in ITS OWN
+// audience's words: a worker explainer never borrows the leader's capacity/cost vocabulary (it would
+// fail the worker rail), and a leader figure explains its computation in the leader's terms. First-
+// encounter explainers cover the five richer ideas — solution shape · TCO · adjacency/grouping ·
+// entitlement × sensitivity · the ecosystem map — "what this is and why it changes the number." The
+// honesty markers (confirmed · inferred · illustrative · directional · discoveries-behind-it) say what
+// they mean in PLAIN terms, not jargon. All STATIC copy + pure lookups: additive, no numeric output
+// changes. Rail-respecting is an ENFORCED invariant (explainersRailClean + the self-test/suite), never
+// auto-sanitized — a regression that lets leader vocab into a worker explainer FAILS the gate.
+// =====================================================================
+export const EXPLAINER_AUDIENCES = ["worker", "leader", "techgov"];
+// the surface each audience renders on (drives the rail the explainer must pass). worker -> the strict
+// worker rail (no capacity, no cost, no headcount/FTE; leverage allowed); leader/techgov -> the
+// dashboard rail (the capacity + cost economics live here).
+export function audienceSurface(audience) { return audience === "worker" ? "worker" : "dashboard"; }
+
+// per-figure explainers, keyed by audience then figure id (the ids match the engine's real figure ids:
+// the worker-view fields, buildLeaderView kpi ids, buildTechGovKpis ids). Each: what the figure MEANS
+// and HOW it is computed, in that audience's words.
+export const FIGURE_EXPLAINERS = {
+  worker: {
+    time_given_back: { label: "Time given back",
+      whatThisMeans: "The time AI gives back to you each week by carrying the routine assembly work — the pulling, formatting, and cross-checking — so more of your week goes to the judgment and the calls that need you.",
+      howComputed: "We take the share of your steps that are routine assembly, count only the part AI can honestly carry, and show it as time given back. The judgment and the decisions are never counted — they stay yours." },
+    ai_carries: { label: "What AI carries",
+      whatThisMeans: "The routine, rule-following part of your work AI can take on — so you're not the one rekeying and reconciling.",
+      howComputed: "The share of your steps tagged as assembly (same inputs, same right output), before any judgment or decision." },
+    stays_mine: { label: "What stays yours",
+      whatThisMeans: "The judgment and the decisions stay with you — AI assists, you decide.",
+      howComputed: "Every step that needs your read (judgment) or commits the firm (decision) is held with you, never handed to AI." },
+  },
+  leader: {
+    gross_capacity: { label: "Gross capacity value",
+      whatThisMeans: "The yearly value of the capacity AI could free across the confirmed assembly work — before the cost of running it.",
+      howComputed: "Per confirmed unit, the freed assembly hours valued at the role rate, summed. Decisions earn nothing — they stay human. This is gross, i.e. before cost-to-serve." },
+    cost_to_serve: { label: "Cost-to-serve (routed)",
+      whatThisMeans: "The yearly cost of running the AI that frees that capacity, on the best-matched (routed) model tier.",
+      howComputed: "The per-run inference cost of the AI-addressable steps at the routed tier, annualized across the deployment." },
+    net_capacity: { label: "Net capacity value",
+      whatThisMeans: "The capacity value that is actually bankable — gross capacity after the cost of serving it, counting only the units where that net is positive.",
+      howComputed: "Gross capacity value minus cost-to-serve, summed over net-positive units. Economics-gated units contribute zero and are flagged separately, never hidden." },
+    model_fit_lever: { label: "Model-fit lever",
+      whatThisMeans: "The yearly swing from matching each step to the right model tier instead of running everything on the frontier tier.",
+      howComputed: "Net capacity on the routed (best-matched) tier minus net on the frontier tier — the value of routing rather than over-paying." },
+    economics_gated: { label: "Economics-gated units",
+      whatThisMeans: "Units where the cost to serve would exceed the capacity value at the permitted tier — deferred, not deleted.",
+      howComputed: "A count of confirmed units whose net capacity value is zero or below once cost-to-serve is subtracted at the permitted tier." },
+    policy_gap: { label: "Policy gap (governance agenda)",
+      whatThisMeans: "Capacity AI could touch in theory but policy does not yet permit — a governance conversation, not a delivery number.",
+      howComputed: "The weekly hours between what is theoretically addressable and what policy currently permits, summed across confirmed units." },
+    realization_gap: { label: "Realization gap (L&D agenda)",
+      whatThisMeans: "Freed capacity that will not land until the team is enabled to use AI well — the enablement agenda.",
+      howComputed: "The weekly hours between the capacity freed and the capacity realized at today's realization factor, across confirmed units." },
+  },
+  techgov: {
+    ai_steps_human_owner: { label: "% AI steps with a human owner",
+      whatThisMeans: "How much of the AI-addressable work has a named human accountable for it — the control that AI assists but a person owns.",
+      howComputed: "AI-addressable steps (everything that is not a decision) with a human owner or approver, as a share of all AI-addressable steps." },
+    hardened_from_confirmed: { label: "% hardened from confirmed data",
+      whatThisMeans: "How much of the confirmed work is ready to build from data a person stood behind — not from inferred guesses.",
+      howComputed: "Confirmed units that pass every hardening gate (provenance, controls, no decision mislabel) as a share of confirmed units." },
+    residency_exceptions_open: { label: "Residency exceptions open",
+      whatThisMeans: "How many formal exceptions are letting sensitive data run somewhere it normally would not — each one a governance item to review.",
+      howComputed: "A count of valid, unexpired policy exceptions (approver, jurisdiction, data class, expiry) across the confirmed set." },
+    eval_coverage_by_shape: { label: "% shaped steps with eval coverage",
+      whatThisMeans: "How much of the buildable work has a test plan behind it — the evidence that an AI step does what it should.",
+      howComputed: "Steps that carry a solution shape and a stated eval plan, as a share of all shaped steps." },
+    control_evidence_completeness: { label: "Control-evidence completeness",
+      whatThisMeans: "How much of the control work (four-eyes, authority, halts) is fully evidenced and passes its checks.",
+      howComputed: "Steps whose control passes the control rail, as a share of all steps that carry a control." },
+    model_tier_mix: { label: "Model-tier mix",
+      whatThisMeans: "Where the work lands across the model tiers — how much sits on the restricted, small, or frontier tier.",
+      howComputed: "A tally of AI-addressable steps by the routed model tier each one resolves to under policy." },
+  },
+};
+
+// the five FIRST-ENCOUNTER explainers (the richer ideas): what it is + why it moves the number. Shown
+// on the leadership / tech-governance surfaces (the dashboard rail), where these concepts surface.
+export const FIRST_ENCOUNTER_EXPLAINERS = [
+  { id: "solutionShape", title: "Solution shape", surface: "dashboard",
+    whatItIs: "How AI would actually be delivered for a step — a prompt, a retrieval-grounded assistant (RAG), a deterministic tool, an agentic flow, or human-in-the-loop.",
+    whyItChangesTheNumber: "The shape sets what is buildable and what it costs to own. A screen-only system cannot honestly be agentic, so it is human-in-the-loop with a larger integration cost — the shape moves both feasibility and the total cost of ownership." },
+  { id: "tco", title: "Total cost of ownership (TCO)", surface: "dashboard",
+    whatItIs: "The full cost of owning a recipe, not just running it: one-time build, integration and eval-build, plus ongoing maintenance, eval, and rework — separate from the per-run cost-to-serve.",
+    whyItChangesTheNumber: "Two recipes with the same per-run cost can cost very different amounts to own — an agentic flow is far more expensive to build and keep alive than a prompt. TCO is what turns a gross figure into an honest payback." },
+  { id: "adjacency", title: "Adjacency & grouping", surface: "dashboard",
+    whatItIs: "Where two confirmed workflows share enough — a role or capability, plus compatible data, controls, cadence, tooling, system class and access — to be built once and reused, shown as a handful of grouped clusters rather than hundreds of pairs.",
+    whyItChangesTheNumber: "Genuinely adjacent work is built once and reused, so the combined capacity lands for less build effort. Where two workflows differ on access or system class they do not combine — surfaced as why-blocked, never forced." },
+  { id: "entitlement", title: "Entitlement × sensitivity", surface: "dashboard",
+    whatItIs: "The access level a step uses (read, write, or approve) paired with how sensitive the data is — read-only on a report and write/approve on the same records are opposite work at the same tier.",
+    whyItChangesTheNumber: "Elevated write/approve access on sensitive data, paired with a decision, is the firm's high-value, human-held core — it raises both the value and the risk weighting, and it is the truest signal of whether two workflows should combine." },
+  { id: "ecosystem", title: "Ecosystem map", surface: "dashboard",
+    whatItIs: "The systems the whole portfolio converges on — workflows linked by a shared data source, system class, or access profile — with the high-degree (bottleneck) systems surfaced.",
+    whyItChangesTheNumber: "When many workflows depend on the same feed, integrating it once unlocks all of them at once. It is honest at one discovery (labelled directional) and sharper across twenty." },
+];
+
+// honesty markers in PLAIN terms (not jargon). These are the words on the surfaces — confirmed vs
+// inferred, the illustrative seed marker, the low-n directional marker, and the discovery count.
+export const HONESTY_MARKERS = {
+  confirmed: { term: "Confirmed", means: "A person reviewed this and stands behind it, so it counts toward the figures." },
+  inferred: { term: "Inferred", means: "We filled this in from what was said — a best read, not yet checked. Confirm it before relying on it." },
+  illustrative: { term: "Illustrative", means: "These numbers come from a calibrated example, not a confirmed pilot — use them for shape and direction, not as the budget." },
+  directional: { term: "Directional", means: "Based on one person's picture so far — a direction, not a settled pattern. It sharpens as more discoveries are pooled." },
+  nDiscoveries: { term: "Discoveries behind it", means: "How many discovery conversations sit behind this number — the more there are, the more confidence it carries." },
+};
+
+// C1 — look up one figure's explainer for an audience. Returns the explainer (with figureId/audience/
+// surface attached) or null for an unknown figure/audience (additive: callers render nothing).
+export function explainFigure(figureId, audience) {
+  const byFig = FIGURE_EXPLAINERS[audience];
+  const e = byFig && byFig[figureId];
+  if (!e) return null;
+  return { figureId, audience, surface: audienceSurface(audience), label: e.label, whatThisMeans: e.whatThisMeans, howComputed: e.howComputed };
+}
+// C1 — every figure explainer for one audience (a surface renders these). [] for an unknown audience.
+export function buildExplainers(audience) {
+  const byFig = FIGURE_EXPLAINERS[audience];
+  if (!byFig) return [];
+  return Object.keys(byFig).map(figureId => explainFigure(figureId, audience));
+}
+// C1 — the first-encounter explainer for one of the five richer concepts, or null.
+export function firstEncounterExplainer(conceptId) {
+  return FIRST_ENCOUNTER_EXPLAINERS.find(f => f.id === conceptId) || null;
+}
+export function listFirstEncounterExplainers() { return FIRST_ENCOUNTER_EXPLAINERS.slice(); }
+// C1 — a plain-language honesty marker by id, or null.
+export function explainHonestyMarker(id) {
+  const m = HONESTY_MARKERS[id];
+  return m ? { id, term: m.term, means: m.means } : null;
+}
+export function plainHonestyMarkers() { return Object.keys(HONESTY_MARKERS).map(id => explainHonestyMarker(id)); }
+// C1 — the ENFORCED rail-respecting invariant: every worker explainer passes the worker rail (no
+// capacity/cost/headcount), and every leader/techgov figure + first-encounter + honesty marker passes
+// the dashboard rail. True iff the whole plain-language layer is rail-clean for its audience. Checked
+// by the self-test and the suite; never used to silently rewrite copy.
+export function explainersRailClean() {
+  const wOk = buildExplainers("worker").every(e => railCheck(`${e.label}. ${e.whatThisMeans} ${e.howComputed}`, "worker").ok);
+  const dashFigs = [...buildExplainers("leader"), ...buildExplainers("techgov")]
+    .every(e => railCheck(`${e.label}. ${e.whatThisMeans} ${e.howComputed}`, "dashboard").ok);
+  const feOk = FIRST_ENCOUNTER_EXPLAINERS.every(f => railCheck(`${f.title}. ${f.whatItIs} ${f.whyItChangesTheNumber}`, f.surface || "dashboard").ok);
+  const hmOk = plainHonestyMarkers().every(m => railCheck(`${m.term}. ${m.means}`, "dashboard").ok);
+  return wOk && dashFigs && feOk && hmOk;
+}
+
+// =====================================================================
 // C4 (Phase 2) — the TECH & GOVERNANCE dashboard. Build view (shape · model tier · eval plan · owner
 // per recipe) · control evidence (four-eyes / authority / halts + the Phase-1 gate-matrix status) · the
 // six AI-policy KPIs · the builder ladder (Use -> Shape -> Evaluate). One real export: the audit-ready
@@ -3169,6 +3314,18 @@ function runTests() {
   ok("F8 SLA dividend = freed capacity as role-weeks (honest), aged/breach counts are LABELED placeholders", sla.freedRoleWeeks > 0 && sla.agedItemsAvoided === null && sla.slaBreachesAvoided === null, JSON.stringify(sla));
   ok("F8 SLA dividend freed == role view freed (no fork)", near(sla.freedHrs, round(sum(buildRoleView([RECON_INTAKE, RECON_INTAKE]).roles.map(r => r.freedHrs)), 2), 0.02), "");
   ok("F8 org-tier numbers carry no headcount/fte vocabulary", !/headcount|\bfte\b|cut staff|lay ?off/i.test(JSON.stringify(hr) + JSON.stringify(sla)), "");
+
+  // ---- Phase 3 \u00b7 C1 \u2014 plain-language self-explaining layer (per-surface, rail-respecting) ----
+  const wExpl = explainFigure("time_given_back", "worker");
+  ok("C1 the worker 'time given back' explainer exists with what-this-means + how-computed", !!wExpl && !!wExpl.whatThisMeans && !!wExpl.howComputed, JSON.stringify(wExpl));
+  ok("C1 the worker freed-capacity explainer is rail-clean on the worker surface (no cost / capacity / headcount / fte)", railCheck(`${wExpl.whatThisMeans} ${wExpl.howComputed}`, "worker").ok, JSON.stringify(railCheck(`${wExpl.whatThisMeans} ${wExpl.howComputed}`, "worker").violations));
+  ok("C1 NO worker explainer borrows leader vocabulary (capacity / cost / headcount / fte)", buildExplainers("worker").every(e => !/\bcapacity\b|\bcost\b|head[\s-]*count|\bfte\b/i.test(`${e.label} ${e.whatThisMeans} ${e.howComputed}`)), JSON.stringify(buildExplainers("worker").map(e => e.figureId)));
+  const lExpl = explainFigure("net_capacity", "leader");
+  ok("C1 a leadership figure explains its computation in the leader's terms (capacity / cost / net)", !!lExpl && /capacity|cost|net/i.test(lExpl.howComputed), JSON.stringify(lExpl));
+  ok("C1 every leader + techgov + first-encounter + honesty marker is rail-clean for its surface", explainersRailClean(), "");
+  ok("C1 first-encounter explainers exist for all five richer concepts (what-it-is + why-it-changes-the-number)", ["solutionShape", "tco", "adjacency", "entitlement", "ecosystem"].every(id => { const f = firstEncounterExplainer(id); return f && f.whatItIs && f.whyItChangesTheNumber; }), JSON.stringify(listFirstEncounterExplainers().map(f => f.id)));
+  ok("C1 honesty markers read in plain terms (confirmed / inferred / illustrative / directional / discoveries)", ["confirmed", "inferred", "illustrative", "directional", "nDiscoveries"].every(id => { const m = explainHonestyMarker(id); return m && m.means.length >= 24 && /\.$/.test(m.means.trim()) && !/provenance|addressabilit|\btheo\b|\bn=\b|de-identif/i.test(m.means) && railCheck(m.means, "dashboard").ok; }), "");
+  ok("C1 the plain-language layer is additive \u2014 an unknown figure / concept / marker returns null, no throw", explainFigure("nope", "leader") === null && firstEncounterExplainer("nope") === null && explainHonestyMarker("nope") === null && buildExplainers("nope").length === 0, "");
 
   console.log(`\n${fail === 0 ? "\u2713 ALL PASS" : "\u2717 FAILURES"} \u2014 ${pass} passed, ${fail} failed`);
   return fail === 0;
