@@ -319,7 +319,7 @@ and pass them through `appWorkflowToIntake` opts → `dashboardRecords()`.
 ---
 
 ### C-13 · Process Map — ordered step nodes, five-rung coloring, Flow/Wait toggle  [A] ✓
-**SHA:** TBD  
+**SHA:** cd98056  
 **Gate:** npm 1121/0 (+25 tests in `test/c13-process-map.test.mjs`)
 
 Hero section prepended to the Workbench tab (`analysis-tab-workbench`). Shows the
