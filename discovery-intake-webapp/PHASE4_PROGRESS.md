@@ -200,7 +200,41 @@ Files changed: `app.js`, `test/c10-recipe-book.test.mjs`
 
 ---
 
-### C-11 through C-13 + A3 + A4  pending
+### C-11 · Executive Dashboard — verdict blocks + metric toggle chart  [A] ✓
+**Tag:** `phase-4-c11`  **SHA:** 67ea883  
+**Gate:** npm 1065/0 (+50 tests in `test/c11-exec-dashboard.test.mjs`)
+
+Three verdict blocks + per-metric toggle chart prepended to the leadership
+dashboard (before the existing `dashHeaderHtml` chain; tech path unchanged).
+
+**Verdict blocks (3-column grid):**
+- **Return** (blue, #4D8BFF) — net/gross waterfall mini-visual, token-cost watch.
+  Headline: formatted net /yr or "—" when no business case computed; never invents numbers.
+- **Trust** (blue→pink gradient bar) — ownership bar (AI-led% vs human-led%); headline
+  "No — it frees people for better work"; framing: "not reductions"; Workforce → link.
+- **Speed** (violet, #9D7BF0) — cycle compression %; solid+dotted bar; deliberation note.
+
+**Metric panel (`ed11MetricPanelHtml`):**
+- Segmented control (Value | Hours | Cycle) → `state.ed11Metric`
+- Toggle (Gross↔Net / Freed hrs↔FTE / Cycle today↔After AI) → `state.ed11Toggle`
+- KPI trio changes per metric; SVG bar chart (`ed11BarsSvg`, 700×200 viewBox)
+  with per-step bars derived from `composedAddr` × `timeTaken` (no re-computation of
+  domain totals — totals come from `lv` engine aggregate only).
+
+**Executive/Workforce split:** verdict blocks are "executive diagnoses."
+"What to do with freed capacity" is Workforce Transformation (C-12), surfaced
+only as a navigation pointer (`Workforce Transformation →`).
+
+**New constants:** `ED11_AI_LED`, `ED11_HUMAN_LED`, `ED11_MET`  
+**New state keys:** `state.ed11Metric` (default "value"), `state.ed11Toggle` (default true)  
+**Modified:** `renderAnalysisTabDashboard` (injects metric panel + verdict row before
+leadership sections), `wireDashboard` (calls `wireEd11`)
+
+Files changed: `app.js`, `test/c11-exec-dashboard.test.mjs`
+
+---
+
+### C-12 through C-13 + A3 + A4  pending
 
 ---
 
