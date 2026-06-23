@@ -27,6 +27,44 @@
   --glass:rgba(255,255,255,.045); --glass-2:rgba(255,255,255,.07);
   --txt:#EAEFFF; --txt-dim:#A6ADC4; --txt-faint:#737A92;
   --font:'Inter',system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+
+  /* ---- Glass McKinsey v2 — P4 A2 Addendum (ownership ramp + per-metric palette) ----
+     These --gm-* tokens feed all Track C surfaces. They do NOT replace --sg-* tokens;
+     both coexist. No surface hardcodes a rung colour — all reads come through here.
+     The line between build and judgment (ai_led / human_led) is the visual thesis:
+     cool = AI leverage, warm = protected human ownership. */
+
+  /* Rung palette: cool (AI-led) → warm (human-owned) */
+  --gm-gather:   #6FB6FF;
+  --gm-build:    #4D8BFF;
+  --gm-judgment: #9D7BF0;
+  --gm-decision: #EC4DA6;
+  --gm-held:     #C2528F;
+
+  /* Per-metric signal colours: value=blue · hours=teal · cycle-time=violet */
+  --gm-value:       #4D8BFF;
+  --gm-value-hi:    #6FB6FF;
+  --gm-hours:       #2BD8C8;
+  --gm-hours-hi:    #63E6D6;
+  --gm-cycle:       #9D7BF0;
+  --gm-cycle-hi:    #B89DF5;
+
+  /* Glass McKinsey surface ground (Track C panels only — body stays --sg-ink) */
+  --gm-base:     #121120;
+  --gm-card:     rgba(255,255,255,.05);
+  --gm-card-2:   rgba(255,255,255,.075);
+  --gm-border:   rgba(255,255,255,.10);
+  --gm-border-2: rgba(255,255,255,.15);
+
+  /* Glow: appears on DATA only — never on chrome or action controls */
+  --gm-glow-blue:   rgba(77,139,255,.50);
+  --gm-glow-pink:   rgba(236,77,166,.40);
+  --gm-glow-violet: rgba(157,123,240,.40);
+  --gm-glow-teal:   rgba(43,216,200,.35);
+
+  /* Font stacks — Space Grotesk (display) + JetBrains Mono (labels/numbers-as-labels) */
+  --gm-display: 'Space Grotesk', system-ui, sans-serif;
+  --gm-mono:    'JetBrains Mono', ui-monospace, monospace;
 }
 
 /* ---- Type: Inter everywhere; headlines 800, body/UI 450 ---- */

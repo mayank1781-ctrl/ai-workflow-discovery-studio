@@ -79,6 +79,34 @@ Files changed: `app.js`, `test/b6-intake-capture.test.mjs`
 
 ---
 
+## Track A (Addendum) — A1 ownershipFamily + A2 Glass McKinsey foundation
+
+### A1 Addendum · ownershipFamily rollup  [A] ✓
+**SHA:** pending  **Gate:** npm 930/0 · engine 369/0
+
+Two-family overlay over cls: `ownershipFamily(cls) → "ai_led" | "human_led" | null`.
+`AI_LED_CLASSES=[gather,build]`, `HUMAN_LED_CLASSES=[judgment,decision,human_held]`,
+legacy `assembly` → `ai_led`. `workflowOwnershipSplit(steps)` returns `{aiLed, humanLed, unknown}`
+(time-weighted %, 1dp) for portfolio rollup. Pure functions; zero change to any engine
+seed numeric output.
+
+Files changed: `studio_engine.mjs`, `test/ownership-family.test.mjs` (+19 tests)
+
+### A2 Addendum · Glass McKinsey v2 visual language — foundation  [A] ✓
+**SHA:** pending  **Gate:** npm 930/0 (no tests; CSS/font-only)
+
+`signal-glass.css`: new `--gm-*` token block in `:root` — ownership ramp (5 rung
+colours: gather #6FB6FF · build #4D8BFF · judgment #9D7BF0 · decision #EC4DA6 ·
+held #C2528F), per-metric colours (value=blue, hours=teal, cycle-time=violet), surface
+ground `--gm-base`, glass card tokens, data-only glow tokens, `--gm-display` (Space
+Grotesk) + `--gm-mono` (JetBrains Mono) font stacks.
+`index.html`: Space Grotesk + JetBrains Mono loaded from Google Fonts (additive; Inter
+unchanged). No surface hardcodes a rung colour; all reads go through `--gm-*`.
+
+Files changed: `signal-glass.css`, `index.html`
+
+---
+
 ## Track C — UI surfaces
 
 ### C-7 through C-13  pending

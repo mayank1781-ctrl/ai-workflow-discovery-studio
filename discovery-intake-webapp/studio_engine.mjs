@@ -272,6 +272,44 @@ const round = (n, d = 0) => { const f = 10 ** d; return Math.round(n * f) / f; }
 const sum = a => a.reduce((x, y) => x + y, 0);
 
 // =====================================================================
+// P4 A1 Addendum — ownership families: a two-family overlay over cls.
+// ai_led  = {gather, build}            — where AI creates primary leverage
+// human_led = {judgment, decision, human_held} — where human ownership is protected
+// This is a DERIVED grouping; cls and all per-step engine math are unchanged.
+// assembly (legacy alias) maps to ai_led (gather/build family).
+// Never used to lower a protection floor or weaken a human-held guard.
+// =====================================================================
+export const AI_LED_CLASSES = ["gather", "build"];
+export const HUMAN_LED_CLASSES = ["judgment", "decision", "human_held"];
+export const OWNERSHIP_FAMILIES = ["ai_led", "human_led"];
+
+export function ownershipFamily(cls) {
+  const c = typeof cls === "string" ? cls.trim().toLowerCase() : "";
+  if (AI_LED_CLASSES.includes(c)) return "ai_led";
+  if (HUMAN_LED_CLASSES.includes(c)) return "human_led";
+  if (c === "assembly") return "ai_led"; // legacy alias → gather/build family
+  return null;
+}
+
+export function workflowOwnershipSplit(steps) {
+  const valid = (Array.isArray(steps) ? steps : []).filter(s => s && s.cls && typeof s.time === "number" && s.time > 0);
+  if (!valid.length) return { aiLed: 0, humanLed: 0, unknown: 0 };
+  const total = valid.reduce((s, x) => s + x.time, 0);
+  let aiT = 0, huT = 0, ukT = 0;
+  for (const s of valid) {
+    const fam = ownershipFamily(s.cls);
+    if (fam === "ai_led") aiT += s.time;
+    else if (fam === "human_led") huT += s.time;
+    else ukT += s.time;
+  }
+  return {
+    aiLed: round(aiT / total * 100, 1),
+    humanLed: round(huT / total * 100, 1),
+    unknown: round(ukT / total * 100, 1),
+  };
+}
+
+// =====================================================================
 // 0 · INTAKE — schema, validation, normalization
 // =====================================================================
 // Required (must-capture) checks — same set as the Discovery capture tool.
