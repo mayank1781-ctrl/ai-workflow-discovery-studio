@@ -6719,7 +6719,13 @@ function renderAnalysisTabWorkbench() {
   </div>`;
   const stepNames = steps.map((s, i) => (typeof stepDisplayName === "function" ? stepDisplayName(s, i) : (s.name || `Step ${i + 1}`)));
   const heroHtml = typeof pm13HeroHtml === "function" ? pm13HeroHtml(steps, stepNames) : "";
-  panel.innerHTML = `${heroHtml}<div class="wb-cockpit">${progressHtml}<div class="wb-steps">${steps.map((s, i) => wbStepCardHtml(s, i)).join("")}</div></div>`;
+  // P5-3 — show the confirmation ladder so users know what level they are at
+  // and what is needed before this workflow counts in portfolio rollups.
+  let wbLadderHtml = "";
+  if (typeof buildConfirmationLadder === "function" && typeof confirmationLadderHtml === "function") {
+    try { wbLadderHtml = confirmationLadderHtml(buildConfirmationLadder()) || ""; } catch (_e) { wbLadderHtml = ""; }
+  }
+  panel.innerHTML = `${heroHtml}<div class="wb-cockpit">${progressHtml}${wbLadderHtml}<div class="wb-steps">${steps.map((s, i) => wbStepCardHtml(s, i)).join("")}</div></div>`;
   if (typeof wireProcessMap === "function") wireProcessMap(panel);
   wireWorkbench();
 }
@@ -14521,6 +14527,102 @@ function applyPolicyConstraintsToSpec(spec, gov, pc) {
 const DASH = { pos: "#00d4b4", cau: "#FFB454", blk: "#FF4FD8", prog: "#a78bfa", acc: "#3b82f6", wait: "#5b7186", ink: "#EAEFFF", dim: "#A6ADC4", faint: "#737A92", line: "#16263a", panel: "#0c1726" };
 const DASH_LIFE = ["captured", "confirmed", "specified", "in-build", "in-telemetry"];
 
+// === P5-3 · Confirmation Ladder ===============================================
+// Five-rung path from captured to portfolio-counted. Pure data model + renderer.
+// Language is client-safe: capacity/confirmed/not counted — no headcount framing.
+
+const LADDER_LEVELS = [
+  { id: "captured",            label: "Captured",            hint: "Steps recorded in Discovery" },
+  { id: "classified",          label: "Classified",          hint: "Steps have class and data sensitivity" },
+  { id: "workbench-confirmed", label: "Workbench confirmed", hint: "All steps confirmed in Workbench" },
+  { id: "engine-complete",     label: "Engine complete",     hint: "All engine fields present" },
+  { id: "portfolio-counted",   label: "Portfolio counted",   hint: "Record included in confirmed rollups" }
+];
+
+// Returns the ladder result for the active session. Pure — reads app state; no writes.
+function buildConfirmationLadder() {
+  const steps = (typeof analysisGridSteps === "function") ? analysisGridSteps() : [];
+
+  // Level 1 — Captured: at least one step exists
+  if (!steps.length) {
+    return { level: 0, levelId: null, label: "Not started", complete: false,
+      nextHint: "Run a Discovery session to capture this workflow",
+      missingFields: [], levels: LADDER_LEVELS };
+  }
+
+  // Level 2 — Classified: at least one step has both class AND data sensitivity
+  // (mirrors the engine's steps[class+data] REQUIRED check)
+  const anyClassified = steps.some((s) => {
+    const cls = typeof engineStepClass === "function" ? engineStepClass(s) : ((s && s.cls) || "");
+    const data = typeof engineDataTier === "function" ? engineDataTier(s) : "";
+    return !!cls && !!data;
+  });
+  if (!anyClassified) {
+    return { level: 1, levelId: "captured", label: "Captured", complete: false,
+      nextHint: "Add data sensitivity on at least one step",
+      missingFields: [], levels: LADDER_LEVELS };
+  }
+
+  // Level 3 — Workbench confirmed: all steps confirmed
+  const cv = (typeof confirmedView === "function") ? confirmedView() : { total: 0, unconfirmed: [] };
+  const allConfirmed = cv.total > 0 && cv.unconfirmed.length === 0;
+  if (!allConfirmed) {
+    const n = (cv.unconfirmed && cv.unconfirmed.length) || 0;
+    return { level: 2, levelId: "classified", label: "Classified", complete: false,
+      nextHint: n > 0 ? `Confirm ${n} step${n === 1 ? "" : "s"} in the Workbench tab`
+                      : "Confirm steps in the Workbench tab",
+      missingFields: [], levels: LADDER_LEVELS };
+  }
+
+  // Level 4 — Engine complete: all 15 bridge fields populated
+  // recap.confirmed is true because cv says allConfirmed (same logic as dashboardRecords).
+  const record = (typeof appWorkflowToIntake === "function")
+    ? appWorkflowToIntake({ recap: { confirmed: true } }) : null;
+  const missingFields = (typeof bridgeMissingFields === "function")
+    ? bridgeMissingFields(record) : [];
+  if (missingFields.length > 0) {
+    return { level: 3, levelId: "workbench-confirmed", label: "Workbench confirmed", complete: false,
+      nextHint: "Fill in the remaining session fields so the engine can confirm this record",
+      missingFields, levels: LADDER_LEVELS };
+  }
+
+  // Level 5 — Portfolio counted: passes engine.isConfirmed
+  const E = (typeof studioEngine === "function") ? studioEngine() : null;
+  const counted = E && typeof E.isConfirmed === "function" && record ? E.isConfirmed(record) : false;
+  if (counted) {
+    return { level: 5, levelId: "portfolio-counted", label: "Portfolio counted", complete: true,
+      nextHint: null, missingFields: [], levels: LADDER_LEVELS };
+  }
+
+  // Engine complete but engine not yet loaded — edge case handled
+  return { level: 4, levelId: "engine-complete", label: "Engine complete", complete: false,
+    nextHint: "Navigate to the Executive Dashboard to view confirmed rollups",
+    missingFields: [], levels: LADDER_LEVELS };
+}
+
+// Renders the ladder as a compact horizontal strip with current level highlighted.
+// Uses the provenance palette: teal=confirmed, blue=current, grey=pending/inferred.
+function confirmationLadderHtml(ladder) {
+  if (!ladder) return "";
+  const { level, label, nextHint, missingFields, levels } = ladder;
+  const esc = typeof escapeHtml === "function" ? escapeHtml : (s) => String(s == null ? "" : s);
+  const CLR = { done: "#00d4b4", current: "#3b82f6", pending: "#5b7186", panel: "#0c1726", line: "#16263a", ink: "#EAEFFF", dim: "#A6ADC4" };
+  const rungs = levels.map((l, i) => {
+    const idx = i + 1;
+    const st = idx < level ? "done" : idx === level ? "current" : "pending";
+    const c = CLR[st];
+    const sep = i > 0 ? `<span style="color:${CLR.pending};margin:0 3px;font-size:10px;">›</span>` : "";
+    return `${sep}<span style="font-size:11px;font-weight:${st === "current" ? 700 : 400};color:${c};">${st === "done" ? "✓ " : ""}${esc(l.label)}</span>`;
+  }).join("");
+  const hintHtml = nextHint ? `<div style="font-size:11px;color:${CLR.dim};margin-top:4px;">Next: ${esc(nextHint)}</div>` : "";
+  const mf = Array.isArray(missingFields) && missingFields.length > 0
+    ? `<ul style="margin:5px 0 0;padding-left:14px;font-size:11px;color:${CLR.dim};line-height:1.65;">${missingFields.map((f) => `<li><strong style="color:${CLR.ink};">${esc(f.label)}</strong> — ${esc(f.hint)}</li>`).join("")}</ul>` : "";
+  return `<div class="p53-ladder" style="background:${CLR.panel};border:1px solid ${CLR.line};border-radius:8px;padding:8px 12px;margin-bottom:8px;">
+    <div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:${CLR.pending};margin-bottom:4px;">Confirmation status · <span style="color:${level >= 5 ? CLR.done : level > 0 ? CLR.current : CLR.pending};">${esc(label)}</span></div>
+    <div>${rungs}</div>${hintHtml}${mf}
+  </div>`;
+}
+
 function dashFmtUsd(v) {
   const a = Math.abs(Number(v) || 0);
   const s = a >= 1000 ? (a / 1000).toFixed(a >= 100000 ? 0 : 1) + "k" : String(Math.round(a));
@@ -14656,8 +14758,12 @@ function dashAgendasHtml(lv) {
     <div style="background:${DASH.panel};border:1px solid ${DASH.line};border-radius:12px;padding:14px 16px;"><div style="font-size:11px;color:${DASH.dim};margin-bottom:8px;">${dashProvDot("stated")} Readiness mix — each state maps to a next move</div><svg viewBox="0 0 960 32" style="display:block;width:100%;height:auto;">${bar}</svg><div style="margin-top:9px;">${key}</div></div></section>`;
 }
 
-function dashEmptyHtml(lv, missingFields) {
+function dashEmptyHtml(lv, missingFields, ladderStatus) {
   const note = (lv && lv.note) || "No confirmed units yet — confirm units on the Workbench to populate.";
+  // P5-3: surface the confirmation ladder level so the user knows where they stand.
+  const statusHtml = ladderStatus
+    ? `<div style="font-size:11px;color:${DASH.dim};margin-top:4px;margin-bottom:10px;">Confirmation status: <strong style="color:${DASH.ink};">${escapeHtml(ladderStatus)}</strong></div>`
+    : "";
   let missingHtml = "";
   if (Array.isArray(missingFields) && missingFields.length > 0) {
     missingHtml = `<div style="margin-top:14px;"><div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:${DASH.faint};margin-bottom:6px;">Fields still needed for engine confirmation</div>
@@ -14668,6 +14774,7 @@ function dashEmptyHtml(lv, missingFields) {
   return `<div style="background:${DASH.panel};border:1px solid ${DASH.line};border-radius:12px;padding:22px 24px;color:${DASH.dim};font-size:13px;line-height:1.6;">
     <div style="font-size:15px;font-weight:700;color:${DASH.ink};margin-bottom:4px;">Executive Dashboard</div>
     <div>${escapeHtml(note)}</div>
+    ${statusHtml}
     ${missingHtml}
     <div style="margin-top:12px;"><button type="button" class="primary-button compact" data-dashboard-to-workbench="1">Go to the Workbench</button></div>
   </div>`;
@@ -15443,13 +15550,17 @@ function renderAnalysisTabDashboard(recordsOverride, opts) {
   if (!studioEngine()) { container.innerHTML = dashEmptyHtml({ note: "The executive Dashboard is loading the Studio engine…" }); return; }
   const { lv, records } = dashboardModel(recordsOverride, opts);
   if (!lv || lv.note || !lv.confirmedCount) {
-    // P5-2 — when engine is loaded but no confirmed units, compute which fields are still missing
-    // and surface them explicitly so the user knows exactly what to capture.
+    // P5-2 — compute which bridge fields are still missing and surface them.
     let missingFields = [];
     if (lv && !lv.note && typeof bridgeMissingFields === "function" && typeof appWorkflowToIntake === "function") {
       try { missingFields = bridgeMissingFields(appWorkflowToIntake()); } catch (_e) { missingFields = []; }
     }
-    container.innerHTML = dashEmptyHtml(lv, missingFields.length ? missingFields : null);
+    // P5-3 — compute the current ladder level label so the empty state names where the session stands.
+    let ladderStatus = null;
+    if (lv && !lv.note && typeof buildConfirmationLadder === "function") {
+      try { const ldr = buildConfirmationLadder(); ladderStatus = ldr ? ldr.label : null; } catch (_e) { }
+    }
+    container.innerHTML = dashEmptyHtml(lv, missingFields.length ? missingFields : null, ladderStatus);
     wireDashboard(container);
     return;
   }

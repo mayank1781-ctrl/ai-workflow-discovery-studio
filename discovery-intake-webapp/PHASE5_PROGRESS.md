@@ -69,6 +69,81 @@ bridgeMissingFields(null)       = 15 items # test "P5-2: bridgeMissingFields ret
 
 ---
 
+## P5-3 · Confirmation Ladder
+
+**Status:** COMPLETE  
+**Gate:** 1236/0 (+29 tests over P5-2 gate of 1207/0)  
+**Eval:** 0/24 dangerous-wrong (unchanged)
+
+---
+
+### What was built
+
+A five-rung confirmation-status model that surfaces exactly where each workflow/session
+stands — why it appears in Workbench but may not count in Executive/Workforce/Portfolio
+rollups — without loosening any gate or touching official rollup logic.
+
+### Changed files
+
+| File | Change |
+|---|---|
+| `app.js` | `LADDER_LEVELS` const + `buildConfirmationLadder()` + `confirmationLadderHtml()` + `dashEmptyHtml` third param + Workbench ladder injection |
+| `test/p5-3-ladder.test.mjs` | 29 new tests (new file) |
+
+### Ladder rungs
+
+| Rung | levelId | Condition |
+|---|---|---|
+| 0 | (none) | No steps captured yet — "Not started" |
+| 1 | `captured` | Steps recorded but no step has class + data sensitivity |
+| 2 | `classified` | At least one step is classified; not all steps Workbench-confirmed |
+| 3 | `workbench-confirmed` | All steps Workbench-confirmed; bridge fields still missing |
+| 4 | `engine-complete` | All 15 bridge fields present; engine not loaded or gate returning false |
+| 5 | `portfolio-counted` | `engine.isConfirmed(record) === true`; `complete: true` |
+
+### Functions added (all in `app.js`)
+
+| Function / Const | Purpose |
+|---|---|
+| `LADDER_LEVELS` | 5-entry array of `{id, label, hint}` — canonical level definitions |
+| `buildConfirmationLadder()` | Pure data function — reads real state, returns `{level, levelId, label, complete, nextHint, missingFields, levels}` |
+| `confirmationLadderHtml(ladder)` | Renderer — progress rungs + current-level bold + nextHint + missing-field list; returns `""` for null |
+
+### Surface changes
+
+- **Workbench tab:** `renderAnalysisTabWorkbench` now injects `confirmationLadderHtml(buildConfirmationLadder())` between `progressHtml` and the step cards (typeof-guarded).
+- **Dashboard empty state:** `dashEmptyHtml(lv, missingFields, ladderStatus?)` gains an optional third param; `renderAnalysisTabDashboard` computes `ladderStatus = buildConfirmationLadder().label` and passes it to the empty state so the user sees "Confirmation status: Classified" (or whatever level) rather than a generic prompt.
+
+### Rules observed
+
+- **Gate unchanged:** `engine.isConfirmed` and `engine.REQUIRED` unmodified.
+- **No partial records in rollups:** Official Executive/Workforce/Portfolio rollups still count only `isConfirmed` records. The ladder is a read-only diagnostic; it never promotes a record.
+- **Language client-safe:** no headcount, FTE, reduction, or eliminate framing in any ladder function.
+- **P5-2 bridge unchanged:** `bridgeMissingFields` and `appWorkflowToIntake` byte-identical; ladder reuses them as read-only callers.
+- **Phase 6 untouched:** no `workIntent`, `stepFunction`, `policyUpload`, or `unitEconomics` references.
+
+### Evidence for each ladder level
+
+```
+level 0 — steps: []                          → label "Not started", complete false
+level 1 — unclassified step                  → label "Captured",    nextHint mentions "data sensitivity"
+level 2 — classified, unconfirmed.length > 0 → label "Classified",  nextHint names unconfirmed count
+level 3 — all confirmed, bridge incomplete   → label "Workbench confirmed", missingFields present
+level 4 — bridge complete, engine not loaded → label "Engine complete",     missingFields []
+level 5 — engine.isConfirmed = true          → label "Portfolio counted",   complete true, nextHint null
+```
+
+### Evidence rollups count only portfolio-counted records
+
+```
+engine.isConfirmed(FULL_RECORD)    === true   # test "P5-3: engine.isConfirmed is the gate for portfolio inclusion"
+engine.isConfirmed(PARTIAL_RECORD) === false  # test "P5-3: engine.isConfirmed false for a partial record"
+engine.isConfirmed({})             === false  # test "P5-3: thin/empty session is not portfolio counted"
+engine.isConfirmed({ recap: { confirmed: true } }) === false  # recap alone does not count
+```
+
+---
+
 ## Pending
 
 | Item | Status |
