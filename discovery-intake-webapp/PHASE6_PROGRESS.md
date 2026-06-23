@@ -145,3 +145,59 @@ node --check app.js      # OK (exit 0)
 node --check server.mjs  # OK (exit 0)
 npm test                 # tests 1424 / pass 1424 / fail 0 (exit 0)
 ```
+
+---
+
+## P6-0A · Schema alignment patch (workIntent + previewEligible)
+
+**Status:** COMPLETE
+**Gate:** 1433/0 (+9 tests over P6-0's 1424/0)
+**Scope:** schema-contract alignment only — no UI, no policy upload, no unit
+economics, no dashboard surfacing.
+
+A small alignment of the P6-0 contract to the updated product rule.
+
+### Changed
+
+- **`workIntent` added to the work-item contract** as a separate relied-on,
+  provenance-carrying axis — kept distinct from `class` (who owns), the V3-15
+  typology / `stepType` (broad structural shape), and `actionVerb` (concrete
+  operation). It is descriptive enrichment, intentionally **not** a mandatory
+  safety field and **not** in the completeness gate groups, so the completeness
+  denominator (and the 71% / 88% / 100% examples) is unchanged. The projector
+  reads `step.workIntent` forward-compatibly (empty until P6-1 populates it).
+- **`previewEligible` added to `workItemCompleteness`** — expresses the surfacing
+  tiers without conflating them:
+  - 66–79% functional draft → draft planning views only (**not** preview-eligible).
+  - 80–94% high-confidence draft → provisional on Portfolio Preview / heatmap /
+    constellation / roadmap (**preview-eligible**, still not official).
+  - 95–100% + engine gate → Portfolio Counted / official / export-ready.
+  `previewEligible = pct >= 80 && mandatoryGatePassed && not modelled/suggested`,
+  independent of confirmed-ness, so it can be true while `counted` is false.
+- **`counted` unchanged and still strict** — confirmed gate + mandatory safety
+  fields + not modelled/suggested. No draft / modelled / suggested / inferred
+  value reaches official counted totals.
+
+### Tests added (9, in `test/p6-0-schema.test.mjs`)
+
+`previewEligible` present in the return; an 80–94% draft is preview-eligible
+while not counted; `previewEligible` true while `counted` false; 66–79% is not
+preview-eligible; a missing mandatory safety field blocks both preview and
+counting; modelled/suggested drafts are never preview-eligible; official counted
+still requires confirmed + gate + mandatory; `workIntent` is separate from
+`class`, `actionVerb`, and the typology sidecar.
+
+### What was intentionally NOT touched (P6-0A)
+
+- No UI mount, no Portfolio Preview / heatmap / constellation / roadmap wiring
+  (P6-5). `previewEligible` is a pure signal only.
+- No change to the completeness percentage math, bands, the confirmation gate,
+  `server.mjs`, `studio_engine.mjs`, `index.html`, or any Phase 5 function.
+
+### Verification (P6-0A)
+
+```bash
+node --check app.js      # OK (exit 0)
+node --check server.mjs  # OK (exit 0)
+npm test                 # tests 1433 / pass 1433 / fail 0 (exit 0)
+```

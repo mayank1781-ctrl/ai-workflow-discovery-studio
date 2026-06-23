@@ -41244,9 +41244,16 @@ const WORK_ITEM_COMPLETENESS_BANDS = [
 const WORK_ITEM_FUNCTIONAL_DRAFT_PCT = 66;
 
 // The relied-on fields each carry a {value, source, confidence} provenance
-// triple on a work item.
+// triple on a work item. workIntent is a SEPARATE axis kept distinct from the
+// others (P6-0A alignment): class = WHO owns the work; the V3-15 typology /
+// stepType = the broad structural shape; workIntent = WHAT the work is doing
+// (retrieve, reconcile, validate, draft, route, approve, ...); actionVerb = the
+// concrete operation on the data. workIntent is descriptive enrichment, not a
+// mandatory safety field, so it is intentionally absent from the completeness
+// gate groups below — later phases infer it for user review before it feeds
+// any downstream logic.
 const WORK_ITEM_RELIED_FIELDS = [
-  "label", "class", "actionVerb", "systems", "dataTier", "entitlement",
+  "label", "class", "workIntent", "actionVerb", "systems", "dataTier", "entitlement",
   "control", "handoff", "solutionPlacement", "policyCap", "economics",
   "decisionOwnership"
 ];
@@ -41461,14 +41468,24 @@ function validateWorkGraph(items, relations) {
 // reports, whether ALL mandatory safety fields are present, and whether the
 // item is eligible for an OFFICIAL rollup.
 //
-// counted is the official-rollup signal. It DELEGATES the confirmed-ness check
-// to the existing confirmation gate via opts.confirmed (the result of
-// isUnitConfirmed) — it never re-implements the gate — AND additionally requires
-// every mandatory safety field to be present. So a suggested/modelled draft is
-// never counted, and a confirmed unit that is still missing a safety field
-// (data tier, entitlement, action verb, systems, control/policy cap, decision
-// owner) is never counted either. A high percentage never bypasses a missing
-// safety field.
+// Two distinct surfacing signals (P6-0A alignment), never conflated:
+//
+//   previewEligible — the item may appear PROVISIONALLY on the Portfolio Preview
+//     surfaces (heatmap / constellation / roadmap). True for the high-confidence
+//     band and up (>= 80%) once every mandatory safety field is present, and
+//     only for real captured/confirmed items — modelled/suggested drafts stay in
+//     the Workbench for review and never reach preview. previewEligible can be
+//     true while counted is false (a high-confidence draft is provisional, not
+//     official). The 66-79% functional-draft band is for draft planning views
+//     only, so it is NOT preview-eligible.
+//
+//   counted — the OFFICIAL-rollup signal. It DELEGATES the confirmed-ness check
+//     to the existing confirmation gate via opts.confirmed (the result of
+//     isUnitConfirmed) — it never re-implements the gate — AND additionally
+//     requires every mandatory safety field to be present. So a draft / modelled
+//     / suggested / merely-inferred item is never counted, and a confirmed unit
+//     still missing a safety field is never counted either. A high percentage
+//     never bypasses a missing safety field.
 function workItemCompleteness(item, opts) {
   const it = item || {};
   const o = opts || {};
@@ -41486,6 +41503,12 @@ function workItemCompleteness(item, opts) {
   const toReport = (g) => ({ field: g.key, label: g.label, hint: (WORK_ITEM_FIELD_META[g.key] || {}).hint || "" });
   const missingRequired = WORK_ITEM_MANDATORY_FIELDS.filter((g) => !groupPresent(g)).map(toReport);
   const missingOptional = WORK_ITEM_OPTIONAL_FIELDS.filter((g) => !groupPresent(g)).map(toReport);
+  // Portfolio Preview eligibility — high-confidence band and up, safety-gated,
+  // and never a modelled/suggested draft. Independent of confirmed-ness.
+  const previewEligible = pct >= 80
+    && mandatoryGatePassed
+    && it.origin !== "modelled"
+    && it.confirmationState !== "suggested";
   const counted = o.confirmed === true
     && it.origin !== "modelled"
     && it.confirmationState !== "suggested"
@@ -41497,6 +41520,7 @@ function workItemCompleteness(item, opts) {
     missingRequired,
     missingOptional,
     mandatoryGatePassed,
+    previewEligible,
     counted
   };
 }
@@ -41616,6 +41640,7 @@ function workGraphFromSteps(steps, opts) {
       level: "step",
       label: workItemField(labelText, labelText ? "user-stated" : "", labelText ? 1 : undefined),
       class: workItemField(step.cls),
+      workIntent: workItemField(step.workIntent),
       dataTier: workItemField(step.data || step.dataTier),
       actionVerb: workItemField(step.action),
       entitlement: workItemField(step.entitlement),

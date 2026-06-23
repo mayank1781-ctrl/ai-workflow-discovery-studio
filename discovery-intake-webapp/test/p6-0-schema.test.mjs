@@ -537,3 +537,101 @@ test("P6-0: did NOT bleed into any Phase 5 / gate function", () => {
     });
   });
 });
+
+// ── P6-0A alignment: workIntent axis + previewEligible surfacing ────────────
+
+test("P6-0A: workIntent is a relied-on field, distinct from class and actionVerb", () => {
+  const { WORK_ITEM_RELIED_FIELDS } = S();
+  ["class", "workIntent", "actionVerb"].forEach((f) => {
+    assert.ok(WORK_ITEM_RELIED_FIELDS.includes(f), `relied fields include ${f}`);
+  });
+  // they are three separate entries, not aliases of one another
+  assert.notEqual(WORK_ITEM_RELIED_FIELDS.indexOf("class"), WORK_ITEM_RELIED_FIELDS.indexOf("workIntent"));
+  assert.notEqual(WORK_ITEM_RELIED_FIELDS.indexOf("workIntent"), WORK_ITEM_RELIED_FIELDS.indexOf("actionVerb"));
+});
+
+test("P6-0A: makeWorkItem keeps workIntent separate from class, actionVerb, and typology", () => {
+  const { makeWorkItem } = S();
+  // class = WHO owns; workIntent = WHAT the work does; actionVerb = concrete op.
+  const it = makeWorkItem({ id: "s1", cls: "build", class: "build", workIntent: "reconcile", actionVerb: "transform" });
+  assert.equal(it.class.value, "build");
+  assert.equal(it.workIntent.value, "reconcile");
+  assert.equal(it.actionVerb.value, "transform");
+  assert.notEqual(it.workIntent.value, it.class.value);
+  assert.notEqual(it.workIntent.value, it.actionVerb.value);
+  // the work-item contract carries no stepType field — typology stays the V3-15
+  // sidecar, so workIntent cannot be conflated with it here.
+  assert.equal(it.stepType, undefined);
+  // setting class never auto-derives a workIntent
+  const onlyClass = makeWorkItem({ id: "s2", class: "judgment" });
+  assert.equal(onlyClass.workIntent.value, "");
+});
+
+test("P6-0A: workItemCompleteness now reports previewEligible", () => {
+  const { makeWorkItem, workItemCompleteness } = S();
+  const c = workItemCompleteness(makeWorkItem({ id: "s1" }));
+  assert.ok("previewEligible" in c);
+  assert.equal(typeof c.previewEligible, "boolean");
+});
+
+test("P6-0A: an 80-94% high-confidence draft is preview-eligible while NOT counted", () => {
+  const { makeWorkItem, workItemCompleteness } = S();
+  // 6 mandatory + 2 optional = 14/17 = 82% (high-confidence-draft band), captured.
+  const it = makeWorkItem(Object.assign({ id: "s1" }, mandatorySet({ label: "Reconcile", class: "build" })));
+  const c = workItemCompleteness(it, { confirmed: false });
+  assert.equal(c.pct, 82);
+  assert.equal(c.bandId, "high-confidence-draft");
+  assert.equal(c.previewEligible, true);  // provisional on Portfolio Preview
+  assert.equal(c.counted, false);          // but not official
+});
+
+test("P6-0A: previewEligible can be true while counted is false (provisional vs official)", () => {
+  const { makeWorkItem, workItemCompleteness } = S();
+  const it = makeWorkItem(Object.assign({ id: "s1" }, mandatorySet({ label: "x", class: "build", handoff: "h" })));
+  const c = workItemCompleteness(it, { confirmed: false });
+  assert.ok(c.pct >= 80 && c.pct <= 94);
+  assert.equal(c.previewEligible, true);
+  assert.equal(c.counted, false);
+});
+
+test("P6-0A: a 66-79% functional draft is NOT preview-eligible (draft planning only)", () => {
+  const { makeWorkItem, workItemCompleteness } = S();
+  const it = makeWorkItem(Object.assign({ id: "s1" }, mandatorySet())); // 71%
+  const c = workItemCompleteness(it);
+  assert.equal(c.bandId, "functional-draft");
+  assert.equal(c.previewEligible, false); // below the 80% preview threshold
+});
+
+test("P6-0A: a missing mandatory safety field blocks BOTH preview and counting at high pct", () => {
+  const { makeWorkItem, workItemCompleteness } = S();
+  // 5 mandatory + 5 optional = 15/17 = 88%, but decision owner is absent.
+  const it = makeWorkItem(Object.assign({ id: "s1", confirmationState: "confirmed" }, mandatorySet({
+    decisionOwnership: "",
+    label: "x", class: "build", handoff: "y", solutionPlacement: "prompt", economics: "z"
+  })));
+  const c = workItemCompleteness(it, { confirmed: true });
+  assert.equal(c.pct, 88);
+  assert.equal(c.mandatoryGatePassed, false);
+  assert.equal(c.previewEligible, false); // safety field gates preview
+  assert.equal(c.counted, false);          // and gates official counting
+});
+
+test("P6-0A: modelled/suggested drafts are never preview-eligible even at high pct", () => {
+  const { markSuggestedWorkAction, workItemCompleteness } = S();
+  const it = markSuggestedWorkAction(Object.assign({ id: "m1" }, mandatorySet({ label: "x", class: "build" })));
+  const c = workItemCompleteness(it, { confirmed: true });
+  assert.ok(c.pct >= 80);
+  assert.equal(c.previewEligible, false); // drafts stay in the Workbench, not Portfolio Preview
+  assert.equal(c.counted, false);
+});
+
+test("P6-0A: official counted still requires confirmed + gate + mandatory, no drafts mixed in", () => {
+  const { makeWorkItem, workItemCompleteness } = S();
+  const confirmed = makeWorkItem(Object.assign({ id: "s1", confirmationState: "confirmed" }, mandatorySet()));
+  assert.equal(workItemCompleteness(confirmed, { confirmed: true }).counted, true);
+  assert.equal(workItemCompleteness(confirmed, { confirmed: false }).counted, false); // gate required
+  // an ai-inferred (not confirmed) item with full mandatory fields is preview-only, never counted
+  const inferred = makeWorkItem(Object.assign({ id: "s2" }, mandatorySet({ label: "x", class: "build" })));
+  const ci = workItemCompleteness(inferred, { confirmed: false });
+  assert.equal(ci.counted, false);
+});
