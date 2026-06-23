@@ -234,6 +234,30 @@ Files changed: `app.js`, `test/c11-exec-dashboard.test.mjs`
 
 ---
 
+### Bugfix · Workbench step name render (namefix)  [standalone] ✓
+**Tag:** `phase-4-c-namefix`  **SHA:** b4df5d3  
+**Gate:** npm 1066/0 (+1 regression test in `test/c8-workbench.test.mjs`)
+
+`wbStepCardHtml` (app.js ~6421) was reading `step.name` (top-level legacy
+field, left blank for all HARVEST-captured sessions) instead of the
+canonical cell path used by every other surface.
+
+Fix: `step.name || ...` → `stepDisplayName(step, idx)` → `gridCellValue(step, "name")`
+→ `step.cells["name"].value`. Guard: `typeof stepDisplayName === "function"` keeps
+old fallback in isolated sandbox contexts.
+
+**cls left alone:** `step.cls` is correctly the canonical source (no grid cell
+backs it); it is set during B-6 intake and defaults to `"assembly"` for
+pre-five-rung sessions (data state, not a render bug).
+
+**The "assembly / Step N / no actions" session** (Exception Matching Process)
+is confirmed as a pre-B-6 thin-capture state. Step names will now render
+correctly after this fix; cls and workActions require re-running Discovery.
+
+Files changed: `app.js` (1 line), `test/c8-workbench.test.mjs` (+33 lines)
+
+---
+
 ### C-12 through C-13 + A3 + A4  pending
 
 ---
