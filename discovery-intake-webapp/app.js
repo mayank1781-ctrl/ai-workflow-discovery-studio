@@ -1128,6 +1128,13 @@ const defaultState = {
   // opportunity score. An ai-inferred tag never auto-hardens (stays ai-inferred until
   // an explicit confirm; normalizeLoadedState backfills {} and never promotes).
   stepTypes: {},
+  // P6-1: per-step work intent (WHAT the work is doing — a SEPARATE axis from the
+  // V3-15 typology, the engine step class, and the action verb). Additive sidecar
+  // keyed by step.id → { value, source, confidence }. Descriptive metadata only —
+  // NEVER feeds the opportunity score, the confirmation/engine gate, or any counted
+  // total. ai-inferred never auto-hardens; normalizeLoadedState backfills {} and
+  // never promotes.
+  workIntents: {},
   // V3-16: handoffs + decisions as first-class structural objects. Two additive
   // sidecars, each keyed by a STABLE id → { value, source, confidence } (same tag
   // shape as stepTypes). handoffTags: keyed by "h:<fromStepId>>"<toStepId>" (a
@@ -7438,6 +7445,181 @@ function wireStepTypology(container) {
   });
 }
 
+// === P6-1: Work Intent / Step Function (descriptive axis) ===================
+// WHAT the work is doing — a SECOND, separate axis. It is deliberately kept
+// distinct from: the V3-15 step typology (the broad structural shape), the
+// engine step class (WHO owns the work — gather/build/judgment/decision/
+// human_held), and the action verb (the concrete operation on data). Mirrors the
+// V3-15 stepType machinery exactly: an additive sidecar (state.workIntents keyed
+// by step.id → {value, source, confidence}); manual pick (user-stated) + AI
+// suggest (ai-inferred → confirm-to-promote); an ai-inferred tag never auto-
+// hardens. Descriptive metadata ONLY — it NEVER feeds the opportunity score, the
+// confirmation / engine gate, official rollups, or any counted total. No grid
+// write (no patchField), no scoring endpoint, no telemetry of the value. A step
+// that looks like it performs MULTIPLE intents is NOT parent-tagged — it is
+// surfaced as likely needing decomposition (P6-2), which P6-1 does not implement.
+const WORK_INTENT_OPTIONS = ["retrieve", "extract", "validate", "reconcile", "calculate", "draft", "summarize", "classify", "route", "monitor", "notify", "escalate", "approve", "release", "attest", "advise", "negotiate"];
+
+function isValidWorkIntent(value) {
+  return typeof value === "string" && WORK_INTENT_OPTIONS.includes(value);
+}
+
+function ensureWorkIntents() {
+  if (!state.workIntents || typeof state.workIntents !== "object") state.workIntents = {};
+  return state.workIntents;
+}
+
+// The stored work-intent tag for a step, or null when untagged (never fabricated).
+// A stored value that is somehow off-taxonomy reads as untagged.
+function workIntentOf(stepId) {
+  const map = state.workIntents && typeof state.workIntents === "object" ? state.workIntents : {};
+  const tag = stepId ? map[stepId] : null;
+  return tag && isValidWorkIntent(tag.value) ? tag : null;
+}
+
+// Manual pick → user-stated. An invalid/"" value clears the key. PURE (no persist).
+function setWorkIntent(stepId, value) {
+  if (!stepId) return false;
+  const map = ensureWorkIntents();
+  if (!isValidWorkIntent(value)) { delete map[stepId]; return false; }
+  map[stepId] = { value, source: "user-stated", confidence: 1 };
+  return true;
+}
+
+// True when a suggestion response signals MULTIPLE intents (an explicit flag or a
+// list value). Used only to choose the surfaced message — never to write a tag.
+function workIntentSuggestionIsMultiple(suggestion) {
+  if (!suggestion || typeof suggestion !== "object") return false;
+  if (suggestion.multiIntent === true) return true;
+  return Array.isArray(suggestion.value) && suggestion.value.length > 1;
+}
+
+// Store an AI suggestion as ai-inferred — ONLY after validating against the pinned
+// taxonomy AND only for a SINGLE intent. A multi-intent signal (multiIntent:true,
+// or a list value) writes NOTHING — a compound step is never parent-tagged. Off-
+// taxonomy / empty / malformed ⇒ no key written (never a fabricated value). PURE.
+function applyWorkIntentSuggestion(stepId, suggestion) {
+  if (!stepId) return false;
+  if (!suggestion || typeof suggestion !== "object") return false;
+  if (workIntentSuggestionIsMultiple(suggestion)) return false;
+  const value = suggestion.value;
+  if (!isValidWorkIntent(value)) return false;
+  const confRaw = Number(suggestion.confidence);
+  const confidence = Number.isFinite(confRaw) && confRaw >= 0 && confRaw <= 1 ? confRaw : 0.5;
+  ensureWorkIntents()[stepId] = { value, source: "ai-inferred", confidence };
+  return true;
+}
+
+// Confirm an ai-inferred tag → promote to user-stated (value preserved). Reuses the
+// established {value,source,confidence} promotion discipline; no new promoter. PURE.
+function confirmWorkIntent(stepId) {
+  const tag = workIntentOf(stepId);
+  if (!tag) return false;
+  ensureWorkIntents()[stepId] = { value: tag.value, source: "user-stated", confidence: 1 };
+  return true;
+}
+
+// Reject → delete the key (back to "no work intent"). PURE.
+function rejectWorkIntent(stepId) {
+  const map = ensureWorkIntents();
+  if (!map[stepId]) return false;
+  delete map[stepId];
+  return true;
+}
+
+// The minimal step text sent to the classifier (only workflow text the user already
+// captured — no extra PII).
+function workIntentSuggestionInput(step) {
+  const c = step && step.cells ? step.cells : {};
+  const pick = (k) => (c[k] && typeof c[k].value === "string" ? c[k].value : "");
+  return {
+    name: pick("name"), description: pick("description"),
+    rulesDecisionLogic: pick("rulesDecisionLogic"), dataProcessing: pick("dataProcessing"),
+    output: pick("output"), handoff: pick("handoff")
+  };
+}
+
+// The ONLY model call in the work-intent flow — a narrow, descriptive classifier
+// endpoint (NOT buildAgentRecipeIr, NOT recipe/scoring). Graceful: any non-200 /
+// empty key / network error / off-taxonomy result leaves the step untagged, writes
+// no key, and never throws. A multi-intent response writes nothing and surfaces a
+// decomposition hint (it never auto-splits the step — that is P6-2).
+async function suggestWorkIntent(stepId) {
+  const step = analysisGridSteps().find((s) => s.id === stepId);
+  if (!step) return false;
+  let result;
+  try {
+    result = await requestJson("/api/suggest-work-intent", { method: "POST", body: { step: workIntentSuggestionInput(step) } });
+  } catch (error) {
+    toast("Work-intent suggestion unavailable — left untagged.");
+    return false;
+  }
+  if (workIntentSuggestionIsMultiple(result)) {
+    toast("This step looks like it has multiple intents — it likely needs decomposition before tagging.");
+    return false;
+  }
+  if (!applyWorkIntentSuggestion(stepId, result)) {
+    toast("No confident work-intent suggestion — left untagged.");
+    return false;
+  }
+  persistState();
+  render();
+  const tag = workIntentOf(stepId);
+  toast(`Suggested "${tag.value}" — confirm or reject.`);
+  return true;
+}
+
+// Work-intent DISPLAY. Returns "" when untagged (byte-identical-when-unused).
+// ai-inferred renders distinct from user-stated via provenanceBadgeHtml (flat
+// single-hue, no gradient) and offers confirm/reject; user-stated shows neither.
+function workIntentTagHtml(step) {
+  const tag = workIntentOf(step && step.id);
+  if (!tag) return "";
+  const suggested = tag.source === "ai-inferred";
+  const cr = suggested
+    ? ` <button type="button" data-work-intent-confirm="${escapeHtml(step.id)}" style="background:none;border:none;color:#00d4b4;cursor:pointer;font-size:11px;padding:0;">confirm</button> <button type="button" data-work-intent-reject="${escapeHtml(step.id)}" style="background:none;border:none;color:#ff4fc8;cursor:pointer;font-size:11px;padding:0;">reject</button>`
+    : "";
+  return `Work intent: <strong style="color:#cfe0f2;">${escapeHtml(tag.value)}</strong> ${provenanceBadgeHtml(tag.source, tag.confidence)}${suggested ? ` <span style="color:#7a93b4;">(suggested)</span>` : ""}${cr}`;
+}
+
+// The manual picker + AI-suggest control (additive; always available in the badge).
+function workIntentPickerHtml(step) {
+  const tag = workIntentOf(step && step.id);
+  const current = tag ? tag.value : "";
+  const opts = [`<option value="">no work intent</option>`]
+    .concat(WORK_INTENT_OPTIONS.map((t) => `<option value="${t}" ${t === current ? "selected" : ""}>${t}</option>`))
+    .join("");
+  return `<span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
+    <select data-work-intent-id="${escapeHtml(step.id)}" style="background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:2px 6px;color:#dde8f5;font-size:11px;">${opts}</select>
+    <button type="button" data-work-intent-suggest="${escapeHtml(step.id)}" style="background:none;border:1px solid #3a2a5a;color:#a855f7;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">Suggest (AI)</button>
+  </span>`;
+}
+
+// Combined work-intent line for the composite badge's expanded list (tag + picker).
+function stepWorkIntentHtml(step) {
+  const tag = workIntentTagHtml(step);
+  return `<li style="list-style:none;margin-left:-16px;margin-top:6px;padding-top:6px;border-top:1px solid #16263a;">${tag}${tag ? "<br>" : ""}${workIntentPickerHtml(step)}</li>`;
+}
+
+// Wires the work-intent controls inside the grid tab. The pure mutators are wrapped
+// with persistState + render here. The suggest action handles its own persist.
+function wireWorkIntent(container) {
+  if (!container) return;
+  container.querySelectorAll("[data-work-intent-id]").forEach((sel) => {
+    sel.addEventListener("change", () => { setWorkIntent(sel.dataset.workIntentId, sel.value); persistState(); render(); });
+  });
+  container.querySelectorAll("[data-work-intent-suggest]").forEach((btn) => {
+    btn.addEventListener("click", () => suggestWorkIntent(btn.dataset.workIntentSuggest));
+  });
+  container.querySelectorAll("[data-work-intent-confirm]").forEach((btn) => {
+    btn.addEventListener("click", () => { if (confirmWorkIntent(btn.dataset.workIntentConfirm)) { persistState(); render(); toast("Work intent confirmed."); } });
+  });
+  container.querySelectorAll("[data-work-intent-reject]").forEach((btn) => {
+    btn.addEventListener("click", () => { if (rejectWorkIntent(btn.dataset.workIntentReject)) { persistState(); render(); toast("Suggestion rejected — untagged."); } });
+  });
+}
+// === end P6-1: Work Intent ==================================================
+
 // === V3-16: Handoffs + decisions as first-class structural objects ==========
 // Reuses the V3-15 {value,source,confidence} tag discipline via ONE generic core
 // (not parallel machinery), used for BOTH handoff transitions (derived from the
@@ -9655,7 +9837,7 @@ function stepCompositeBadgeHtml(step) {
     `Readiness: ${s.readinessLabel}${s.readinessScore !== null ? ` (${s.readinessScore}/100)` : ""}`,
     `Provenance: ${s.captured} captured field${s.captured === 1 ? "" : "s"}, each with a tracked source`
   ];
-  return `<details class="step-trust-badge" style="display:inline-block;margin-left:8px;"><summary style="cursor:pointer;list-style:none;display:inline-block;"><span class="ds-badge ${posture.cls}">${escapeHtml(posture.label)}</span></summary><ul style="margin:6px 0 0;padding-left:16px;color:#8aa0b8;font-size:11px;line-height:1.5;">${dims.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}${stepTypologyHtml(step)}${stepStructuralHtml(step)}${stepFrictionHtml(step)}${stepRoleHtml(step)}</ul></details>`;
+  return `<details class="step-trust-badge" style="display:inline-block;margin-left:8px;"><summary style="cursor:pointer;list-style:none;display:inline-block;"><span class="ds-badge ${posture.cls}">${escapeHtml(posture.label)}</span></summary><ul style="margin:6px 0 0;padding-left:16px;color:#8aa0b8;font-size:11px;line-height:1.5;">${dims.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}${stepTypologyHtml(step)}${stepWorkIntentHtml(step)}${stepStructuralHtml(step)}${stepFrictionHtml(step)}${stepRoleHtml(step)}</ul></details>`;
 }
 
 // V3-7: knowledge-library panel for the grid tab. Shows (1) the entries applied
@@ -9962,6 +10144,7 @@ function renderAnalysisTabGrid() {
   wireGridCellEditors(container);
   wireKnowledgeLibrary(container);
   wireStepTypology(container);
+  wireWorkIntent(container);
   wireStructural(container);
   wireFriction(container);
   wireRole(container);
@@ -40135,6 +40318,7 @@ function normalizeLoadedState(parsed = {}) {
     // V3-15: backfill step typology. Stored tags pass through UNCHANGED — an
     // ai-inferred tag is never promoted on load (it hardens only on explicit confirm).
     stepTypes: parsed.stepTypes && typeof parsed.stepTypes === "object" ? parsed.stepTypes : {},
+    workIntents: parsed.workIntents && typeof parsed.workIntents === "object" ? parsed.workIntents : {},
     // V3-16: backfill handoff/decision tags. Stored tags pass through UNCHANGED — an
     // ai-inferred tag is never promoted on load (it hardens only on explicit confirm).
     handoffTags: parsed.handoffTags && typeof parsed.handoffTags === "object" ? parsed.handoffTags : {},

@@ -78,6 +78,9 @@ test("d: per-step composite badge surfaces the four dimensions and never writes"
       // test is not about typology, so stub it to "" (keeps the four-dim assertions
       // exact). The real stepTypologyHtml is covered by test/step-typology.test.mjs.
       stepTypologyHtml: () => "",
+      // P6-1: same for the work-intent controls — stubbed here; the real
+      // stepWorkIntentHtml is covered by test/p6-1-work-intent.test.mjs.
+      stepWorkIntentHtml: () => "",
       // V3-16: same for the handoff/decision controls — stubbed here; the real
       // stepStructuralHtml is covered by test/handoffs-decisions.test.mjs.
       stepStructuralHtml: () => "",

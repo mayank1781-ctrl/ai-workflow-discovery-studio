@@ -1668,6 +1668,11 @@ const server = http.createServer(async (req, res) => {
       return await handleSuggestRole(req, res);
     }
 
+    // P6-1: descriptive work-intent classifier (NOT scoring). Additive.
+    if (req.method === "POST" && requestUrl.pathname === "/api/suggest-work-intent") {
+      return await handleSuggestWorkIntent(req, res);
+    }
+
     if (req.method === "POST" && requestUrl.pathname === "/api/realtime/session") {
       return await handleRealtimeSession(req, res);
     }
@@ -2395,6 +2400,67 @@ async function handleSuggestStepType(req, res) {
     }
     // Server-side taxonomy validation — an off-taxonomy/malformed value → no suggestion.
     const value = parsed && STEP_TYPE_VALUES.includes(parsed.type) ? parsed.type : null;
+    const confRaw = Number(parsed && parsed.confidence);
+    const confidence = Number.isFinite(confRaw) && confRaw >= 0 && confRaw <= 1 ? confRaw : 0.5;
+    return sendJson(res, 200, value ? { value, confidence } : { value: null });
+  } catch (error) {
+    return sendJson(res, 502, { error: error.message || "Suggestion unavailable" });
+  }
+}
+
+// P6-1: work-intent classifier — a narrow DESCRIPTIVE endpoint (mirrors
+// handleSuggestStepType). Returns ONE pinned work-intent value + confidence, or
+// { value: null }, or { value: null, multiIntent: true } when the step clearly
+// performs several distinct intents (so it should be decomposed, not tagged — the
+// app surfaces a hint and writes nothing). NEVER computes/returns opportunity/
+// value/ROI; never calls the recipe/scoring paths. The model output is validated
+// against the taxonomy server-side (defense in depth — the client validates too).
+const WORK_INTENT_VALUES = ["retrieve", "extract", "validate", "reconcile", "calculate", "draft", "summarize", "classify", "route", "monitor", "notify", "escalate", "approve", "release", "attest", "advise", "negotiate"];
+const WORK_INTENT_SYSTEM_PROMPT = `You classify what ONE workflow step is DOING into exactly one work intent. Allowed intents (use these exact lowercase strings): retrieve, extract, validate, reconcile, calculate, draft, summarize, classify, route, monitor, notify, escalate, approve, release, attest, advise, negotiate. This is a SEPARATE axis from who owns the work and from the broad structural shape of the step. If the step clearly performs SEVERAL distinct intents (so it should be split into smaller steps), do NOT pick one — respond {"type":null,"multiIntent":true}. Otherwise respond ONLY as JSON: {"type":"<one allowed intent>","confidence":<number 0..1>}. This is descriptive classification ONLY — never assess value, ROI, opportunity, savings, or automation.`;
+
+async function handleSuggestWorkIntent(req, res) {
+  if (!getOpenAiKey()) {
+    return sendJson(res, 400, { error: "OPENAI_API_KEY is not configured." });
+  }
+  let body;
+  try {
+    body = await readJson(req);
+  } catch {
+    return sendJson(res, 400, { error: "Invalid request body" });
+  }
+  const step = body && typeof body.step === "object" && body.step ? body.step : {};
+  const text = ["name", "description", "rulesDecisionLogic", "dataProcessing", "output", "handoff"]
+    .map((k) => (typeof step[k] === "string" ? step[k] : ""))
+    .filter(Boolean)
+    .join("\n");
+  if (!text.trim()) return sendJson(res, 200, { value: null });
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${getOpenAiKey()}` },
+      body: JSON.stringify({
+        model: HARVEST_MODEL,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: WORK_INTENT_SYSTEM_PROMPT },
+          { role: "user", content: text }
+        ]
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      return sendJson(res, 502, { error: data.error?.message || "Suggestion failed" });
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(data.choices?.[0]?.message?.content || "");
+    } catch {
+      return sendJson(res, 200, { value: null });
+    }
+    // A multi-intent step is never parent-tagged — surface decomposition instead.
+    if (parsed && parsed.multiIntent === true) return sendJson(res, 200, { value: null, multiIntent: true });
+    // Server-side taxonomy validation — an off-taxonomy/malformed value → no suggestion.
+    const value = parsed && WORK_INTENT_VALUES.includes(parsed.type) ? parsed.type : null;
     const confRaw = Number(parsed && parsed.confidence);
     const confidence = Number.isFinite(confRaw) && confRaw >= 0 && confRaw <= 1 ? confRaw : 0.5;
     return sendJson(res, 200, value ? { value, confidence } : { value: null });

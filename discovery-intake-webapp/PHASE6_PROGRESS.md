@@ -201,3 +201,85 @@ node --check app.js      # OK (exit 0)
 node --check server.mjs  # OK (exit 0)
 npm test                 # tests 1433 / pass 1433 / fail 0 (exit 0)
 ```
+
+---
+
+## P6-1 · Work Intent / Step Function tags
+
+**Status:** COMPLETE
+**Gate:** 1450/0 (+17 tests over P6-0A's 1433/0)
+**Scope:** the work-intent capture axis only — no substep decomposition (P6-2),
+no policy upload (P6-3), no unit economics (P6-4), no portfolio preview / dashboard
+surfacing (P6-5).
+
+A new reviewable **work-intent** axis — *what the work is doing* — built by
+mirroring the existing V3-15 step-typology machinery exactly.
+
+### What was built
+
+- **Controlled 17-value vocabulary** (`WORK_INTENT_OPTIONS`): retrieve, extract,
+  validate, reconcile, calculate, draft, summarize, classify, route, monitor,
+  notify, escalate, approve, release, attest, advise, negotiate.
+- **Reviewable sidecar** `state.workIntents` keyed by `step.id` →
+  `{ value, source, confidence }` (same shape as `stepTypes`). Manual pick →
+  `user-stated`; AI suggest → `ai-inferred`; `confirmWorkIntent` promotes
+  inferred → user-stated; `rejectWorkIntent` clears. An ai-inferred tag **never
+  auto-hardens** (`normalizeLoadedState` backfills `{}` and passes the sidecar
+  through unchanged — never rewrites to user-stated). Persist/load safe.
+- **Workbench surface** in the per-step composite badge (beside the typology
+  controls): current value, inferred-vs-confirmed state, confidence/provenance
+  badge, a manual `<select>`, a *Suggest (AI)* button, and confirm/reject
+  affordances that appear **only** for ai-inferred suggestions.
+- **AI-suggest endpoint** `/api/suggest-work-intent` (`handleSuggestWorkIntent`)
+  — a narrow descriptive classifier: key-gated (400 offline), taxonomy-validated
+  server-side, graceful on every failure (`{ value: null }`), and **no scoring /
+  opportunity / ROI**. A compound step returns `{ value: null, multiIntent: true }`.
+
+### Safety / trust rules encoded
+
+- **Off-taxonomy / empty / malformed suggestion writes nothing** — validated both
+  server-side and in `applyWorkIntentSuggestion` before any key is written.
+- **No multi-intent parent tagging** — if a step looks like it performs several
+  intents, the app surfaces *"likely needs decomposition before tagging"* and
+  writes nothing. P6-2 (decomposition) is **not** implemented here.
+- **Kept distinct from** `class` (who owns), the V3-15 typology / `stepType`
+  (broad structural shape), and the action verb (concrete operation) — a separate
+  sidecar, separate functions, separate render label.
+- **Never feeds official logic yet** — work intent does not touch the opportunity
+  score, the scorers, the confirmation/engine gate, or any counted rollup
+  (proven functionally and at the source level).
+
+### Changed files
+
+| File | Change |
+|---|---|
+| `app.js` | `state.workIntents` in `defaultState` + backfill in `normalizeLoadedState`; the P6-1 lifecycle/render/wiring block (mirrors V3-15); one mount in `stepCompositeBadgeHtml`; one `wireWorkIntent` call beside `wireStepTypology` |
+| `server.mjs` | `handleSuggestWorkIntent` + `WORK_INTENT_VALUES` + `WORK_INTENT_SYSTEM_PROMPT` + the `/api/suggest-work-intent` route |
+| `test/p6-1-work-intent.test.mjs` | 17 focused tests (new) |
+| `test/trust-legibility.test.mjs` | one added stub (`stepWorkIntentHtml: () => ""`) — the badge sandbox now stubs the new dimension, same as the other four |
+
+### Adversarial review
+
+Reviewed across two lenses (trust/rails + correctness/additivity), each finding
+skeptic-verified. One actionable item — a missing explicit test for a
+single-element-array suggestion (`{ value: ["retrieve"] }`), which the code
+already rejects — was added as a regression guard. Two further findings were
+verified `isReal=false` (the `workGraphFromSteps` projector reading
+`step.workIntent` is a harmless prospective P6-0 note with no production caller;
+`workIntent`'s placement in the P6-0 contract is correct intentional design).
+
+### What was intentionally NOT touched
+
+- No substep decomposition (P6-2), policy upload (P6-3), unit economics (P6-4),
+  or portfolio preview / dashboard surfacing (P6-5).
+- No change to `index.html`, `studio_engine.mjs`, the scorers
+  (`getStepOpportunityMeta` / `scoreRecipeReadiness` / `stepTrustSignals`), the
+  confirmation/engine gate, or the P6-0/P6-0A work-graph contract.
+
+### Verification (P6-1)
+
+```bash
+node --check app.js      # OK (exit 0)
+node --check server.mjs  # OK (exit 0)
+npm test                 # tests 1450 / pass 1450 / fail 0 (exit 0)
+```
