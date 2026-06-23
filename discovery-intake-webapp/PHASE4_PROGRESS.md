@@ -170,7 +170,37 @@ no savings language in any render function. (Promise panel explicitly names
 
 Files changed: `app.js`, `test/c9-your-workflow.test.mjs` (+28 tests)
 
-### C-10 through C-13 + A3 + A4  pending
+### C-10 · Recipe Book Phase 4 — TCO summary, gate register, audit export  [A] ✓
+**Tag:** `phase-4-c10`  **SHA:** c99d2db  
+**Gate:** npm 1015/0 (+34 tests in `test/c10-recipe-book.test.mjs`)
+
+Additive additions to the Recipe tab. Three new sections rendered above the
+existing recipe cards, wired but never hard-disabled:
+
+- **TCO summary** (`rb10TcoHtml`): 4-column header bar — buildable steps
+  (total minus `judgment|decision|human_held`), confirmed (through Workbench),
+  build effort (~days from shape × weight), heaviest shape pill + dot meter.
+  Uses `step.cls` / `solutionShape` / `derivedShape` from engine; no re-computation.
+- **Gate register** (`rb10GateRegisterHtml`): per-step trusted/proposed row list
+  derived from the existing `recipeGateCheck` gate (no new field). Shows open
+  gap count and sensitivity warning (`p9Unconfirmed`) in-line.
+- **Audit export** (`rb10AuditExportHtml` + `wireRb10`): JSON pack button — gate
+  status, open gaps, recipe text, provenance — toast-guarded, never hard-disabled.
+  `rb10AuditPackData` assembles the pack; source is `recipeUnitSource` (the
+  existing one-point recipe boundary).
+
+`RB10_SHAPE_WEIGHT` const maps shapes (`prompt/rag/tool/deterministic-tool/
+agentic/human-in-loop`) to build-weight 0–4.
+
+**Rail-clean:** no scorer, no `patchField`, no server endpoint, no banned metric
+language. Existing `recipeBookHtml() +` composition and `Pattern confidence:`
+count (2) unchanged — the existing recipe-book test passes without modification.
+
+Files changed: `app.js`, `test/c10-recipe-book.test.mjs`
+
+---
+
+### C-11 through C-13 + A3 + A4  pending
 
 ---
 
