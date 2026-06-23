@@ -8716,6 +8716,123 @@ function appStepToEngineStep(step) {
   return out;
 }
 
+// === P5-2 · Real Confirmed Engine Data Bridge =====================================
+// Bridge: real captured session state -> engine intake fields. Rules: never fakes a
+// field; reads only from captured interview / grid state; if a field is absent it is
+// absent in the record (not substituted). Missing fields surface via bridgeMissingFields
+// — the engine's isConfirmed gate fails closed for all 15 REQUIRED checks until real
+// data fills them.
+
+// Derives the header block from real session metadata only.
+function buildBridgeHeader() {
+  const persona = (state.sessionMeta && typeof state.sessionMeta.userRole === "string" && state.sessionMeta.userRole)
+    || state.fields.intervieweeRole || "";
+  const deptRaw = state.sessionMeta && state.sessionMeta.departmentTag;
+  const dept = (deptRaw && typeof deptRaw === "object" && deptRaw.value) ? deptRaw.value
+    : (typeof deptRaw === "string" ? deptRaw : "");
+  const anchor = (typeof analysisWorkflowName === "function" ? analysisWorkflowName() : "")
+    || (state.sessionMeta && state.sessionMeta.name) || "";
+  return { persona, dept, anchor, lifecycle: "session" };
+}
+
+// Derives the trigger block from real interview fields only.
+function buildBridgeTrigger() {
+  return {
+    trigger: state.fields.triggerSource || "",
+    cadence: state.fields.triggerFrequency || "",
+    volume: state.fields.runsPerPeriod || ""
+  };
+}
+
+// Derives the engine judgment block from grid cells on human-led steps + interview field.
+// Returns real captured values; empty strings when not yet captured.
+function buildBridgeJudgmentBlock(steps) {
+  const allSteps = Array.isArray(steps) ? steps
+    : (typeof analysisGridSteps === "function" ? analysisGridSteps() : []);
+  const gc = (s, k) => (typeof gridCellValue === "function") ? String(gridCellValue(s, k) || "") : "";
+  const HUMAN_CLS = ["judgment", "decision", "human_held"];
+  const humanLed = allSteps.filter((s) =>
+    HUMAN_CLS.includes(typeof engineStepClass === "function" ? engineStepClass(s) : ((s && s.cls) || "")));
+  const needs = state.fields.humanJudgmentArea
+    || humanLed.map((s) => gc(s, "humanCheckpoint")).filter(Boolean).join("; ");
+  const hard = humanLed.map((s) => gc(s, "rulesDecisionLogic")).filter(Boolean).join("; ");
+  const cues = humanLed.map((s) => gc(s, "exceptionBranching")).filter(Boolean).join("; ");
+  const human = humanLed.map((s) => {
+    const n = gc(s, "name");
+    return n || (typeof stepDisplayName === "function" ? stepDisplayName(s, 0) : ((s && s.step) || ""));
+  }).filter(Boolean).join(", ");
+  return { needs, hard, cues, human };
+}
+
+// Derives the engine confirm block from interview field + highest data sensitivity across steps.
+function buildBridgeConfirmBlock(steps) {
+  const allSteps = Array.isArray(steps) ? steps
+    : (typeof analysisGridSteps === "function" ? analysisGridSteps() : []);
+  const gc = (s, k) => (typeof gridCellValue === "function") ? String(gridCellValue(s, k) || "") : "";
+  const acceptance = state.fields.acceptanceCriteria
+    || allSteps.map((s) => gc(s, "humanCheckpoint")).filter(Boolean).join("; ");
+  const escalation = allSteps.map((s) => gc(s, "exceptionBranching")).filter(Boolean).join("; ");
+  const TIER_RANK = { public: 0, Public: 0, internal: 1, Internal: 1, confidential: 2, Confidential: 2, "Client Confidential": 2, PII: 3, PHI: 3, PCI: 3, MNPI: 4 };
+  let dataTier = "";
+  let highestRank = -1;
+  for (const s of allSteps) {
+    const t = (typeof engineDataTier === "function" ? engineDataTier(s) : gc(s, "dataSensitivity")) || "";
+    const rank = TIER_RANK[t] != null ? TIER_RANK[t] : -1;
+    if (rank > highestRank) { highestRank = rank; dataTier = t; }
+  }
+  if (!dataTier) dataTier = state.fields.dataSensitivity || "";
+  return { acceptance, escalation, dataTier };
+}
+
+// Labels + hints for the 15 required fields — parallel to engine's REQUIRED array.
+// Mirrors the engine check order exactly; a mismatch here is a P5-2 build error.
+const BRIDGE_REQUIRED_META = {
+  "header.persona":     { label: "Your role in this workflow",                      hint: "Enter your role in Discovery setup" },
+  "header.dept":        { label: "Department",                                      hint: "Tag a department in the sidebar" },
+  "header.anchor":      { label: "Workflow name",                                   hint: "Name the workflow in the header" },
+  "trigger.trigger":    { label: "What triggers this workflow",                     hint: "Describe the trigger in Discovery" },
+  "trigger.cadence":    { label: "How often it runs",                               hint: "Give frequency in Discovery (e.g. weekly)" },
+  "steps[class+data]":  { label: "Steps with class + data sensitivity",             hint: "Confirm steps in Workbench; add data sensitivity labels" },
+  "seams[3-dim]":       { label: "Handoff dimensions (friction / latency / crit)",  hint: "Tag friction, handoffs, and decisions in the structural view" },
+  "judgment.needs":     { label: "What judgment this workflow requires",             hint: "Describe judgment areas in Discovery" },
+  "judgment.hard":      { label: "The hardest call in this workflow",               hint: "Capture rules / decision logic on judgment steps" },
+  "judgment.cues":      { label: "Decision cues used",                              hint: "Capture exception / branch logic on judgment steps" },
+  "judgment.human":     { label: "Where humans make the final call",                hint: "Confirm judgment, decision, or human-held steps in Workbench" },
+  "confirm.acceptance": { label: "Acceptance criteria (what 'done' looks like)",    hint: "Fill in acceptance criteria in Discovery or step checkpoints" },
+  "confirm.escalation": { label: "Escalation path for exceptions",                  hint: "Capture exception branching on steps" },
+  "confirm.dataTier":   { label: "Highest data sensitivity tier",                   hint: "Label data sensitivity on at least one step" },
+  "recap.confirmed":    { label: "All steps confirmed in Workbench",                hint: "Confirm all steps in the Workbench tab" }
+};
+
+// The same 15 checks as engine.REQUIRED — deterministic client-side mirror so the
+// missing-field report is computed without an engine round-trip.
+const BRIDGE_REQUIRED_CHECKS = [
+  ["header.persona",     (r) => r.header && r.header.persona],
+  ["header.dept",        (r) => r.header && r.header.dept],
+  ["header.anchor",      (r) => r.header && r.header.anchor],
+  ["trigger.trigger",    (r) => r.trigger && r.trigger.trigger],
+  ["trigger.cadence",    (r) => r.trigger && r.trigger.cadence],
+  ["steps[class+data]",  (r) => r.steps && r.steps.some((s) => s.step && s.cls && s.data)],
+  ["seams[3-dim]",       (r) => r.seams && r.seams.some((s) => s.friction && s.latency && s.crit)],
+  ["judgment.needs",     (r) => r.judgment && r.judgment.needs],
+  ["judgment.hard",      (r) => r.judgment && r.judgment.hard],
+  ["judgment.cues",      (r) => r.judgment && r.judgment.cues],
+  ["judgment.human",     (r) => r.judgment && r.judgment.human],
+  ["confirm.acceptance", (r) => r.confirm && r.confirm.acceptance],
+  ["confirm.escalation", (r) => r.confirm && r.confirm.escalation],
+  ["confirm.dataTier",   (r) => r.confirm && r.confirm.dataTier],
+  ["recap.confirmed",    (r) => r.recap && r.recap.confirmed === true]
+];
+
+// Returns missing REQUIRED fields as [{field, label, hint}]. Empty array = all 15 present.
+// Fails closed on null/undefined record (returns all 15 as missing).
+function bridgeMissingFields(record) {
+  if (!record) return Object.keys(BRIDGE_REQUIRED_META).map((f) => Object.assign({ field: f }, BRIDGE_REQUIRED_META[f]));
+  return BRIDGE_REQUIRED_CHECKS
+    .filter((pair) => !pair[1](record))
+    .map((pair) => Object.assign({ field: pair[0] }, BRIDGE_REQUIRED_META[pair[0]]));
+}
+
 // The active app workflow (or a passed-in step/seam list + meta) -> an engine intake record.
 // Seams come from buildWorkflowLeverage via recipeConnectionSeams (consumed, not re-detected),
 // carrying the E1 friction/latency/criticality triples.
@@ -8731,9 +8848,24 @@ function appWorkflowToIntake(opts = {}) {
     crit: engineProvValue(s.criticality != null ? s.criticality : s.crit), note: s.note || ""
   }));
   const meta = opts.meta || {};
+  // P5-2 — derive real session fields as fallbacks when opts doesn't supply them.
+  // Never fakes a field: each bridge function reads only captured interview/grid state.
+  const bh = (typeof buildBridgeHeader === "function") ? buildBridgeHeader() : {};
+  const bt = (typeof buildBridgeTrigger === "function") ? buildBridgeTrigger() : {};
+  const bj = (typeof buildBridgeJudgmentBlock === "function") ? buildBridgeJudgmentBlock(steps) : {};
+  const bc = (typeof buildBridgeConfirmBlock === "function") ? buildBridgeConfirmBlock(steps) : {};
   return {
-    header: meta.header || { persona: opts.persona || "", dept: opts.dept || "", anchor: opts.anchor || (typeof analysisWorkflowName === "function" ? analysisWorkflowName() : ""), lifecycle: opts.lifecycle },
-    trigger: meta.trigger || { trigger: opts.trigger || "", cadence: opts.cadence || "", volume: opts.volume || "" },
+    header: meta.header || {
+      persona: opts.persona || bh.persona || "",
+      dept: opts.dept || bh.dept || "",
+      anchor: opts.anchor || bh.anchor || (typeof analysisWorkflowName === "function" ? analysisWorkflowName() : ""),
+      lifecycle: opts.lifecycle || bh.lifecycle
+    },
+    trigger: meta.trigger || {
+      trigger: opts.trigger || bt.trigger || "",
+      cadence: opts.cadence || bt.cadence || "",
+      volume: opts.volume || bt.volume || ""
+    },
     steps: (Array.isArray(steps) ? steps : []).map(appStepToEngineStep),
     // E3/F1+F2+F3 — firm-level registry + write-once shared rules + routes. Absent => omitted
     // empty, so the engine's multi-actor math is inert and the record reads as today.
@@ -8741,8 +8873,8 @@ function appWorkflowToIntake(opts = {}) {
     sharedRules: meta.sharedRules || opts.sharedRules || [],
     routes: meta.routes || opts.routes || [],
     seams,
-    judgment: meta.judgment || opts.judgment || {},
-    confirm: meta.confirm || opts.confirm || {},
+    judgment: meta.judgment || opts.judgment || bj,
+    confirm: meta.confirm || opts.confirm || bc,
     recap: meta.recap || opts.recap || {}
   };
 }
@@ -14524,11 +14656,19 @@ function dashAgendasHtml(lv) {
     <div style="background:${DASH.panel};border:1px solid ${DASH.line};border-radius:12px;padding:14px 16px;"><div style="font-size:11px;color:${DASH.dim};margin-bottom:8px;">${dashProvDot("stated")} Readiness mix — each state maps to a next move</div><svg viewBox="0 0 960 32" style="display:block;width:100%;height:auto;">${bar}</svg><div style="margin-top:9px;">${key}</div></div></section>`;
 }
 
-function dashEmptyHtml(lv) {
+function dashEmptyHtml(lv, missingFields) {
   const note = (lv && lv.note) || "No confirmed units yet — confirm units on the Workbench to populate.";
+  let missingHtml = "";
+  if (Array.isArray(missingFields) && missingFields.length > 0) {
+    missingHtml = `<div style="margin-top:14px;"><div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:${DASH.faint};margin-bottom:6px;">Fields still needed for engine confirmation</div>
+      <ul style="margin:0;padding:0 0 0 16px;font-size:12px;color:${DASH.dim};line-height:1.7;">
+        ${missingFields.map((f) => `<li><span style="color:${DASH.ink};font-weight:600;">${escapeHtml(f.label)}</span> — ${escapeHtml(f.hint)}</li>`).join("")}
+      </ul></div>`;
+  }
   return `<div style="background:${DASH.panel};border:1px solid ${DASH.line};border-radius:12px;padding:22px 24px;color:${DASH.dim};font-size:13px;line-height:1.6;">
     <div style="font-size:15px;font-weight:700;color:${DASH.ink};margin-bottom:4px;">Executive Dashboard</div>
     <div>${escapeHtml(note)}</div>
+    ${missingHtml}
     <div style="margin-top:12px;"><button type="button" class="primary-button compact" data-dashboard-to-workbench="1">Go to the Workbench</button></div>
   </div>`;
 }
@@ -15302,7 +15442,17 @@ function renderAnalysisTabDashboard(recordsOverride, opts) {
   if (!container) return;
   if (!studioEngine()) { container.innerHTML = dashEmptyHtml({ note: "The executive Dashboard is loading the Studio engine…" }); return; }
   const { lv, records } = dashboardModel(recordsOverride, opts);
-  if (!lv || lv.note || !lv.confirmedCount) { container.innerHTML = dashEmptyHtml(lv); wireDashboard(container); return; }
+  if (!lv || lv.note || !lv.confirmedCount) {
+    // P5-2 — when engine is loaded but no confirmed units, compute which fields are still missing
+    // and surface them explicitly so the user knows exactly what to capture.
+    let missingFields = [];
+    if (lv && !lv.note && typeof bridgeMissingFields === "function" && typeof appWorkflowToIntake === "function") {
+      try { missingFields = bridgeMissingFields(appWorkflowToIntake()); } catch (_e) { missingFields = []; }
+    }
+    container.innerHTML = dashEmptyHtml(lv, missingFields.length ? missingFields : null);
+    wireDashboard(container);
+    return;
+  }
   const E = studioEngine();
   // representative confirmed record for the cycle-time view (the first confirmed one)
   const confirmed = (Array.isArray(records) ? records : []).filter((r) => E.isConfirmed(r));
