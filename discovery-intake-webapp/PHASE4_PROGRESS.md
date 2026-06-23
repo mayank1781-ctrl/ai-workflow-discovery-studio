@@ -259,7 +259,7 @@ Files changed: `app.js` (1 line), `test/c8-workbench.test.mjs` (+33 lines)
 ---
 
 ### C-12 · Workforce Transformation — freed capacity → redesigned roles / redeployment / reskilling  [A] ✓
-**SHA:** (pending commit)  
+**SHA:** 80091cb  
 **Gate:** npm 1096/0 (+30 tests in `test/c12-workforce.test.mjs`)
 
 **P5 data-bridge (captured before build):** No-injection bridge check confirmed: the
