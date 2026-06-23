@@ -14933,6 +14933,233 @@ function wireEd11(container) {
   });
 }
 
+// =============================================================================
+// A-3 · Portfolio Lens Heatmap — five-rung × role grid, four lenses
+// =============================================================================
+
+const A3_RUNGS = ["gather", "build", "judgment", "decision", "human_held"];
+const A3_RUNG_LABEL = { gather: "Gather", build: "Build", judgment: "Judgment", decision: "Decision", human_held: "Human-held" };
+const A3_OPP_COLOR = {
+  "quick-win":  "#00d4b4",
+  "strategic":  "#3b82f6",
+  "speculative":"rgba(255,255,255,.14)",
+  "compliance": "#FF4FD8"
+};
+const A3_SHAPE_COLOR = {
+  "prompt":             "#6FB6FF",
+  "rag":                "#4D8BFF",
+  "deterministic-tool": "#00d4b4",
+  "agentic":            "#9D7BF0",
+  "human-in-loop":      "#C2528F"
+};
+const A3_SENS_COLOR = {
+  "PII":                  "#FF4FD8",
+  "MNPI":                 "#FF4FD8",
+  "PHI":                  "#FF4FD8",
+  "PCI":                  "#FF4FD8",
+  "Regulated model/data": "#FF4FD8",
+  "Client Confidential":  "#FFB454",
+  "Confidential":         "#FFB454",
+  "Internal":             "rgba(255,255,255,.14)",
+  "Public":               "rgba(255,255,255,.08)",
+  "Unknown":              "rgba(255,255,255,.06)"
+};
+
+function a3RoleFor(step) {
+  const tag = state.roleTags && state.roleTags[step.id];
+  return (tag && tag.value) ? String(tag.value) : "—";
+}
+
+function a3OppTier(step) {
+  try {
+    if (typeof getStepOpportunityMeta === "function") return getStepOpportunityMeta(step).tier || "speculative";
+  } catch (_) {}
+  return "speculative";
+}
+
+function a3ShapeFor(step) {
+  const sh = state.solutionShapes && state.solutionShapes[step.id];
+  return (sh && sh.value) ? String(sh.value) : "";
+}
+
+function a3SensFor(step) {
+  return (typeof gridCellValue === "function") ? (gridCellValue(step, "dataSensitivity") || "Unknown") : "Unknown";
+}
+
+function a3CapacityLensEnabled(lv) {
+  if (!lv || typeof dashKpiVal !== "function") return false;
+  return dashKpiVal(lv, "cost_to_serve") !== null && dashKpiVal(lv, "gross_capacity") !== null;
+}
+
+function a3CellHtml(cellSteps, lens) {
+  const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
+  if (!cellSteps || !cellSteps.length) {
+    return `<td class="a3-cell a3-empty" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05);border-radius:4px;min-width:48px;padding:4px;text-align:center;font-size:10px;color:#737A92;">—</td>`;
+  }
+  const n = cellSteps.length;
+  const names = cellSteps.map((s, i) => (typeof stepDisplayName === "function" ? stepDisplayName(s, i) : (s.name || s.id))).join(", ");
+  let bg = "#737A92";
+  let label = String(n);
+  if (lens === "shape") {
+    const counts = {};
+    for (const s of cellSteps) { const sh = a3ShapeFor(s); if (sh) counts[sh] = (counts[sh] || 0) + 1; }
+    const dom = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+    bg = dom ? (A3_SHAPE_COLOR[dom[0]] || "#737A92") : "#737A92";
+  } else if (lens === "risk") {
+    const riskOrder = ["PII","MNPI","PHI","PCI","Regulated model/data","Client Confidential","Confidential","Internal","Public","Unknown"];
+    let worstIdx = riskOrder.length - 1;
+    for (const s of cellSteps) { const idx = riskOrder.indexOf(a3SensFor(s)); if (idx !== -1 && idx < worstIdx) worstIdx = idx; }
+    bg = A3_SENS_COLOR[riskOrder[worstIdx]] || "#737A92";
+  } else if (lens === "readiness") {
+    const conf = cellSteps.filter(s => s.workbenchConfirmed).length;
+    bg = conf === n ? "#00d4b4" : conf === 0 ? "#737A92" : "#FFB454";
+    label = `${conf}/${n}`;
+  } else {
+    const counts = {};
+    for (const s of cellSteps) { const t = a3OppTier(s); counts[t] = (counts[t] || 0) + 1; }
+    const dom = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+    bg = A3_OPP_COLOR[dom] || "#737A92";
+  }
+  const isHex = bg.startsWith("#");
+  const fill = isHex ? bg + "22" : "rgba(255,255,255,.06)";
+  const bord = isHex ? bg + "66" : bg;
+  return `<td class="a3-cell" style="background:${fill};border:1px solid ${bord};border-radius:4px;min-width:48px;padding:6px;text-align:center;font-size:11px;font-weight:700;color:#EAEFFF;cursor:default;" title="${esc(names)}">${label}</td>`;
+}
+
+function a3HeatmapTableHtml(steps, lens) {
+  if (!steps || !steps.length) return "";
+  const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
+  const roles = [...new Set(steps.map(s => a3RoleFor(s)))];
+  const rows = roles.map(role => {
+    const cells = A3_RUNGS.map(rung => {
+      const cs = steps.filter(s => {
+        const cls = s.cls || "assembly";
+        const eff = cls === "assembly" ? "build" : cls;
+        return a3RoleFor(s) === role && eff === rung;
+      });
+      return a3CellHtml(cs, lens);
+    }).join("");
+    return `<tr><td style="font-size:11px;color:#A6ADC4;padding:4px 8px 4px 0;white-space:nowrap;">${esc(role)}</td>${cells}</tr>`;
+  }).join("");
+  const ths = A3_RUNGS.map(r => `<th style="font-size:9px;font-weight:700;color:#737A92;text-transform:uppercase;letter-spacing:.06em;padding:3px 4px;text-align:center;">${A3_RUNG_LABEL[r]}</th>`).join("");
+  return `<div style="overflow-x:auto;margin:8px 0 12px;"><table style="border-collapse:separate;border-spacing:3px;width:100%;"><thead><tr><th style="width:110px;"></th>${ths}</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function a3LensSelectorHtml(current) {
+  const lenses = [
+    { key: "opportunity", label: "Opportunity" },
+    { key: "shape",       label: "Shape mix"  },
+    { key: "risk",        label: "Data risk"  },
+    { key: "readiness",   label: "Readiness"  }
+  ];
+  return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">${
+    lenses.map(l => {
+      const on = l.key === current;
+      return `<button data-a3-lens="${l.key}" style="padding:4px 12px;border-radius:6px;border:1px solid ${on ? "#42E8FF" : "rgba(255,255,255,.12)"};background:${on ? "#42E8FF" : "none"};color:${on ? "#08111f" : "#A6ADC4"};font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;">${l.label}</button>`;
+    }).join("")
+  }</div>`;
+}
+
+function a3ShapeMixBarHtml(steps, lv) {
+  const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
+  const shapeLabel = { prompt: "Prompt", rag: "RAG", "deterministic-tool": "Tool", agentic: "Agentic", "human-in-loop": "Human-in-loop" };
+  const order = ["prompt", "rag", "deterministic-tool", "agentic", "human-in-loop"];
+  const counts = {};
+  for (const s of steps) { const sh = a3ShapeFor(s); if (sh) counts[sh] = (counts[sh] || 0) + 1; }
+  const total = steps.length || 1;
+  const bars = order.filter(sh => counts[sh]).map(sh => {
+    const color = A3_SHAPE_COLOR[sh] || "#737A92";
+    const pct = Math.round(counts[sh] / total * 100);
+    return `<div style="flex:${counts[sh]};background:${color};height:9px;border-radius:2px;" title="${esc(shapeLabel[sh])} · ${pct}%"></div>`;
+  }).join("");
+  const legend = order.filter(sh => counts[sh]).map(sh => {
+    const color = A3_SHAPE_COLOR[sh] || "#737A92";
+    return `<span style="display:inline-flex;align-items:center;gap:4px;font-size:10.5px;color:#A6ADC4;"><span style="width:7px;height:7px;border-radius:50%;background:${color};display:inline-block;"></span>${esc(shapeLabel[sh])}</span>`;
+  }).join("");
+  if (!bars) return `<div style="font-size:11px;color:#737A92;font-style:italic;margin-bottom:10px;">No solution shapes captured — add shapes in Workbench to see the mix</div>`;
+  return `<div style="margin-bottom:12px;"><div style="font-size:10px;font-weight:600;color:#737A92;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Solution-shape mix</div><div style="display:flex;gap:2px;border-radius:4px;overflow:hidden;margin-bottom:6px;">${bars}</div><div style="display:flex;gap:10px;flex-wrap:wrap;">${legend}</div></div>`;
+}
+
+function a3BlockedHtml(steps, adj) {
+  const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
+  const getName = (s, i) => (typeof stepDisplayName === "function") ? stepDisplayName(s, i) : (s.name || s.id);
+  const oppGroups = { "quick-win": [], strategic: [], speculative: [], compliance: [] };
+  for (const s of steps) { const t = a3OppTier(s); if (oppGroups[t]) oppGroups[t].push(s); }
+  const oppRows = ["quick-win", "strategic", "speculative"].filter(t => oppGroups[t].length).map(t => {
+    const color = A3_OPP_COLOR[t] || "#737A92";
+    return `<div style="margin:3px 0;font-size:11px;"><span style="font-weight:700;color:${color};">${esc(t)}</span> · ${oppGroups[t].map((s, i) => esc(getName(s, i))).join(", ")}</div>`;
+  }).join("") || `<div style="font-size:11px;color:#737A92;">No groupings — confirm steps to see opportunity clusters</div>`;
+  const blocked = [
+    ...steps.filter(s => a3OppTier(s) === "compliance").map((s, i) => ({ reason: "Compliance gate", name: getName(s, i) })),
+    ...steps.filter(s => (s.cls || "assembly") === "human_held").map((s, i) => ({ reason: "Human-held by design", name: getName(s, i) })),
+    ...((adj && Array.isArray(adj.whyBlocked)) ? adj.whyBlocked.map(b => ({ reason: b.reason || "Blocked", name: (b.workflows || []).join(", ") })) : [])
+  ];
+  const blockedRows = blocked.slice(0, 6).map(b =>
+    `<div style="margin:3px 0;font-size:11px;"><span style="font-weight:700;color:#FF4FD8;">⛉ ${esc(b.reason)}</span> · ${esc(b.name)}</div>`
+  ).join("") || `<div style="font-size:11px;color:#737A92;">No blocked steps identified</div>`;
+  return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;"><div><div style="font-size:10px;font-weight:600;color:#737A92;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Grouped opportunity</div>${oppRows}</div><div><div style="font-size:10px;font-weight:600;color:#737A92;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Blocked / protected</div>${blockedRows}</div></div>`;
+}
+
+function a3RiskTableHtml(steps) {
+  if (!steps || !steps.length) return "";
+  const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
+  const riskOrder = ["PII","MNPI","PHI","PCI","Regulated model/data","Client Confidential","Confidential","Internal","Public","Unknown"];
+  const elevated = steps.filter(s => riskOrder.indexOf(a3SensFor(s)) < riskOrder.indexOf("Internal"));
+  if (!elevated.length) return `<div style="font-size:11px;color:#737A92;font-style:italic;margin-bottom:12px;">No elevated data-sensitivity steps captured</div>`;
+  const getName = (s, i) => (typeof stepDisplayName === "function") ? stepDisplayName(s, i) : (s.name || s.id);
+  const getSys = s => (typeof gridCellValue === "function") ? (gridCellValue(s, "systemsTools") || "—") : "—";
+  const getChk = s => (typeof gridCellValue === "function") ? (gridCellValue(s, "humanCheckpoint") || "—") : "—";
+  const rows = elevated.map((s, i) => {
+    const sens = a3SensFor(s);
+    const color = A3_SENS_COLOR[sens] || "#737A92";
+    return `<tr><td style="font-size:11px;color:#EAEFFF;padding:4px 8px;">${esc(getName(s, i))}</td><td style="font-size:11px;padding:4px 8px;"><span style="background:${color}22;color:${color};border:1px solid ${color}55;border-radius:3px;padding:1px 6px;">${esc(sens)}</span></td><td style="font-size:11px;color:#A6ADC4;padding:4px 8px;">${esc(String(getSys(s)))}</td><td style="font-size:11px;color:#A6ADC4;padding:4px 8px;">${esc(String(getChk(s)))}</td></tr>`;
+  }).join("");
+  return `<div style="margin-bottom:12px;"><div style="font-size:10px;font-weight:600;color:#737A92;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Data &amp; control risk</div><div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;"><thead><tr><th style="font-size:9px;color:#737A92;text-align:left;padding:4px 8px;border-bottom:1px solid #16263a;">Step</th><th style="font-size:9px;color:#737A92;text-align:left;padding:4px 8px;border-bottom:1px solid #16263a;">Sensitivity</th><th style="font-size:9px;color:#737A92;text-align:left;padding:4px 8px;border-bottom:1px solid #16263a;">Systems / tools</th><th style="font-size:9px;color:#737A92;text-align:left;padding:4px 8px;border-bottom:1px solid #16263a;">Human checkpoint</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+
+function a3EmptyHtml(note) {
+  const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
+  const msg = note ? esc(note) : "Confirm workflow steps in the Workbench to unlock the Portfolio Lens";
+  return `<section style="margin:0 0 14px;padding:14px;background:#0c1726;border:1px solid #16263a;border-radius:10px;"><div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:15px;font-weight:700;color:#EAEFFF;margin-bottom:8px;">Portfolio Lens</div><div style="font-size:12px;color:#737A92;line-height:1.6;margin-bottom:12px;">${msg}</div><button data-a3-to-workbench style="padding:7px 16px;background:#42E8FF;color:#08111f;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Go to Workbench →</button></section>`;
+}
+
+function a3PortfolioLensHtml(lv, steps, records) {
+  if (!lv || lv.note || !lv.confirmedCount) return a3EmptyHtml(lv && lv.note);
+  const current = state.a3Lens || "opportunity";
+  const allSteps = steps || [];
+  const confirmed = allSteps.filter(s => s.workbenchConfirmed);
+  const unconfirmedN = allSteps.length - confirmed.length;
+  let adj = null;
+  try { if (typeof engineAdjacency === "function") adj = engineAdjacency(records || []); } catch (_) { adj = null; }
+  const confirmedNote = unconfirmedN > 0
+    ? `<div style="font-size:10.5px;color:#737A92;margin-bottom:10px;">Portfolio totals include <strong style="color:#00d4b4;">${confirmed.length} confirmed step${confirmed.length !== 1 ? "s" : ""}</strong> only · ${unconfirmedN} unconfirmed not counted</div>`
+    : "";
+  return `<section style="margin:0 0 14px;padding:16px;background:#0c1726;border:1px solid #16263a;border-radius:10px;"><div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:15px;font-weight:700;color:#EAEFFF;margin-bottom:10px;">Portfolio Lens</div>` +
+    a3LensSelectorHtml(current) +
+    confirmedNote +
+    a3HeatmapTableHtml(allSteps, current) +
+    a3ShapeMixBarHtml(allSteps, lv) +
+    a3BlockedHtml(allSteps, adj) +
+    a3RiskTableHtml(allSteps) +
+    `</section>`;
+}
+
+function wireA3(container) {
+  if (!container || container.dataset.a3Wired) return;
+  container.dataset.a3Wired = "1";
+  container.addEventListener("click", e => {
+    const lb = e.target.closest("[data-a3-lens]");
+    if (lb) {
+      state.a3Lens = lb.dataset.a3Lens || "opportunity";
+      if (typeof persistState === "function") persistState();
+      if (typeof renderAnalysisTabDashboard === "function") renderAnalysisTabDashboard();
+      return;
+    }
+    const wb = e.target.closest("[data-a3-to-workbench]");
+    if (wb && typeof setAnalysisTab === "function") setAnalysisTab("workbench");
+  });
+}
+
 function renderAnalysisTabDashboard(recordsOverride, opts) {
   const container = document.getElementById("analysis-tab-dashboard");
   if (!container) return;
@@ -14980,8 +15207,10 @@ function renderAnalysisTabDashboard(recordsOverride, opts) {
     (audience === "tech" ? techHtml :
       (ed11MetricPanelHtml(lv, steps, ed11Metric, ed11Toggle) +
        ed11VerdictRowHtml(lv, steps) +
+       (typeof a3PortfolioLensHtml === "function" ? a3PortfolioLensHtml(lv, steps, records) : "") +
        e3OrgTier + dashHeaderHtml(lv) + dashEvidenceChainHtml(lv, flow) + dashCapacityNetHtml(lv) + dashFlowHtml(lv, sample, flow) + dashAgendasHtml(lv) + c3Leadership));
   wireDashboard(container);
+  if (typeof wireA3 === "function") wireA3(container);
 }
 
 function wireDashboard(container) {

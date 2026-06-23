@@ -387,7 +387,70 @@ Files changed: `app.js`, `signal-glass.css`, `test/c13-process-map.test.mjs`
 
 ---
 
-### A-3 + A-4  pending
+### A-3 · Portfolio Lens Heatmap  [A] ✓
+**SHA:** (see commit below)
+**Gate:** npm 1148/0 (+27 tests in `test/a3-portfolio-lens.test.mjs`)
+
+Portfolio-level heatmap section injected into the Executive Dashboard tab, before the existing
+leadership chain. Renders from confirmed engine outputs only via `dashboardModel()`; fails closed
+with a Workbench CTA when `lv.confirmedCount = 0`.
+
+**Five-rung × role grid (`a3HeatmapTableHtml`):**
+Rows = unique roles from `state.roleTags`; columns = five rungs (`A3_RUNGS`).
+`assembly` aliased to `build`. Each cell counts steps in that (role, rung) bucket
+and colors by the active lens. Empty cells show `—` with `a3-empty` class.
+
+**Four lenses (`a3LensSelectorHtml`):**
+- **Opportunity** (default) — dominant `getStepOpportunityMeta` tier; colors: quick-win=`#00d4b4` /
+  strategic=`#3b82f6` / speculative=faint / compliance=`#FF4FD8`.
+- **Shape mix** — dominant `state.solutionShapes` value; colors match `--gm-*` rung palette
+  (prompt=`#6FB6FF` / rag=`#4D8BFF` / tool=`#00d4b4` / agentic=`#9D7BF0` / human-in-loop=`#C2528F`).
+- **Data risk** — worst-case `dataSensitivity` in cell; PII/MNPI/PHI/PCI/Regulated=`#FF4FD8` /
+  Confidential=`#FFB454` / Internal and below = faint.
+- **Readiness** — confirmed/total ratio per cell; `#00d4b4` (all) / `#FFB454` (partial) / `#737A92` (none).
+
+**Capacity lens guard (`a3CapacityLensEnabled`):**
+No capacity lens button in `a3LensSelectorHtml`. `a3CapacityLensEnabled(lv)` requires
+`dashKpiVal(lv,"cost_to_serve") !== null && dashKpiVal(lv,"gross_capacity") !== null`
+before any capacity data can appear — both conditions are false in all current sessions.
+Source-level test asserts `data-a3-lens="capacity"` is absent from the selector.
+
+**Confirmed-only totals:**
+`a3PortfolioLensHtml` filters `steps.filter(s => s.workbenchConfirmed)` for the "confirmed" count.
+When unconfirmed steps are present: explicit note "X unconfirmed not counted" rendered in the section header.
+Total steps remain visible in the heatmap for context; only the confirmed note is qualified.
+
+**Solution-shape mix bar (`a3ShapeMixBarHtml`):**
+Proportional colored bar + legend. Five ordered shapes with `A3_SHAPE_COLOR` colors. 
+Honest empty message "No solution shapes captured" when `state.solutionShapes` is empty.
+
+**Grouped opportunity + blocked (`a3BlockedHtml`):**
+Two-column grid: left = opportunity tier groups (quick-win/strategic/speculative step lists);
+right = blocked/protected (compliance-tier steps + `human_held` steps + `adj.whyBlocked`
+entries from `engineAdjacency(records)`). `whyBlocked` is surfaced with step names, not dropped.
+
+**Data & control risk table (`a3RiskTableHtml`):**
+Only shows steps with sensitivity above "Internal" (PII/MNPI/PHI/PCI/Regulated/Confidential).
+Columns: Step · Sensitivity chip (hex-colored) · Systems/tools · Human checkpoint.
+Honest "no elevated data-sensitivity" message when no risky steps.
+
+**Lens toggle (`wireA3`):**
+Event-delegated on container (`container.dataset.a3Wired` guard — once-wired per mount).
+Lens click updates `state.a3Lens`, calls `persistState()` + `renderAnalysisTabDashboard()`.
+Workbench CTA click calls `setAnalysisTab("workbench")`.
+`renderAnalysisTabDashboard` injects `a3PortfolioLensHtml(lv, steps, records)` after `ed11VerdictRowHtml`
+(typeof-guarded); calls `wireA3(container)` after `wireDashboard`.
+
+**Constants:** `A3_RUNGS`, `A3_RUNG_LABEL`, `A3_OPP_COLOR`, `A3_SHAPE_COLOR`, `A3_SENS_COLOR`
+
+**Rail-clean:** no patchField, no scorer invent, no fetch, no invented endpoint, no
+headcount/reduction vocabulary, no banned phrase.
+
+Files changed: `app.js`, `test/a3-portfolio-lens.test.mjs`
+
+---
+
+### A-4  pending
 
 ### P5-1 · Legacy thin-step MODELED composition fallback  [A] pending
 
