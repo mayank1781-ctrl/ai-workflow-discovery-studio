@@ -110,7 +110,7 @@ Files changed: `signal-glass.css`, `index.html`
 ## Track C — UI surfaces
 
 ### C-7 · Studio shell: left rail + altitude-grouped 5-tab nav  [A] ✓
-**SHA:** pending  **Gate:** npm 930/0 · engine 369/0
+**SHA:** 11cc3db  **Gate:** npm 930/0 · engine 369/0
 
 Horizontal `.analysis-tab-bar` (6 tabs) → vertical `.studio-rail` (5 tabs, altitude-grouped).
 Two groups: "This workflow" (Workbench · Your Workflow · Recipe Book) and "Portfolio"
