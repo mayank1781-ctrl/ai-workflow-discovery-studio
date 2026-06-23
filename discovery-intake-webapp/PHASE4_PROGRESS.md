@@ -25,10 +25,35 @@ Files changed: `studio_engine.mjs`, `test/eval-set.test.mjs`, `test/fixtures/eva
 
 ---
 
-### A-2 · step.workActions[] multi-action composition  [B] pending
-### A-3 · waitSegments + wait sub-types  [A→B] pending
-### A-4 · artifacts[] + convening channel  [A] pending
-### A-5 · Value tiers + augmentation floor config  [A] pending
+### A-2 · step.workActions[] multi-action composition  [B] ✓ SEALED
+**Tag:** `phase-4-workactions`  **SHA:** 23390c7  
+**Gate:** npm 843/0 · engine 348/0
+
+composeStepAddressability, deriveStepSolutionShape, class-split invariant (owner="ai"
+forbidden on decision/human_held); normalizeIntake populates composedAddr+derivedShape;
+stepPermitted + roleCapacity.theoPct use composedAddr??theo; cappedSolutionShape,
+buildShapeProfile, buildTco, costToServe use derivedShape??solutionShape. FPA_INTAKE
+"Collect & consolidate" gains workActions (addr=85=theo → golden numbers unchanged).
+test/work-actions.test.mjs: 20 tests.
+
+### A-3 · waitSegments + wait sub-types  [A] ✓
+**SHA:** 7b4f5f8  **Gate:** npm 878/0 · engine 369/0
+
+WAIT_SEGMENT_KINDS; cycleTime uses segment-level reduction (deliberation→lRed, others→wRed)
+when present, falls back to waitKind when absent; validateIntake checks kind enum + minutes
+bounds; seeds unchanged → zero number change. test/wait-segments.test.mjs: 11 tests.
+
+### A-4 · artifacts[] + convening channel  [A] ✓
+**SHA:** 7b4f5f8  **Gate:** npm 878/0
+
+ARTIFACT_TYPES/DIRECTIONS + stepArtifacts(); validateIntake checks type+direction enum;
+convening = workActions channel="synchronous_human" (A-2). test/artifacts.test.mjs: 11 tests.
+
+### A-5 · Value tiers + augmentation floor config  [A] ✓
+**SHA:** 7b4f5f8  **Gate:** npm 878/0
+
+VALUE_TIERS + AUGMENTATION_FLOOR_DEFAULT=50 + buildValueProfile(record,cap) advisory export;
+validateIntake checks valueTier enum + augmentationFloor 0..100. test/value-tiers.test.mjs: 12 tests.
 
 ---
 
