@@ -82,7 +82,7 @@ Files changed: `app.js`, `test/b6-intake-capture.test.mjs`
 ## Track A (Addendum) — A1 ownershipFamily + A2 Glass McKinsey foundation
 
 ### A1 Addendum · ownershipFamily rollup  [A] ✓
-**SHA:** pending  **Gate:** npm 930/0 · engine 369/0
+**SHA:** aebe1be  **Gate:** npm 930/0 · engine 369/0
 
 Two-family overlay over cls: `ownershipFamily(cls) → "ai_led" | "human_led" | null`.
 `AI_LED_CLASSES=[gather,build]`, `HUMAN_LED_CLASSES=[judgment,decision,human_held]`,
@@ -93,7 +93,7 @@ seed numeric output.
 Files changed: `studio_engine.mjs`, `test/ownership-family.test.mjs` (+19 tests)
 
 ### A2 Addendum · Glass McKinsey v2 visual language — foundation  [A] ✓
-**SHA:** pending  **Gate:** npm 930/0 (no tests; CSS/font-only)
+**SHA:** aebe1be  **Gate:** npm 930/0 (no tests; CSS/font-only)
 
 `signal-glass.css`: new `--gm-*` token block in `:root` — ownership ramp (5 rung
 colours: gather #6FB6FF · build #4D8BFF · judgment #9D7BF0 · decision #EC4DA6 ·
