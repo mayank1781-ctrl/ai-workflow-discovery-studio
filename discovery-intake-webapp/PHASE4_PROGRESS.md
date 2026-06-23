@@ -126,7 +126,51 @@ Rail CSS added to signal-glass.css; layout uses `display:flex;flex-direction:row
 
 Files changed: `app.js`, `index.html`, `signal-glass.css`, `test/trust-legibility.test.mjs`
 
-### C-8 through C-13 + A3 + A4  pending
+### C-8 · Workbench cockpit — multi-action confirm + adversarial two-tier guard  [A] ✓
+**SHA:** e2e70db  **Gate:** npm 953/0
+
+Full `renderAnalysisTabWorkbench()` replaces the C-7 stub. Step cards render
+`workActions[]` composition (owner/channel toggleable inline chips), assembled
+and wired via `wireWorkbench()` (event-delegated, once-wired guard).
+Two-tier adversarial guards: **pink guard** (class trap — human-led cls
+`judgment|decision|human_held` + any AI-owner action); **amber guard** (all
+AI+online double-check). `wbConfirmStep()` hardens `ai-inferred`→`user-stated`
+provenance on all actions; blocks via toast when pink guard is active.
+`wbToggleOwner` / `wbToggleChannel` cycle owner/channel inline and re-render.
+`wbSplitStep` is a toast stub. `WB_RUNG_COLOR` maps five rungs to `--gm-*` tokens
+(A2). Workbench CSS block added to `signal-glass.css`. 23 new tests in
+`test/c8-workbench.test.mjs`. C-8 does not touch `getStepOpportunityMeta`,
+`patchField`, or any server endpoint.
+
+Files changed: `app.js`, `signal-glass.css`, `test/c8-workbench.test.mjs`
+
+### C-9 · Your Workflow — leverage-framed plain language surface  [A] ✓
+**SHA:** 02cafde  **Gate:** npm 981/0
+
+Replaces stub `renderAnalysisTabWorkflow` with `ywBuildModel` + full render
+pipeline. `ywBuildModel` consumes `buildWorkflowLeverage` (no re-computation)
+and classifies every step/seam into three buckets:
+- **Ready now**: leverage signal present + `workbenchConfirmed = true` (steps);
+  or non-human-held seams (structural, no confirmation needed).
+- **Needs setup**: leverage signal but not yet confirmed; or uncaptured
+  non-structural steps (note: "Capture step shape in Workbench to see where AI helps").
+- **Stays yours**: `humanHeld = true` (from leverage model); structural-human
+  cls (`judgment|decision|human_held`) with no leverage signal; human-held seams.
+
+`timeBackMinutes` uses `step.composedAddr` (A-2) else `step.theo` else 70%
+fallback; only for non-human-held leverage steps with a `timeTaken` cell.
+Hero shows workflow name + time-back badge (hidden at 0). Three buckets (✓ / ○ / ✦)
++ reinvestment menu (Go deeper / Help the team / Learn something / Build something;
+Now / Next / Durable badges) + dark promise panel.
+
+**Rail-clean:** no cost, no headcount as a metric, no FTE, no dollar signs,
+no savings language in any render function. (Promise panel explicitly names
+"costs or headcount" as things it *excludes* — permitted as prohibition framing.)
+**Separation:** no scorer, no `patchField`, no `fetch`, no invented endpoint.
+
+Files changed: `app.js`, `test/c9-your-workflow.test.mjs` (+28 tests)
+
+### C-10 through C-13 + A3 + A4  pending
 
 ---
 
