@@ -7926,6 +7926,9 @@ function engineStepClass(step) {
   const tag = (typeof stepTypeOf === "function" && step && step.id) ? stepTypeOf(step.id) : null;
   const v = (tag && typeof tag.value === "string") ? tag.value : ((step && step.cls) || "");
   switch (v) {
+    case "gather": return "gather";       // P4 B-6 five-rung
+    case "build": return "build";         // P4 B-6 five-rung
+    case "human_held": return "human_held"; // P4 B-6 five-rung
     case "decision": return "decision";
     case "judgment": case "review": return "judgment";
     case "assembly": case "data-op": case "handoff": return "assembly";
@@ -7979,6 +7982,10 @@ function appStepToEngineStep(step) {
   // cost / eval / controls / readiness follow it. Absent => omitted => byte-identical (A1 default path).
   const shape = (step && step.solutionShape) || ((typeof solutionShapeOf === "function" && step && step.id) ? (solutionShapeOf(step.id) || {}).value : null);
   if (shape) out.solutionShape = shape;
+  // P4 B-6 — pass through composition primitives captured during the Discovery interview
+  if (step && Array.isArray(step.workActions) && step.workActions.length > 0) out.workActions = step.workActions;
+  if (step && Array.isArray(step.waitSegments) && step.waitSegments.length > 0) out.waitSegments = step.waitSegments;
+  if (step && Array.isArray(step.artifacts) && step.artifacts.length > 0) out.artifacts = step.artifacts;
   return out;
 }
 
@@ -18606,7 +18613,10 @@ function stepFieldMeta() {
     { key: "pain", label: "Pain", icon: "triangle-alert", prompt: "what makes this step repetitive, slow, painful, or risky", required: false },
     { key: "exceptions", label: "Variations", icon: "split", prompt: "what exceptions, variants, edge cases, or special handling happen", required: false },
     { key: "dataSensitivity", label: "Sensitivity", icon: "shield-check", prompt: "whether this step involves client, confidential, regulated, personal, financial, or internal data", required: true },
-    { key: "evidenceConfidence", label: "Confidence", icon: "badge-check", prompt: "how confident we are in this captured step: high, medium, low, or unknown", required: false }
+    { key: "evidenceConfidence", label: "Confidence", icon: "badge-check", prompt: "how confident we are in this captured step: high, medium, low, or unknown", required: false },
+    { key: "workCompositionNotes", label: "Work composition", icon: "layers", prompt: "how many distinct actions are involved, who performs each (AI or person), and through what channel", required: false },
+    { key: "waitBreakdownNotes", label: "Wait breakdown", icon: "clock", prompt: "whether any wait is for context or data (reducible), a person's deliberation (protected), or scheduling coordination", required: false },
+    { key: "artifactNotes", label: "Artifacts", icon: "file-text", prompt: "what recordings, transcripts, decision logs, or files this step produces or consumes", required: false }
   ];
 }
 
@@ -18846,6 +18856,22 @@ function drilldownClusters(step) {
       keys: ["pain", "exceptions"],
       optional: true,
       question: `For "${stepName}", what makes this step slow, repetitive, risky, or variable across projects?`
+    },
+    {
+      id: "work_composition",
+      label: "Work composition",
+      icon: "layers",
+      keys: ["workCompositionNotes"],
+      optional: true,
+      question: `For "${stepName}", does this step involve one action or several distinct actions? Note who performs each action — AI/automated or a person — and whether it happens via an online system, an offline or manual process, or a live synchronous activity such as a meeting, call, or approval session.`
+    },
+    {
+      id: "wait_artifacts",
+      label: "Wait + artifacts",
+      icon: "clock",
+      keys: ["waitBreakdownNotes", "artifactNotes"],
+      optional: true,
+      question: `For "${stepName}", if there is a wait or pause: is it waiting for context or data (reducible), waiting for a person's deliberation or decision (protected), or coordinating schedules across people (coordination)? Also, does this step involve a recording, transcript, decision log, email thread, or file artifact?`
     }
   ];
 }
@@ -20625,6 +20651,48 @@ function mergeStepAnchorsFromAnswer(answer, options = {}) {
   return touched;
 }
 
+// P4 B-6 — pure inference functions for the work-composition intake cluster.
+// Each returns an array of structured objects that can be validated by the engine.
+// Called by mergeCurrentStepDetailHintsFromAnswer after notes are captured.
+
+function inferWorkActionsFromNote(note) {
+  const text = String(note || "").toLowerCase();
+  const acts = [];
+  if (/\b(ai[- ]assisted|automat|bot)\b/.test(text) || /\bai\b.*\b(pull|gather|collect|extract|draft|build|generat|summar|route)\b/.test(text)) {
+    acts.push({ id: "ai-online", label: "AI-assisted action", owner: "ai", channel: "online", addressability: 70 });
+  }
+  if (/\b(meeting|call|synchronous|in[- ]?person|committee|approval session|live review)\b/.test(text)) {
+    acts.push({ id: "human-sync", label: "Synchronous human activity", owner: "human", channel: "synchronous_human" });
+  }
+  if (/\boffline\b/.test(text) || /\b(manual\s+check|physical\s+check|paper)\b/.test(text)) {
+    acts.push({ id: "human-offline", label: "Offline human task", owner: "human", channel: "offline" });
+  }
+  return acts;
+}
+
+function inferWaitSegmentsFromNote(note) {
+  const text = String(note || "").toLowerCase();
+  const segs = [];
+  if (/\b(deliberat|person\s+deliberation)\b/.test(text)) {
+    segs.push({ kind: "deliberation", minutes: 240 });
+  } else if (/\b(coordinat|coordination)\b/.test(text)) {
+    segs.push({ kind: "coordination", minutes: 120 });
+  } else if (/\b(reducible|context\s+wait)\b/.test(text)) {
+    segs.push({ kind: "reducible", minutes: 60 });
+  }
+  return segs;
+}
+
+function inferArtifactsFromNote(note) {
+  const text = String(note || "").toLowerCase();
+  const arts = [];
+  if (/\brecording\b/.test(text)) arts.push({ type: "recording", direction: "produced" });
+  if (/\btranscript\b/.test(text)) arts.push({ type: "transcript", direction: "produced" });
+  if (/\bdecision[_\s]log\b/.test(text)) arts.push({ type: "decision_log", direction: "produced" });
+  if (/\bemail\s+thread\b/.test(text)) arts.push({ type: "email_thread", direction: "consumed" });
+  return arts;
+}
+
 function mergeCurrentStepDetailHintsFromAnswer(answer, options = {}) {
   if (!state.steps.length) return 0;
   const hints = inferStepDetailHintsFromAnswer(answer);
@@ -20649,6 +20717,29 @@ function mergeCurrentStepDetailHintsFromAnswer(answer, options = {}) {
         step[key] = merged;
         touched += 1;
       }
+    }
+  }
+
+  // P4 B-6 — derive structured arrays from captured B-6 notes (only if freshly set and arrays absent)
+  if (typeof step.workCompositionNotes === "string" && step.workCompositionNotes.trim()) {
+    const acts = inferWorkActionsFromNote(step.workCompositionNotes);
+    if (acts.length && !(Array.isArray(step.workActions) && step.workActions.length)) {
+      step.workActions = acts;
+      touched += 1;
+    }
+  }
+  if (typeof step.waitBreakdownNotes === "string" && step.waitBreakdownNotes.trim()) {
+    const segs = inferWaitSegmentsFromNote(step.waitBreakdownNotes);
+    if (segs.length && !(Array.isArray(step.waitSegments) && step.waitSegments.length)) {
+      step.waitSegments = segs;
+      touched += 1;
+    }
+  }
+  if (typeof step.artifactNotes === "string" && step.artifactNotes.trim()) {
+    const arts = inferArtifactsFromNote(step.artifactNotes);
+    if (arts.length && !(Array.isArray(step.artifacts) && step.artifacts.length)) {
+      step.artifacts = arts;
+      touched += 1;
     }
   }
 
@@ -20857,6 +20948,36 @@ function inferStepDetailHintsFromAnswer(answer = "") {
   if (/\b(client confidential|client data|confidential|regulated|personal data|financial data|sensitive)\b/i.test(raw)) {
     hints.dataSensitivity = "Client confidential or sensitive data may be involved";
   }
+
+  // P4 B-6 — work composition: owner/channel signals
+  const workCompCues = [];
+  if (/\b(ai[- ]assisted|automat|bot)\b/i.test(raw) || (/\bai\b/i.test(raw) && /\b(pull|gather|collect|extract|draft|build|generat|summar|route)\b/i.test(raw))) {
+    workCompCues.push("AI-assisted action");
+  }
+  if (/\b(meeting|call|synchronous|committee|approval session|live review)\b/i.test(raw)) {
+    workCompCues.push("synchronous human activity");
+  }
+  if (/\boffline\b/i.test(raw) || /\b(manual\s+check|paper[- ]based|physical\s+check)\b/i.test(raw)) {
+    workCompCues.push("offline human task");
+  }
+  if (workCompCues.length) hints.workCompositionNotes = uniqueSignals(workCompCues).join("; ");
+
+  // P4 B-6 — wait breakdown: deliberation vs coordination vs reducible
+  if (/\b(deliberat|person\s+deliberation|sign[- ]?off\s+wait|decision\s+wait|wait.*\bapproval\b)\b/i.test(raw)) {
+    hints.waitBreakdownNotes = "person deliberation wait";
+  } else if (/\b(coordinat|scheduling|chasing|align|hunting\s+the\s+decision)\b/i.test(raw)) {
+    hints.waitBreakdownNotes = "coordination wait";
+  } else if (/\b(reducible\s+wait|wait.*\bdata\b|wait.*\bcontext\b|waiting\s+for\s+information)\b/i.test(raw)) {
+    hints.waitBreakdownNotes = "reducible context wait";
+  }
+
+  // P4 B-6 — artifact notes: recording/transcript/decision log/email thread
+  const artifactCues = [];
+  if (/\brecording\b/i.test(raw)) artifactCues.push("recording");
+  if (/\btranscript\b/i.test(raw)) artifactCues.push("transcript");
+  if (/\bdecision[_\s]log\b/i.test(raw)) artifactCues.push("decision log");
+  if (/\bemail\s+thread\b/i.test(raw)) artifactCues.push("email thread");
+  if (artifactCues.length) hints.artifactNotes = uniqueSignals(artifactCues).join(", ");
 
   return hints;
 }
@@ -37609,7 +37730,7 @@ function normalizeWorkflowGrid(grid) {
 
 function newRecord(type) {
   const templates = {
-    steps: { name: "", actor: "", tool: "", accessMode: "", action: "", input: "", dataHandling: "", output: "", handoff: "", trigger: "", time: "", decision: "", pain: "", risk: "", exceptions: "", dataSensitivity: "", pattern: "", toolFit: "", evidenceConfidence: "", interviewNotes: "", openQuestions: "" },
+    steps: { name: "", actor: "", tool: "", accessMode: "", action: "", input: "", dataHandling: "", output: "", handoff: "", trigger: "", time: "", decision: "", pain: "", risk: "", exceptions: "", dataSensitivity: "", pattern: "", toolFit: "", evidenceConfidence: "", interviewNotes: "", openQuestions: "", workCompositionNotes: "", waitBreakdownNotes: "", artifactNotes: "" },
     data: { category: "", source: "", format: "", sensitivity: "", usageMode: "", processing: "", tool: "", storage: "", access: "", avoidRaw: "", splitNotes: "" },
     systems: { name: "", purpose: "", access: "", owner: "", integration: "", clientData: "" },
     decisions: { decision: "", owner: "", criteria: "", risk: "", approval: "", escalation: "" },
