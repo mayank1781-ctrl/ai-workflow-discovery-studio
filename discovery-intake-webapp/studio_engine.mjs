@@ -190,6 +190,38 @@ const ENTITLEMENT_DECISION_MULT = 1.5; // a decision multiplies value/risk (the 
 // is a hidden CONTROL and must never be compressed to zero. Trigger is enum-integrity surfaced.
 export const HANDOFF_TRIGGERS = ["email", "notification", "file-drop"];
 
+// P4 A2 — MULTI-ACTION COMPOSITION. A step may bundle several distinct actions (e.g. pull data +
+// deduplicate + output a summary). Each action names its owner (ai or human), channel, and the
+// fraction of work AI can carry (addressability 0..100). The step-level score is composed from the
+// action-level values; solutionShape is derived, not stored as authoritative truth.
+export const WORK_ACTION_OWNERS = ["ai", "human"];
+export const WORK_ACTION_CHANNELS = ["online", "offline", "synchronous_human"];
+
+// P4 A2 — composed addressability for a step: Σ(effort × addr of ai-online actions) / Σ(effort).
+// Equal-weight fallback when effort is absent. Returns step.theo when workActions absent/empty.
+export function composeStepAddressability(step) {
+  const acts = step && Array.isArray(step.workActions) ? step.workActions : [];
+  if (!acts.length) return step ? (step.theo ?? 0) : 0;
+  const total = acts.reduce((s, a) => s + (a.effort ?? 1), 0);
+  if (!total) return step.theo ?? 0;
+  const aiAddr = acts.reduce((s, a) => {
+    if (a.owner !== "ai" || a.channel === "offline" || a.channel === "synchronous_human") return s;
+    return s + (a.effort ?? 1) * (a.addressability ?? 0);
+  }, 0);
+  return Math.round(aiAddr / total * 10) / 10;
+}
+
+// P4 A2 — derived solution shape from workActions: if any action is human-owned or runs on an
+// offline/synchronous channel, the step requires human-in-loop regardless of what is stated.
+// Returns step.solutionShape (or null) when workActions are absent or all ai-online.
+export function deriveStepSolutionShape(step) {
+  const acts = step && Array.isArray(step.workActions) ? step.workActions : [];
+  if (!acts.length) return (step && step.solutionShape) || null;
+  if (acts.some(a => a.owner === "human" || a.channel === "offline" || a.channel === "synchronous_human"))
+    return "human_in_loop";
+  return (step && step.solutionShape) || null;
+}
+
 const prov = (value, source = "inferred", confidence = "medium") => ({ value, source, confidence });
 const round = (n, d = 0) => { const f = 10 ** d; return Math.round(n * f) / f; };
 const sum = a => a.reduce((x, y) => x + y, 0);
@@ -282,6 +314,17 @@ export function validateIntake(rawRecord) {
     // A4 — a step's entitlement (when stated) must resolve to read|write|approve; surfaced, never coerced.
     if (s.entitlement != null && !ENTITLEMENTS.includes(s.entitlement)) errors.push(`step ${i + 1}: unknown entitlement "${s.entitlement}" (not in ${ENTITLEMENTS.join("|")})`);
     if (s.volume != null && (typeof s.volume !== "number" || !Number.isFinite(s.volume) || s.volume < 0)) errors.push(`step ${i + 1}: volume "${s.volume}" is not a valid non-negative number`);
+    // P4 A2 — workActions class-split invariant: an AI owner must never appear in a decision or
+    // human_held step (those classes are 0% addressable by definition; an ai-owner action there
+    // contradicts the class and would silently over-state capacity).
+    if (Array.isArray(s.workActions)) {
+      s.workActions.forEach((a, j) => {
+        if (a.owner != null && !WORK_ACTION_OWNERS.includes(a.owner)) errors.push(`step ${i + 1} workAction ${j + 1}: unknown owner "${a.owner}" (not in ${WORK_ACTION_OWNERS.join("|")})`);
+        if (a.channel != null && !WORK_ACTION_CHANNELS.includes(a.channel)) errors.push(`step ${i + 1} workAction ${j + 1}: unknown channel "${a.channel}" (not in ${WORK_ACTION_CHANNELS.join("|")})`);
+        if (a.addressability != null && (typeof a.addressability !== "number" || a.addressability < 0 || a.addressability > 100)) errors.push(`step ${i + 1} workAction ${j + 1}: addressability ${a.addressability} out of bounds (0..100)`);
+        if (a.owner === "ai" && (s.cls === "decision" || s.cls === "human_held")) errors.push(`step ${i + 1} workAction ${j + 1}: owner="ai" is invalid in a ${s.cls} step (class-split invariant)`);
+      });
+    }
     // A2 — a step's system refs must resolve to the systems[] registry (when a registry exists); an
     // unresolved ref is surfaced, never silently assumed reachable (it would mis-shape the build).
     if (Array.isArray(record.systems) && Array.isArray(s.systems)) {
@@ -329,6 +372,11 @@ export function normalizeIntake(record) {
     if (s.touch == null) s.touch = CONFIG.defaults.touch[s.cls] ?? 45;
     if (s.wait == null) s.wait = 0;
     if (!s.waitKind) s.waitKind = (s.cls === "decision" || s.cls === "human_held") ? "protected" : "reducible";
+    // P4 A2 — compose multi-action addressability + derived shape when workActions are present.
+    if (Array.isArray(s.workActions) && s.workActions.length > 0) {
+      s.composedAddr = composeStepAddressability(s);
+      s.derivedShape = deriveStepSolutionShape(s);
+    }
   });
   return r;
 }
@@ -441,7 +489,7 @@ export function stepDecisionLanguage(step) {
 export function stepPermitted(step, profile) {
   if (step.cls === "decision" || step.cls === "human_held") return 0; // M3 — decisions and human-held steps are never given to AI
   if (stepDecisionLanguage(step)) return 0; // B2 — a decision in disguise earns NO automation
-  const theo = (step.theo ?? 0) / 100;
+  const theo = (step.composedAddr ?? step.theo ?? 0) / 100; // P4 A2 — composed addr overrides stated theo when workActions present
   const af = step.action != null ? actionCeilingFactor(step.action) : 1; // A3 — the action verb caps automatability (a controlled write/approve carries less than a read)
   return Math.min(theo, stepCeilingFraction(step.cls, step.data, profile)) * af;
 }
@@ -478,7 +526,7 @@ export function stepSystemRecords(step, record) {
 // (the rubric's "a screen-only system can't honestly be agentic"). batch/api impose no cap here.
 // Additive: with no systems referenced, realistic === declared and capped:false.
 export function cappedSolutionShape(step, record) {
-  const declared = (step && step.solutionShape) || null;
+  const declared = (step && (step.derivedShape ?? step.solutionShape)) || null; // P4 A2: derivedShape (from workActions) takes precedence
   const recs = stepSystemRecords(step, record);
   const screenOnly = recs.filter(s => s && s.reachability === "screen-only");
   if (screenOnly.length) {
@@ -498,7 +546,7 @@ export function roleCapacity(steps, profile, opts = {}) {
   const rf = opts.realizationFactor ?? CONFIG.realizationFactor;
   const W = opts.weeks ?? CONFIG.weeks, rate = opts.loadedRate ?? CONFIG.loadedRate;
   const totT = sum(steps.map(s => s.time)) || 1;
-  const theoPct = sum(steps.map(s => s.time * (s.theo / 100))) / totT;        // role theoretical share
+  const theoPct = sum(steps.map(s => s.time * ((s.composedAddr ?? s.theo) / 100))) / totT;        // role theoretical share; P4 A2: composedAddr overrides when present
   const permPct = sum(steps.map(s => s.time * stepPermitted(s, profile))) / totT; // role permitted share
   const theoHrs = theoPct * H, permittedHrs = permPct * H;
   const freedHrs = permittedHrs * ff, realizedHrs = freedHrs * rf;
@@ -560,7 +608,7 @@ export function costToServe(steps, profile, mode = "routed", opts = {}) {
   if (aiPermHrs <= 0) return { runsPerYr: 0, blendedCostPerRun: 0, annual: 0 };
   const runsPerYr = aiPermHrs * 60 / c.avgTaskMin * W;
   const blended = sum(permHrsByStep.map(({ s, hrs }) =>           // A1 — thread each step's shape into its per-run cost
-    hrs * costPerRun(modelTier(s.cls, s.data, mode, opts.policyException), c, s.solutionShape))) / aiPermHrs;
+    hrs * costPerRun(modelTier(s.cls, s.data, mode, opts.policyException), c, s.derivedShape ?? s.solutionShape))) / aiPermHrs; // P4 A2
   return { runsPerYr, blendedCostPerRun: blended, annual: runsPerYr * blended };
 }
 
@@ -584,12 +632,13 @@ export function shapeRequirements(shape) {
 // carries a shape (shaped:0, empty maps/lists) so an unshaped workflow's outputs are byte-identical.
 const SHAPE_EFFORT_RANK = { none: 0, light: 1, standard: 2, heavy: 3 };
 export function buildShapeProfile(steps) {
-  const list = (Array.isArray(steps) ? steps : []).filter(s => s && s.solutionShape);
+  const eff = s => s.derivedShape ?? s.solutionShape; // P4 A2: derived (from workActions) overrides stated
+  const list = (Array.isArray(steps) ? steps : []).filter(s => s && eff(s));
   const byShape = {};
-  list.forEach(s => { byShape[s.solutionShape] = (byShape[s.solutionShape] || 0) + 1; });
+  list.forEach(s => { byShape[eff(s)] = (byShape[eff(s)] || 0) + 1; });
   let maxEvalEffort = "none"; const evidence = new Set();
   list.forEach(s => {
-    const rq = shapeRequirements(s.solutionShape);
+    const rq = shapeRequirements(eff(s));
     if ((SHAPE_EFFORT_RANK[rq.evalEffort] ?? 0) > (SHAPE_EFFORT_RANK[maxEvalEffort] ?? 0)) maxEvalEffort = rq.evalEffort;
     rq.requiredEvidence.forEach(e => evidence.add(e));
   });
@@ -619,7 +668,7 @@ export function buildTco(record, opts = {}) {
   const grossScaled = cap.grossValue * instances;
   const runAnnual = costToServe(r.steps, profile, mode, opts).annual * instances;
   const aiSteps = r.steps.filter(s => s.cls !== "decision" && s.cls !== "human_held"); // decision+human_held = human, no AI build
-  const drv = (s) => (s.solutionShape && T.shape[s.solutionShape]) || T.default;
+  const drv = (s) => { const sh = s.derivedShape ?? s.solutionShape; return (sh && T.shape[sh]) || T.default; }; // P4 A2: derivedShape takes precedence
   // one-time build cost (each AI step is a build unit; agentic steps dominate). Built ONCE for the deployment.
   const build = sum(aiSteps.map(s => drv(s).buildWk)) * rate;
   const integration = sum(aiSteps.map(s => drv(s).integrationWk)) * rate;
@@ -2699,7 +2748,8 @@ export const FPA_INTAKE = {
   header: { persona: "FP&A analyst", dept: "Finance", anchor: "Last monthly forecast refresh & variance pack", lifecycle: "confirmed" },
   trigger: { trigger: "month-end close completes", cadence: "monthly", volume: "~12/yr" },
   steps: [
-    { step: "Collect & consolidate", cls: "gather", data: "confidential", time: 18, theo: 85, touch: 90, wait: 0, waitKind: "reducible", inputs: "GL extract", output: "consolidated actuals", consumer: "self", tool: "ERP, Excel" },
+    { step: "Collect & consolidate", cls: "gather", data: "confidential", time: 18, theo: 85, touch: 90, wait: 0, waitKind: "reducible", inputs: "GL extract", output: "consolidated actuals", consumer: "self", tool: "ERP, Excel",
+      workActions: [{ id: "pull-gl-extract", label: "Pull GL extract", owner: "ai", channel: "online", addressability: 85 }] },
     { step: "Reconcile & validate", cls: "build", data: "confidential", time: 16, theo: 70, touch: 120, wait: 240, waitKind: "reducible", inputs: "sub-ledger vs GL", output: "reconciled figures", consumer: "self", tool: "ERP, Excel" },
     { step: "Build & refresh models", cls: "build", data: "confidential", time: 14, theo: 55, touch: 90, wait: 0, waitKind: "reducible", inputs: "actuals, drivers", output: "updated model", consumer: "self", tool: "Excel" },
     { step: "Variance analysis", cls: "judgment", data: "confidential", time: 14, theo: 30, touch: 60, wait: 0, waitKind: "reducible", inputs: "actuals vs forecast", output: "explained variances", consumer: "reviewer", tool: "Excel" },
@@ -3495,6 +3545,33 @@ function runTests() {
     return def.illustrative === true && def.content.includes(CALIBRATED_SEED_MARKER) && real.illustrative === false && !real.content.includes(CALIBRATED_SEED_MARKER);
   })(), "");
   ok("D4 the SHIPPED default stays illustrative \u2014 no opts means the marker is present (never faked real)", illustrativeMarker({}) === CALIBRATED_SEED_MARKER && illustrativeMarker(undefined) === CALIBRATED_SEED_MARKER, "");
+
+  // ---- Phase 4 \u00b7 A2 \u2014 multi-action workActions composition ----
+  // single ai-online action: composedAddr = addressability (equal weight, addr=85 \u2192 85)
+  ok("P4-A2 composeStepAddressability: single ai-online action \u2192 composedAddr equals addressability", composeStepAddressability({ workActions: [{ owner: "ai", channel: "online", addressability: 85 }] }) === 85, "");
+  // mixed: one ai (addr 80) + one human \u2192 AI gets 0 from the human action; total effort=2; composedAddr=40
+  ok("P4-A2 composeStepAddressability: ai+human mix \u2192 human action contributes 0 addressability", composeStepAddressability({ workActions: [{ owner: "ai", channel: "online", addressability: 80 }, { owner: "human", channel: "synchronous_human", addressability: 0 }] }) === 40, "");
+  // offline action: not carried by AI regardless of owner tag
+  ok("P4-A2 composeStepAddressability: offline channel \u2192 0 contribution even if owner=ai", composeStepAddressability({ workActions: [{ owner: "ai", channel: "offline", addressability: 90 }] }) === 0, "");
+  // no workActions \u2192 falls back to step.theo
+  ok("P4-A2 composeStepAddressability: absent workActions \u2192 step.theo unchanged", composeStepAddressability({ theo: 55 }) === 55, "");
+  // deriveStepSolutionShape: all ai-online \u2192 no override (returns stated shape)
+  ok("P4-A2 deriveStepSolutionShape: all ai-online \u2192 returns stated solutionShape", deriveStepSolutionShape({ solutionShape: "prompt", workActions: [{ owner: "ai", channel: "online", addressability: 80 }] }) === "prompt", "");
+  // deriveStepSolutionShape: any human action \u2192 forces human_in_loop
+  ok("P4-A2 deriveStepSolutionShape: human action \u2192 forces human_in_loop over stated shape", deriveStepSolutionShape({ solutionShape: "agentic", workActions: [{ owner: "ai", channel: "online", addressability: 80 }, { owner: "human", channel: "synchronous_human" }] }) === "human_in_loop", "");
+  // deriveStepSolutionShape: no workActions \u2192 returns stated shape
+  ok("P4-A2 deriveStepSolutionShape: absent workActions \u2192 stated solutionShape returned", deriveStepSolutionShape({ solutionShape: "rag" }) === "rag", "");
+  // class-split invariant: ai owner on a decision step is rejected by validateIntake
+  ok("P4-A2 validateIntake: owner=ai on decision step is a hard error (class-split invariant)", !validateIntake({ ...FPA_INTAKE, steps: [{ step: "approve waiver", cls: "decision", data: "confidential", time: 10, theo: 10, workActions: [{ owner: "ai", channel: "online", addressability: 30 }] }] }).ok, "");
+  // class-split invariant: ai owner on a human_held step is rejected
+  ok("P4-A2 validateIntake: owner=ai on human_held step is a hard error (class-split invariant)", !validateIntake({ ...FPA_INTAKE, steps: [{ step: "partner sign-off", cls: "human_held", data: "MNPI", time: 10, theo: 0, workActions: [{ owner: "ai", channel: "online", addressability: 20 }] }] }).ok, "");
+  // human owner on a gather step is valid (human review alongside AI-gathered data)
+  ok("P4-A2 validateIntake: human-owner action on a gather step is valid (no false split)", validateIntake({ ...FPA_INTAKE, steps: [{ step: "pull and review", cls: "gather", data: "confidential", time: 10, theo: 80, workActions: [{ owner: "ai", channel: "online", addressability: 80 }, { owner: "human", channel: "online", addressability: 0 }] }] }).ok, "");
+  // FPA_INTAKE golden: normalizeIntake populates composedAddr on the workActions step (addr=85 = theo)
+  ok("P4-A2 FPA_INTAKE: normalizeIntake populates composedAddr on the workActions step", normalizeIntake(FPA_INTAKE).steps[0].composedAddr === 85, "");
+  // additive: steps without workActions have no composedAddr; capacity numbers unchanged
+  ok("P4-A2 additive: steps without workActions carry no composedAddr (undefined)", normalizeIntake(FPA_INTAKE).steps[1].composedAddr === undefined, "");
+  ok("P4-A2 additive: capacity golden numbers unchanged (composedAddr=85 === theo=85)", near(roleCapacity(normalizeIntake(FPA_INTAKE).steps, "Conservative").theoPct * 100, 55, 0.5), "");
 
   console.log(`\n${fail === 0 ? "\u2713 ALL PASS" : "\u2717 FAILURES"} \u2014 ${pass} passed, ${fail} failed`);
   return fail === 0;
