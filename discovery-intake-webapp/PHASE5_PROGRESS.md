@@ -290,9 +290,83 @@ Returns `null` when no signal fires or class is exempt.
 
 ---
 
-## Pending
+---
 
-| Item | Status |
+## P5-1 · Legacy / Thin-Step Modeled Fallback
+
+**Status:** COMPLETE  
+**Gate:** 1387/0 (+46 tests over P5-4A gate of 1341/0)  
+**Eval:** 0/24 dangerous-wrong (unchanged)
+
+---
+
+### What was built
+
+For thinly captured steps where `workActions` are absent, a conservative modeled
+work-action signal is inferred from existing captured fields and rendered in the
+Workbench instead of a silent blank. The modeled panel is explicitly labeled
+"Modeled — not captured" so the user never mistakes it for confirmed data.
+
+### Changed files
+
+| File | Change |
 |---|---|
-| P5-1 · Legacy thin-step modeled composition fallback | Pending — not started |
-| Phase 6 · workIntent / stepFunction / policy upload guardrails / unit economics | Pending — not started |
+| `app.js` | `buildModeledWorkActions()` + `modeledWorkActionsHtml()` inserted before `wbStepBodyHtml`; `wbStepBodyHtml` updated with P5-1 typeof-guarded injection |
+| `test/p5-1-modeled.test.mjs` | 46 new tests (new file) |
+
+### Functions added (all in `app.js`)
+
+| Function | Purpose |
+|---|---|
+| `buildModeledWorkActions(step)` | Returns `{modeledActs, evidenceUsed, missingEvidence, confidence, cls}` or null. Reads cls, step name verb, systemsTools, rulesDecisionLogic, humanCheckpoint. Returns null if `workActions` already exist (explicit wins), if step is null/no-id, or if evidence is too thin (assembly default + no signals). |
+| `modeledWorkActionsHtml(modeled)` | Renders the modeled panel as a dashed-border block labeled "Modeled — not captured" with confidence, action rows (AI/Human owner label + channel), evidence-from, and missing-evidence indicators. Returns "" for null. |
+
+### Inference logic
+
+| Class | Modeled actions |
+|---|---|
+| `decision` | Human: approve or decide (offline) |
+| `human_held` | Human-led action (offline) |
+| `judgment` | AI: present analysis (online) + Human: exercise judgment (offline) |
+| `gather` | AI: retrieve source materials [+ tool ref if systemsTools] (online); + Human review if humanCheckpoint |
+| `assembly` / `build` — human verb (approve, review, check, verify…) | AI: prepare supporting info (online) + Human: verb/confirm (offline) |
+| `assembly` / `build` — AI verb (draft, generate, extract, send…) | AI: primary operation [+ tool ref] (online); + Human review if humanCheckpoint; + AI rule-apply if rulesDecisionLogic |
+
+### Confidence
+
+- `"moderate"` — ≥2 distinct evidence signals (e.g., non-assembly class + verb; or verb + cells)
+- `"low"` — 1 signal (e.g., assembly class + verb only)
+
+### `wbStepBodyHtml` integration
+
+When `acts.length === 0`:
+- `p51ModeledHtml = modeledWorkActionsHtml(buildModeledWorkActions(step))` (typeof-guarded)
+- `actionsHtml` uses `p51ModeledHtml` when non-empty; falls back to the original `"No actions captured yet"` message for truly thin steps where modeled is null
+
+### Rules observed
+
+- **Explicit wins:** `workActions` present → `buildModeledWorkActions` returns null unconditionally.
+- **No auto-hardening:** modeled result is never written to `step.workActions` or any state.
+- **No rollup count:** modeled values never reach `appStepToEngineStep` (which reads `step.workActions` only), so official Executive/Workforce/Portfolio rollups are untouched.
+- **Compound + thin:** a step flagged by P5-4A (compound guard) also receives P5-1 modeled guidance — the compound warning and modeled panel are rendered independently.
+- **Rail-clean:** no headcount, FTE, eliminat, automat, autoSplit, substep, or Phase 6 symbols in source.
+- **Engine confirmation gate unchanged:** studio_engine.mjs unmodified.
+
+---
+
+## Phase 5 — COMPLETE
+
+All planned Phase 5 items are now done:
+
+| Item | Status | Gate at completion |
+|---|---|---|
+| P5-2 · Real Confirmed Engine Data Bridge | ✓ COMPLETE | 1207/0 |
+| P5-3 · Confirmation Ladder | ✓ COMPLETE | 1236/0 |
+| P5-4 · Solution Placement Explainer | ✓ COMPLETE | 1295/0 |
+| P5-4A · Compound-Step Granularity Guard | ✓ COMPLETE | 1341/0 |
+| P5-5 · Canonical shape cleanup | ✓ Absorbed into P5-4 | — |
+| P5-6 · Extraction fallback and provenance | ✓ Absorbed into P5-4 | — |
+| P5-7 · Language and rail hardening | ✓ Per-function in P5-4/P5-4A tests | — |
+| P5-1 · Legacy / Thin-Step Modeled Fallback | ✓ COMPLETE | 1387/0 |
+
+**Remaining:** Phase 6 only (workIntent / stepFunction / policy upload guardrails / unit economics) — not started.

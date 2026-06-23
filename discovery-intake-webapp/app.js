@@ -6392,16 +6392,133 @@ function wbActionRowHtml(act, i, stepId) {
   </div>`;
 }
 
+// P5-1: Infers a conservative modeled work-action signal for steps that have no
+// explicit workActions captured.  Returns null if workActions already exist, if the
+// step has insufficient evidence to model, or if the step is null.
+// NEVER writes to workActions; NEVER auto-hardens; display-only.
+function buildModeledWorkActions(step) {
+  if (!step || !step.id) return null;
+  if (Array.isArray(step.workActions) && step.workActions.length > 0) return null;
+
+  const gc  = (k) => (typeof gridCellValue === "function") ? (gridCellValue(step, k) || "") : "";
+  const cls  = (typeof engineStepClass === "function") ? engineStepClass(step) : (step.cls || "");
+  const name = String(step.step || step.name || "").trim();
+  const nameL = name.toLowerCase();
+
+  const sysTools   = gc("systemsTools");
+  const rules      = gc("rulesDecisionLogic");
+  const checkpoint = gc("humanCheckpoint");
+
+  const hasTools      = sysTools.length > 0;
+  const hasRules      = rules.length > 0;
+  const hasCheckpoint = checkpoint.length > 0;
+
+  const VERB_RE = /\b(extract|retriev|pull|download|gather|fetch|draft|write|generat|creat|produc|send|submit|upload|route|dispatch|approv|sign|authoriz|review|assess|check|verify|validat|analyz|summariz|flag|match|reconcil|log|record)/i;
+  const verbMatch = nameL.match(VERB_RE);
+  const verb = verbMatch ? verbMatch[1].toLowerCase() : null;
+
+  // At least one identifiable signal beyond "assembly + no name" is required.
+  const evidenceSignals = [verb, hasTools, hasRules, hasCheckpoint].filter(Boolean).length;
+  if (!name && !cls) return null;
+  if (cls === "assembly" && evidenceSignals === 0) return null;
+
+  const modeledActs   = [];
+  const evidenceUsed  = [];
+  const missingEvidence = [];
+
+  if (cls) evidenceUsed.push(`class: ${cls}`);
+  if (verb) evidenceUsed.push(`verb "${verb}" (step name)`);
+  if (hasTools) evidenceUsed.push("systemsTools");
+  if (hasRules) evidenceUsed.push("rulesDecisionLogic");
+  if (hasCheckpoint) evidenceUsed.push("humanCheckpoint");
+
+  const HUMAN_VERB_RE = /\b(approv|sign|authoriz|review|assess|check|verify|validat|analyz)/i;
+  const humanVerbMatch = nameL.match(HUMAN_VERB_RE);
+
+  if (cls === "decision" || cls === "human_held") {
+    modeledActs.push({
+      label:   cls === "decision" ? "Human: approve or decide" : "Human-led action",
+      owner:   "human",
+      channel: "offline",
+      basis:   `class: ${cls}`
+    });
+  } else if (cls === "judgment") {
+    modeledActs.push(
+      { label: "AI: present analysis or supporting summary", owner: "ai",    channel: "online",  basis: "class: judgment" },
+      { label: "Human: exercise judgment / decide",          owner: "human", channel: "offline", basis: "class: judgment" }
+    );
+  } else if (cls === "gather") {
+    const ref = hasTools ? ` from ${sysTools.slice(0, 35)}` : "";
+    modeledActs.push({ label: `AI: retrieve source materials${ref}`, owner: "ai", channel: "online", basis: hasTools ? "class: gather + systemsTools" : "class: gather" });
+    if (hasCheckpoint) modeledActs.push({ label: "Human: review retrieved output", owner: "human", channel: "offline", basis: "humanCheckpoint" });
+  } else {
+    // assembly / build — verb-sensitive path.
+    if (humanVerbMatch) {
+      modeledActs.push(
+        { label: "AI: prepare or surface supporting information", owner: "ai",    channel: "online",  basis: `verb "${humanVerbMatch[1]}" implies review` },
+        { label: `Human: ${humanVerbMatch[1]} / confirm`,         owner: "human", channel: "offline", basis: `verb "${humanVerbMatch[1]}"` }
+      );
+    } else {
+      const ref = hasTools ? ` via ${sysTools.slice(0, 30)}` : "";
+      modeledActs.push({ label: verb ? `AI: ${verb}${ref}` : `AI: primary operation${ref}`, owner: "ai", channel: "online", basis: verb ? `verb "${verb}"` : "class: assembly" });
+      if (hasCheckpoint) modeledActs.push({ label: "Human: review or confirm output", owner: "human", channel: "offline", basis: "humanCheckpoint" });
+    }
+    if (hasRules) modeledActs.push({ label: "AI: apply business rules / conditions", owner: "ai", channel: "online", basis: "rulesDecisionLogic" });
+  }
+
+  if (!modeledActs.length) return null;
+
+  missingEvidence.push("Explicit action decomposition (Discovery interview — primary source)");
+  if (!hasTools) missingEvidence.push("Systems or tools this step uses");
+  if (!hasCheckpoint && cls !== "decision" && cls !== "human_held") missingEvidence.push("Human checkpoint or review note");
+
+  const confSignals = [cls && cls !== "assembly", verb, hasTools, hasRules, hasCheckpoint].filter(Boolean).length;
+  const confidence  = confSignals >= 2 ? "moderate" : "low";
+
+  return { modeledActs, evidenceUsed, missingEvidence, confidence, cls };
+}
+
+// Renders the P5-1 modeled work-action panel.  Returns "" when modeled is null.
+function modeledWorkActionsHtml(modeled) {
+  if (!modeled || !Array.isArray(modeled.modeledActs) || !modeled.modeledActs.length) return "";
+  const esc = (typeof escapeHtml === "function") ? escapeHtml : (s) => String(s == null ? "" : s);
+  const C = {
+    panel: "#0c1726", border: "#16263a", ink: "#EAEFFF", dim: "#A6ADC4",
+    warn: "#f59e0b", ai: "#3b82f6", human: "#FF4FD8"
+  };
+  const confText  = modeled.confidence === "moderate" ? "moderate evidence" : "limited evidence";
+  const rowsHtml  = modeled.modeledActs.map((a) => {
+    const oc = a.owner === "ai" ? C.ai : C.human;
+    return `<div style="display:flex;align-items:center;gap:6px;padding:2px 0;font-size:11.5px;color:${C.ink};">` +
+      `<span style="flex:1;">${esc(a.label)}</span>` +
+      `<span style="font-size:10px;color:${oc};font-weight:600;">${a.owner === "ai" ? "AI" : "Human"}</span>` +
+      `<span style="font-size:10px;color:${C.dim};">${a.channel === "offline" ? "Offline" : "Online"}</span></div>`;
+  }).join("");
+  const evHtml  = modeled.evidenceUsed.length
+    ? `<div style="margin-top:5px;font-size:10.5px;color:${C.dim};">From: ${modeled.evidenceUsed.map(esc).join(" · ")}</div>` : "";
+  const misHtml = modeled.missingEvidence.length
+    ? `<div style="margin-top:3px;">${modeled.missingEvidence.map((m) => `<div style="font-size:10.5px;color:${C.warn};">? ${esc(m)}</div>`).join("")}</div>` : "";
+  return `<div class="wb-modeled-acts" style="background:${C.panel};border:1px dashed ${C.border};border-radius:6px;padding:8px 10px;margin:4px 0;">` +
+    `<div style="font-size:10px;font-weight:700;color:${C.warn};letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px;">` +
+    `⧆ Modeled — not captured (${confText})</div>` +
+    `${rowsHtml}${evHtml}${misHtml}</div>`;
+}
+
 function wbStepBodyHtml(step) {
   const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
   const acts = Array.isArray(step.workActions) ? step.workActions : [];
   const composed = wbComposed(step);
   const guardsHtml = wbGuardsHtml(step);
   const hasBlockingGuard = guardsHtml.includes("wb-guard-pink");
+  // P5-1 — modeled work-action fallback for thin steps (typeof-guarded, display-only).
+  let p51ModeledHtml = "";
+  if (!acts.length && typeof buildModeledWorkActions === "function" && typeof modeledWorkActionsHtml === "function") {
+    try { p51ModeledHtml = modeledWorkActionsHtml(buildModeledWorkActions(step)) || ""; } catch (_e) { p51ModeledHtml = ""; }
+  }
   const actionsHtml = acts.length
     ? `<div class="wb-act-header"><span>Action</span><span>Owner</span><span>Channel</span><span>Addr.</span></div>
        ${acts.map((a, i) => wbActionRowHtml(a, i, step.id)).join("")}`
-    : `<div class="wb-no-acts">No actions captured yet — gather composition in the Discovery interview.</div>`;
+    : (p51ModeledHtml || `<div class="wb-no-acts">No actions captured yet — gather composition in the Discovery interview.</div>`);
   const composedHtml = acts.length
     ? `<div class="wb-composed">${composed.shape ? `Shape <strong>${esc(composed.shape)}</strong>` : ""}${composed.score != null ? ` · addressability <strong>${composed.score}%</strong>` : ""}${composed.why ? `<div class="wb-composed-why">${esc(composed.why)}</div>` : ""}</div>` : "";
   const isConfirmed = !!step.workbenchConfirmed;
