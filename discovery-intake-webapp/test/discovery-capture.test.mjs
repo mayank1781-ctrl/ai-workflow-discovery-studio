@@ -13,7 +13,7 @@ const SHAPES = ["prompt", "rag", "deterministic-tool", "agentic", "human-in-loop
 test("B1 — 'draft and approve' is flagged for split at capture (engine)", () => {
   const f = engine.flagCombinedStep("draft and approve the memo");
   assert.equal(f.combined, true);
-  assert.ok(f.acts.some((a) => a.cls === "assembly") && f.acts.some((a) => a.cls === "decision"));
+  assert.ok(f.acts.some((a) => a.cls === "build" || a.cls === "gather" || a.cls === "assembly") && f.acts.some((a) => a.cls === "decision"));
   assert.match(f.suggestion, /Split into/);
   assert.equal(engine.flagCombinedStep("reconcile the ledgers").combined, false); // no false split
 });

@@ -34,7 +34,7 @@
       "clause": "C1",
       "sme_says": "I work out the DSCR and the leverage ratios.",
       "trap": "'work out' sounds like judgment.",
-      "expected": { "cls": "assembly", "note": "deterministic engine computes; a model only parses the covenant formula once, human-verified. Numbers are NOT model-generated." },
+      "expected": { "cls": "build", "note": "deterministic engine computes; a model only parses the covenant formula once, human-verified. Numbers are NOT model-generated." },
       "dangerous_wrong": { "cls": "judgment" }
     },
     {
@@ -51,7 +51,7 @@
       "sme_says": "I draft the memo and put in whether I'd waive the covenant.",
       "trap": "captured as one step.",
       "expected": { "split": true, "steps": [
-        { "step": "draft the memo", "cls": "assembly", "why": "states facts, no judgment" },
+        { "step": "draft the memo", "cls": "build", "why": "states facts, no judgment" },
         { "step": "recommend the covenant waiver", "cls": "decision", "why": "a waiver call commits the firm" }
       ]},
       "dangerous_wrong": { "split": false, "cls": "assembly" }
@@ -61,7 +61,7 @@
       "clause": "C2",
       "sme_says": "I pull the borrower's financials and tax returns.",
       "trap": "'pull files' feels low-tier and mechanical.",
-      "expected": { "cls": "assembly", "data": "confidential", "note": "if it carries identifiable individuals, escalate to PII." },
+      "expected": { "cls": "gather", "data": "confidential", "note": "if it carries identifiable individuals, escalate to PII." },
       "dangerous_wrong": { "data": "internal" }
     },
     {
@@ -69,7 +69,7 @@
       "clause": "C4",
       "sme_says": "Honestly, AI could basically do the whole spreading.",
       "trap": "set theo = 100.",
-      "expected": { "cls": "assembly", "theo_range": [65, 80], "note": "novel accounts, tie-out exceptions and verification need headroom; analyst review gate stays." },
+      "expected": { "cls": "build", "theo_range": [65, 80], "note": "novel accounts, tie-out exceptions and verification need headroom; analyst review gate stays." },
       "dangerous_wrong": { "theo": 100 }
     },
     {
@@ -79,7 +79,7 @@
       "trap": "'pull' reads as assembly.",
       "expected": { "split": true, "steps": [
         { "step": "choose the relevant comps", "cls": "judgment", "why": "needs a read of what's comparable" },
-        { "step": "pull the chosen comps", "cls": "assembly", "why": "mechanical once chosen" }
+        { "step": "pull the chosen comps", "cls": "gather", "why": "mechanical once chosen" }
       ]},
       "dangerous_wrong": { "split": false, "cls": "assembly" }
     },
@@ -119,7 +119,7 @@
       "trap": "captured as one assembly step: 'understand the request'.",
       "expected": { "split": true, "steps": [
         { "step": "classify the request type", "cls": "judgment", "why": "the type branches the whole downstream recipe (templates, techniques, sessions); needs a read" },
-        { "step": "search the repository for similar past workshops", "cls": "assembly", "data": "internal", "why": "mechanical retrieval once the type is known" }
+        { "step": "search the repository for similar past workshops", "cls": "gather", "data": "internal", "why": "mechanical retrieval once the type is known" }
       ], "schema_note": "request-type is a branch, not a linear step — the recipe is conditional on it." },
       "dangerous_wrong": { "split": false, "cls": "assembly" }
     },
@@ -129,7 +129,7 @@
       "clause": "C1",
       "sme_says": "Sometimes the material is a blank template with headers — we populate it live during the workshop. You're facilitating the answer, not coming with it.",
       "trap": "set acceptance to 'complete, correct deliverable' and let AI fill the answer.",
-      "expected": { "cls": "assembly", "acceptance": "the template enables the live exercise; deliberately incomplete", "note": "its output feeds a human judgment downstream — AI must NOT pre-fill the answer." },
+      "expected": { "cls": "build", "acceptance": "the template enables the live exercise; deliberately incomplete", "note": "its output feeds a human judgment downstream — AI must NOT pre-fill the answer." },
       "dangerous_wrong": { "behavior": "AI fills in the answer", "why_bad": "defeats the purpose of the facilitation step" }
     },
     {
@@ -148,7 +148,7 @@
       "sme_says": "I pull the logs and metrics, correlate them, then decide if it's a real incident and who to page.",
       "trap": "'pull logs' makes the whole thing read as assembly.",
       "expected": { "split": true, "steps": [
-        { "step": "gather and correlate logs/metrics", "cls": "assembly", "why": "mechanical collection" },
+        { "step": "gather and correlate logs/metrics", "cls": "gather", "why": "mechanical collection" },
         { "step": "triage severity and page on-call", "cls": "decision", "why": "paging commits people and an escalation path; the call carries accountability" }
       ]},
       "dangerous_wrong": { "split": false, "cls": "assembly", "note": "auto-paging from AI is the unsafe outcome." }
@@ -160,7 +160,7 @@
       "sme_says": "I review the PR and approve the merge.",
       "trap": "'review' reads as judgment-assist and 'approve' is buried.",
       "expected": { "split": true, "steps": [
-        { "step": "summarize the diff, flag risks", "cls": "assembly", "why": "AI drafts the review" },
+        { "step": "summarize the diff, flag risks", "cls": "build", "why": "AI drafts the review" },
         { "step": "approve and merge", "cls": "decision", "why": "merging commits to the codebase / prod path" }
       ]},
       "dangerous_wrong": { "behavior": "AI approves or merges", "cls": "assembly" }

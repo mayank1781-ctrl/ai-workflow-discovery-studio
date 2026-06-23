@@ -36,7 +36,7 @@ test("B3 — every recipe carries shape / eval / owner / evidence / fallback / m
 });
 
 test("B3 — solution shape drives the eval plan (agentic needs a harness; a prompt does not)", () => {
-  const shape = (sh) => ({ ...FPA, steps: FPA.steps.map((s) => s.cls === "assembly" ? { ...s, solutionShape: sh } : s) });
+  const shape = (sh) => ({ ...FPA, steps: FPA.steps.map((s) => (s.cls === "gather" || s.cls === "build" || s.cls === "assembly") ? { ...s, solutionShape: sh } : s) });
   assert.ok(engine.buildRecipeProof(shape("agentic")).evalPlan.some((e) => /harness/.test(e)));
   assert.ok(!engine.buildRecipeProof(shape("prompt")).evalPlan.some((e) => /harness/.test(e)));
 });

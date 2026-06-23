@@ -63,8 +63,8 @@ test("A3 — sharing role + capability and compatible on every dimension still E
 });
 
 test("A3 — solution-shape incompatibility blocks a combine (the same capability built two ways)", () => {
-  const asPrompt = { ...RECON, header: { ...RECON.header, anchor: "recon-prompt" }, steps: RECON.steps.map(s => s.cls === "assembly" ? { ...s, solutionShape: "prompt" } : s) };
-  const asAgentic = { ...RECON, header: { ...RECON.header, anchor: "recon-agentic" }, steps: RECON.steps.map(s => s.cls === "assembly" ? { ...s, solutionShape: "agentic" } : s) };
+  const asPrompt = { ...RECON, header: { ...RECON.header, anchor: "recon-prompt" }, steps: RECON.steps.map(s => (s.cls === "gather" || s.cls === "build" || s.cls === "assembly") ? { ...s, solutionShape: "prompt" } : s) };
+  const asAgentic = { ...RECON, header: { ...RECON.header, anchor: "recon-agentic" }, steps: RECON.steps.map(s => (s.cls === "gather" || s.cls === "build" || s.cls === "assembly") ? { ...s, solutionShape: "agentic" } : s) };
   const adj = E.buildAdjacency([asPrompt, asAgentic]);
   assert.equal(adj.enabledCount, 0);
   assert.ok(adj.whyBlocked.some(c => c.blockedDimension === "shape"));

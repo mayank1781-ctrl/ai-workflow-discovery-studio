@@ -8,8 +8,8 @@ import * as engine from "../studio_engine.mjs";
 
 const source = readAppSource();
 const FPA = engine.FPA_INTAKE;
-const tech = { ...FPA, header: { ...FPA.header, dept: "Technology", anchor: "tech-wf" }, steps: FPA.steps.map((s) => s.cls === "assembly" ? { ...s, solutionShape: "agentic", data: "internal" } : { ...s, data: "internal" }), confirm: { ...FPA.confirm, dataTier: "internal" } };
-const credit = { ...FPA, header: { ...FPA.header, dept: "Credit Risk", anchor: "credit-wf" }, steps: FPA.steps.map((s) => s.cls === "assembly" ? { ...s, solutionShape: "prompt" } : s) };
+const tech = { ...FPA, header: { ...FPA.header, dept: "Technology", anchor: "tech-wf" }, steps: FPA.steps.map((s) => (s.cls === "gather" || s.cls === "build" || s.cls === "assembly") ? { ...s, solutionShape: "agentic", data: "internal" } : { ...s, data: "internal" }), confirm: { ...FPA.confirm, dataTier: "internal" } };
+const credit = { ...FPA, header: { ...FPA.header, dept: "Credit Risk", anchor: "credit-wf" }, steps: FPA.steps.map((s) => (s.cls === "gather" || s.cls === "build" || s.cls === "assembly") ? { ...s, solutionShape: "prompt" } : s) };
 const SET = [tech, credit];
 
 test("C1 — slicing by solution shape = agentic filters the record set", () => {

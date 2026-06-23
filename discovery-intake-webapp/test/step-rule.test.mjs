@@ -18,7 +18,7 @@ test("A1 — a 'draft and approve' utterance flags a required split (class-chang
   const f = E.flagCombinedStep("I draft the memo and approve the waiver");
   assert.equal(f.combined, true);
   assert.equal(f.boundary, "class-change");
-  assert.ok(f.acts.some((a) => a.cls === "assembly"), "the draft is assembly");
+  assert.ok(f.acts.some((a) => a.cls === "build" || a.cls === "gather" || a.cls === "assembly"), "the draft is AI-class (build)");
   assert.ok(f.acts.some((a) => a.cls === "decision" || a.cls === "judgment"), "the call stays human-held");
 });
 
@@ -37,7 +37,7 @@ test("A1 — recon s1 'Classify and open' splits into two steps: a human read + 
   assert.equal(s1.combined, true);
   assert.equal(s1.steps.length, 2);
   assert.ok(s1.steps.some((x) => x.cls === "judgment"), "the read whether-real-break stays human-held");
-  assert.ok(s1.steps.some((x) => x.cls === "assembly"), "opening/pulling the case is assembly AI can carry");
+  assert.ok(s1.steps.some((x) => x.cls === "gather" || x.cls === "build" || x.cls === "assembly"), "opening/pulling the case is AI can carry");
   // the data tier rides along to each atomic step; no invented per-act time
   assert.ok(s1.steps.every((x) => x.data === "confidential"));
   assert.ok(s1.steps.every((x) => x.time === undefined), "time is re-inferred by class, not a split share");

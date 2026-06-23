@@ -47,19 +47,19 @@ export const CONFIG = {
   // of PII/MNPI on each profile, so the pooled (collective) numbers are conservative, never optimistic.
   // Purely additive: existing records use public/internal/confidential/PII/MNPI and are byte-identical.
   profiles: {
-    Conservative: { step: { assembly: 65, judgment: 20, decision: 0 },
+    Conservative: { step: { assembly: 65, gather: 65, build: 65, judgment: 20, decision: 0, human_held: 0 },
       tier: { public: 1, internal: 1, confidential: 0.9, PII: 0.5, MNPI: 0.3, restricted: 0.3 }, mode: "draft-only" },
-    Moderate: { step: { assembly: 80, judgment: 30, decision: 0 },
+    Moderate: { step: { assembly: 80, gather: 80, build: 80, judgment: 30, decision: 0, human_held: 0 },
       tier: { public: 1, internal: 1, confidential: 1, PII: 0.8, MNPI: 0.6, restricted: 0.6 }, mode: "bounded agents" },
-    Progressive: { step: { assembly: 92, judgment: 40, decision: 0 },
+    Progressive: { step: { assembly: 92, gather: 92, build: 92, judgment: 40, decision: 0, human_held: 0 },
       tier: { public: 1, internal: 1, confidential: 1, PII: 0.9, MNPI: 0.8, restricted: 0.8 }, mode: "supervised orchestration" },
   },
 
-  // model-fit routing by step class; decision stays human (no AI tier)
+  // model-fit routing by step class; decision and human_held stay human (no AI tier)
   routing: {
-    routed:   { assembly: "small", judgment: "mid" },
-    mid:      { assembly: "mid",   judgment: "mid" },
-    frontier: { assembly: "frontier", judgment: "frontier" },
+    routed:   { assembly: "small", gather: "small", build: "small", judgment: "mid" },
+    mid:      { assembly: "mid",   gather: "mid",   build: "mid",   judgment: "mid" },
+    frontier: { assembly: "frontier", gather: "frontier", build: "frontier", judgment: "frontier" },
   },
   // $/M tokens [input, output]
   tierPrice: { small: [0.40, 1.60], mid: [3.00, 15.00], frontier: [5.00, 25.00], restricted: [6.00, 30.00] },
@@ -105,11 +105,12 @@ export const CONFIG = {
   econMarginPerYr: 0, // netValue <= this at the permitted tier => gated-economics
 
   // class-based defaults for the quantitative layer (used when not stated -> provenance "inferred")
-  defaults: { theo: { assembly: 70, judgment: 35, decision: 10 },
-              touch: { assembly: 60, judgment: 45, decision: 30 } },
+  defaults: { theo: { assembly: 70, gather: 70, build: 70, judgment: 35, decision: 10, human_held: 0 },
+              touch: { assembly: 60, gather: 60, build: 60, judgment: 45, decision: 30, human_held: 0 } },
 };
 
-const CLASSES = ["assembly", "judgment", "decision"];
+// P4 A1 — five-rung taxonomy. "assembly" kept as legacy alias so existing test fixtures round-trip.
+const CLASSES = ["gather", "build", "judgment", "decision", "human_held", "assembly"];
 // A4 — `restricted` is the de-identified pooled library's generalized residency class (PII/MNPI fold
 // into it). Additive: real intake still uses the five specific tiers; only pooled records use restricted.
 const TIERS = ["public", "internal", "confidential", "PII", "MNPI", "restricted"];
@@ -222,8 +223,10 @@ export const REQUIRED = [
 // every existing caller is unaffected. Used at the top of validateIntake + normalizeIntake.
 export function reconcileIntake(record) {
   if (!record || typeof record !== "object") return record;
-  // Only clone (and reconcile) when a drift field is actually present — keeps the common path cheap.
-  const hasDrift = (record.header && record.header.department != null && record.header.dept == null)
+  // Only clone (and reconcile) when a drift field or legacy cls is present — keeps the common path cheap.
+  const hasClsMigration = Array.isArray(record.steps) && record.steps.some(s => s && s.cls === "assembly");
+  const hasDrift = hasClsMigration
+    || (record.header && record.header.department != null && record.header.dept == null)
     || (record.judgmentCore != null && record.judgment == null)
     || (Array.isArray(record.seams) && record.seams.some(s => s && s.criticality != null && s.crit == null));
   if (!hasDrift) return record;
@@ -231,6 +234,16 @@ export function reconcileIntake(record) {
   if (r.header && r.header.department != null && r.header.dept == null) r.header.dept = r.header.department;
   if (r.judgmentCore != null && r.judgment == null) r.judgment = r.judgmentCore;
   (r.seams || []).forEach(s => { if (s && s.criticality != null && s.crit == null) s.crit = s.criticality; });
+  // P4 A1 — migrate legacy "assembly" to "gather" (read/retrieve) or "build" (transform/compute).
+  // Verb heuristic: action field takes priority; step name is the fallback.
+  const GATHER_RE = /\b(pull|gather|collect|retriev|search|dig\s+in|extract)\b/i;
+  (r.steps || []).forEach(s => {
+    if (s.cls !== "assembly") return;
+    const act = s.action || null;
+    if (act === "read" || act === "download") { s.cls = "gather"; return; }
+    if (act != null) { s.cls = "build"; return; }
+    s.cls = GATHER_RE.test(String(s.step || "")) ? "gather" : "build";
+  });
   return r;
 }
 
@@ -315,7 +328,7 @@ export function normalizeIntake(record) {
     s._touchProv = s.touch != null ? "stated" : "inferred";
     if (s.touch == null) s.touch = CONFIG.defaults.touch[s.cls] ?? 45;
     if (s.wait == null) s.wait = 0;
-    if (!s.waitKind) s.waitKind = s.cls === "decision" ? "protected" : "reducible";
+    if (!s.waitKind) s.waitKind = (s.cls === "decision" || s.cls === "human_held") ? "protected" : "reducible";
   });
   return r;
 }
@@ -416,7 +429,7 @@ export function buildEntitlementRisk(record, opts = {}) {
 // supply an explicit, documented human override (step.classOverride, >= 8 chars). Additive:
 // false for any step without decision language, so existing capture is byte-identical.
 export function stepDecisionLanguage(step) {
-  if (!step || !step.cls || step.cls === "decision") return false;
+  if (!step || !step.cls || step.cls === "decision" || step.cls === "human_held") return false;
   const text = `${step.step || ""}. ${step.output || ""}. ${step.action || ""}`;
   if (rubricStepClass(text) !== "decision") return false;
   const override = step.classOverride ?? step.overrideRationale;
@@ -426,7 +439,7 @@ export function stepDecisionLanguage(step) {
 
 // permitted addressability for one step (fraction 0..1) = min(theoretical, policy ceiling)
 export function stepPermitted(step, profile) {
-  if (step.cls === "decision") return 0;    // M3 — a decision is NEVER given to AI (defence in depth, independent of the profile config)
+  if (step.cls === "decision" || step.cls === "human_held") return 0; // M3 — decisions and human-held steps are never given to AI
   if (stepDecisionLanguage(step)) return 0; // B2 — a decision in disguise earns NO automation
   const theo = (step.theo ?? 0) / 100;
   const af = step.action != null ? actionCeilingFactor(step.action) : 1; // A3 — the action verb caps automatability (a controlled write/approve carries less than a read)
@@ -518,7 +531,7 @@ export function validPolicyException(exc, dataTier) {
 // model tier for a unit: routing by class, FORCED to restricted by data-tier residency unless a
 // valid, formal policy exception lifts it (M2 — a bare boolean can no longer downgrade PII/MNPI).
 export function modelTier(stepClass, dataTier, mode = "routed", policyException = false) {
-  if (stepClass === "decision") return "human";
+  if (stepClass === "decision" || stepClass === "human_held") return "human";
   let tier = CONFIG.routing[mode][stepClass] || "mid";
   if (RESIDENCY_FORCE.includes(dataTier) && !validPolicyException(policyException, dataTier)) tier = "restricted";
   return tier;
@@ -537,11 +550,11 @@ function costPerRun(tier, c = CONFIG.cost, shape) {
   const p = CONFIG.tierPrice[tier] || CONFIG.tierPrice.mid;
   return (inE * p[0] + outE * p[1]) / 1e6;
 }
-// annual cost-to-serve, blended across the AI-addressable class mix (assembly + judgment; decision is human)
+// annual cost-to-serve, blended across the AI-addressable class mix (gather/build/judgment; decision+human_held are human)
 export function costToServe(steps, profile, mode = "routed", opts = {}) {
   const H = opts.weeklyHours ?? CONFIG.weeklyHours, W = opts.weeks ?? CONFIG.weeks, c = opts.cost ?? CONFIG.cost;
   const totT = sum(steps.map(s => s.time)) || 1;
-  const aiSteps = steps.filter(s => s.cls !== "decision");
+  const aiSteps = steps.filter(s => s.cls !== "decision" && s.cls !== "human_held");
   const permHrsByStep = aiSteps.map(s => ({ s, hrs: (s.time / totT) * stepPermitted(s, profile) * H }));
   const aiPermHrs = sum(permHrsByStep.map(x => x.hrs));
   if (aiPermHrs <= 0) return { runsPerYr: 0, blendedCostPerRun: 0, annual: 0 };
@@ -605,7 +618,7 @@ export function buildTco(record, opts = {}) {
   const cap = roleCapacity(r.steps, profile, opts);
   const grossScaled = cap.grossValue * instances;
   const runAnnual = costToServe(r.steps, profile, mode, opts).annual * instances;
-  const aiSteps = r.steps.filter(s => s.cls !== "decision");          // decision = human, no AI build
+  const aiSteps = r.steps.filter(s => s.cls !== "decision" && s.cls !== "human_held"); // decision+human_held = human, no AI build
   const drv = (s) => (s.solutionShape && T.shape[s.solutionShape]) || T.default;
   // one-time build cost (each AI step is a build unit; agentic steps dominate). Built ONCE for the deployment.
   const build = sum(aiSteps.map(s => drv(s).buildWk)) * rate;
@@ -744,7 +757,7 @@ export function cycleTime(steps, opts = {}) {
   const wRed = opts.reducibleWaitReduction ?? CONFIG.flow.reducibleWaitReduction;
   const lRed = opts.decisionLeadReduction ?? CONFIG.flow.decisionLeadReduction;
   const touchB = sum(steps.map(s => s.touch)), waitB = sum(steps.map(s => s.wait));
-  const touchA = sum(steps.map(s => s.cls === "assembly" ? s.touch * (1 - tRed) : s.touch));
+  const touchA = sum(steps.map(s => (s.cls === "assembly" || s.cls === "gather" || s.cls === "build") ? s.touch * (1 - tRed) : s.touch));
   const waitA = sum(steps.map(s => s.waitKind === "protected" ? s.wait * (1 - lRed) : s.wait * (1 - wRed)));
   const cycleB = touchB + waitB, cycleA = touchA + waitA;
   return {
@@ -842,9 +855,9 @@ export function roleCapacityByActor(record, profile = "Conservative", opts = {})
     g.freedHrs += permH * ff;
     g.realizedHrs += permH * ff * rf;
     g.time += s.time; g.stepCount += 1;
-    if (s.cls === "assembly") g.assemblyTime += s.time;
+    if (s.cls === "assembly" || s.cls === "gather" || s.cls === "build") g.assemblyTime += s.time;
     else if (s.cls === "judgment") g.judgmentTime += s.time;
-    else g.decisionTime += s.time;
+    else g.decisionTime += s.time; // decision + human_held
   });
   const roles = [...groups.values()].map(g => ({
     ...g,
@@ -933,8 +946,8 @@ export function deriveRoutes(record) {
 const TIER_RANK = { public: 0, internal: 1, confidential: 2, PII: 3, MNPI: 4, restricted: 4 }; // A4 — restricted ranks as most-sensitive (= MNPI)
 const uniq = a => [...new Set(a.filter(Boolean).map(s => String(s).trim()).filter(Boolean))];
 const dash = s => (s && String(s).trim()) ? String(s).trim() : "\u2014";
-const asm = steps => steps.filter(s => s.cls === "assembly");
-const humans = steps => steps.filter(s => s.cls && s.cls !== "assembly");
+const asm = steps => steps.filter(s => s.cls === "assembly" || s.cls === "gather" || s.cls === "build");
+const humans = steps => steps.filter(s => s.cls && s.cls !== "assembly" && s.cls !== "gather" && s.cls !== "build");
 const maxTier = r => {
   let m = "", mx = -1;
   (r.steps || []).forEach(s => { if (s.data && TIER_RANK[s.data] > mx) { mx = TIER_RANK[s.data]; m = s.data; } });
@@ -955,8 +968,8 @@ export function buildDraftSpec(record, opts = {}) {
   const human = humans(r.steps);
   const mode = opts.mode || "routed", profile = opts.profile || "Conservative";
 
-  // model-fit: tier per AI-addressable class; residency note from AI-addressable steps only (not the human decision)
-  const aiSteps = (r.steps || []).filter(s => s.cls !== "decision");
+  // model-fit: tier per AI-addressable class; residency note from AI-addressable steps only (not the human decision or human-held)
+  const aiSteps = (r.steps || []).filter(s => s.cls !== "decision" && s.cls !== "human_held");
   let aiMaxTier = "", _mx = -1; aiSteps.forEach(s => { if (s.data && TIER_RANK[s.data] > _mx) { _mx = TIER_RANK[s.data]; aiMaxTier = s.data; } });
   const aiTiers = uniq(asm(r.steps).map(s => modelTier(s.cls, s.data, mode, opts.policyException)));
   let modelFit = `Routed \u2014 assembly \u2192 ${aiTiers.join("/") || "small"}; judgment-adjacent \u2192 mid; decision stays human.`;
@@ -1045,9 +1058,9 @@ export function buildDraftRecipe(record, opts = {}) {
 
   // ordered build steps: assembly -> an AI instruction at its tier; judgment/decision -> a human checkpoint
   const ordered = r.steps.map(s => {
-    // B2 \u2014 a step tagged assembly but whose text commits the firm is NEVER rendered as an AI step;
+    // B2 \u2014 a step tagged gather/build but whose text commits the firm is NEVER rendered as an AI step;
     // it falls through to a human checkpoint that says split prep from the decision.
-    const base = (s.cls === "assembly" && !stepDecisionLanguage(s))
+    const base = ((s.cls === "assembly" || s.cls === "gather" || s.cls === "build") && !stepDecisionLanguage(s))
       ? {
           kind: "ai-step", step: s.step, tier: modelTier(s.cls, s.data, mode, opts.policyException),
           action: `Assemble: ${dash(s.output) === "\u2014" ? s.step : dash(s.output)} from ${dash(s.inputs)} using ${dash(s.tool)}.`,
@@ -1057,6 +1070,8 @@ export function buildDraftRecipe(record, opts = {}) {
           kind: "human-checkpoint", step: s.step, cls: s.cls,
           action: stepDecisionLanguage(s)
             ? `Decision/commitment language in a step tagged "${s.cls}" \u2014 AI prepares the lead-up only; the call stays with the person. Split prep (AI) from the decision before hardening.`
+            : s.cls === "human_held"
+            ? `Human-held: ${s.step}. Trust, strategy, or relationship — not addressable by AI.`
             : s.cls === "decision"
             ? `Human decision: ${s.step}. AI prepares the lead-up only; the call stays with the person.`
             : `Human judgment: ${s.step}. AI surfaces options/evidence; the person decides.`,
@@ -1331,12 +1346,15 @@ export function buildAiHybridHumanMix(records, opts = {}) {
   const confirmed = (Array.isArray(records) ? records : []).filter(isConfirmed);
   let ai = 0, hybrid = 0, human = 0;
   confirmed.forEach(rec => normalizeIntake(rec).steps.forEach(s => {
-    const t = s.time || 0; if (s.cls === "assembly") ai += t; else if (s.cls === "judgment") hybrid += t; else human += t;
+    const t = s.time || 0;
+    if (s.cls === "assembly" || s.cls === "gather" || s.cls === "build") ai += t;
+    else if (s.cls === "judgment") hybrid += t;
+    else human += t; // decision + human_held
   }));
   const tot = ai + hybrid + human || 1;
   const pct = n => round(n / tot * 100);
   return { ai: pct(ai), hybrid: pct(hybrid), human: pct(human), confirmedCount: confirmed.length,
-    whereTheLineSits: `AI carries ${pct(ai)}% (assembly); ${pct(hybrid)}% is hybrid (judgment — AI assists, the person decides); ${pct(human)}% stays human (the decisions).` };
+    whereTheLineSits: `AI carries ${pct(ai)}% (gather/build); ${pct(hybrid)}% is hybrid (judgment — AI assists, the person decides); ${pct(human)}% stays human (decisions and human-held).` };
 }
 
 // C3 — the two gap tiles, each with its remedy. The POLICY tile is RED whenever a policy gap exists —
@@ -1436,7 +1454,7 @@ export function buildHonestUnderPressure(records, opts = {}) {
   confirmed.forEach(rec => {
     if (provenanceBlockers(rec).length) inferredUnits += 1;
     const r = normalizeIntake(rec);
-    excludedDecisionSteps += r.steps.filter(s => s.cls === "decision").length;
+    excludedDecisionSteps += r.steps.filter(s => s.cls === "decision" || s.cls === "human_held").length;
     const cap = roleCapacity(r.steps, opts.profile || "Conservative", opts);
     if ((cap.theoPct - cap.permittedPct) > 0.01) policyBlocked += 1;
   });
@@ -1719,7 +1737,7 @@ export function buildTechGovKpis(records, opts = {}) {
     if (canHarden(rec)) hardened += 1;
     const hasEvals = !!(rec.confirm?.evals || "").trim();
     const hasHumanOwner = !!(rec.confirm?.checker || rec.judgment?.human);
-    r.steps.filter(s => s.cls !== "decision").forEach(s => {
+    r.steps.filter(s => s.cls !== "decision" && s.cls !== "human_held").forEach(s => {
       aiSteps += 1;
       const owned = hasHumanOwner || (Array.isArray(s.participants) && s.participants.some(p => p.part === "approver" && !isNonHumanActor(p.actorId, rec)));
       if (owned) aiWithOwner += 1;
@@ -1917,7 +1935,7 @@ export function buildCapabilityMap(records, opts = {}) {
     const r = normalizeIntake(rec);
     const totT = sum(r.steps.map(s => s.time)) || 1;
     const wf = rec.header?.anchor || rec.header?.persona || "workflow";
-    r.steps.filter(s => s.cls === "assembly").forEach(s => {
+    r.steps.filter(s => s.cls === "assembly" || s.cls === "gather" || s.cls === "build").forEach(s => {
       const sig = capabilitySignature(s);
       if (!caps.has(sig)) caps.set(sig, { capability: sig, occurrences: [], workflows: new Set(), combinedLeverage: 0 });
       const c = caps.get(sig);
@@ -2190,14 +2208,16 @@ const RUBRIC_SEND_FINAL_RE = /\bsend(?:s|ing)?\b[^.]*\b(final|memo|client|custom
 const RUBRIC_DECIDE_COMMIT_RE = /\bdecide\s+(?:if|whether)\b|\bdecide\b[^.]*\b(?:page|incident|escalat)/i;
 // needs a person's read -> judgment. "decide/choose WHICH/WHAT" is a read (not a firm-commit).
 const RUBRIC_JUDGMENT_RE = /\b(?:assess|interpret|weigh|evaluat|prioriti[sz]e|judge|decid(?:e|ing)\s+wh(?:ich|at)|choose\s+(?:wh|the\s+relevant|relevant)|select\s+(?:wh|the\s+relevant|relevant)|which\s+\w+\s+(?:are|is)\s+relevant|figure\s+out\s+wh|understand\s+the\s+(?:request|ask|situation|case)|techniques?\s+to\s+use|where\s+the\s+art\s+is)/i;
-// rule-following, same inputs -> same output -> assembly (AI can carry it, with a spot-check).
+// rule-following, same inputs -> same output -> gather or build (AI can carry it, with a spot-check).
 const RUBRIC_ASSEMBLY_RE = /\b(?:pull|gather|extract|\bmap\b|format|populat|reconcil|comput|calculat|work(?:s|ed|ing)?\s+out|draft|classif|categor|collect|retriev|summari[sz]e|correlat|spread|search|dig\s+in|tie[\s-]?out|review|book|post)/i;
+// P4 A1 — within RUBRIC_ASSEMBLY_RE, read/retrieve verbs → gather; transform/compute verbs → build.
+const RUBRIC_GATHER_RE = /\b(?:pull|gather|collect|retriev|search|dig\s+in|extract)\b/i;
 
 export function rubricStepClass(text) {
   const t = String(text || "");
   if (RUBRIC_DECISION_RE.test(t) || RUBRIC_PUSH_PROD_RE.test(t) || RUBRIC_SEND_FINAL_RE.test(t) || RUBRIC_DECIDE_COMMIT_RE.test(t)) return "decision";
   if (RUBRIC_JUDGMENT_RE.test(t)) return "judgment";
-  if (RUBRIC_ASSEMBLY_RE.test(t)) return "assembly";
+  if (RUBRIC_ASSEMBLY_RE.test(t)) return RUBRIC_GATHER_RE.test(t) ? "gather" : "build";
   return "judgment"; // round UP when unsure — never silently assembly
 }
 const rubricHasVerb = (t) => RUBRIC_DECISION_RE.test(t) || RUBRIC_PUSH_PROD_RE.test(t) || RUBRIC_SEND_FINAL_RE.test(t) || RUBRIC_DECIDE_COMMIT_RE.test(t) || RUBRIC_JUDGMENT_RE.test(t) || RUBRIC_ASSEMBLY_RE.test(t);
@@ -2209,8 +2229,9 @@ export function rubricClassify(utterance) {
   const clauses = t.split(/\b(?:and then|and|then)\b|[,;.]/i).map(s => s.trim()).filter(s => s.length > 2);
   const acts = clauses.map(c => ({ text: c, cls: rubricStepClass(c) })).filter(a => rubricHasVerb(a.text));
   const classes = new Set(acts.map(a => a.cls));
-  const split = acts.length >= 2 && classes.has("assembly") && (classes.has("judgment") || classes.has("decision"));
-  const overall = classes.has("decision") ? "decision" : classes.has("judgment") ? "judgment" : (classes.has("assembly") ? "assembly" : rubricStepClass(t));
+  const isAI = cls => cls === "gather" || cls === "build" || cls === "assembly";
+  const split = acts.length >= 2 && acts.some(a => isAI(a.cls)) && (classes.has("judgment") || classes.has("decision"));
+  const overall = classes.has("decision") ? "decision" : classes.has("judgment") ? "judgment" : (acts.some(a => isAI(a.cls)) ? acts.find(a => isAI(a.cls)).cls : rubricStepClass(t));
   return { split, steps: split ? acts.map(a => ({ text: a.text, cls: a.cls })) : [{ text: t, cls: overall }], cls: overall,
     // a facilitation/template step's output is deliberately incomplete — AI must NOT pre-fill the answer.
     aiMustNotPrefill: /facilitat|deliberately incomplete|live during|template with headers|populate it live|not coming with it|fill(?:s|ing)?\s+in\s+the\s+answer/i.test(t) };
@@ -2227,10 +2248,11 @@ export function rubricDataTier(text) {
   if (/\b(public|published|press release)\b/.test(t)) return "public";
   return null;
 }
-// theo % — honest, never 100 for assembly (setup, exceptions, verification keep headroom: ~65–80%).
+// theo % — honest, never 100 for gather/build (setup, exceptions, verification keep headroom: ~65–80%).
 export function rubricTheoRange(cls) {
-  if (cls === "assembly") return [65, 80];
+  if (cls === "gather" || cls === "build" || cls === "assembly") return [65, 80];
   if (cls === "judgment") return [20, 40];
+  if (cls === "human_held") return [0, 0];
   return [5, 15];
 }
 // seam friction — mechanical toil only (re-key/swivel/manual). "one click" is LOW friction.
@@ -2360,7 +2382,7 @@ export function flagCombinedStep(text) {
     // forces a split (assembly bundled with a judgment/decision). null when the step is single-act.
     boundary: rc.split ? "class-change" : null,
     suggestion: rc.split
-      ? `Split into ${rc.steps.length} steps: ${rc.steps.map(a => `"${String(a.text || "").trim()}" (${a.cls})`).join(" + ")}. AI carries the assembly; the person keeps the judgment/decision.`
+      ? `Split into ${rc.steps.length} steps: ${rc.steps.map(a => `"${String(a.text || "").trim()}" (${a.cls})`).join(" + ")}. AI carries the gather/build step; the person keeps the judgment/decision.`
       : null,
   };
 }
@@ -2677,12 +2699,12 @@ export const FPA_INTAKE = {
   header: { persona: "FP&A analyst", dept: "Finance", anchor: "Last monthly forecast refresh & variance pack", lifecycle: "confirmed" },
   trigger: { trigger: "month-end close completes", cadence: "monthly", volume: "~12/yr" },
   steps: [
-    { step: "Collect & consolidate", cls: "assembly", data: "confidential", time: 18, theo: 85, touch: 90, wait: 0, waitKind: "reducible", inputs: "GL extract", output: "consolidated actuals", consumer: "self", tool: "ERP, Excel" },
-    { step: "Reconcile & validate", cls: "assembly", data: "confidential", time: 16, theo: 70, touch: 120, wait: 240, waitKind: "reducible", inputs: "sub-ledger vs GL", output: "reconciled figures", consumer: "self", tool: "ERP, Excel" },
-    { step: "Build & refresh models", cls: "assembly", data: "confidential", time: 14, theo: 55, touch: 90, wait: 0, waitKind: "reducible", inputs: "actuals, drivers", output: "updated model", consumer: "self", tool: "Excel" },
+    { step: "Collect & consolidate", cls: "gather", data: "confidential", time: 18, theo: 85, touch: 90, wait: 0, waitKind: "reducible", inputs: "GL extract", output: "consolidated actuals", consumer: "self", tool: "ERP, Excel" },
+    { step: "Reconcile & validate", cls: "build", data: "confidential", time: 16, theo: 70, touch: 120, wait: 240, waitKind: "reducible", inputs: "sub-ledger vs GL", output: "reconciled figures", consumer: "self", tool: "ERP, Excel" },
+    { step: "Build & refresh models", cls: "build", data: "confidential", time: 14, theo: 55, touch: 90, wait: 0, waitKind: "reducible", inputs: "actuals, drivers", output: "updated model", consumer: "self", tool: "Excel" },
     { step: "Variance analysis", cls: "judgment", data: "confidential", time: 14, theo: 30, touch: 60, wait: 0, waitKind: "reducible", inputs: "actuals vs forecast", output: "explained variances", consumer: "reviewer", tool: "Excel" },
-    { step: "Draft commentary", cls: "assembly", data: "confidential", time: 16, theo: 60, touch: 60, wait: 480, waitKind: "reducible", inputs: "variances", output: "narrative", consumer: "reporting manager", tool: "Excel, Word" },
-    { step: "Forecast updates", cls: "assembly", data: "confidential", time: 12, theo: 50, touch: 45, wait: 2880, waitKind: "protected", inputs: "revised assumptions", output: "updated forecast", consumer: "leadership", tool: "Excel" },
+    { step: "Draft commentary", cls: "build", data: "confidential", time: 16, theo: 60, touch: 60, wait: 480, waitKind: "reducible", inputs: "variances", output: "narrative", consumer: "reporting manager", tool: "Excel, Word" },
+    { step: "Forecast updates", cls: "build", data: "confidential", time: 12, theo: 50, touch: 45, wait: 2880, waitKind: "protected", inputs: "revised assumptions", output: "updated forecast", consumer: "leadership", tool: "Excel" },
     { step: "Stakeholder advisory", cls: "decision", data: "MNPI", time: 10, theo: 10, touch: 30, wait: 0, waitKind: "reducible", inputs: "the pack", output: "guidance", consumer: "leadership", tool: "meeting" },
   ],
   seams: [
@@ -2718,7 +2740,7 @@ export const RECON_INTAKE = {
     ] },
   ],
   steps: [
-    { step: "Allocate exception", cls: "assembly", data: "internal", time: 10, theo: 80, touch: 30, wait: 60, waitKind: "reducible",
+    { step: "Allocate exception", cls: "build", data: "internal", time: 10, theo: 80, touch: 30, wait: 60, waitKind: "reducible",
       inputs: "exception queue", output: "allocated case", tool: "case manager",
       participants: [{ actorId: "teamLead", part: "doer" }],
       control: { type: "completeness", rule: "every exception allocated within SLA; none left unassigned" } },
@@ -2733,7 +2755,7 @@ export const RECON_INTAKE = {
       inputs: "proposed adjustment", output: "approval", tool: "case manager",
       participants: [{ actorId: "maker", part: "doer" }, { actorId: "checker", part: "approver" }],
       control: { type: "four-eyes", distinct: ["doer", "approver"], authorityRef: "authorityMatrix:writeOff" } },
-    { step: "Post adjustment", cls: "assembly", data: "confidential", time: 14, theo: 75, touch: 30, wait: 0, waitKind: "reducible",
+    { step: "Post adjustment", cls: "build", data: "confidential", time: 14, theo: 75, touch: 30, wait: 0, waitKind: "reducible",
       inputs: "approval", output: "posted entry", tool: "ERP",
       participants: [{ actorId: "maker", part: "doer" }] },
     { step: "Close & sign off", cls: "decision", data: "internal", time: 8, theo: 10, touch: 20, wait: 0, waitKind: "protected",
@@ -2793,7 +2815,7 @@ function runTests() {
 
   // A2 — RUN-COST vs TCO as two separate lenses; both bands; shape drives TCO + payback
   {
-    const wf = (shape) => ({ ...FPA_INTAKE, steps: FPA_INTAKE.steps.map(s => s.cls === "assembly" ? { ...s, solutionShape: shape } : s) });
+    const wf = (shape) => ({ ...FPA_INTAKE, steps: FPA_INTAKE.steps.map(s => (s.cls === "gather" || s.cls === "build" || s.cls === "assembly") ? { ...s, solutionShape: shape } : s) });
     const tProm = buildTco(wf("prompt"), { instances: 18 }), tAgent = buildTco(wf("agentic"), { instances: 18 });
     ok("A2 run-cost and TCO are separate", tProm.runCost.point !== tProm.tco.firstYear.point && tProm.tco.buildOneTime.point > 0, "");
     ok("A2 agentic TCO build >> prompt TCO build", tAgent.tco.buildOneTime.point > tProm.tco.buildOneTime.point * 3, `${tAgent.tco.buildOneTime.point} vs ${tProm.tco.buildOneTime.point}`);
@@ -3051,7 +3073,7 @@ function runTests() {
     const leaks = ["Acme Corp", "SECRET", "John Smith", "123-45-6789", "9988", "AcmeSecretTool", "client X", "SECRETSAUCE", "PROPRIETARY"].filter(s => json.includes(s));
     ok("A4 pooled record leaks NO PII/MNPI/name/proprietary free-text", leaks.length === 0, JSON.stringify(leaks));
     ok("A4 pooled record never holds a literal PII/MNPI tier value (generalized to restricted)", !/"(PII|MNPI)"/.test(json), "");
-    ok("A4 pooled record keeps the de-identified shape (class/tier/capability/metrics)", pooled.steps[0].cls === "assembly" && pooled.steps[0].data === "restricted" && !!pooled.steps[0].capability && pooled.steps[0].time === 18, JSON.stringify(pooled.steps[0]));
+    ok("A4 pooled record keeps the de-identified shape (class/tier/capability/metrics)", pooled.steps[0].cls === "gather" && pooled.steps[0].data === "restricted" && !!pooled.steps[0].capability && pooled.steps[0].time === 18, JSON.stringify(pooled.steps[0]));
     ok("A4 pooled record still passes isConfirmed (placeholders, not sensitive)", isConfirmed(pooled), "");
     const two = splitDiscoveryTiers(dirty);
     ok("A4 split writes both tiers (full engagement + de-identified pooled)", two.engagement === dirty && two.pooled.deIdentified === true, "");
@@ -3067,7 +3089,7 @@ function runTests() {
     // recon s1 ("Classify and open") is TWO steps by the rule — a human-held read carved from the open
     const s1 = splitCombinedStep(RECON_S1_COMBINED);
     ok("A1 recon s1 'Classify and open' splits into two steps", s1.combined === true && s1.steps.length === 2, `${s1.combined}/${s1.steps.length}`);
-    ok("A1 recon s1 split keeps a human-held read + a carried assembly", s1.steps.some(x => x.cls === "judgment") && s1.steps.some(x => x.cls === "assembly"), JSON.stringify(s1.steps.map(x => x.cls)));
+    ok("A1 recon s1 split keeps a human-held read + a carried gather/build", s1.steps.some(x => x.cls === "judgment") && s1.steps.some(x => x.cls === "gather" || x.cls === "build" || x.cls === "assembly"), JSON.stringify(s1.steps.map(x => x.cls)));
     ok("A1 a single-act step is NOT split (round-trips as one)", splitCombinedStep({ step: "Reconcile the two ledgers", cls: "assembly", data: "internal" }).combined === false, "");
     // Option-A: a one-class step touching three systems stays ONE step; capacity is NOT divided per system
     const oneSys = [{ step: "Pull and reconcile feeds", cls: "assembly", data: "internal", time: 100, theo: 80, tool: "ERP" }];
@@ -3172,7 +3194,7 @@ function runTests() {
   // B1 — clean capture: combined-step split flag + the contradiction queue
   {
     ok("B1 'draft and approve' is flagged for split at capture", flagCombinedStep("draft and approve the memo").combined === true, "");
-    ok("B1 the split names the assembly + decision acts", (() => { const f = flagCombinedStep("draft and approve the memo"); return f.acts.length >= 2 && f.acts.some(a => a.cls === "assembly") && f.acts.some(a => a.cls === "decision"); })(), "");
+    ok("B1 the split names the build/gather + decision acts", (() => { const f = flagCombinedStep("draft and approve the memo"); return f.acts.length >= 2 && f.acts.some(a => a.cls === "build" || a.cls === "gather" || a.cls === "assembly") && f.acts.some(a => a.cls === "decision"); })(), "");
     ok("B1 a single assembly act is NOT flagged (no false split)", flagCombinedStep("reconcile the two ledgers").combined === false, "");
     // contradiction queue — a step tagged assembly but committing the firm lands in the queue
     const mis = { steps: [{ step: "Approve the waiver and send it", cls: "assembly", data: "internal", time: 10, theo: 80 }] };
@@ -3209,8 +3231,8 @@ function runTests() {
     ok("B3 the recipe carries shape / eval plan / owner / fallback / maintenance", !!proof.solutionShapes && Array.isArray(proof.evalPlan) && !!proof.owner && !!proof.fallback && proof.maintenanceCost.annualPoint >= 0, "");
     ok("B3 'how you prove it' derives a golden set + thresholds from acceptance", /golden set/.test(proof.howYouProveIt.goldenSet) && /meets:/.test(proof.howYouProveIt.thresholds) && /routes back/.test(proof.howYouProveIt.fallback), JSON.stringify(proof.howYouProveIt));
     // shape drives the eval plan: an agentic recipe demands the harness; a prompt does not
-    const agentic = buildRecipeProof({ ...FPA_INTAKE, steps: FPA_INTAKE.steps.map(s => s.cls === "assembly" ? { ...s, solutionShape: "agentic" } : s) });
-    ok("B3 an agentic recipe's eval plan demands a harness; a prompt's does not", agentic.evalPlan.some(e => /harness/.test(e)) && !buildRecipeProof({ ...FPA_INTAKE, steps: FPA_INTAKE.steps.map(s => s.cls === "assembly" ? { ...s, solutionShape: "prompt" } : s) }).evalPlan.some(e => /harness/.test(e)), JSON.stringify(agentic.evalPlan));
+    const agentic = buildRecipeProof({ ...FPA_INTAKE, steps: FPA_INTAKE.steps.map(s => (s.cls === "gather" || s.cls === "build" || s.cls === "assembly") ? { ...s, solutionShape: "agentic" } : s) });
+    ok("B3 an agentic recipe's eval plan demands a harness; a prompt's does not", agentic.evalPlan.some(e => /harness/.test(e)) && !buildRecipeProof({ ...FPA_INTAKE, steps: FPA_INTAKE.steps.map(s => (s.cls === "gather" || s.cls === "build" || s.cls === "assembly") ? { ...s, solutionShape: "prompt" } : s) }).evalPlan.some(e => /harness/.test(e)), JSON.stringify(agentic.evalPlan));
     // a non-gated workflow (no policy gap) names no remedy
     const clean = buildRecipeProof({ steps: [{ step: "x", cls: "assembly", data: "internal", time: 10, theo: 50 }], confirm: { acceptance: "matches" } }, { profile: "Progressive" });
     ok("B3 a non-gated recipe names NO false remedy", clean.governanceRemedy.gated === false && clean.governanceRemedy.remedy === null, JSON.stringify(clean.governanceRemedy));
@@ -3218,8 +3240,8 @@ function runTests() {
 
   // C1 — shared slice + drill-down + three-lenses-always
   {
-    const tech = { ...FPA_INTAKE, header: { ...FPA_INTAKE.header, dept: "Technology", anchor: "tech-wf" }, steps: FPA_INTAKE.steps.map(s => s.cls === "assembly" ? { ...s, solutionShape: "agentic", data: "internal" } : { ...s, data: "internal" }), confirm: { ...FPA_INTAKE.confirm, dataTier: "internal" } };
-    const credit = { ...FPA_INTAKE, header: { ...FPA_INTAKE.header, dept: "Credit Risk", anchor: "credit-wf" }, steps: FPA_INTAKE.steps.map(s => s.cls === "assembly" ? { ...s, solutionShape: "prompt" } : s) };
+    const tech = { ...FPA_INTAKE, header: { ...FPA_INTAKE.header, dept: "Technology", anchor: "tech-wf" }, steps: FPA_INTAKE.steps.map(s => (s.cls === "gather" || s.cls === "build" || s.cls === "assembly") ? { ...s, solutionShape: "agentic", data: "internal" } : { ...s, data: "internal" }), confirm: { ...FPA_INTAKE.confirm, dataTier: "internal" } };
+    const credit = { ...FPA_INTAKE, header: { ...FPA_INTAKE.header, dept: "Credit Risk", anchor: "credit-wf" }, steps: FPA_INTAKE.steps.map(s => (s.cls === "gather" || s.cls === "build" || s.cls === "assembly") ? { ...s, solutionShape: "prompt" } : s) };
     const set = [tech, credit];
     ok("C1 slice by department filters all dashboards", sliceRecords(set, { dimension: "department", value: "Technology" }).length === 1, "");
     ok("C1 slice by solution shape = agentic filters to the agentic workflow", sliceRecords(set, { dimension: "solutionShape", value: "agentic" }).length === 1 && sliceRecords(set, { dimension: "solutionShape", value: "agentic" })[0].header.dept === "Technology", "");
@@ -3459,7 +3481,7 @@ function runTests() {
   ok("D3 a shared system NAME alone is NOT combinable (needs shared action + data + access)", classifyUtterance("both teams work in the same CRM, so these two workflows are the same build \u2014 just combine them").combinable === false, "");
   ok("D3 a genuine shared action + data + access DOES read as combinable", classifyUtterance("same task, same data, same access on both \u2014 one build for both, combine them").combinable === true, "");
   ok("D3 read-only on a report stays a read (no false write/approve, not high-value)", (() => { const r = classifyUtterance("I just read the report and pull the figures into a summary"); return r.action === "read" && r.entitlement === "read" && r.highValue === false; })(), "");
-  ok("D3 the v3 reads are additive \u2014 the existing fields are unchanged (a clean assembly still reads assembly)", (() => { const r = classifyUtterance("reconcile the two ledgers"); return r.cls === "assembly" && Array.isArray(r.theoRange) && r.combinable === null; })(), "");
+  ok("D3 the v3 reads are additive \u2014 the existing fields are unchanged (a clean build still reads build)", (() => { const r = classifyUtterance("reconcile the two ledgers"); return r.cls === "build" && Array.isArray(r.theoRange) && r.combinable === null; })(), "");
 
   // ---- Phase 3 \u00b7 D4 \u2014 the real-seed ingestion path (the marker drops only on a genuine confirmed pilot) ----
   ok("D4 a genuine confirmed seed is ACCEPTED \u2014 realConfirmedSeed flips true, marker null", (() => { const r = ingestRealSeed(RECON_INTAKE); return r.accepted === true && r.realConfirmedSeed === true && r.marker === null; })(), JSON.stringify(ingestRealSeed(RECON_INTAKE).reasons));

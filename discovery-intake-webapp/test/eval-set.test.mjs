@@ -51,10 +51,11 @@ function producesDangerousWrong(c, r) {
   return false;
 }
 
-// A "meaningful split" carves an assembly act away from a judgment/decision act (so AI can't carry the call).
+// A "meaningful split" carves a gather/build act away from a judgment/decision act (so AI can't carry the call).
 function expectsMeaningfulSplit(c) {
+  const AI_CLASSES = ["gather", "build", "assembly"];
   const steps = (c.expected && c.expected.steps) || [];
-  return c.expected && c.expected.split === true && steps.some((s) => s.cls === "assembly") && steps.some((s) => s.cls !== "assembly");
+  return c.expected && c.expected.split === true && steps.some((s) => AI_CLASSES.includes(s.cls)) && steps.some((s) => !AI_CLASSES.includes(s.cls));
 }
 
 // ---- the gate: zero dangerous-wrong across the whole eval set ----
@@ -131,7 +132,7 @@ test("an unstated acceptance bar is recorded as inferred, never stated", () => {
 test("a facilitation/template step flags that AI must NOT pre-fill the answer", () => {
   const c = EVAL.cases.find((x) => x.id === "template-not-answer");
   const r = engine.classifyUtterance(c.sme_says);
-  assert.equal(r.cls, "assembly");
+  assert.ok(r.cls === "build" || r.cls === "assembly", `template cls: ${r.cls}`);
   assert.equal(r.aiMustNotPrefill, true);
 });
 

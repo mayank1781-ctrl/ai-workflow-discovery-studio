@@ -11,7 +11,7 @@ import * as E from "../studio_engine.mjs";
 
 const wf = (shape) => ({
   ...E.FPA_INTAKE,
-  steps: E.FPA_INTAKE.steps.map(s => s.cls === "assembly" ? { ...s, solutionShape: shape } : s),
+  steps: E.FPA_INTAKE.steps.map(s => (s.cls === "gather" || s.cls === "build" || s.cls === "assembly") ? { ...s, solutionShape: shape } : s),
 });
 
 test("A2 — runCost and TCO are exposed separately, both as bands", () => {
