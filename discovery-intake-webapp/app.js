@@ -14265,6 +14265,337 @@ function dashOrgTierHtml(records, opts) {
     <div style="display:flex;gap:10px;flex-wrap:wrap;">${adjBlock}${handoffTile}${slaTile}</div></section>`;
 }
 
+// ── C-11 · Executive Dashboard — verdict blocks + metric toggle chart ─────────
+// Return (blue) / Trust (blue→pink) / Speed (violet) verdict blocks.
+// Per-metric toggle bar chart (value | hours | cycle) with per-step SVG bars.
+// Executive diagnoses; "what to do with freed capacity" is Workforce (C-12).
+// Sources: lv (engine aggregate, never re-computed here) + per-step grid cells.
+
+const ED11_AI_LED = ["gather", "build", "assembly"];
+const ED11_HUMAN_LED = ["judgment", "decision", "human_held"];
+
+const ED11_MET = {
+  value: { label: "Value", color: "#8FB6FF", glow: "rgba(77,139,255,.5)", g0: "#7FC0FF", g1: "#4D8BFF",
+           togLabels: ["Gross (before token cost)", "Net of token run-cost"] },
+  hours: { label: "Hours", color: "#63E6D6", glow: "rgba(43,216,200,.5)", g0: "#6FF0E2", g1: "#2BD8C8",
+           togLabels: ["Freed hours", "FTE-equivalent capacity"] },
+  cycle: { label: "Cycle time", color: "#B89DF5", glow: "rgba(157,123,240,.55)", g0: "#B89DF5", g1: "#9D7BF0",
+           togLabels: ["Cycle today", "After AI (wait removed)"] }
+};
+
+function ed11Dollars(n) {
+  if (n == null || !isFinite(n)) return "—";
+  if (Math.abs(n) >= 1e6) return "$" + (n / 1e6).toFixed(2) + "M";
+  if (Math.abs(n) >= 1e3) return "$" + Math.round(n / 1e3) + "k";
+  return "$" + Math.round(n).toLocaleString("en-US");
+}
+
+function ed11HrsLabel(h) {
+  if (!h || !isFinite(h)) return "—";
+  if (h >= 1000) return (h / 1000).toFixed(1) + "k hr";
+  return Math.round(h) + " hr";
+}
+
+function ed11KpiCard(label, val, sub, accent) {
+  return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:4px;">`
+    + `<div style="font-family:'JetBrains Mono',monospace;font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:rgba(255,255,255,.4);">${escapeHtml(label)}</div>`
+    + `<div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:20px;font-weight:600;color:${accent || "#ECEAF6"};letter-spacing:-.02em;">${escapeHtml(String(val))}</div>`
+    + (sub ? `<div style="font-size:11px;color:rgba(255,255,255,.38);line-height:1.3;">${escapeHtml(sub)}</div>` : "")
+    + `</div>`;
+}
+
+function ed11KpiTrioHtml(lv, steps, metric) {
+  const dep = (lv && lv.breakdown && lv.breakdown.deployable) || {};
+  const chain = dep.chain || {};
+  const aiSteps = steps.filter(s => ED11_AI_LED.includes(s.cls || "assembly"));
+  const confirmedAi = aiSteps.filter(s => s.workbenchConfirmed).length;
+  const aiPct = steps.length ? Math.round((aiSteps.length / steps.length) * 100) : 0;
+
+  if (metric === "hours") {
+    const freed = chain.freedHrs;
+    const fteEquiv = freed ? (freed / 2080).toFixed(1) : "—";
+    const freedFmt = freed ? ed11HrsLabel(freed) + "/yr" : "—";
+    return `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px;">`
+      + ed11KpiCard("Freed hours /yr", freedFmt, "from confirmed AI-led steps", "#63E6D6")
+      + ed11KpiCard("FTE-equivalent capacity", fteEquiv, "freed hrs ÷ 2,080 (US annual)", "#63E6D6")
+      + ed11KpiCard("AI-led step share", aiPct + "%", aiSteps.length + " of " + steps.length + " captured steps", "#63E6D6")
+      + `</div>`;
+  }
+  if (metric === "cycle") {
+    let totalT = 0, totalCut = 0, count = 0;
+    for (const step of steps.filter(s => s.workbenchConfirmed)) {
+      const t = parseFloat((typeof gridCellValue === "function" ? gridCellValue(step, "timeTaken") : "0") || "0") || 0;
+      const addr = (typeof step.composedAddr === "number" ? step.composedAddr
+        : typeof step.theo === "number" ? step.theo : 0) / 100;
+      if (t > 0) { totalT += t; totalCut += t * addr; count++; }
+    }
+    const compPct = totalT ? Math.round((totalCut / totalT) * 100) : 0;
+    const avgCut = count ? Math.round(totalCut / count) : 0;
+    let longestName = "—";
+    if (steps.length) {
+      const byTime = [...steps].sort((a, b) => {
+        const ta = parseFloat((typeof gridCellValue === "function" ? gridCellValue(a, "timeTaken") : "0") || "0") || 0;
+        const tb = parseFloat((typeof gridCellValue === "function" ? gridCellValue(b, "timeTaken") : "0") || "0") || 0;
+        return tb - ta;
+      });
+      longestName = (byTime[0] && (byTime[0].name || byTime[0].id) || "—").slice(0, 20);
+    }
+    return `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px;">`
+      + ed11KpiCard("Avg cycle cut", avgCut ? avgCut + " min" : "—", "per confirmed step (est.)", "#B89DF5")
+      + ed11KpiCard("Wait compressed", compPct ? compPct + "%" : "—", "of total captured cycle time", "#B89DF5")
+      + ed11KpiCard("Longest pole", longestName, "step with most time captured", "#B89DF5")
+      + `</div>`;
+  }
+  // value (default)
+  const net = dep.net; const gross = dep.gross;
+  return `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px;">`
+    + ed11KpiCard("Net value /yr", net ? ed11Dollars(net) : "—", gross ? ed11Dollars(gross) + " gross" : "Compute business case to model", "#8FB6FF")
+    + ed11KpiCard("Confirmed steps", dep.count != null ? String(dep.count) : String(confirmedAi), "with engine gate clear", "#ECEAF6")
+    + ed11KpiCard("AI-addressable", aiPct + "%", aiSteps.length + " of " + steps.length + " captured steps", "#8FB6FF")
+    + `</div>`;
+}
+
+function ed11BarsSvg(steps, metric, toggle) {
+  const cfg = ED11_MET[metric] || ED11_MET.value;
+  const W = 700, H = 200, padL = 8, padB = 36, padT = 8;
+  const chartW = W - padL * 2, chartH = H - padB - padT;
+  const items = steps.slice(0, 12).map((step, idx) => {
+    const label = String(step.name || step.id || String(idx + 1)).slice(0, 12);
+    const addr = (typeof step.composedAddr === "number" ? step.composedAddr
+      : typeof step.theo === "number" ? step.theo : 70) / 100;
+    const t = parseFloat((typeof gridCellValue === "function" ? gridCellValue(step, "timeTaken") : "0") || "0") || 20;
+    const freq = parseFloat((typeof gridCellValue === "function" ? gridCellValue(step, "frequencyVolume") : "4") || "4") || 4;
+    if (metric === "hours") {
+      const freed = t * addr * freq;
+      return { label, v1: toggle ? freed / 2080 : freed, v2: 0 };
+    }
+    if (metric === "cycle") {
+      if (toggle) return { label, v1: t * (1 - addr), v2: t * addr };
+      return { label, v1: t, v2: 0 };
+    }
+    const impact = addr * t;
+    return { label, v1: toggle ? impact * 0.88 : impact, v2: 0 };
+  });
+  if (!items.length) {
+    return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:${H}px;">`
+      + `<text x="${W/2}" y="${H/2}" fill="rgba(255,255,255,.3)" text-anchor="middle" font-family="Inter,system-ui" font-size="12">`
+      + `No steps captured yet</text></svg>`;
+  }
+  const maxVal = Math.max(...items.flatMap(d => [d.v1, d.v2 || 0]).filter(v => isFinite(v)), 1);
+  const n = items.length;
+  const barW = Math.max(6, Math.floor(chartW / n * 0.55));
+  const stepW = Math.floor(chartW / n);
+  const gid = "bg_" + metric.slice(0,1);
+  const dotId = "dp_" + metric.slice(0,1);
+  const bars = items.map((d, i) => {
+    const x = padL + i * stepW + (stepW - barW) / 2;
+    const h1 = Math.max(2, Math.round((Math.max(d.v1, 0) / maxVal) * chartH));
+    const h2 = d.v2 ? Math.max(2, Math.round((d.v2 / maxVal) * chartH)) : 0;
+    const y1 = padT + chartH - h1;
+    const y2 = y1 - h2;
+    let out = `<rect x="${x}" y="${y1}" width="${barW}" height="${h1}" fill="url(#${gid})" rx="2"/>`;
+    if (h2 > 0) out += `<rect x="${x}" y="${y2}" width="${barW}" height="${h2}" fill="url(#${dotId})" rx="2" opacity="0.7"/>`;
+    out += `<text x="${x + barW / 2}" y="${H - 4}" fill="rgba(255,255,255,.38)" font-size="8" font-family="'JetBrains Mono',monospace" text-anchor="middle">${escapeHtml(d.label)}</text>`;
+    return out;
+  }).join("\n    ");
+  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:${H}px;">
+    <defs>
+      <linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${cfg.g0}"/>
+        <stop offset="100%" stop-color="${cfg.g1}" stop-opacity="0.8"/>
+      </linearGradient>
+      <pattern id="${dotId}" patternUnits="userSpaceOnUse" width="8" height="8">
+        <rect width="8" height="8" fill="transparent"/>
+        <circle cx="4" cy="4" r="1.5" fill="${cfg.g0}" opacity="0.45"/>
+      </pattern>
+    </defs>
+    <line x1="${padL}" y1="${padT + chartH}" x2="${W - padL}" y2="${padT + chartH}" stroke="rgba(255,255,255,.1)" stroke-width="1"/>
+    ${bars}
+  </svg>`;
+}
+
+function ed11MetricPanelHtml(lv, steps, metric, toggle) {
+  const cfg = ED11_MET[metric] || ED11_MET.value;
+  const segBtns = Object.keys(ED11_MET).map(m => {
+    const mc = ED11_MET[m];
+    const on = m === metric;
+    return `<button type="button" data-ed11-metric="${escapeHtml(m)}" style="`
+      + `padding:5px 14px;border-radius:6px;border:none;cursor:pointer;font-family:inherit;font-size:12px;font-weight:600;`
+      + `background:${on ? "rgba(255,255,255,.12)" : "transparent"};`
+      + `color:${on ? mc.color : "rgba(255,255,255,.38)"};`
+      + `box-shadow:${on ? "0 0 10px " + mc.glow : "none"};">`
+      + `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${mc.color};margin-right:5px;vertical-align:middle;"></span>`
+      + escapeHtml(mc.label) + `</button>`;
+  }).join("");
+  const togLabel = cfg.togLabels[toggle ? 1 : 0];
+  const togHtml = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">`
+    + `<div id="ed11ToggleBtn" data-ed11-toggle="1" role="switch" aria-checked="${toggle}" style="width:30px;height:16px;border-radius:8px;background:${toggle ? cfg.color : "rgba(255,255,255,.15)"};position:relative;cursor:pointer;">`
+    + `<div style="width:12px;height:12px;border-radius:50%;background:#fff;position:absolute;top:2px;${toggle ? "right:2px" : "left:2px"};"></div></div>`
+    + `<span id="ed11ToggleLbl" style="font-size:11px;color:rgba(255,255,255,.5);">${escapeHtml(togLabel)}</span></div>`;
+  const cycleLegend = (metric === "cycle" && toggle) ? `<div style="display:flex;gap:14px;margin-top:8px;">`
+    + `<span style="display:flex;align-items:center;gap:5px;font-size:10px;color:rgba(255,255,255,.4);"><span style="width:12px;height:3px;background:${cfg.g1};border-radius:2px;display:inline-block;"></span>cycle now</span>`
+    + `<span style="display:flex;align-items:center;gap:5px;font-size:10px;color:rgba(255,255,255,.4);"><span style="width:12px;height:3px;background:rgba(157,123,240,.4);border:1px dashed ${cfg.g0};display:inline-block;border-radius:2px;"></span>wait removed</span></div>` : "";
+  return `<div style="border:1px solid rgba(255,255,255,.08);border-radius:14px;background:rgba(255,255,255,.03);padding:18px 18px 14px;margin-bottom:16px;">`
+    + `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">`
+    + `<span style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:14px;font-weight:700;color:rgba(255,255,255,.9);">Value created</span>`
+    + `<div style="display:flex;gap:4px;background:rgba(255,255,255,.06);border-radius:8px;padding:3px;">${segBtns}</div></div>`
+    + ed11KpiTrioHtml(lv, steps, metric)
+    + `<div style="background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:14px 12px 8px;">`
+    + togHtml + ed11BarsSvg(steps, metric, toggle) + cycleLegend + `</div></div>`;
+}
+
+// ── Verdict blocks ─────────────────────────────────────────────────────────────
+
+function ed11ReturnHtml(lv) {
+  const dep = (lv && lv.breakdown && lv.breakdown.deployable) || {};
+  const gross = dep.gross; const cost = dep.cost; const net = dep.net;
+  const netFmt = net ? ed11Dollars(net) : "—";
+  const grossFmt = gross ? ed11Dollars(gross) : null;
+  const costPct = (gross && cost && gross > 0) ? Math.round((cost / gross) * 100) : null;
+  const netPct = costPct != null ? 100 - costPct : null;
+  const shapeMix = (lv && lv.breakdown && lv.breakdown.shapeMix) || {};
+  const agePct = typeof shapeMix.agentic === "number" ? Math.round(shapeMix.agentic * 100) : null;
+  const watchText = agePct != null
+    ? "agentic = " + agePct + "% of token spend"
+    : "confirm shapes to model token cost";
+  const watchOk = agePct == null || agePct < 30;
+  const wfRows = (grossFmt && netPct != null) ? [
+    `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">`,
+    `<div style="flex:1;height:16px;background:rgba(111,182,255,.15);border-radius:3px;"></div>`,
+    `<span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:rgba(255,255,255,.38);white-space:nowrap;">gross ${escapeHtml(grossFmt)}</span></div>`,
+    `<div style="display:flex;align-items:center;gap:8px;">`,
+    `<div style="flex:1;height:16px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;display:flex;">`,
+    `<div style="width:${netPct}%;background:linear-gradient(90deg,#7FC0FF,#4D8BFF);height:100%;border-radius:3px 0 0 3px;"></div>`,
+    `<div style="width:${costPct}%;background:repeating-linear-gradient(45deg,rgba(242,178,60,.38) 0 3px,transparent 3px 6px);height:100%;"></div>`,
+    `</div><span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#ECEAF6;white-space:nowrap;">net ${escapeHtml(netFmt)}</span></div>`
+  ].join("") : `<div style="font-size:11px;color:rgba(255,255,255,.3);padding:6px 0;">Compute the business case to model net value.</div>`;
+  return `<div style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:14px;padding:18px 18px 14px;display:flex;flex-direction:column;gap:8px;">`
+    + `<div style="display:flex;align-items:center;justify-content:space-between;">`
+    + `<span style="font-family:'JetBrains Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:rgba(255,255,255,.38);">Return — is it worth it?</span>`
+    + `<span style="width:26px;height:6px;border-radius:3px;background:#4D8BFF;box-shadow:0 0 12px rgba(77,139,255,.6);"></span></div>`
+    + `<div><span style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:26px;font-weight:600;letter-spacing:-.02em;color:#8FB6FF;text-shadow:0 0 18px rgba(77,139,255,.5);">${escapeHtml(netFmt)}</span>`
+    + `<span style="font-size:13px;color:rgba(255,255,255,.38);margin-left:4px;">/yr net</span></div>`
+    + `<div style="font-size:12px;color:rgba(255,255,255,.45);line-height:1.4;">${grossFmt ? `<b style="color:#ECEAF6;">after token run-cost</b> · ${escapeHtml(grossFmt)} gross` : "Compute the business case to model value."}</div>`
+    + `<div style="margin:4px 0;">${wfRows}</div>`
+    + `<div style="display:flex;align-items:center;justify-content:space-between;border-top:1px solid rgba(255,255,255,.08);padding-top:8px;margin-top:2px;">`
+    + `<span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:${watchOk ? "#2BD8C8" : "#F2B23C"};">⚠ ${escapeHtml(watchText)}</span>`
+    + `<button type="button" data-ed11-lens="cost" style="background:none;border:none;font-size:10px;color:#8FB6FF;cursor:pointer;padding:0;font-family:inherit;">Cost lens →</button></div>`
+    + `</div>`;
+}
+
+function ed11TrustHtml(steps) {
+  const total = steps.length || 1;
+  const aiLed = steps.filter(s => ED11_AI_LED.includes(s.cls || "assembly")).length;
+  const humanLed = steps.filter(s => ED11_HUMAN_LED.includes(s.cls || "")).length;
+  const aiPct = Math.round((aiLed / total) * 100);
+  const humanPct = 100 - aiPct;
+  const ownBar = `<div style="display:flex;border-radius:6px;overflow:hidden;height:18px;position:relative;margin:4px 0;">`
+    + `<div style="width:${aiPct}%;background:linear-gradient(90deg,#6FB6FF,#4D8BFF);"></div>`
+    + `<div style="width:${humanPct}%;background:linear-gradient(90deg,#9D7BF0,#EC4DA6);"></div>`
+    + `<div style="position:absolute;left:${aiPct}%;top:0;bottom:0;width:1px;background:rgba(255,255,255,.6);"></div></div>`
+    + `<div style="display:flex;justify-content:space-between;margin-top:4px;">`
+    + `<span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#8FB6FF;">${aiPct}% AI helps here</span>`
+    + `<span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#F58FC4;">${humanPct}% people own this</span></div>`;
+  return `<div style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:14px;padding:18px 18px 14px;display:flex;flex-direction:column;gap:8px;">`
+    + `<div style="display:flex;align-items:center;justify-content:space-between;">`
+    + `<span style="font-family:'JetBrains Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:rgba(255,255,255,.38);">Trust — will this change the team?</span>`
+    + `<span style="width:26px;height:6px;border-radius:3px;background:linear-gradient(90deg,#4D8BFF,#EC4DA6);box-shadow:0 0 12px rgba(236,77,166,.5);"></span></div>`
+    + `<div><span style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:20px;font-weight:600;color:#ECEAF6;">No — it frees people </span>`
+    + `<span style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:20px;font-weight:600;color:#F58FC4;">for better work</span></div>`
+    + `<div style="font-size:12px;color:rgba(255,255,255,.45);line-height:1.4;"><b style="color:#ECEAF6;">Two-thirds of this work stays with people.</b> AI assists the addressable parts; judgment, approval, and decisions remain human-owned. Freed time moves into higher-value work.</div>`
+    + `<div style="margin:4px 0;">${ownBar}</div>`
+    + `<div style="display:flex;align-items:center;justify-content:space-between;border-top:1px solid rgba(255,255,255,.08);padding-top:8px;margin-top:2px;">`
+    + `<span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#2BD8C8;">✓ freed time → redesigned roles, not reductions</span>`
+    + `<button type="button" data-ed11-tab="workforce" style="background:none;border:none;font-size:10px;color:#8FB6FF;cursor:pointer;padding:0;font-family:inherit;">Workforce →</button></div>`
+    + `</div>`;
+}
+
+function ed11SpeedHtml(steps) {
+  const confirmed = steps.filter(s => s.workbenchConfirmed);
+  let compPct = 0, avgCutLabel = "—";
+  if (confirmed.length) {
+    let totalT = 0, totalCut = 0;
+    for (const step of confirmed) {
+      const t = parseFloat((typeof gridCellValue === "function" ? gridCellValue(step, "timeTaken") : "0") || "0") || 0;
+      const addr = (typeof step.composedAddr === "number" ? step.composedAddr
+        : typeof step.theo === "number" ? step.theo : 0) / 100;
+      totalT += t; totalCut += t * addr;
+    }
+    compPct = totalT ? Math.round((totalCut / totalT) * 100) : 0;
+    const avgMin = confirmed.length ? Math.round(totalCut / confirmed.length) : 0;
+    if (avgMin >= 60) avgCutLabel = (avgMin / 60).toFixed(1) + " hr";
+    else if (avgMin > 0) avgCutLabel = avgMin + " min";
+  }
+  const nowPct = Math.max(0, 100 - compPct);
+  const compBar = `<div style="display:flex;border-radius:6px;overflow:hidden;height:18px;margin:4px 0;">`
+    + `<div style="width:${nowPct}%;background:linear-gradient(90deg,#B89DF5,#9D7BF0);min-width:${nowPct > 0 ? 1 : 0}px;"></div>`
+    + `<div style="width:${compPct}%;background:repeating-linear-gradient(90deg,rgba(157,123,240,.4) 0 4px,transparent 4px 8px);border-left:${compPct > 0 ? "1px dashed rgba(157,123,240,.6)" : "none"};min-width:${compPct > 0 ? 1 : 0}px;"></div></div>`
+    + `<div style="display:flex;justify-content:space-between;margin-top:4px;">`
+    + `<span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#B89DF5;">cycle now</span>`
+    + `<span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:rgba(255,255,255,.35);">wait removed</span></div>`;
+  return `<div style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:14px;padding:18px 18px 14px;display:flex;flex-direction:column;gap:8px;">`
+    + `<div style="display:flex;align-items:center;justify-content:space-between;">`
+    + `<span style="font-family:'JetBrains Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:rgba(255,255,255,.38);">Speed — are we faster?</span>`
+    + `<span style="width:26px;height:6px;border-radius:3px;background:#9D7BF0;box-shadow:0 0 12px rgba(157,123,240,.6);"></span></div>`
+    + `<div><span style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:26px;font-weight:600;letter-spacing:-.02em;color:#B89DF5;text-shadow:0 0 18px rgba(157,123,240,.5);">${compPct ? "−" + compPct + "%" : "—"}</span>`
+    + `<span style="font-size:13px;color:rgba(255,255,255,.38);margin-left:4px;">cycle-time</span></div>`
+    + `<div style="font-size:12px;color:rgba(255,255,255,.45);line-height:1.4;">${avgCutLabel !== "—" ? `<b style="color:#ECEAF6;">${escapeHtml(avgCutLabel)}</b> off the average confirmed step` : "Confirm steps in Workbench and enter time to model cycle compression."}</div>`
+    + `<div style="margin:4px 0;">${compBar}</div>`
+    + `<div style="display:flex;align-items:center;justify-content:space-between;border-top:1px solid rgba(255,255,255,.08);padding-top:8px;margin-top:2px;">`
+    + `<span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#F2B23C;">deliberation &amp; gates kept intact</span>`
+    + `<button type="button" data-ed11-lens="cycle" style="background:none;border:none;font-size:10px;color:#8FB6FF;cursor:pointer;padding:0;font-family:inherit;">Cycle lens →</button></div>`
+    + `</div>`;
+}
+
+function ed11VerdictRowHtml(lv, steps) {
+  const cnt = (lv && lv.confirmedCount) || 0;
+  const note = cnt
+    ? "Based on <b>" + cnt + "</b> confirmed session" + (cnt > 1 ? "s" : "") + " · what to do with freed capacity lives in"
+    : "No confirmed sessions yet · what to do with freed capacity lives in";
+  return `<div style="margin-bottom:16px;">`
+    + `<div style="margin-bottom:10px;">`
+    + `<div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:16px;font-weight:700;color:rgba(255,255,255,.9);margin-bottom:4px;">The leadership verdict</div>`
+    + `<div style="font-size:12px;color:rgba(255,255,255,.4);">${note} <button type="button" data-ed11-tab="workforce" style="background:none;border:none;font-size:12px;color:#F58FC4;cursor:pointer;padding:0;font-family:inherit;">Workforce Transformation →</button></div></div>`
+    + `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;">`
+    + ed11ReturnHtml(lv) + ed11TrustHtml(steps) + ed11SpeedHtml(steps)
+    + `</div></div>`;
+}
+
+function wireEd11(container) {
+  if (!container) return;
+  container.querySelectorAll("[data-ed11-metric]").forEach(btn => {
+    if (btn.dataset.ed11Wired) return;
+    btn.dataset.ed11Wired = "1";
+    btn.addEventListener("click", () => {
+      state.ed11Metric = btn.dataset.ed11Metric || "value";
+      if (typeof persistState === "function") persistState();
+      if (typeof renderAnalysisTabDashboard === "function") renderAnalysisTabDashboard();
+    });
+  });
+  const tog = container.querySelector("#ed11ToggleBtn");
+  if (tog && !tog.dataset.ed11Wired) {
+    tog.dataset.ed11Wired = "1";
+    tog.addEventListener("click", () => {
+      state.ed11Toggle = !state.ed11Toggle;
+      if (typeof persistState === "function") persistState();
+      if (typeof renderAnalysisTabDashboard === "function") renderAnalysisTabDashboard();
+    });
+  }
+  container.querySelectorAll("[data-ed11-lens]").forEach(btn => {
+    if (btn.dataset.ed11Wired) return;
+    btn.dataset.ed11Wired = "1";
+    btn.addEventListener("click", () => { toast("Cost and cycle lens details are in the panels below."); });
+  });
+  container.querySelectorAll("[data-ed11-tab]").forEach(btn => {
+    if (btn.dataset.ed11Wired) return;
+    btn.dataset.ed11Wired = "1";
+    btn.addEventListener("click", () => {
+      const tab = btn.dataset.ed11Tab || "workforce";
+      if (typeof setAnalysisTab === "function") setAnalysisTab(tab);
+    });
+  });
+}
+
 function renderAnalysisTabDashboard(recordsOverride, opts) {
   const container = document.getElementById("analysis-tab-dashboard");
   if (!container) return;
@@ -14302,11 +14633,17 @@ function renderAnalysisTabDashboard(recordsOverride, opts) {
   // C3 — the LEADERSHIP dashboard sections (additive, computed guarded).
   let c3Leadership = "";
   if (audience === "leadership" && typeof leadershipSectionsHtml === "function") { try { c3Leadership = leadershipSectionsHtml(records, opts) || ""; } catch (_e) { c3Leadership = ""; } }
+  // C-11 — per-step grid steps + metric/toggle state for verdict blocks + chart.
+  const steps = (typeof analysisGridSteps === "function") ? analysisGridSteps() : [];
+  const ed11Metric = (state.ed11Metric && ED11_MET[state.ed11Metric]) ? state.ed11Metric : "value";
+  const ed11Toggle = typeof state.ed11Toggle === "boolean" ? state.ed11Toggle : true;
   container.innerHTML =
     `<div style="font-size:11px;color:${DASH.faint};margin:0 0 10px;padding:6px 10px;background:${DASH.panel};border:1px solid ${DASH.line};border-radius:8px;">FIREWALL · capacity / cost / flow live only on this surface · nothing here reaches capture / workbench / recipe</div>` +
     c2Audience + c1Slice + c1ThreeLens +
     (audience === "tech" ? techHtml :
-      (e3OrgTier + dashHeaderHtml(lv) + dashEvidenceChainHtml(lv, flow) + dashCapacityNetHtml(lv) + dashFlowHtml(lv, sample, flow) + dashAgendasHtml(lv) + c3Leadership));
+      (ed11MetricPanelHtml(lv, steps, ed11Metric, ed11Toggle) +
+       ed11VerdictRowHtml(lv, steps) +
+       e3OrgTier + dashHeaderHtml(lv) + dashEvidenceChainHtml(lv, flow) + dashCapacityNetHtml(lv) + dashFlowHtml(lv, sample, flow) + dashAgendasHtml(lv) + c3Leadership));
   wireDashboard(container);
 }
 
@@ -14328,6 +14665,8 @@ function wireDashboard(container) {
   container.querySelector("#downloadLeverageSummaryBtn")?.addEventListener("click", () => downloadLeverageSummary());
   // C3/C4 — export buttons (real downloads) wired when those sections render.
   if (typeof wireDashboardExports === "function") { try { wireDashboardExports(container); } catch (_e) { /* additive */ } }
+  // C-11 — verdict block metric selector + toggle.
+  if (typeof wireEd11 === "function") { try { wireEd11(container); } catch (_e) { /* additive */ } }
 }
 
 // ── C-10 · Recipe Book Phase 4 additions ─────────────────────────────────────
