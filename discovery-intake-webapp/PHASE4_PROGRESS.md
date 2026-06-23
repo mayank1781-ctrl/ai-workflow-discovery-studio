@@ -546,4 +546,32 @@ confirmed seed outputs remain byte-identical.
 
 ## Track D — Eval gate
 
-### D-14 · Eval gate extension N=20→24  pending
+### D-14 · Eval gate extension N=20→24  [A] ✓
+**Gate:** npm 1178/0 · eval 0/24 dangerous-wrong
+
+Four new adversarial eval cases added to `test/fixtures/eval-set.json` (N=20→24).
+`_meta.domains` updated to note Phase 4 rules. Four named per-case positive-assertion
+tests added to `test/eval-set.test.mjs`. No existing cases modified; `producesDangerousWrong`
+already covered all four new dangerous-wrong types.
+
+**Case 21 — hybrid-ownership-step (clause C1-split):**
+Utterance: "I populate the trade confirmation template from the matching results, and then I personally approve and send it to the counterparty."
+Trap: captured as one assembly step (population dominates). Rule: the approval sub-step must be split out as a decision gate before the instruction leaves the firm.
+Dangerous wrong: `cls="assembly"`. Engine result: `split=true`, steps=[build, decision], `cls=decision`.
+
+**Case 22 — wait-segmentation-protected (clause C3-wait):**
+Utterance: "First the data sits a day in my processing queue, then the committee meets to deliberate, then they sign off."
+Trap: tag all three phases as reducible flow friction. Rule: committee deliberation + sign-off is a protected wait that must not be compressed to zero as automation savings.
+Dangerous wrong: `all="reducible"`. Engine result: waits=[reducible (queue), protected (committee/deliberate)].
+
+**Case 23 — portfolio-cluster-false-positive (clause V3-combine):**
+Utterance: "Both my team and the risk analytics team run reconciliation workflows, so we should combine them into one AI build."
+Trap: shared workflow-family name 'reconciliation' taken as evidence of combinability. Rule: shared name alone is not sufficient — shared action + data + access must all be present.
+Dangerous wrong: `combine=true`. Engine result: `combinable=false` (combine claimed, but shared action/data/access all absent).
+
+**Case 24 — label-sounds-automatable-mechanics-block (clause V3-reachability):**
+Utterance: "I categorise the transaction type for each exception — it sounds mechanical but there is no API to the settlement system, so I key every one in directly on the screen, with write access to client account data."
+Trap: 'categorise' sounds prompt-classify; the mechanics cap the shape. Rule: no-API + screen-only reachability forces realistic shape to human-in-loop regardless of how mechanical the labelling verb sounds.
+Dangerous wrong: `shape="agentic"`. Engine result: `reachability="screen-only"`, `realisticShape="human-in-loop"`.
+
+Files changed: `test/fixtures/eval-set.json`, `test/eval-set.test.mjs`

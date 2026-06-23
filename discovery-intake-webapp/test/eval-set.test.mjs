@@ -170,3 +170,32 @@ test("v3 — a shared system name alone is NOT combinable (needs shared action +
   const r = engine.classifyUtterance(c.sme_says);
   assert.equal(r.combinable, false);
 });
+
+// ---- Phase 4 — four new cases protect Phase 4 behaviour ----
+test("Phase 4 — a step with AI-carriable prep and human approval splits out the decision gate", () => {
+  const c = EVAL.cases.find((x) => x.id === "hybrid-ownership-step");
+  const r = engine.classifyUtterance(c.sme_says);
+  assert.equal(r.split, true, "hybrid prep+approval step must split");
+  assert.ok(r.steps.some((s) => s.cls === "decision"), "approval sub-step classified as decision");
+  assert.notEqual(r.cls, "assembly", "top-level cls is not assembly");
+});
+
+test("Phase 4 — deliberation wait is classified protected; routine queue remains reducible", () => {
+  const c = EVAL.cases.find((x) => x.id === "wait-segmentation-protected");
+  const r = engine.classifyUtterance(c.sme_says);
+  assert.ok(r.waits.some((w) => w.waitKind === "protected"), "committee/deliberation wait → protected");
+  assert.ok(r.waits.some((w) => w.waitKind === "reducible"), "processing queue → reducible");
+});
+
+test("Phase 4 — shared workflow-family name alone is not sufficient to combine; engine returns combinable=false", () => {
+  const c = EVAL.cases.find((x) => x.id === "portfolio-cluster-false-positive");
+  const r = engine.classifyUtterance(c.sme_says);
+  assert.equal(r.combinable, false, "shared workflow family + no shared action+data+access → not combinable");
+});
+
+test("Phase 4 — screen-only + no-API mechanics cap the shape to human-in-loop, regardless of how automatable the label sounds", () => {
+  const c = EVAL.cases.find((x) => x.id === "label-sounds-automatable-mechanics-block");
+  const r = engine.classifyUtterance(c.sme_says);
+  assert.equal(r.realisticShape, "human-in-loop", "screen-only reachability forces human-in-loop shape");
+  assert.notEqual(r.realisticShape, "agentic", "agentic is mechanically impossible for screen-only");
+});

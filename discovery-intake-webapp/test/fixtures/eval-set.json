@@ -3,7 +3,7 @@
     "purpose": "Adversarial cases to test that the workflow-tagging layer (consultant or AI-assist) classifies inputs soundly before they reach studio_engine.mjs.",
     "scoring": "Weight a false-'assembly' on any decision/judgment step as a CRITICAL failure. Over-protection (rounding up) is a soft failure. Target: 0 critical failures.",
     "fields": "Each case gives the raw SME utterance, the trap, the expected tags, and the dangerous wrong answer.",
-    "domains": "20 cases spanning credit-risk, strategy (workshop prep), technology (SRE / SWE), and the v3 capture model (action / reachability / entitlement / adjacency) across banking, insurance, capital markets, and fraud-risk.",
+    "domains": "24 cases spanning credit-risk, strategy (workshop prep), technology (SRE / SWE), and the v3 capture model (action / reachability / entitlement / adjacency) across banking, insurance, capital markets, and fraud-risk; plus Phase 4 rules (hybrid-ownership split, wait-segmentation, portfolio-cluster false positive, label-vs-mechanics shape cap).",
     "rubric_clauses": {
       "C1": "Step class — round up; commit/accountability = decision",
       "C1-split": "A step containing two kinds of work must be split",
@@ -209,6 +209,45 @@
       "trap": "a shared application name alone is not evidence of combinable work; the truer signals are the action, the data, and the access — absent those, combining over-grants and forces a false reuse.",
       "expected": { "combine": false, "why": "system != work; two people in the same app doing different actions on different data with different access are not the same build." },
       "dangerous_wrong": { "combine": true, "note": "treating a shared system name as evidence two workflows combine, absent shared action + data + access (the v3 adjacency error)." }
+    },
+
+    {
+      "id": "hybrid-ownership-step",
+      "clause": "C1-split",
+      "sme_says": "I populate the trade confirmation template from the matching results, and then I personally approve and send it to the counterparty.",
+      "trap": "captured as one assembly step because most of it is deterministic population.",
+      "expected": { "split": true, "steps": [
+        { "step": "populate trade confirmation template", "cls": "build", "why": "deterministic fill from matched data; AI can carry" },
+        { "step": "personally approve and send to counterparty", "cls": "decision", "why": "the send commits the firm's position to the counterparty; human-held approval gate" }
+      ]},
+      "dangerous_wrong": { "cls": "assembly", "note": "treating the whole step as AI-carriable assembly erases the human approval gate before the instruction leaves the firm (Phase 4 hybrid-ownership rule)" }
+    },
+    {
+      "id": "wait-segmentation-protected",
+      "clause": "C3-wait",
+      "sme_says": "First the data sits a day in my processing queue, then the committee meets to deliberate, then they sign off.",
+      "trap": "tag all three phases as reducible flow friction because they all look like idle time.",
+      "expected": { "waits": [
+        { "what": "analyst processing queue", "waitKind": "reducible", "note": "routine backlog; can be tightened" },
+        { "what": "committee deliberation and sign-off", "waitKind": "protected", "note": "decision-gate; must not be compressed to zero" }
+      ]},
+      "dangerous_wrong": { "all": "reducible", "note": "erasing the protected deliberation wait by treating committee time as automation savings — the Phase 4 wait-segmentation error" }
+    },
+    {
+      "id": "portfolio-cluster-false-positive",
+      "clause": "V3-combine",
+      "sme_says": "Both my team and the risk analytics team run reconciliation workflows, so we should combine them into one AI build.",
+      "trap": "shared workflow family name 'reconciliation' taken as evidence these two workflows combine into a single AI build, even though data tiers and entitlements differ.",
+      "expected": { "combine": false, "why": "a shared workflow-family name is not evidence of combinability; without shared action, shared data, and shared access the workflows are blocked candidates, not an enabled cluster." },
+      "dangerous_wrong": { "combine": true, "note": "combining over a shared workflow-family name without verifying shared action + data + access — the portfolio-clustering false-positive error (Phase 4 A-4 rule)" }
+    },
+    {
+      "id": "label-sounds-automatable-mechanics-block",
+      "clause": "V3-reachability",
+      "sme_says": "I categorise the transaction type for each exception — it sounds mechanical but there is no API to the settlement system, so I key every one in directly on the screen, with write access to client account data.",
+      "trap": "the verb 'categorise' sounds like a prompt-classify job; the mechanics (no API, screen-only, write access, client data) cap the realistic shape.",
+      "expected": { "reachability": "screen-only", "shape": "human-in-loop", "note": "no API + screen-only system + write-in-place action + client data: the realistic shape is human-in-loop regardless of how mechanical the labelling logic sounds." },
+      "dangerous_wrong": { "shape": "agentic", "note": "placing an agentic build over a screen-only system that has no API — an un-buildable plan; the label-vs-mechanics error (Phase 4 reachability rule)" }
     }
   ]
 }
