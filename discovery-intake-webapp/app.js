@@ -41164,3 +41164,482 @@ if (typeof window !== "undefined" && typeof window.addEventListener === "functio
   window.addEventListener("beforeunload", telemetryEmitAbandonedIfNeeded);
 }
 // === end V3-1 client telemetry =============================================
+
+// ===========================================================================
+// Phase 6 · P6-0 — Flexible Work Graph data contract (schema design only)
+// ---------------------------------------------------------------------------
+// This block defines the common WORK ITEM contract and a flexible work graph
+// so later Phase 6 items (work intent, substep decomposition, policy, unit
+// economics, dashboards) have a single, provenance-aware shape to build on.
+//
+// It is PURE and ADDITIVE. Nothing here is mounted into the UI yet, nothing
+// mutates an existing step / grid cell / session record, and nothing touches
+// the Phase 5 confirmation gate (recipeGateCheck / isUnitConfirmed /
+// confirmedView / hardenedRecipeSpec / confirmUnit), the engine, the P5-3
+// ladder, the P5-4 placement explainer, or the P5-1 modeled fallback. With no
+// caller, the app is byte-identical to the Phase 5 seal.
+//
+// Trust rules encoded here (the dominant product principle):
+//   • A flexible graph, not a rigid hierarchy. Supported paths:
+//       workflow -> activity/stage -> step -> substep/workAction
+//       workflow -> step -> workAction
+//       workflow -> activity/stage -> workAction
+//       workflow -> workAction
+//     activity/stage and step may collapse to the same object; intermediate
+//     levels may be skipped. A child must sit DEEPER than its parent; gaps are
+//     allowed, inversion is not.
+//   • Every relied-on field carries provenance {value, source, confidence}.
+//   • Suggested/modelled children are draft-only: they never auto-confirm,
+//     never overwrite an explicit child, and never count in official rollups.
+//   • Official rollups stay confirmed-only — the count gate is DELEGATED to the
+//     existing Phase 5 confirmation gate (passed in), never re-implemented.
+//   • A 66% "functional draft" threshold makes compound work usable for
+//     planning, but mandatory safety fields (data tier, entitlement, action
+//     verb, systems/reachability, control/policy cap, decision/approval
+//     ownership) still gate official placement/economics — a high percentage
+//     never bypasses a missing safety field.
+//
+// Domain vocabularies (class, action verb, data tier, entitlement, solution
+// shape, reachability) are owned and enforced by studio_engine.mjs at intake;
+// this contract carries those values with provenance and does NOT re-validate
+// them, to avoid forking the engine's enum-integrity discipline.
+// ===========================================================================
+
+// The work-graph levels, ordered from the named end-to-end process down to the
+// lowest useful unit. Index = depth rank (lower = higher in the graph).
+const WORK_ITEM_LEVELS = ["workflow", "activity", "step", "substep", "workAction"];
+// "stage" is an accepted synonym for "activity" (the discovery vocabulary uses
+// both); it folds to the canonical level so the two never diverge.
+const WORK_ITEM_LEVEL_ALIASES = { stage: "activity" };
+
+// Relationship kinds an edge may express. parent-child is also carried by
+// parentId; the rest are graph overlays the later phases read.
+const WORK_ITEM_RELATIONSHIPS = [
+  "parent-child", "sequence", "handoff",
+  "same-system", "same-capability",
+  "evidence-dependency", "policy-dependency"
+];
+
+// Confirmation posture — distinct from completeness label AND from the official
+// engine gate:
+//   suggested = AI / modelled draft; never auto-confirms, never counts
+//   captured  = user-entered or observed, not yet hardened through the gate
+//   confirmed = hardened via the existing confirmation gate (official)
+const WORK_ITEM_CONFIRM_STATES = ["suggested", "captured", "confirmed"];
+
+// Where a work item came from. A modelled item can never be born confirmed.
+const WORK_ITEM_ORIGINS = ["captured", "modelled"];
+
+// Track 1B completeness ladder (orthogonal to the P5-3 confirmation ladder).
+// Every integer 0..100 falls in exactly one band.
+const WORK_ITEM_COMPLETENESS_BANDS = [
+  { id: "captured-only",          min: 0,  max: 33,  label: "Captured only" },
+  { id: "directional",           min: 34, max: 65,  label: "Directional" },
+  { id: "functional-draft",      min: 66, max: 79,  label: "Functional draft" },
+  { id: "high-confidence-draft", min: 80, max: 94,  label: "High-confidence draft" },
+  { id: "portfolio-counted",     min: 95, max: 100, label: "Portfolio counted" }
+];
+
+// The recommended functional-draft threshold (two-thirds), per the Phase 6 plan.
+const WORK_ITEM_FUNCTIONAL_DRAFT_PCT = 66;
+
+// The relied-on fields each carry a {value, source, confidence} provenance
+// triple on a work item.
+const WORK_ITEM_RELIED_FIELDS = [
+  "label", "class", "actionVerb", "systems", "dataTier", "entitlement",
+  "control", "handoff", "solutionPlacement", "policyCap", "economics",
+  "decisionOwnership"
+];
+
+// Mandatory safety fields. Each group is "present" when ANY of its fields is
+// present, so control OR policy cap satisfies that group. These gate official
+// use regardless of completeness percentage.
+const WORK_ITEM_MANDATORY_FIELDS = [
+  { key: "dataTier",           label: "Data tier",                 fields: ["dataTier"] },
+  { key: "entitlement",        label: "Entitlement",               fields: ["entitlement"] },
+  { key: "actionVerb",         label: "Action verb",               fields: ["actionVerb"] },
+  { key: "systems",            label: "Systems / reachability",    fields: ["systems"] },
+  { key: "controlOrPolicyCap", label: "Control / policy cap",      fields: ["control", "policyCap"] },
+  { key: "decisionOwnership",  label: "Decision / approval owner", fields: ["decisionOwnership"] }
+];
+
+// Optional enrichment fields — counted toward the percentage, never a gate.
+const WORK_ITEM_OPTIONAL_FIELDS = [
+  { key: "label",             label: "Label",              fields: ["label"] },
+  { key: "class",             label: "Primary class",      fields: ["class"] },
+  { key: "handoff",           label: "Handoff / seam",     fields: ["handoff"] },
+  { key: "solutionPlacement", label: "Solution placement", fields: ["solutionPlacement"] },
+  { key: "economics",         label: "Economics",          fields: ["economics"] }
+];
+
+// Short, plain-language next-action hints surfaced for missing fields.
+const WORK_ITEM_FIELD_META = {
+  dataTier:           { hint: "Sensitivity tier of the data touched (public to restricted)." },
+  entitlement:        { hint: "Access level held: read, write, or approve." },
+  actionVerb:         { hint: "What is done to the data (read, transform, generate-output, approve)." },
+  systems:            { hint: "Systems/tools touched and how AI can reach them (api, batch, screen-only)." },
+  controlOrPolicyCap: { hint: "Control or policy ceiling that bounds the work." },
+  decisionOwnership:  { hint: "Who owns the decision/approval (human-held, human-in-loop)." },
+  label:              { hint: "Short name for the work item." },
+  class:              { hint: "Primary ownership class (gather, build, judgment, decision, human-held)." },
+  handoff:            { hint: "Where work crosses a person or system." },
+  solutionPlacement:  { hint: "Recommended solution shape (prompt, RAG, deterministic-tool, agentic, human-in-loop)." },
+  economics:          { hint: "Run-cost / total-cost-of-ownership inputs for the work item." }
+};
+
+// Fold "stage" to "activity"; return the canonical level or null if unknown.
+function normalizeWorkItemLevel(level) {
+  if (typeof level !== "string") return null;
+  const v = WORK_ITEM_LEVEL_ALIASES[level] || level;
+  return WORK_ITEM_LEVELS.includes(v) ? v : null;
+}
+
+// Depth rank for a level (0 = workflow, deeper = larger). -1 for unknown.
+function workItemLevelRank(level) {
+  const v = normalizeWorkItemLevel(level);
+  return v == null ? -1 : WORK_ITEM_LEVELS.indexOf(v);
+}
+
+// Build a provenance triple. Mirrors the established sidecar shape
+// {value, source, confidence}. A bare scalar is accepted as the value.
+function workItemField(value, source, confidence) {
+  const v = value == null ? "" : value;
+  const s = typeof source === "string" ? source : "";
+  const c = typeof confidence === "number" ? confidence : "";
+  return { value: v, source: s, confidence: c };
+}
+
+// A relied-on field is "present" when it carries a non-empty value.
+function workItemFieldPresent(field) {
+  if (!field || typeof field !== "object") return false;
+  const v = field.value;
+  if (Array.isArray(v)) return v.length > 0;
+  if (typeof v === "number") return !Number.isNaN(v); // NaN is not a meaningful value
+  if (typeof v === "string") return v.trim().length > 0;
+  return Boolean(v);
+}
+
+// Roll the least-asserted provenance and the minimum confidence across the
+// PRESENT relied-on fields — a single inferred field makes the whole item read
+// as inferred (the same discipline as the heatmap's leastAsserted rollup).
+function workItemProvenanceRollup(item) {
+  const it = item || {};
+  const present = WORK_ITEM_RELIED_FIELDS.map((f) => it[f]).filter(workItemFieldPresent);
+  if (!present.length) return { provenance: "unknown", confidence: "" };
+  let anyInferred = false;
+  let allStated = true;
+  let minConf = Infinity;
+  present.forEach((t) => {
+    const s = (t && t.source) || "";
+    if (s === "ai-inferred" || s === "") anyInferred = true;
+    if (!(s === "user-stated" || s === "user-edited")) allStated = false;
+    const c = typeof t.confidence === "number" ? t.confidence : 1;
+    if (c < minConf) minConf = c;
+  });
+  const provenance = anyInferred ? "inferred" : (allStated ? "stated" : "mixed");
+  return { provenance, confidence: minConf === Infinity ? "" : minConf };
+}
+
+// Construct a normalized work item. Pure: fills empty triples for absent
+// relied-on fields, defaults level to "step" (the common captured unit), and
+// derives the provenance/confidence rollup. A modelled item can NEVER be born
+// confirmed — it is coerced to "suggested".
+function makeWorkItem(input) {
+  const src = input && typeof input === "object" ? input : {};
+  const level = normalizeWorkItemLevel(src.level) || "step";
+  const origin = WORK_ITEM_ORIGINS.includes(src.origin) ? src.origin : "captured";
+  let confirmationState = WORK_ITEM_CONFIRM_STATES.includes(src.confirmationState)
+    ? src.confirmationState
+    : (origin === "modelled" ? "suggested" : "captured");
+  if (origin === "modelled") confirmationState = "suggested";
+  const item = {
+    id: typeof src.id === "string" && src.id ? src.id : "",
+    parentId: typeof src.parentId === "string" && src.parentId ? src.parentId : null,
+    level,
+    origin,
+    confirmationState
+  };
+  WORK_ITEM_RELIED_FIELDS.forEach((f) => {
+    const t = src[f];
+    if (t && typeof t === "object" && "value" in t) {
+      item[f] = workItemField(t.value, t.source, t.confidence);
+    } else {
+      item[f] = workItemField(t);
+    }
+  });
+  const roll = workItemProvenanceRollup(item);
+  item.provenance = roll.provenance;
+  item.confidence = roll.confidence;
+  return item;
+}
+
+// Force an input into a suggested/modelled child workAction. Used by later
+// phases (substep decomposition) so a suggestion can never arrive confirmed.
+function markSuggestedWorkAction(input) {
+  const src = input && typeof input === "object" ? input : {};
+  const merged = Object.assign({}, src, {
+    level: "workAction",
+    origin: "modelled",
+    confirmationState: "suggested"
+  });
+  return makeWorkItem(merged);
+}
+
+// Build a validated relationship edge, or null if the kind/endpoints are bad.
+function makeWorkRelation(fromId, toId, kind) {
+  if (!WORK_ITEM_RELATIONSHIPS.includes(kind)) return null;
+  if (typeof fromId !== "string" || typeof toId !== "string" || !fromId || !toId) return null;
+  return { from: fromId, to: toId, kind };
+}
+
+// Structural integrity of a single work item. Domain vocab (class/tier/verb) is
+// NOT re-checked here — the engine owns that at intake.
+function validateWorkItem(item) {
+  const errors = [];
+  const it = item || {};
+  if (!it.id || typeof it.id !== "string") errors.push("id-missing");
+  if (!WORK_ITEM_LEVELS.includes(it.level)) errors.push("level-invalid:" + it.level);
+  if (it.parentId != null && typeof it.parentId !== "string") errors.push("parentId-type");
+  if (!WORK_ITEM_CONFIRM_STATES.includes(it.confirmationState)) {
+    errors.push("confirmationState-invalid:" + it.confirmationState);
+  }
+  if (it.origin != null && !WORK_ITEM_ORIGINS.includes(it.origin)) errors.push("origin-invalid:" + it.origin);
+  if (it.origin === "modelled" && it.confirmationState === "confirmed") errors.push("modelled-cannot-confirm");
+  WORK_ITEM_RELIED_FIELDS.forEach((f) => {
+    const t = it[f];
+    if (t != null && (typeof t !== "object" || !("value" in t))) errors.push("field-shape:" + f);
+  });
+  return { ok: errors.length === 0, errors };
+}
+
+// Validate the whole graph: well-formed items, unique ids, parents resolve,
+// children sit deeper than parents (gaps allowed, inversion refused), no
+// cycles, and relationship endpoints/kinds are valid. Roots (parentId null)
+// are allowed at any level so a graph can start at a step or even a workAction.
+function validateWorkGraph(items, relations) {
+  const errors = [];
+  const list = Array.isArray(items) ? items : [];
+  const ids = new Set();
+  list.forEach((it) => {
+    const v = validateWorkItem(it);
+    if (!v.ok) errors.push("item:" + (it && it.id) + ":" + v.errors.join(","));
+    if (it && it.id) {
+      if (ids.has(it.id)) errors.push("duplicate-id:" + it.id);
+      ids.add(it.id);
+    }
+  });
+  const byId = new Map(list.filter((it) => it && it.id).map((it) => [it.id, it]));
+  list.forEach((it) => {
+    if (!it || it.parentId == null) return;
+    const parent = byId.get(it.parentId);
+    if (!parent) { errors.push("parent-missing:" + it.id + "->" + it.parentId); return; }
+    if (!(workItemLevelRank(parent.level) < workItemLevelRank(it.level))) {
+      errors.push("level-order:" + it.id + "(" + it.level + ") under " + parent.id + "(" + parent.level + ")");
+    }
+  });
+  list.forEach((it) => {
+    let p = it && it.parentId;
+    let guard = 0;
+    const seen = new Set([it && it.id]);
+    while (p && byId.has(p) && guard < 10000) {
+      if (seen.has(p)) { errors.push("cycle:" + it.id); break; }
+      seen.add(p);
+      p = byId.get(p).parentId;
+      guard += 1;
+    }
+  });
+  (Array.isArray(relations) ? relations : []).forEach((r) => {
+    if (!r || !WORK_ITEM_RELATIONSHIPS.includes(r.kind)) { errors.push("relation-kind:" + (r && r.kind)); return; }
+    if (!byId.has(r.from)) errors.push("relation-from:" + r.from);
+    if (!byId.has(r.to)) errors.push("relation-to:" + r.to);
+  });
+  return { ok: errors.length === 0, errors };
+}
+
+// Score a work item's completeness. Mandatory groups are weighted twice the
+// optional groups. Returns the percentage, its band label, the missing field
+// reports, whether ALL mandatory safety fields are present, and whether the
+// item is eligible for an OFFICIAL rollup.
+//
+// counted is the official-rollup signal. It DELEGATES the confirmed-ness check
+// to the existing confirmation gate via opts.confirmed (the result of
+// isUnitConfirmed) — it never re-implements the gate — AND additionally requires
+// every mandatory safety field to be present. So a suggested/modelled draft is
+// never counted, and a confirmed unit that is still missing a safety field
+// (data tier, entitlement, action verb, systems, control/policy cap, decision
+// owner) is never counted either. A high percentage never bypasses a missing
+// safety field.
+function workItemCompleteness(item, opts) {
+  const it = item || {};
+  const o = opts || {};
+  const groupPresent = (g) => g.fields.some((f) => workItemFieldPresent(it[f]));
+  const mPresent = WORK_ITEM_MANDATORY_FIELDS.filter(groupPresent);
+  const oPresent = WORK_ITEM_OPTIONAL_FIELDS.filter(groupPresent);
+  const Wm = 2;
+  const Wo = 1;
+  const num = mPresent.length * Wm + oPresent.length * Wo;
+  const den = WORK_ITEM_MANDATORY_FIELDS.length * Wm + WORK_ITEM_OPTIONAL_FIELDS.length * Wo;
+  const pct = den > 0 ? Math.round((num / den) * 100) : 0;
+  const band = WORK_ITEM_COMPLETENESS_BANDS.find((b) => pct >= b.min && pct <= b.max)
+    || WORK_ITEM_COMPLETENESS_BANDS[0];
+  const mandatoryGatePassed = mPresent.length === WORK_ITEM_MANDATORY_FIELDS.length;
+  const toReport = (g) => ({ field: g.key, label: g.label, hint: (WORK_ITEM_FIELD_META[g.key] || {}).hint || "" });
+  const missingRequired = WORK_ITEM_MANDATORY_FIELDS.filter((g) => !groupPresent(g)).map(toReport);
+  const missingOptional = WORK_ITEM_OPTIONAL_FIELDS.filter((g) => !groupPresent(g)).map(toReport);
+  const counted = o.confirmed === true
+    && it.origin !== "modelled"
+    && it.confirmationState !== "suggested"
+    && mandatoryGatePassed;
+  return {
+    pct,
+    label: band.label,
+    bandId: band.id,
+    missingRequired,
+    missingOptional,
+    mandatoryGatePassed,
+    counted
+  };
+}
+
+// A compound area is usable as a functional draft for PLANNING (not official)
+// when it clears the percentage AND every mandatory safety field is present.
+// The percentage alone is never enough.
+function workItemFunctionalDraftReady(item, opts) {
+  const c = workItemCompleteness(item, opts);
+  return c.pct >= WORK_ITEM_FUNCTIONAL_DRAFT_PCT && c.mandatoryGatePassed;
+}
+
+// Reconcile modelled suggestions against the explicit (authoritative) children
+// of a parent. Explicit children are returned unchanged. A suggestion whose id
+// or label collides with an explicit child is REFUSED (explicit wins, never
+// overwritten); the rest are returned as suggested/modelled drafts.
+function reconcileSuggestedChildren(explicitChildren, suggestedChildren) {
+  const explicit = Array.isArray(explicitChildren) ? explicitChildren.slice() : [];
+  const suggestions = Array.isArray(suggestedChildren) ? suggestedChildren : [];
+  const idOf = (it) => (it && typeof it.id === "string" ? it.id.trim().toLowerCase() : "");
+  const labelOf = (it) => (it && it.label && typeof it.label.value === "string" ? it.label.value.trim().toLowerCase() : "");
+  // Explicit children win on EITHER identity — a suggestion that shares an id OR
+  // a label with any explicit child is refused, so an explicit child can never
+  // be silently overwritten or duplicated.
+  const ids = new Set(explicit.map(idOf).filter(Boolean));
+  const labels = new Set(explicit.map(labelOf).filter(Boolean));
+  const suggested = [];
+  const dropped = [];
+  suggestions.forEach((raw) => {
+    const it = markSuggestedWorkAction(raw);
+    const id = idOf(it);
+    const label = labelOf(it);
+    if ((id && ids.has(id)) || (label && labels.has(label))) { dropped.push(it); return; }
+    if (id) ids.add(id);
+    if (label) labels.add(label);
+    suggested.push(it);
+  });
+  return { explicit, suggested, dropped };
+}
+
+// The official-rollup subset: confirmed-only, never modelled/suggested, and
+// never double-counted. The confirmation check is DELEGATED to the existing
+// Phase 5 gate (isConfirmedFn, typically (it) => isUnitConfirmed(it.id)). When
+// both a parent and a descendant are confirmed, only the deeper (lowest)
+// confirmed item is counted, so substeps never double-count against their step.
+function rollupCountableItems(items, isConfirmedFn) {
+  const list = Array.isArray(items) ? items : [];
+  const confirm = typeof isConfirmedFn === "function" ? isConfirmedFn : () => false;
+  const byId = new Map();
+  list.forEach((it) => { if (it && it.id) byId.set(it.id, it); });
+  const isOfficial = (it) => Boolean(it)
+    && it.origin !== "modelled"
+    && it.confirmationState !== "suggested"
+    && confirm(it) === true;
+  const official = list.filter(isOfficial);
+  const hasOfficialDescendant = (item) => official.some((other) => {
+    if (other.id === item.id) return false;
+    let p = other.parentId;
+    let guard = 0;
+    while (p && byId.has(p) && guard < 10000) {
+      if (p === item.id) return true;
+      p = byId.get(p).parentId;
+      guard += 1;
+    }
+    return false;
+  });
+  return official.filter((it) => !hasOfficialDescendant(it));
+}
+
+// Read-only projector: build a flexible work graph from the existing flat step
+// list WITHOUT mutating any step. A step becomes a "step" work item; its
+// explicit workActions become captured "workAction" children; a step with no
+// workActions is a leaf. An optional workflow root and optional activity
+// grouping collapse away when not supplied — proving the four supported paths
+// over real captured data. Provenance rides from what the step already carries;
+// nothing is invented.
+function workGraphFromSteps(steps, opts) {
+  const list = Array.isArray(steps) ? steps : [];
+  const o = opts || {};
+  const confirmedFn = typeof o.isConfirmedFn === "function" ? o.isConfirmedFn : null;
+  const items = [];
+  let workflowId = null;
+  if (o.workflowLabel) {
+    workflowId = o.workflowId || "wf:root";
+    items.push(makeWorkItem({
+      id: workflowId,
+      parentId: null,
+      level: "workflow",
+      label: workItemField(o.workflowLabel, "user-stated", 1),
+      origin: "captured",
+      confirmationState: "captured"
+    }));
+  }
+  const activityOf = {};
+  if (o.activities && typeof o.activities === "object") {
+    Object.keys(o.activities).forEach((aid) => {
+      const a = o.activities[aid] || {};
+      items.push(makeWorkItem({
+        id: aid,
+        parentId: workflowId,
+        level: "activity",
+        label: workItemField(a.label, "user-stated", 1),
+        origin: "captured",
+        confirmationState: "captured"
+      }));
+      (Array.isArray(a.stepIds) ? a.stepIds : []).forEach((sid) => { activityOf[sid] = aid; });
+    });
+  }
+  list.forEach((step) => {
+    if (!step || !step.id) return;
+    const parentId = activityOf[step.id] || workflowId || null;
+    const confirmed = confirmedFn ? confirmedFn(step) === true : false;
+    const labelText = step.step || step.name || "";
+    const stepItem = makeWorkItem({
+      id: step.id,
+      parentId,
+      level: "step",
+      label: workItemField(labelText, labelText ? "user-stated" : "", labelText ? 1 : undefined),
+      class: workItemField(step.cls),
+      dataTier: workItemField(step.data || step.dataTier),
+      actionVerb: workItemField(step.action),
+      entitlement: workItemField(step.entitlement),
+      solutionPlacement: workItemField(step.solutionShape || step.derivedShape),
+      control: step.control && step.control.type ? workItemField(step.control.type) : workItemField(""),
+      origin: "captured",
+      confirmationState: confirmed ? "confirmed" : "captured"
+    });
+    items.push(stepItem);
+    const acts = Array.isArray(step.workActions) ? step.workActions : [];
+    acts.forEach((wa, i) => {
+      if (!wa) return;
+      const waLabel = wa.label || [wa.owner, wa.channel].filter(Boolean).join(" ");
+      items.push(makeWorkItem({
+        id: wa.id || (step.id + ":wa" + i),
+        parentId: step.id,
+        level: "workAction",
+        label: workItemField(waLabel),
+        actionVerb: workItemField(step.action),
+        origin: "captured",
+        confirmationState: confirmed ? "confirmed" : "captured"
+      }));
+    });
+  });
+  return items;
+}
+// === end Phase 6 · P6-0 work-graph data contract ===========================
