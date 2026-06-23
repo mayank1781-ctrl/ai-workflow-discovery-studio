@@ -190,12 +190,57 @@ const ENTITLEMENT_DECISION_MULT = 1.5; // a decision multiplies value/risk (the 
 // is a hidden CONTROL and must never be compressed to zero. Trigger is enum-integrity surfaced.
 export const HANDOFF_TRIGGERS = ["email", "notification", "file-drop"];
 
+// P4 A3 — WAIT SUB-TYPES. "reducible" (queue/manual) and "coordination" (multi-party sync) are
+// compressible buckets in cycle-time. "deliberation" (committee/sign-off/protected decision wait)
+// is preserved — AI may not compress a protected human decision. Additive alongside step.wait (flat
+// minutes), never replacing it. waitBefore is always Σ(step.wait); only waitAfter uses segments.
+export const WAIT_SEGMENT_KINDS = ["reducible", "deliberation", "coordination"];
+
+// P4 A4 — ARTIFACTS. A step may produce or consume named artifacts. Additive: absent steps are
+// byte-identical. type drives the meeting/decision compression story + Recipe controls (recordings,
+// transcripts, and decision logs are the AI-assistance anchors in human-led steps).
+export const ARTIFACT_TYPES = ["recording", "transcript", "decision_log", "email_thread", "file", "system_record"];
+export const ARTIFACT_DIRECTIONS = ["consumed", "produced"];
+
+// P4 A5 — VALUE TIERS + AUGMENTATION FLOOR. A workflow's value tier (routine | valued | critical)
+// signals the stakes; the augmentation floor (0..100) is the minimum AI addressability below which
+// deployment is not recommended. Both are advisory and presentational — they do not change the
+// capacity/cost math. Additive: absent fields are byte-identical.
+export const VALUE_TIERS = ["routine", "valued", "critical"];
+export const AUGMENTATION_FLOOR_DEFAULT = 50; // AI must address at least 50% of the work (advisory)
+
 // P4 A2 — MULTI-ACTION COMPOSITION. A step may bundle several distinct actions (e.g. pull data +
 // deduplicate + output a summary). Each action names its owner (ai or human), channel, and the
 // fraction of work AI can carry (addressability 0..100). The step-level score is composed from the
 // action-level values; solutionShape is derived, not stored as authoritative truth.
 export const WORK_ACTION_OWNERS = ["ai", "human"];
 export const WORK_ACTION_CHANNELS = ["online", "offline", "synchronous_human"];
+
+// P4 A4 — resolved artifact list for a step: returns an array of { type, direction } pairs.
+// Additive: returns [] when step.artifacts is absent/empty. Filters to known type+direction values.
+export function stepArtifacts(step) {
+  if (!step || !Array.isArray(step.artifacts)) return [];
+  return step.artifacts.filter(a => a && ARTIFACT_TYPES.includes(a.type) && ARTIFACT_DIRECTIONS.includes(a.direction));
+}
+
+// P4 A5 — advisory value profile: derives valueTier (fallback: "routine") and evaluates the
+// augmentationFloor against the computed theoPct. Purely advisory — never a hard blocker.
+// Additive: absent fields return defaults without any field being written.
+export function buildValueProfile(record, cap) {
+  const tier = (record && VALUE_TIERS.includes(record.valueTier)) ? record.valueTier : "routine";
+  const floor = (record && typeof record.augmentationFloor === "number") ? record.augmentationFloor : AUGMENTATION_FLOOR_DEFAULT;
+  const theoPct = cap ? (cap.theoPct ?? 0) : 0;
+  const belowFloor = theoPct * 100 < floor;
+  return {
+    valueTier: tier,
+    augmentationFloor: floor,
+    theoPct: round(theoPct * 100, 1),
+    belowFloor,
+    advisory: belowFloor
+      ? `Addressability (${round(theoPct * 100, 1)}%) is below the ${floor}% augmentation floor for a ${tier} workflow — verify assumptions before deployment recommendation.`
+      : null,
+  };
+}
 
 // P4 A2 — composed addressability for a step: Σ(effort × addr of ai-online actions) / Σ(effort).
 // Equal-weight fallback when effort is absent. Returns step.theo when workActions absent/empty.
@@ -325,6 +370,20 @@ export function validateIntake(rawRecord) {
         if (a.owner === "ai" && (s.cls === "decision" || s.cls === "human_held")) errors.push(`step ${i + 1} workAction ${j + 1}: owner="ai" is invalid in a ${s.cls} step (class-split invariant)`);
       });
     }
+    // P4 A3 — waitSegments kind enum; minutes must be a non-negative finite number.
+    if (Array.isArray(s.waitSegments)) {
+      s.waitSegments.forEach((seg, j) => {
+        if (seg.kind != null && !WAIT_SEGMENT_KINDS.includes(seg.kind)) errors.push(`step ${i + 1} waitSegment ${j + 1}: unknown kind "${seg.kind}" (not in ${WAIT_SEGMENT_KINDS.join("|")})`);
+        if (seg.minutes != null && (typeof seg.minutes !== "number" || !Number.isFinite(seg.minutes) || seg.minutes < 0)) errors.push(`step ${i + 1} waitSegment ${j + 1}: minutes "${seg.minutes}" is not a valid non-negative number`);
+      });
+    }
+    // P4 A4 — artifacts: type and direction must resolve to the controlled vocabulary.
+    if (Array.isArray(s.artifacts)) {
+      s.artifacts.forEach((a, j) => {
+        if (a.type != null && !ARTIFACT_TYPES.includes(a.type)) errors.push(`step ${i + 1} artifact ${j + 1}: unknown type "${a.type}" (not in ${ARTIFACT_TYPES.join("|")})`);
+        if (a.direction != null && !ARTIFACT_DIRECTIONS.includes(a.direction)) errors.push(`step ${i + 1} artifact ${j + 1}: unknown direction "${a.direction}" (not in ${ARTIFACT_DIRECTIONS.join("|")})`);
+      });
+    }
     // A2 — a step's system refs must resolve to the systems[] registry (when a registry exists); an
     // unresolved ref is surfaced, never silently assumed reachable (it would mis-shape the build).
     if (Array.isArray(record.systems) && Array.isArray(s.systems)) {
@@ -350,6 +409,13 @@ export function validateIntake(rawRecord) {
   (record.actors || []).forEach((a, i) => {
     if (a && a.line && !LINES.includes(a.line)) errors.push(`actor ${i + 1}: unknown line "${a.line}" (Edition 3)`);
   });
+  // P4 A5 — workflow-level valueTier must resolve to the controlled vocabulary when stated.
+  if (record.valueTier != null && !VALUE_TIERS.includes(record.valueTier)) errors.push(`valueTier "${record.valueTier}" unknown (not in ${VALUE_TIERS.join("|")})`);
+  // P4 A5 — augmentationFloor must be 0..100 when stated.
+  if (record.augmentationFloor != null) {
+    const af = record.augmentationFloor;
+    if (typeof af !== "number" || !Number.isFinite(af) || af < 0 || af > 100) errors.push(`augmentationFloor ${af} is out of bounds (0..100)`);
+  }
   // Edition 3 (F3) — an authored route's kind must be a known route kind, when present.
   (record.routes || []).forEach((rt, i) => {
     if (rt && rt.kind && !ROUTE_KINDS.includes(rt.kind)) errors.push(`route ${i + 1}: unknown kind "${rt.kind}" (Edition 3)`);
@@ -807,7 +873,14 @@ export function cycleTime(steps, opts = {}) {
   const lRed = opts.decisionLeadReduction ?? CONFIG.flow.decisionLeadReduction;
   const touchB = sum(steps.map(s => s.touch)), waitB = sum(steps.map(s => s.wait));
   const touchA = sum(steps.map(s => (s.cls === "assembly" || s.cls === "gather" || s.cls === "build") ? s.touch * (1 - tRed) : s.touch));
-  const waitA = sum(steps.map(s => s.waitKind === "protected" ? s.wait * (1 - lRed) : s.wait * (1 - wRed)));
+  // P4 A3 — when waitSegments present, use segment-level reduction (deliberation→lRed, others→wRed).
+  // waitBefore always uses step.wait (flat total) so numbers are byte-identical on steps without segments.
+  const stepWaitA = (s) => {
+    if (Array.isArray(s.waitSegments) && s.waitSegments.length > 0)
+      return sum(s.waitSegments.map(seg => seg.kind === "deliberation" ? (seg.minutes ?? 0) * (1 - lRed) : (seg.minutes ?? 0) * (1 - wRed)));
+    return s.waitKind === "protected" ? s.wait * (1 - lRed) : s.wait * (1 - wRed);
+  };
+  const waitA = sum(steps.map(stepWaitA));
   const cycleB = touchB + waitB, cycleA = touchA + waitA;
   return {
     cycleBefore: cycleB, cycleAfter: cycleA, touchBefore: touchB, touchAfter: touchA, waitBefore: waitB, waitAfter: waitA,
@@ -3572,6 +3645,59 @@ function runTests() {
   // additive: steps without workActions have no composedAddr; capacity numbers unchanged
   ok("P4-A2 additive: steps without workActions carry no composedAddr (undefined)", normalizeIntake(FPA_INTAKE).steps[1].composedAddr === undefined, "");
   ok("P4-A2 additive: capacity golden numbers unchanged (composedAddr=85 === theo=85)", near(roleCapacity(normalizeIntake(FPA_INTAKE).steps, "Conservative").theoPct * 100, 55, 0.5), "");
+
+  // ---- Phase 4 \u00b7 A3 \u2014 waitSegments sub-types ----
+  {
+    const mkStep = (waitSegments) => ({ step: "x", cls: "build", data: "internal", time: 10, touch: 60, wait: 480 + 240, theo: 70, waitKind: "reducible", waitSegments });
+    // deliberation segment is protected (lRed=12%); reducible is compressed (wRed=30%)
+    const s = mkStep([{ kind: "reducible", minutes: 480 }, { kind: "deliberation", minutes: 240 }]);
+    const ct = cycleTime([s]);
+    const expectedWaitA = 480 * (1 - CONFIG.flow.reducibleWaitReduction) + 240 * (1 - CONFIG.flow.decisionLeadReduction);
+    ok("P4-A3 waitSegments: deliberation\u2192lRed, reducible\u2192wRed, independently", near(ct.waitAfter, expectedWaitA, 0.01), round(ct.waitAfter, 2));
+    // coordination compresses the same as reducible
+    const sc = mkStep([{ kind: "coordination", minutes: 480 }]);
+    const ctc = cycleTime([sc]);
+    ok("P4-A3 waitSegments: coordination reduces same as reducible", near(ctc.waitAfter, 480 * (1 - CONFIG.flow.reducibleWaitReduction), 0.01), round(ctc.waitAfter, 2));
+    // waitBefore always uses step.wait (flat), unaffected by segments
+    ok("P4-A3 waitSegments: waitBefore is always step.wait (flat total)", ct.waitBefore === 720, "");
+    // additive: absent waitSegments \u2192 byte-identical cycle-time numbers on FPA/RECON seeds
+    const ctFpa = cycleTime(normalizeIntake(FPA_INTAKE).steps);
+    ok("P4-A3 additive: FPA seed cycle-time unchanged (no waitSegments)", ctFpa.cycleAfter > 0 && ctFpa.cycleAfter < ctFpa.cycleBefore, round(ctFpa.cycleAfter, 2));
+    // validateIntake: unknown kind is rejected
+    ok("P4-A3 validateIntake: unknown waitSegment kind is rejected", !validateIntake({ ...FPA_INTAKE, steps: [{ step: "x", cls: "build", data: "internal", time: 10, theo: 70, waitSegments: [{ kind: "pending", minutes: 60 }] }] }).ok, "");
+  }
+
+  // ---- Phase 4 \u00b7 A4 \u2014 artifacts[] ----
+  {
+    const s = { step: "Interview", cls: "judgment", data: "internal", time: 20, theo: 35,
+      artifacts: [{ type: "recording", direction: "produced" }, { type: "transcript", direction: "produced" }] };
+    ok("P4-A4 stepArtifacts returns known type+direction pairs", stepArtifacts(s).length === 2, JSON.stringify(stepArtifacts(s)));
+    ok("P4-A4 stepArtifacts returns [] when absent", stepArtifacts({}).length === 0, "");
+    ok("P4-A4 validateIntake: unknown artifact type is rejected", !validateIntake({ ...FPA_INTAKE, steps: [{ ...FPA_INTAKE.steps[0], artifacts: [{ type: "whiteboard", direction: "produced" }] }] }).ok, "");
+    ok("P4-A4 validateIntake: unknown artifact direction is rejected", !validateIntake({ ...FPA_INTAKE, steps: [{ ...FPA_INTAKE.steps[0], artifacts: [{ type: "recording", direction: "archived" }] }] }).ok, "");
+    ok("P4-A4 validateIntake: valid artifact passes", validateIntake({ ...FPA_INTAKE, steps: [{ ...FPA_INTAKE.steps[0], artifacts: [{ type: "decision_log", direction: "produced" }] }] }).ok, "");
+  }
+
+  // ---- Phase 4 \u00b7 A5 \u2014 value tiers + augmentation floor ----
+  {
+    const cap = roleCapacity(normalizeIntake(FPA_INTAKE).steps, "Conservative");
+    const vp = buildValueProfile(FPA_INTAKE, cap);
+    ok("P4-A5 buildValueProfile: returns valueTier string", VALUE_TIERS.includes(vp.valueTier), JSON.stringify(vp.valueTier));
+    ok("P4-A5 buildValueProfile: augmentationFloor defaults to 50", vp.augmentationFloor === AUGMENTATION_FLOOR_DEFAULT, "");
+    ok("P4-A5 buildValueProfile: theoPct matches capacity chain", near(vp.theoPct, 55, 0.6), vp.theoPct);
+    ok("P4-A5 buildValueProfile: belowFloor is boolean", typeof vp.belowFloor === "boolean", "");
+    // explicit valueTier + floor
+    const vp2 = buildValueProfile({ valueTier: "critical", augmentationFloor: 80 }, cap);
+    ok("P4-A5 buildValueProfile: stated valueTier and floor honoured", vp2.valueTier === "critical" && vp2.augmentationFloor === 80, "");
+    ok("P4-A5 buildValueProfile: advisory message when below floor", vp2.belowFloor === true && typeof vp2.advisory === "string", JSON.stringify(vp2));
+    // validateIntake: unknown valueTier rejected
+    ok("P4-A5 validateIntake: unknown valueTier is rejected", !validateIntake({ ...FPA_INTAKE, valueTier: "tier-X" }).ok, "");
+    ok("P4-A5 validateIntake: valid valueTier passes", validateIntake({ ...FPA_INTAKE, valueTier: "valued" }).ok, "");
+    ok("P4-A5 validateIntake: out-of-bounds augmentationFloor is rejected", !validateIntake({ ...FPA_INTAKE, augmentationFloor: 150 }).ok, "");
+    ok("P4-A5 validateIntake: valid augmentationFloor passes", validateIntake({ ...FPA_INTAKE, augmentationFloor: 60 }).ok, "");
+    // additive: FPA_INTAKE has neither field; validates OK
+    ok("P4-A5 additive: absent valueTier + augmentationFloor leaves validateIntake unchanged", validateIntake(FPA_INTAKE).ok, "");
+  }
 
   console.log(`\n${fail === 0 ? "\u2713 ALL PASS" : "\u2717 FAILURES"} \u2014 ${pass} passed, ${fail} failed`);
   return fail === 0;
