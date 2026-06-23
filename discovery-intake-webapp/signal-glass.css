@@ -363,3 +363,73 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:fo
     scroll-behavior:auto !important;
   }
 }
+
+/* ================================================================
+   C-8 — Workbench cockpit
+================================================================ */
+.wb-cockpit{ padding:20px 24px 40px; }
+.wb-cockpit-head{ display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:20px; }
+.wb-wf-name{ font-family:var(--gm-display,'Space Grotesk',system-ui,sans-serif); font-size:18px; font-weight:700; color:var(--txt); }
+.wb-subhead{ color:var(--txt-dim); font-size:12px; margin-top:3px; }
+.wb-progress{ min-width:140px; text-align:right; }
+.wb-prog-label{ font-family:var(--gm-mono,'JetBrains Mono',ui-monospace,monospace); font-size:11px; color:var(--txt-faint); }
+.wb-prog-track{ height:4px; background:var(--sg-line,rgba(255,255,255,.12)); border-radius:2px; margin-top:5px; }
+.wb-prog-fill{ height:100%; border-radius:2px; background:var(--gm-value,#4D8BFF); transition:width .3s; }
+
+/* Step cards */
+.wb-steps{ display:flex; flex-direction:column; gap:8px; }
+.wb-step{ border:1px solid var(--sg-line-soft,rgba(255,255,255,.08)); border-radius:12px; background:var(--glass,rgba(255,255,255,.04)); overflow:hidden; }
+.wb-step.wb-step-confirmed{ border-color:var(--sg-line,rgba(255,255,255,.12)); }
+
+/* Step header */
+.wb-shead{ display:flex; align-items:center; gap:10px; padding:12px 14px; cursor:pointer; }
+.wb-shead:hover{ background:var(--glass-2,rgba(255,255,255,.065)); }
+.wb-sn{ font-family:var(--gm-mono,'JetBrains Mono',ui-monospace,monospace); font-size:11px; color:var(--txt-faint); min-width:22px; }
+.wb-stt{ flex:1; font-weight:600; font-size:13.5px; color:var(--txt); }
+.wb-rung{ font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:6px; font-family:var(--gm-mono,'JetBrains Mono',ui-monospace,monospace); letter-spacing:.04em; white-space:nowrap; }
+.wb-status{ font-size:11px; white-space:nowrap; }
+.wb-status-confirmed{ color:var(--sg-green,#00d4b4); }
+.wb-status-needs{ color:var(--txt-faint); }
+.wb-caret{ font-size:11px; color:var(--txt-faint); transition:transform .15s; }
+.wb-step.wb-expanded .wb-caret{ transform:rotate(90deg); }
+
+/* Step body (hidden until expanded) */
+.wb-sbody{ display:none; padding:14px 14px 16px; border-top:1px solid var(--sg-line-soft,rgba(255,255,255,.08)); }
+.wb-step.wb-expanded .wb-sbody{ display:block; }
+
+/* Actions section */
+.wb-acts-section{ border:1px solid var(--sg-line-soft,rgba(255,255,255,.08)); border-radius:8px; padding:10px 12px; }
+.wb-lbl{ font-size:11px; font-weight:600; color:var(--txt-faint); margin-bottom:8px; }
+.wb-hint{ font-weight:400; }
+.wb-act-header{ display:grid; grid-template-columns:1fr 68px 72px 44px; gap:6px; font-size:10px; font-weight:600; color:var(--txt-faint); padding:0 4px 5px; font-family:var(--gm-mono,'JetBrains Mono',ui-monospace,monospace); letter-spacing:.06em; text-transform:uppercase; }
+.wb-act-row{ display:grid; grid-template-columns:1fr 68px 72px 44px; gap:6px; align-items:center; padding:4px; border-radius:6px; }
+.wb-act-row:hover{ background:var(--glass-2,rgba(255,255,255,.065)); }
+.wb-act-name{ font-size:12px; color:var(--txt); }
+.wb-act-addr{ font-size:11px; font-family:var(--gm-mono,'JetBrains Mono',ui-monospace,monospace); color:var(--txt-dim); text-align:right; }
+.wb-no-acts{ font-size:12px; color:var(--txt-faint); padding:6px 0; font-style:italic; }
+
+/* Toggle chips */
+.wb-toggle{ display:inline-block; font-size:10.5px; font-weight:700; padding:3px 8px; border-radius:5px; cursor:pointer; font-family:var(--gm-mono,'JetBrains Mono',ui-monospace,monospace); text-align:center; user-select:none; }
+.wb-toggle-ai{ background:rgba(77,139,255,.18); color:var(--gm-build,#4D8BFF); }
+.wb-toggle-human{ background:rgba(194,82,143,.18); color:var(--gm-held,#C2528F); }
+.wb-toggle-chan{ background:var(--glass-2,rgba(255,255,255,.065)); color:var(--txt-dim); border:1px solid var(--sg-line-soft,rgba(255,255,255,.08)); }
+
+/* Composed summary */
+.wb-composed{ margin-top:10px; padding:10px 12px; background:var(--deep2,#08111f); border-radius:8px; font-size:12px; color:var(--txt-dim); }
+.wb-composed strong{ color:var(--txt); }
+.wb-composed-why{ margin-top:5px; font-size:11px; color:var(--txt-faint); }
+
+/* Adversarial guards */
+.wb-guard{ margin-top:10px; padding:10px 12px; border-radius:8px; font-size:11.5px; line-height:1.55; }
+.wb-guard strong{ font-weight:700; }
+.wb-guard-pink{ background:rgba(236,77,166,.12); border:1px solid rgba(236,77,166,.35); color:var(--txt); }
+.wb-guard-amber{ background:rgba(242,178,60,.10); border:1px solid rgba(242,178,60,.30); color:var(--txt-dim); }
+
+/* Confirm bar */
+.wb-confirmbar{ display:flex; align-items:center; gap:10px; margin-top:14px; flex-wrap:wrap; }
+.wb-split-btn{ padding:7px 14px; background:none; border:1px solid var(--sg-line,rgba(255,255,255,.12)); border-radius:8px; color:var(--txt-dim); font-size:12px; cursor:pointer; font-family:inherit; }
+.wb-split-btn:hover{ color:var(--txt); }
+.wb-confirm-btn{ padding:7px 18px; background:var(--sg-cyan,#42E8FF); color:#08111f; border:none; border-radius:8px; font-size:12px; font-weight:700; cursor:pointer; font-family:inherit; }
+.wb-confirm-btn.wb-confirm-blocked{ opacity:.42; cursor:not-allowed; }
+.wb-confirm-note{ font-size:11px; color:var(--txt-faint); }
+.wb-confirmed-badge{ font-size:12px; font-weight:700; color:var(--sg-green,#00d4b4); }

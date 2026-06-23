@@ -6335,15 +6335,190 @@ function renderAnalysisStudio() {
 // C-7: Studio shell — three new surface stubs (populated in C-8 / C-9 / C-12)
 // =============================================================================
 
-function renderAnalysisTabWorkbench() {
-  // C-8: Workbench cockpit (multi-action confirm, adversarial, two-tier guard).
-  // Stub only — C-8 overwrites this entirely.
-  const panel = document.getElementById("analysis-tab-workbench");
-  if (!panel || panel.dataset.c8Ready) return;
-  panel.innerHTML = `<div style="padding:28px 24px;color:var(--txt-dim);font-size:13.5px;line-height:1.6;">
-    <strong style="color:var(--txt);">Workbench</strong><br>
-    Confirm your workflow steps here. Multi-action confirm gate and adversarial guard coming in C-8.
+// =============================================================================
+// C-8: Workbench cockpit — multi-action confirm, adversarial two-tier guard
+// =============================================================================
+
+const WB_RUNG_COLOR = {
+  gather:"var(--gm-gather)", build:"var(--gm-build)",
+  judgment:"var(--gm-judgment)", decision:"var(--gm-decision)",
+  human_held:"var(--gm-held)", assembly:"var(--gm-build)"
+};
+function wbRungColor(cls) { return WB_RUNG_COLOR[cls] || "var(--txt-faint)"; }
+
+function wbComposed(step) {
+  const E = studioEngine();
+  const acts = Array.isArray(step.workActions) ? step.workActions : [];
+  if (!acts.length) return {
+    shape: step.derivedShape || step.solutionShape || null,
+    score: typeof step.composedAddr === "number" ? step.composedAddr : (typeof step.theo === "number" ? step.theo : null),
+    why: null
+  };
+  const score = (E && typeof E.composeStepAddressability === "function") ? E.composeStepAddressability(step) : null;
+  const shape = (E && typeof E.deriveStepSolutionShape === "function") ? E.deriveStepSolutionShape(step) : null;
+  const humanActs = acts.filter(a => a.owner === "human" || a.channel === "offline" || a.channel === "synchronous_human");
+  const why = humanActs.length
+    ? `${humanActs.length} human/offline action${humanActs.length > 1 ? "s" : ""} set shape to ${shape || "human-in-loop"}`
+    : `${acts.length} AI-online action${acts.length > 1 ? "s" : ""}; step is addressable`;
+  return { shape, score: score != null ? Math.round(score) : null, why };
+}
+
+function wbGuardsHtml(step) {
+  const acts = Array.isArray(step.workActions) ? step.workActions : [];
+  if (!acts.length) return "";
+  const humanLedCls = ["judgment", "decision", "human_held"].includes(step.cls);
+  const aiOnHumanLed = humanLedCls && acts.some(a => a.owner === "ai");
+  const allAutoOnline = acts.every(a => a.owner === "ai" && a.channel !== "offline" && a.channel !== "synchronous_human");
+  let out = "";
+  if (aiOnHumanLed) {
+    out += `<div class="wb-guard wb-guard-pink"><strong>Guard — class trap:</strong> This is a <strong>${step.cls}</strong> step — the human owns the outcome. Marking an action AI-carried here claims the decision is automatable (the decision-as-assembly trap). Adjust action owners or reclassify the step.</div>`;
+  }
+  if (allAutoOnline) {
+    out += `<div class="wb-guard wb-guard-amber"><strong>Double-check:</strong> All actions are AI/online. Confirm there is no hidden human approval or checkpoint inside this step.</div>`;
+  }
+  return out;
+}
+
+function wbActionRowHtml(act, i, stepId) {
+  const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
+  const ownerTint = act.owner === "ai" ? "wb-toggle-ai" : "wb-toggle-human";
+  const chanLabel = act.channel === "synchronous_human" ? "Sync" : act.channel === "offline" ? "Offline" : "Online";
+  const addr = typeof act.addressability === "number" ? `${act.addressability}%` : "—";
+  return `<div class="wb-act-row">
+    <span class="wb-act-name">${esc(act.label || act.id || "Action")}</span>
+    <span class="wb-toggle ${ownerTint}" data-wb-owner="${esc(stepId)}" data-wb-act="${i}">${act.owner === "ai" ? "AI" : "Human"}</span>
+    <span class="wb-toggle wb-toggle-chan" data-wb-chan="${esc(stepId)}" data-wb-act="${i}">${chanLabel}</span>
+    <span class="wb-act-addr">${addr}</span>
   </div>`;
+}
+
+function wbStepBodyHtml(step) {
+  const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
+  const acts = Array.isArray(step.workActions) ? step.workActions : [];
+  const composed = wbComposed(step);
+  const guardsHtml = wbGuardsHtml(step);
+  const hasBlockingGuard = guardsHtml.includes("wb-guard-pink");
+  const actionsHtml = acts.length
+    ? `<div class="wb-act-header"><span>Action</span><span>Owner</span><span>Channel</span><span>Addr.</span></div>
+       ${acts.map((a, i) => wbActionRowHtml(a, i, step.id)).join("")}`
+    : `<div class="wb-no-acts">No actions captured yet — gather composition in the Discovery interview.</div>`;
+  const composedHtml = acts.length
+    ? `<div class="wb-composed">${composed.shape ? `Shape <strong>${esc(composed.shape)}</strong>` : ""}${composed.score != null ? ` · addressability <strong>${composed.score}%</strong>` : ""}${composed.why ? `<div class="wb-composed-why">${esc(composed.why)}</div>` : ""}</div>` : "";
+  const isConfirmed = !!step.workbenchConfirmed;
+  const confirmBar = isConfirmed
+    ? `<span class="wb-confirmed-badge">● Confirmed</span>`
+    : `<button type="button" class="wb-confirm-btn${hasBlockingGuard ? " wb-confirm-blocked" : ""}" data-wb-confirm="${esc(step.id)}">Confirm step ✓</button>${hasBlockingGuard ? `<span class="wb-confirm-note">Resolve the guard above first</span>` : ""}`;
+  return `<div class="wb-sbody">
+    <div class="wb-acts-section"><div class="wb-lbl">Actions in this step${acts.length ? ` <span class="wb-hint">· tap Owner or Channel to adjust</span>` : ""}</div>${actionsHtml}</div>
+    ${composedHtml}${guardsHtml}
+    <div class="wb-confirmbar"><button type="button" class="wb-split-btn" data-wb-split="${esc(step.id)}">Split step</button>${confirmBar}</div>
+  </div>`;
+}
+
+function wbStepCardHtml(step, idx) {
+  const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
+  const cls = step.cls || "assembly";
+  const name = step.name || step.step || `Step ${idx + 1}`;
+  const color = wbRungColor(cls);
+  const isConfirmed = !!step.workbenchConfirmed;
+  return `<div class="wb-step${isConfirmed ? " wb-step-confirmed" : ""}" id="wb-${esc(step.id)}">
+    <div class="wb-shead" data-wb-toggle="${esc(step.id)}">
+      <span class="wb-sn">${String(idx + 1).padStart(2, "0")}</span>
+      <span class="wb-stt">${esc(name)}</span>
+      <span class="wb-rung" style="background:${color}20;color:${color};border:1px solid ${color}60;">${esc(cls)}</span>
+      <span class="wb-status ${isConfirmed ? "wb-status-confirmed" : "wb-status-needs"}">${isConfirmed ? "● confirmed" : "○ needs confirm"}</span>
+      <span class="wb-caret" aria-hidden="true">▸</span>
+    </div>
+    ${wbStepBodyHtml(step)}
+  </div>`;
+}
+
+function wbToggleOwner(stepId, actIdx) {
+  const step = analysisGridSteps().find(s => s.id === stepId);
+  if (!step || !Array.isArray(step.workActions) || !step.workActions[actIdx]) return;
+  const act = step.workActions[actIdx];
+  act.owner = act.owner === "ai" ? "human" : "ai";
+  if (typeof persistState === "function") persistState();
+  renderAnalysisTabWorkbench();
+}
+
+function wbToggleChannel(stepId, actIdx) {
+  const step = analysisGridSteps().find(s => s.id === stepId);
+  if (!step || !Array.isArray(step.workActions) || !step.workActions[actIdx]) return;
+  const act = step.workActions[actIdx];
+  const ch = ["online", "offline", "synchronous_human"];
+  act.channel = ch[(ch.indexOf(act.channel) + 1) % ch.length];
+  if (typeof persistState === "function") persistState();
+  renderAnalysisTabWorkbench();
+}
+
+function wbConfirmStep(stepId) {
+  const step = analysisGridSteps().find(s => s.id === stepId);
+  if (!step) return;
+  const acts = Array.isArray(step.workActions) ? step.workActions : [];
+  const humanLed = ["judgment", "decision", "human_held"].includes(step.cls);
+  if (humanLed && acts.length && acts.every(a => a.owner === "ai")) {
+    toast("Guard active — resolve the class trap before confirming");
+    return;
+  }
+  step.workbenchConfirmed = true;
+  acts.forEach(a => { if (a.source !== "user-stated") { a._priorSource = a.source || "ai-inferred"; a.source = "user-stated"; } });
+  if (typeof persistState === "function") persistState();
+  renderAnalysisTabWorkbench();
+}
+
+function wbSplitStep(stepId) {
+  toast("Step splitting — coming in a later sprint");
+}
+
+function wireWorkbench() {
+  const panel = document.getElementById("analysis-tab-workbench");
+  if (!panel || panel.dataset.wbWired) return;
+  panel.dataset.wbWired = "1";
+  panel.addEventListener("click", e => {
+    const toggleEl = e.target.closest("[data-wb-toggle]");
+    if (toggleEl) {
+      const card = document.getElementById(`wb-${toggleEl.dataset.wbToggle}`);
+      if (card) {
+        card.classList.toggle("wb-expanded");
+        const caret = card.querySelector(".wb-caret");
+        if (caret) caret.textContent = card.classList.contains("wb-expanded") ? "▾" : "▸";
+      }
+      return;
+    }
+    const ownerEl = e.target.closest("[data-wb-owner]");
+    if (ownerEl) { wbToggleOwner(ownerEl.dataset.wbOwner, parseInt(ownerEl.dataset.wbAct)); return; }
+    const chanEl = e.target.closest("[data-wb-chan]");
+    if (chanEl) { wbToggleChannel(chanEl.dataset.wbChan, parseInt(chanEl.dataset.wbAct)); return; }
+    const confirmEl = e.target.closest("[data-wb-confirm]");
+    if (confirmEl && !confirmEl.classList.contains("wb-confirm-blocked")) { wbConfirmStep(confirmEl.dataset.wbConfirm); return; }
+    const splitEl = e.target.closest("[data-wb-split]");
+    if (splitEl) { wbSplitStep(splitEl.dataset.wbSplit); return; }
+  });
+}
+
+function renderAnalysisTabWorkbench() {
+  const panel = document.getElementById("analysis-tab-workbench");
+  if (!panel) return;
+  const steps = analysisGridSteps();
+  if (!steps.length) {
+    panel.innerHTML = `<div style="padding:28px 24px;color:var(--txt-dim);font-size:13.5px;line-height:1.7;"><strong style="color:var(--txt);font-family:var(--gm-display);">Workbench</strong><br>Run a Discovery session or open a saved workflow to confirm your steps here.</div>`;
+    return;
+  }
+  const confirmedCount = steps.filter(s => s.workbenchConfirmed).length;
+  const pct = Math.round(confirmedCount / steps.length * 100);
+  const wfName = typeof analysisWorkflowName === "function" ? analysisWorkflowName() : "";
+  const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
+  const progressHtml = `<div class="wb-cockpit-head">
+    <div><div class="wb-wf-name">${esc(wfName || "Untitled workflow")}</div>
+    <div class="wb-subhead">Confirm each step — recipe and dashboard read from confirmed steps only</div></div>
+    <div class="wb-progress">
+      <div class="wb-prog-label">${confirmedCount}/${steps.length}</div>
+      <div class="wb-prog-track"><div class="wb-prog-fill" style="width:${pct}%"></div></div>
+    </div>
+  </div>`;
+  panel.innerHTML = `<div class="wb-cockpit">${progressHtml}<div class="wb-steps">${steps.map((s, i) => wbStepCardHtml(s, i)).join("")}</div></div>`;
+  wireWorkbench();
 }
 
 function renderAnalysisTabWorkflow() {
