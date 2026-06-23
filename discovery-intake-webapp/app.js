@@ -14660,6 +14660,62 @@ function inferStepPlacementShape(cls, entitlement, dataTier) {
   return { shape: "prompt", reason: "assembly-class read step — prompt or retrieval may carry this" };
 }
 
+// P5-4A — Detect whether a step is likely compound (too broad for confident placement).
+// Signals: (A) engine class-change flag, (B) broad aggregate verb, (C) bundle/scope noun,
+// (D) three or more systems, (E) mixed AI/human workActions.
+// Decision and human_held steps are EXEMPT — they are already correctly placed.
+// Returns null when no signal fires.
+function detectCompoundStep(step) {
+  if (!step) return null;
+  const cls = (typeof engineStepClass === "function") ? engineStepClass(step) : ((step && step.cls) || "");
+  if (cls === "decision" || cls === "human_held") return null;
+
+  const name   = String(step.step || step.name || "").trim();
+  const nameL  = name.toLowerCase();
+  const gc     = (k) => (typeof gridCellValue === "function") ? (gridCellValue(step, k) || "") : "";
+  const sysTools = gc("systemsTools");
+  const reasons  = [];
+
+  // Signal A: engine class-change detection (explicit conjunction spanning classes).
+  const E = (typeof studioEngine === "function") ? studioEngine() : null;
+  if (name && E && typeof E.flagCombinedStep === "function") {
+    const ef = E.flagCombinedStep(name);
+    if (ef.combined) {
+      reasons.push("class-change: " + (ef.suggestion || "AI-carriable act bundled with a judgment or decision"));
+    }
+  }
+
+  // Signal B: broad aggregate verb — implies multiple hidden sub-operations of uncertain class.
+  // These are verbs that describe *oversight* or *category-wide* work rather than a single act.
+  // Deliberately excludes specific atomic verbs (download, send, extract, reconcile, approve, etc.).
+  const BROAD_VERB_RE = /\b(check|review|validat|process|handl|manag|coordinat|ensur|complet|perform|verif|oversee|administer|address|assess|evaluat|analys|analyz|examin)/i;
+  const bvm = nameL.match(BROAD_VERB_RE);
+  if (bvm) reasons.push(`broad aggregate verb "${bvm[1]}" — implies multiple hidden sub-operations`);
+
+  // Signal C: broad bundle / scope noun — implies multi-document or multi-task scope.
+  const BROAD_NOUN_RE = /\b(setup|set-?up|configuration|package|bundle|suite|onboarding|exception|casework?|intake|portfolio|workload|procedure|details?|information)\b/i;
+  const bnm = nameL.match(BROAD_NOUN_RE);
+  if (bnm) reasons.push(`bundle noun "${bnm[1]}" — may span multiple sub-tasks`);
+
+  // Signal D: three or more distinct systems named (multiple-system scope without a single action verb).
+  const sysCount = sysTools ? sysTools.split(/[,;\/&+]/).filter((s) => s.trim().length > 1).length : 0;
+  if (sysCount >= 3) reasons.push("three or more systems named — confirm this is one class of work");
+
+  // Signal E: mixed AI/human workActions in the same step (a sub-step boundary may exist).
+  const acts = Array.isArray(step.workActions) ? step.workActions : [];
+  const hasHumanAct = acts.some((a) => a.owner === "human" || a.channel === "offline" || a.channel === "synchronous_human");
+  const hasAiAct    = acts.some((a) => a.owner === "ai" && a.channel === "online");
+  if (acts.length >= 2 && hasHumanAct && hasAiAct)
+    reasons.push("mixed AI/human actions — a sub-step boundary may exist here");
+
+  if (!reasons.length) return null;
+  return {
+    warning: "Compound step likely — this step may contain multiple actions with different AI fit. Split or confirm before treating placement as final.",
+    detail:  "May include retrieval, extraction, reconciliation, exception assessment, routing, or approval.",
+    reasons
+  };
+}
+
 // Returns a structured explainer object for the given step. Pure read — no writes.
 function buildPlacementExplainer(step) {
   if (!step || !step.id) return null;
@@ -14817,6 +14873,7 @@ function buildPlacementExplainer(step) {
   if (!hasWorkActions)
     whatWouldChange.push("Add action decomposition in the Discovery interview to derive placement from actual actions");
 
+  const cg = (typeof detectCompoundStep === "function") ? detectCompoundStep(step) : null;
   return {
     stepId:         step.id,
     stepName:       step.step || step.name || "",
@@ -14831,7 +14888,8 @@ function buildPlacementExplainer(step) {
     missingEvidence: [...new Set(missingEvidence)],
     confidence:      shapeSource,
     whatWouldChange,
-    compoundWarning: null,      // P5-4A hook — not yet implemented
+    compoundWarning: cg ? cg.warning : null,
+    compoundGuard:   cg,
     note:            PLACEMENT_SHAPE_LABELS[shape] || shape
   };
 }
@@ -14843,7 +14901,7 @@ function placementExplainerHtml(explainer, surface) {
   if (!explainer) return "";
   const esc = (typeof escapeHtml === "function") ? escapeHtml : (s) => String(s == null ? "" : s);
   const { shape, shapeSource, inferReason, aiCarries, humanHeld, blockers,
-          evidence, missingEvidence, whatWouldChange, compoundWarning } = explainer;
+          evidence, missingEvidence, whatWouldChange, compoundWarning, compoundGuard } = explainer;
   const label = PLACEMENT_SHAPE_LABELS[shape] || esc(shape || "Unknown");
   const sfx = surface || "workbench";
   const PCLR = {
@@ -14860,9 +14918,10 @@ function placementExplainerHtml(explainer, surface) {
     : shape === "deterministic-tool" ? "#f59e0b"
     : shape === "rag" ? PCLR.computed
     : PCLR.carry;
-  const srcLabel = shapeSource === "stated" ? "user-confirmed"
+  const srcLabelBase = shapeSource === "stated" ? "user-confirmed"
     : shapeSource === "computed" ? "derived from actions"
     : inferReason || "class-inferred";
+  const srcLabel = compoundWarning ? srcLabelBase + " · provisional" : srcLabelBase;
   const badgeHtml = `<span style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:4px;background:${badgeColor}22;border:1px solid ${badgeColor}55;color:${badgeColor};font-size:11px;font-weight:600;">${esc(label)}</span> <span style="font-size:10px;color:${PCLR.dim};">${esc(srcLabel)}</span>`;
   const listHtml = (items, color) => items.length
     ? `<ul style="margin:4px 0 0 0;padding-left:0;list-style:none;">${items.map((t) => `<li style="font-size:11.5px;color:${color};margin-bottom:2px;">· ${esc(t)}</li>`).join("")}</ul>`
@@ -14884,7 +14943,7 @@ function placementExplainerHtml(explainer, surface) {
   const changeHtml = whatWouldChange.length
     ? `<details style="margin-top:5px;"><summary style="font-size:10px;color:${PCLR.dim};cursor:pointer;list-style:none;">What would change this placement</summary><ul style="margin:4px 0 0 12px;padding:0;list-style:none;">${whatWouldChange.map((c) => `<li style="font-size:11px;color:${PCLR.dim};margin-bottom:2px;">→ ${esc(c)}</li>`).join("")}</ul></details>` : "";
   const cwHtml = compoundWarning
-    ? `<div style="font-size:11px;color:${PCLR.warn};margin-top:5px;">⚠ ${esc(compoundWarning)}</div>` : "";
+    ? `<div style="font-size:11px;color:${PCLR.warn};margin-top:5px;">⚠ ${esc(compoundWarning)}${compoundGuard && compoundGuard.detail ? `<br><span style="font-size:10.5px;color:${PCLR.dim};">${esc(compoundGuard.detail)}</span>` : ""}</div>` : "";
   return `<div class="p54-placement" style="background:${PCLR.panel};border:1px solid ${PCLR.border};border-radius:6px;padding:8px 10px;margin:6px 0;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><span style="font-size:10px;font-weight:700;color:${PCLR.dim};letter-spacing:.05em;text-transform:uppercase;">Placement</span>${badgeHtml}</div>${carryHtml}${heldHtml}${blockersHtml}${missingHtml}${evidenceHtml}${changeHtml}${cwHtml}</div>`;
 }
 
