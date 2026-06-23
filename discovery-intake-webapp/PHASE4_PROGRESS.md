@@ -318,7 +318,76 @@ and pass them through `appWorkflowToIntake` opts → `dashboardRecords()`.
 
 ---
 
-### C-13 through C-13 + A3 + A4  pending
+### C-13 · Process Map — ordered step nodes, five-rung coloring, Flow/Wait toggle  [A] ✓
+**SHA:** TBD  
+**Gate:** npm 1121/0 (+25 tests in `test/c13-process-map.test.mjs`)
+
+Hero section prepended to the Workbench tab (`analysis-tab-workbench`). Shows the
+workflow as an ordered horizontal node strip with Flow ↔ Wait mode toggle.
+
+**Data source:** `analysisGridSteps()` direct — no engine required for the map itself.
+Empty state (no captured steps) is handled by the existing `!steps.length` guard in
+`renderAnalysisTabWorkbench`; no `dashboardModel` gate needed.
+
+**Five-rung coloring (`PM_RUNG` const):**
+- Gather `#6FB6FF` · Build `#4D8BFF` · Judgment `#9D7BF0` · Decision `#EC4DA6` · Human-held `#C2528F`
+- `assembly` maps to Build family (legacy alias).
+
+**Step nodes (`pm13NodeHtml`):** 4px rung-colored top bar, step number, display name
+(via `stepDisplayName`), rung badge, owner chip (`pm13OwnerLabel`), wait bar
+(hidden in Flow mode), confirmed dot when `workbenchConfirmed`.
+
+**Owner chip (`pm13OwnerLabel`):**
+- `judgment | decision | human_held` → "human-held"
+- AI-led cls + human `workAction` present → "hybrid · AI assists"
+- AI-led cls + no human action → "AI carries"
+
+**The line (`pm13ConnHtml`):** connector between the last non-human step and
+the first human-structural step (`PM_HUMAN_STRUCTURAL = [judgment, decision, human_held]`)
+shows a `pm-the-line` badge ("the line") in teal `#42E8FF`. Connector class:
+AI-led source → `pm-conn-ai` (blue dashes + teal particle); human-led → `pm-conn-hu`.
+
+**Wait segments (`pm13WaitBarHtml`, `pm13WaitInfo`):**
+- `reducible` → dotted pattern bar (`pm-wseg-red`)
+- `coordination` → faint solid bar (`pm-wseg-coord`)
+- `deliberation` / `deliberation-protected` → diagonal stripe bar (`pm-wseg-prot`)
+All wait bars hidden in Flow mode; revealed by `.pm-hero[data-pm-mode="wait"] .pm-waitbar`.
+
+**Flow / Wait toggle (`wireProcessMap`):** event-delegated on the panel (once-wired
+`panel.dataset.pmWired` guard); sets `hero.dataset.pmMode` and toggles `.pm-active`
+on buttons. Node click updates selected node (`pm-sel`) and re-renders `#pm-detail`.
+
+**Cumulative timeline (`pm13CumTimelineHtml`):** below the node strip in Wait mode —
+work segments (colored by rung) + wait sub-type segments from `step.waitSegments[]`
+using `gridCellValue(step, "timeTaken")`. Hidden when no time data captured.
+
+**Detail panel (`pm13DetailHtml`):** below the timeline; shows selected step rung,
+name, ownership, tool/system, and wait breakdown. Updated on node click.
+
+**Legend (`pm13LegendHtml`):** five rung dots + "Build → Judgment" the-line marker.
+
+**CSS:** all `.pm-*` classes and `@keyframes pm-flow/pm-dot/pm-hold/pm-gate` added
+to `signal-glass.css`. CSS-only mode toggle (`.pm-hero[data-pm-mode="wait"]` selector).
+
+**Animations (CSS-only):**
+- `pm-flow`: dashed connector line scrolls (0.5s linear infinite)
+- `pm-dot`: particle traverses connector (1.9s ease-in-out)
+- `pm-hold`: human_held node opacity pulses
+- `pm-gate`: decision node ring pulse
+
+**Rail-clean:** no patchField, no scorer, no server endpoint, no headcount/reduction
+vocabulary, no banned phrase. No `dashboardModel` engine check. Seams from
+`recipeConnectionSeams()` used for pair lookup (no recompute); handoff cell used
+for connector label.
+
+**Separation:** `renderAnalysisTabWorkbench` calls `pm13HeroHtml` (typeof-guarded
+so c8-workbench tests continue to pass with their existing sandbox without pm13*).
+
+Files changed: `app.js`, `signal-glass.css`, `test/c13-process-map.test.mjs`
+
+---
+
+### A-3 + A-4  pending
 
 ### P5-1 · Legacy thin-step MODELED composition fallback  [A] pending
 

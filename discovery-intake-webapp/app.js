@@ -6497,6 +6497,206 @@ function wireWorkbench() {
   });
 }
 
+// =============================================================================
+// C-13: Process Map — ordered step nodes, five-rung coloring, Flow/Wait toggle
+// =============================================================================
+
+const PM_RUNG = {
+  gather:     { color: "#6FB6FF", icon: "⤓", label: "Gather" },
+  build:      { color: "#4D8BFF", icon: "⇄", label: "Build" },
+  judgment:   { color: "#9D7BF0", icon: "◎", label: "Judgment" },
+  decision:   { color: "#EC4DA6", icon: "⊘", label: "Decision" },
+  human_held: { color: "#C2528F", icon: "✦", label: "Human-held" },
+  assembly:   { color: "#4D8BFF", icon: "⇄", label: "Build" }
+};
+const PM_HUMAN_STRUCTURAL = ["judgment", "decision", "human_held"];
+
+function pm13OwnerLabel(cls, workActions) {
+  if (PM_HUMAN_STRUCTURAL.includes(cls)) return "human-held";
+  const acts = Array.isArray(workActions) ? workActions : [];
+  if (!acts.length) return "AI carries";
+  return acts.some(a => a.owner === "human") ? "hybrid · AI assists" : "AI carries";
+}
+
+function pm13WaitInfo(step) {
+  const segs = Array.isArray(step.waitSegments) ? step.waitSegments : [];
+  let totalMins = 0, reducMins = 0, coordMins = 0, protMins = 0;
+  for (const seg of segs) {
+    const m = parseFloat(seg.minutes) || 0;
+    totalMins += m;
+    if (seg.kind === "reducible") reducMins += m;
+    else if (seg.kind === "coordination") coordMins += m;
+    else if (seg.kind === "deliberation" || seg.kind === "deliberation-protected") protMins += m;
+  }
+  return { hasMaterial: totalMins > 0, totalMins, reducMins, coordMins, protMins, segments: segs };
+}
+
+function pm13WaitBarHtml(step) {
+  const wi = pm13WaitInfo(step);
+  if (!wi.hasMaterial) return "";
+  const fmt = m => m >= 60 ? `${(m / 60).toFixed(1)}h` : `${Math.round(m)}m`;
+  const parts = [];
+  if (wi.reducMins > 0) parts.push(`<div class="pm-wseg pm-wseg-red" style="flex:${wi.reducMins}" title="Reducible wait · ${fmt(wi.reducMins)}"></div>`);
+  if (wi.coordMins > 0) parts.push(`<div class="pm-wseg pm-wseg-coord" style="flex:${wi.coordMins}" title="Coordination wait · ${fmt(wi.coordMins)}"></div>`);
+  if (wi.protMins > 0) parts.push(`<div class="pm-wseg pm-wseg-prot" style="flex:${wi.protMins}" title="Deliberation · protected · ${fmt(wi.protMins)}"></div>`);
+  return `<div class="pm-waitbar" title="Total wait ${fmt(wi.totalMins)}">${parts.join("")}<span class="pm-wait-total">${fmt(wi.totalMins)} wait</span></div>`;
+}
+
+function pm13NodeHtml(step, idx, name) {
+  const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
+  const cls = step.cls || "assembly";
+  const rung = PM_RUNG[cls] || PM_RUNG.assembly;
+  const color = rung.color;
+  const selClass = idx === 0 ? " pm-sel" : "";
+  return `<div class="pm-node${selClass}" data-pm-idx="${idx}" data-pm-cls="${esc(cls)}">` +
+    `<div class="pm-node-top" style="background:${color};"></div>` +
+    `<div class="pm-node-body">` +
+    `<div class="pm-step-num">${String(idx + 1).padStart(2, "0")}</div>` +
+    `<div class="pm-step-name">${esc(name)}</div>` +
+    `<div class="pm-rung-badge" style="color:${color};">${esc(rung.label)}</div>` +
+    `<div class="pm-owner-chip">${pm13OwnerLabel(cls, step.workActions)}</div>` +
+    pm13WaitBarHtml(step) +
+    (step.workbenchConfirmed ? `<div class="pm-confirmed-dot"></div>` : "") +
+    `</div></div>`;
+}
+
+function pm13ConnHtml(fromCls, seamLabel, isLineCross) {
+  const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
+  const connClass = PM_HUMAN_STRUCTURAL.includes(fromCls) ? "pm-conn-hu" : "pm-conn-ai";
+  const lineMarker = isLineCross ? `<div class="pm-the-line">the line</div>` : "";
+  const seamHtml = seamLabel ? `<div class="pm-seam">${esc(String(seamLabel))}</div>` : "";
+  return `<div class="pm-conn ${connClass}">${lineMarker}${seamHtml}<div class="pm-conn-line"></div><div class="pm-conn-dot"></div></div>`;
+}
+
+function pm13LegendHtml() {
+  const rungs = [
+    { color: "#6FB6FF", label: "Gather" },
+    { color: "#4D8BFF", label: "Build" },
+    { color: "#9D7BF0", label: "Judgment" },
+    { color: "#EC4DA6", label: "Decision" },
+    { color: "#C2528F", label: "Human-held" }
+  ];
+  return `<div class="pm-legend">` +
+    rungs.map(r => `<span class="pm-leg-dot" style="background:${r.color};"></span><span class="pm-leg-lbl">${r.label}</span>`).join("") +
+    `<span class="pm-leg-dot pm-leg-line"></span><span class="pm-leg-lbl">Build → Judgment</span></div>`;
+}
+
+function pm13DetailHtml(step, name) {
+  if (!step) return `<div id="pm-detail" class="pm-detail"></div>`;
+  const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
+  const cls = step.cls || "assembly";
+  const rung = PM_RUNG[cls] || PM_RUNG.assembly;
+  const color = rung.color;
+  const wi = pm13WaitInfo(step);
+  const fmt = m => m >= 60 ? `${(m / 60).toFixed(1)} hr` : `${Math.round(m)} min`;
+  const ownerLabel = pm13OwnerLabel(cls, step.workActions);
+  const tool = (typeof gridCellValue === "function") ? (gridCellValue(step, "systemsTools") || "—") : "—";
+  let waitDetail = "—";
+  if (wi.hasMaterial) {
+    const wparts = [];
+    if (wi.reducMins > 0) wparts.push(`${fmt(wi.reducMins)} reducible`);
+    if (wi.coordMins > 0) wparts.push(`${fmt(wi.coordMins)} coordination`);
+    if (wi.protMins > 0) wparts.push(`${fmt(wi.protMins)} deliberation · protected`);
+    waitDetail = wparts.join(" · ");
+  }
+  return `<div id="pm-detail" class="pm-detail">` +
+    `<div class="pm-detail-label" style="color:${color};">${esc(rung.label)}</div>` +
+    `<div class="pm-detail-name">${esc(name)}</div>` +
+    `<div class="pm-detail-grid">` +
+    `<div class="pm-detail-cell"><div class="pm-detail-k">Ownership</div><div class="pm-detail-v">${esc(ownerLabel)}</div></div>` +
+    `<div class="pm-detail-cell"><div class="pm-detail-k">Tool / system</div><div class="pm-detail-v">${esc(String(tool))}</div></div>` +
+    `<div class="pm-detail-cell"><div class="pm-detail-k">Wait</div><div class="pm-detail-v">${waitDetail}</div></div>` +
+    `</div></div>`;
+}
+
+function pm13CumTimelineHtml(steps, stepNames) {
+  if (!steps.length) return "";
+  const segments = [];
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    const cls = s.cls || "assembly";
+    const rung = PM_RUNG[cls] || PM_RUNG.assembly;
+    const workMins = parseFloat((typeof gridCellValue === "function") ? gridCellValue(s, "timeTaken") : 0) || 0;
+    if (workMins > 0) segments.push({ kind: "work", mins: workMins, color: rung.color, label: stepNames[i] || `Step ${i + 1}` });
+    const wi = pm13WaitInfo(s);
+    if (wi.reducMins > 0) segments.push({ kind: "red", mins: wi.reducMins, label: "Reducible wait" });
+    if (wi.coordMins > 0) segments.push({ kind: "coord", mins: wi.coordMins, label: "Coordination wait" });
+    if (wi.protMins > 0) segments.push({ kind: "prot", mins: wi.protMins, label: "Deliberation · protected" });
+  }
+  const totalMins = segments.reduce((a, b) => a + b.mins, 0);
+  if (!totalMins) return `<div class="pm-cum pm-cum-empty">No time data — add step durations in the grid to see the full timeline</div>`;
+  const fmt = m => m >= 60 ? `${(m / 60).toFixed(1)}h` : `${Math.round(m)}m`;
+  const waitMins = segments.filter(seg => seg.kind !== "work").reduce((a, b) => a + b.mins, 0);
+  const segHtml = segments.map(seg => {
+    const inlineStyle = seg.kind === "work" ? `background:${seg.color};` : "";
+    return `<div class="pm-cseg pm-cseg-${seg.kind}" style="${inlineStyle}flex:${seg.mins}" title="${seg.label} · ${fmt(seg.mins)}"></div>`;
+  }).join("");
+  return `<div class="pm-cum"><div class="pm-cum-bar">${segHtml}</div>` +
+    `<div class="pm-cum-total">${fmt(totalMins)} total · ${waitMins > 0 ? fmt(waitMins) + " wait" : "no captured wait"}</div></div>`;
+}
+
+function pm13HeroHtml(steps, stepNames) {
+  if (!steps.length) return "";
+  const firstHumanIdx = steps.findIndex(s => PM_HUMAN_STRUCTURAL.includes(s.cls || "assembly"));
+  const seams = (typeof recipeConnectionSeams === "function") ? (recipeConnectionSeams() || []) : [];
+  const seamByPair = {};
+  for (const sm of seams) seamByPair[`${sm.fromId}>${sm.toId}`] = sm;
+  const parts = [];
+  for (let i = 0; i < steps.length; i++) {
+    parts.push(pm13NodeHtml(steps[i], i, stepNames[i]));
+    if (i < steps.length - 1) {
+      const fromCls = steps[i].cls || "assembly";
+      const handoff = (typeof gridCellValue === "function") ? (gridCellValue(steps[i], "handoff") || "") : "";
+      const isLineCross = firstHumanIdx > 0 && i === firstHumanIdx - 1;
+      parts.push(pm13ConnHtml(fromCls, handoff, isLineCross));
+    }
+  }
+  return `<div id="pm-hero" class="pm-hero" data-pm-mode="flow">` +
+    `<div class="pm-hero-head"><div class="pm-hero-title">Process Map</div>` +
+    `<div class="pm-controls">` +
+    `<button class="pm-toggle-btn pm-active" data-pm-mode="flow">Flow</button>` +
+    `<button class="pm-toggle-btn" data-pm-mode="wait">Wait</button>` +
+    `<span id="pm-modehint" class="pm-modehint">Flow — work moving through the process</span>` +
+    `</div></div>` +
+    pm13LegendHtml() +
+    `<div class="pm-nodes">${parts.join("")}</div>` +
+    pm13CumTimelineHtml(steps, stepNames) +
+    pm13DetailHtml(steps[0], stepNames[0]) +
+    `</div>`;
+}
+
+function wireProcessMap(panel) {
+  if (!panel || panel.dataset.pmWired) return;
+  panel.dataset.pmWired = "1";
+  panel.addEventListener("click", e => {
+    const toggleBtn = e.target.closest(".pm-toggle-btn");
+    if (toggleBtn) {
+      const hero = panel.querySelector("#pm-hero");
+      if (!hero) return;
+      const mode = toggleBtn.dataset.pmMode || "flow";
+      hero.dataset.pmMode = mode;
+      hero.querySelectorAll(".pm-toggle-btn").forEach(b => b.classList.toggle("pm-active", b.dataset.pmMode === mode));
+      const hint = panel.querySelector("#pm-modehint");
+      if (hint) hint.textContent = mode === "wait"
+        ? "Wait — where time accumulates (gates hold; reducible wait can compress)"
+        : "Flow — work moving through the process";
+      return;
+    }
+    const pmNode = e.target.closest(".pm-node");
+    if (pmNode) {
+      panel.querySelectorAll(".pm-node").forEach(n => n.classList.remove("pm-sel"));
+      pmNode.classList.add("pm-sel");
+      const idx = parseInt(pmNode.dataset.pmIdx || "0", 10);
+      const steps = (typeof analysisGridSteps === "function") ? analysisGridSteps() : [];
+      if (!steps[idx]) return;
+      const name = (typeof stepDisplayName === "function") ? stepDisplayName(steps[idx], idx) : (steps[idx].name || `Step ${idx + 1}`);
+      const detailEl = panel.querySelector("#pm-detail");
+      if (detailEl) detailEl.outerHTML = pm13DetailHtml(steps[idx], name);
+      return;
+    }
+  });
+}
+
 function renderAnalysisTabWorkbench() {
   const panel = document.getElementById("analysis-tab-workbench");
   if (!panel) return;
@@ -6517,7 +6717,10 @@ function renderAnalysisTabWorkbench() {
       <div class="wb-prog-track"><div class="wb-prog-fill" style="width:${pct}%"></div></div>
     </div>
   </div>`;
-  panel.innerHTML = `<div class="wb-cockpit">${progressHtml}<div class="wb-steps">${steps.map((s, i) => wbStepCardHtml(s, i)).join("")}</div></div>`;
+  const stepNames = steps.map((s, i) => (typeof stepDisplayName === "function" ? stepDisplayName(s, i) : (s.name || `Step ${i + 1}`)));
+  const heroHtml = typeof pm13HeroHtml === "function" ? pm13HeroHtml(steps, stepNames) : "";
+  panel.innerHTML = `${heroHtml}<div class="wb-cockpit">${progressHtml}<div class="wb-steps">${steps.map((s, i) => wbStepCardHtml(s, i)).join("")}</div></div>`;
+  if (typeof wireProcessMap === "function") wireProcessMap(panel);
   wireWorkbench();
 }
 
