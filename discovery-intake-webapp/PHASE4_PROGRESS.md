@@ -451,7 +451,7 @@ Files changed: `app.js`, `test/a3-portfolio-lens.test.mjs`
 ---
 
 ### A-4 · Portfolio Constellation  [A] ✓
-**SHA:** (see commit below)
+**SHA:** 5c42491
 **Gate:** npm 1174/0 (+26 tests in `test/a4-constellation.test.mjs`)
 
 Visual companion to A-3. Where A-3 is the heatmap/lens (role × rung grid), A-4 is the
