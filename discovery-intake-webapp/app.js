@@ -6521,16 +6521,184 @@ function renderAnalysisTabWorkbench() {
   wireWorkbench();
 }
 
-function renderAnalysisTabWorkflow() {
-  // C-9: Your Workflow — merged Leverage Map + per-workflow AI Opportunities.
-  // Stub: renders into the new #analysis-tab-workflow panel.
-  // C-9 will redesign this surface. For now, show a brief placeholder.
-  const panel = document.getElementById("analysis-tab-workflow");
-  if (!panel || panel.dataset.c9Ready) return;
-  panel.innerHTML = `<div style="padding:28px 24px;color:var(--txt-dim);font-size:13.5px;line-height:1.6;">
-    <strong style="color:var(--txt);">Your Workflow</strong><br>
-    Leverage-framed, plain language view of where AI helps. Merged from Leverage Map + AI Opportunities in C-9.
+// =============================================================================
+// C-9: Your Workflow — leverage-framed, plain language, no cost/headcount ever
+// =============================================================================
+
+const YW_HUMAN_STRUCTURAL = ["judgment", "decision", "human_held"];
+
+function ywBuildModel(gridSteps) {
+  if (!gridSteps.length) return { readyNow: [], needsSetup: [], staysYours: [], timeBackMinutes: 0, hasLeverage: false };
+
+  const intakeSteps = gridSteps.map((step, index) => ({
+    id: step.id,
+    name: stepDisplayName(step, index),
+    tool: gridCellValue(step, "systemsTools"),
+    channel: gridCellValue(step, "handoff"),
+    accessMode: typeof step.accessMode === "string" ? step.accessMode : "",
+    hasHumanCheckpoint: Boolean(gridCellValue(step, "humanCheckpoint")),
+    cls: step.cls || "assembly"
+  }));
+
+  const model = buildWorkflowLeverage(intakeSteps, {
+    stepTypes: state.stepTypes,
+    frictionTags: state.frictionTags,
+    roleTags: state.roleTags,
+    handoffTags: state.handoffTags,
+    decisionTags: state.decisionTags
+  });
+
+  const leverageStepIds = new Set(model.steps.map(s => s.id));
+  const readyNow = [], needsSetup = [], staysYours = [];
+
+  for (const row of model.steps) {
+    const gridStep = gridSteps.find(s => s.id === row.id);
+    const confirmed = gridStep && gridStep.workbenchConfirmed;
+    const item = { type: "step", id: row.id, name: row.name, assist: row.assist, evidence: row.evidence, level: row.level, lstate: row.state, humanHeld: row.humanHeld };
+    if (row.humanHeld) staysYours.push(item);
+    else if (confirmed) readyNow.push(item);
+    else needsSetup.push({ ...item, note: "Confirm in Workbench to activate" });
+  }
+
+  for (const gridStep of gridSteps) {
+    if (leverageStepIds.has(gridStep.id)) continue;
+    const cls = gridStep.cls || "assembly";
+    const name = intakeSteps.find(s => s.id === gridStep.id)?.name || gridStep.name || gridStep.id;
+    if (YW_HUMAN_STRUCTURAL.includes(cls)) {
+      staysYours.push({ type: "step", id: gridStep.id, name, assist: null, evidence: [], level: null, lstate: null, humanHeld: true, note: "Human judgment or approval step" });
+    } else {
+      needsSetup.push({ type: "step", id: gridStep.id, name, assist: null, evidence: [], level: null, lstate: null, humanHeld: false, note: "Capture step shape in Workbench to see where AI helps" });
+    }
+  }
+
+  for (const seam of model.seams) {
+    const item = { type: "seam", id: `${seam.fromId}>${seam.toId}`, name: `${seam.fromName} → ${seam.toName}`, fromName: seam.fromName, toName: seam.toName, assist: seam.assist, evidence: seam.evidence, level: seam.level, lstate: seam.state, humanHeld: seam.humanHeld };
+    if (seam.humanHeld) staysYours.push(item);
+    else readyNow.push(item);
+  }
+
+  let timeBackMinutes = 0;
+  for (const row of model.steps) {
+    if (row.humanHeld) continue;
+    const gridStep = gridSteps.find(s => s.id === row.id);
+    if (!gridStep) continue;
+    const rawTime = parseFloat(gridCellValue(gridStep, "timeTaken")) || 0;
+    if (!rawTime) continue;
+    const addr = (typeof gridStep.composedAddr === "number" ? gridStep.composedAddr
+      : typeof gridStep.theo === "number" ? gridStep.theo : 70) / 100;
+    timeBackMinutes += rawTime * addr;
+  }
+
+  return {
+    readyNow, needsSetup, staysYours,
+    timeBackMinutes: Math.round(timeBackMinutes),
+    hasLeverage: model.steps.length > 0 || model.seams.length > 0
+  };
+}
+
+function ywTimeBackLabel(minutes) {
+  if (!minutes) return null;
+  if (minutes < 60) return `~${minutes}m`;
+  const hrs = Math.round(minutes / 6) / 10;
+  return `~${hrs} hr${hrs !== 1 ? "s" : ""}`;
+}
+
+function ywItemHtml(item) {
+  const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
+  const isSeam = item.type === "seam";
+  const nameHtml = isSeam
+    ? `${esc(item.fromName)} <span style="color:var(--txt-faint);margin:0 4px;">→</span> ${esc(item.toName)}`
+    : esc(item.name);
+  let badge = "";
+  if (item.humanHeld) {
+    badge = `<span style="background:${HUMAN_HOLD_HUE}22;color:${HUMAN_HOLD_HUE};border:1px solid ${HUMAN_HOLD_HUE}55;border-radius:5px;font-size:10px;font-family:var(--gm-mono,'JetBrains Mono',monospace);padding:2px 7px;white-space:nowrap;">held</span>`;
+  } else if (item.level) {
+    const lc = { high: "var(--gm-value)", medium: "var(--gm-hours)", low: "var(--txt-faint)" }[item.level] || "var(--txt-faint)";
+    badge = `<span style="background:${lc}22;color:${lc};border:1px solid ${lc}55;border-radius:5px;font-size:10px;font-family:var(--gm-mono,'JetBrains Mono',monospace);padding:2px 7px;">${item.level}</span>`;
+  }
+  const seqIcon = isSeam ? `<span style="font-size:11px;color:var(--txt-faint);flex-shrink:0;">↔</span>` : "";
+  const assistLine = item.assist ? `<div style="font-size:11px;color:var(--txt-dim);margin-top:3px;">${esc(item.assist)}</div>` : "";
+  const noteLine = item.note ? `<div style="font-size:11px;color:var(--txt-faint);margin-top:3px;font-style:italic;">${esc(item.note)}</div>` : "";
+  const evLine = item.evidence && item.evidence.length
+    ? `<div style="font-size:10.5px;color:var(--txt-faint);margin-top:4px;">${item.evidence.slice(0, 3).map(e => esc(e)).join(" · ")}</div>` : "";
+  return `<div style="padding:9px 13px;border-top:1px solid var(--sg-line-soft);">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">${seqIcon}<span style="font-size:13px;font-weight:600;color:var(--txt);flex:1;">${nameHtml}</span>${badge}</div>
+    ${assistLine}${evLine}${noteLine}
   </div>`;
+}
+
+function ywBucketHtml(labelText, accentCss, icon, items, emptyMsg) {
+  const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
+  const count = items.length;
+  const body = count
+    ? items.map(ywItemHtml).join("")
+    : `<div style="padding:14px 13px;font-size:12px;color:var(--txt-faint);font-style:italic;">${esc(emptyMsg)}</div>`;
+  return `<div style="border:1px solid var(--sg-line-soft);border-radius:12px;overflow:hidden;background:var(--glass);">
+    <div style="padding:11px 14px;display:flex;align-items:center;gap:9px;border-bottom:1px solid var(--sg-line-soft);background:${accentCss}12;">
+      <span style="font-size:15px;line-height:1;">${icon}</span>
+      <span style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-weight:700;font-size:13.5px;color:var(--txt);">${esc(labelText)}</span>
+      <span style="margin-left:auto;font-family:var(--gm-mono,'JetBrains Mono',monospace);font-size:11px;color:var(--txt-faint);">${count}</span>
+    </div>
+    ${body}
+  </div>`;
+}
+
+function ywHeroHtml(wfName, model) {
+  const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
+  const timeLabel = ywTimeBackLabel(model.timeBackMinutes);
+  const timeBadge = timeLabel
+    ? `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--gm-value)18;border:1px solid var(--gm-value)50;color:var(--gm-value);font-family:var(--gm-mono,'JetBrains Mono',monospace);font-size:12px;padding:5px 12px;border-radius:8px;margin-top:10px;">${esc(timeLabel)} per run — back to the work that needs you</span>` : "";
+  return `<div style="padding:22px 24px 18px;border-bottom:1px solid var(--sg-line-soft);">
+    <div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:22px;font-weight:700;color:var(--txt);line-height:1.2;">${esc(wfName || "Your workflow")}</div>
+    <div style="margin-top:6px;font-size:13.5px;color:var(--txt-dim);line-height:1.6;">Where AI clears the path — and what stays yours. No cost, no headcount, ever.</div>
+    ${timeBadge}
+  </div>`;
+}
+
+function ywReinvestHtml() {
+  const ways = [
+    { label: "Go deeper", badge: "Now", desc: "More time on the tricky cases — the ones that actually need judgment.", color: "var(--gm-build)" },
+    { label: "Help the team", badge: "Now", desc: "Lend a hand when it's slammed, without burning out.", color: "var(--gm-build)" },
+    { label: "Learn something", badge: "Next", desc: "Get AI-fluent, pick up new skills, grow into the next role.", color: "var(--gm-hours)" },
+    { label: "Build something", badge: "Durable", desc: "Write the playbook the whole team reuses — your work, multiplied.", color: "var(--gm-cycle)" }
+  ];
+  const waysHtml = ways.map(w => `<div style="flex:1;min-width:150px;padding:13px 14px;background:var(--glass-2);border:1px solid var(--sg-line-soft);border-radius:10px;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;">
+      <span style="font-size:13px;font-weight:700;color:var(--txt);">${w.label}</span>
+      <span style="font-family:var(--gm-mono,'JetBrains Mono',monospace);font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;background:${w.color}22;color:${w.color};">${w.badge}</span>
+    </div>
+    <div style="font-size:12px;color:var(--txt-dim);line-height:1.5;">${w.desc}</div>
+  </div>`).join("");
+  return `<div style="padding:20px 24px;border-bottom:1px solid var(--sg-line-soft);">
+    <div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:14px;font-weight:700;color:var(--txt);margin-bottom:12px;">The time comes back — here's where it could go</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">${waysHtml}</div>
+  </div>`;
+}
+
+function ywPromiseHtml() {
+  return `<div style="margin:20px 24px 28px;padding:20px 22px;background:var(--deep2,#08111f);border:1px solid rgba(255,255,255,.10);border-radius:12px;">
+    <div style="font-family:var(--gm-mono,'JetBrains Mono',monospace);font-size:10px;letter-spacing:.10em;text-transform:uppercase;color:var(--txt-faint);margin-bottom:8px;">The promise</div>
+    <div style="font-size:14px;font-weight:600;color:var(--txt);line-height:1.6;">AI clears the mechanical path. What needs you — judgment, trust, nuance — stays with you. This view never shows costs or headcount: the moment it does, trust is gone.</div>
+  </div>`;
+}
+
+function renderAnalysisTabWorkflow() {
+  const panel = document.getElementById("analysis-tab-workflow");
+  if (!panel) return;
+  const gridSteps = analysisGridSteps();
+  if (!gridSteps.length) {
+    panel.innerHTML = `<div style="padding:28px 24px;color:var(--txt-dim);font-size:13.5px;line-height:1.7;"><strong style="color:var(--txt);font-family:var(--gm-display,'Space Grotesk',system-ui);">Your Workflow</strong><br>Run a Discovery session or open a saved workflow to see where AI can help — and what stays yours.</div>`;
+    return;
+  }
+  const model = ywBuildModel(gridSteps);
+  const wfName = typeof analysisWorkflowName === "function" ? analysisWorkflowName() : "";
+  const holdCss = (typeof HUMAN_HOLD_HUE === "string") ? HUMAN_HOLD_HUE : "#FF4FD8";
+  const bucketsHtml = `<div style="padding:20px 24px;display:flex;flex-direction:column;gap:12px;border-bottom:1px solid var(--sg-line-soft);">
+    ${ywBucketHtml("Ready now", "var(--gm-value)", "✓", model.readyNow, "No steps ready yet — confirm steps in Workbench to activate.")}
+    ${ywBucketHtml("Needs setup", "var(--gm-hours)", "○", model.needsSetup, "Nothing to set up — all steps are either ready or human-owned.")}
+    ${ywBucketHtml("Stays yours", holdCss, "✦", model.staysYours, "No human-held steps — every step has a leverage signal.")}
+  </div>`;
+  panel.innerHTML = ywHeroHtml(wfName, model) + bucketsHtml + ywReinvestHtml() + ywPromiseHtml();
 }
 
 function renderAnalysisTabWorkforce() {
