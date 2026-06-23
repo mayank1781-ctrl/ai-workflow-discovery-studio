@@ -388,7 +388,7 @@ Files changed: `app.js`, `signal-glass.css`, `test/c13-process-map.test.mjs`
 ---
 
 ### A-3 · Portfolio Lens Heatmap  [A] ✓
-**SHA:** (see commit below)
+**SHA:** 84417ae
 **Gate:** npm 1148/0 (+27 tests in `test/a3-portfolio-lens.test.mjs`)
 
 Portfolio-level heatmap section injected into the Executive Dashboard tab, before the existing
