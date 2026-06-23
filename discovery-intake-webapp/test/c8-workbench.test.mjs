@@ -280,6 +280,39 @@ test("wbConfirmStep: toast-guards when judgment cls has all-AI actions (pink gua
 
 // ── wbSplitStep is a stub that toasts ─────────────────────────────────────
 
+// ── namefix regression ─────────────────────────────────────────────────────
+// Sandbox variant that includes stepDisplayName + its call chain so the
+// cells.name.value path is exercised end-to-end.
+
+function wbNameSandbox() {
+  return buildSandbox(source, {
+    consts: ["WB_RUNG_COLOR", "GRID_CELL_KEYS", "GRID_CELL_LAYER"],
+    functions: ["wbRungColor", "wbGuardsHtml", "wbActionRowHtml", "wbComposed",
+                "wbStepBodyHtml", "wbStepCardHtml",
+                "stepDisplayName", "gridCellValue", "getField",
+                "escapeHtml"],
+    globals: {
+      studioEngine: () => null,
+      analysisGridSteps: () => [],
+      persistState: () => {},
+      toast: () => {},
+      analysisWorkflowName: () => "Test workflow",
+      currentGridStep: () => null,
+      document: { getElementById: () => null, querySelectorAll: () => [] },
+      console: { warn() {}, error() {}, info() {} }
+    }
+  });
+}
+
+test("namefix: wbStepCardHtml renders cells.name.value, not the legacy step.name", () => {
+  const { wbStepCardHtml } = wbNameSandbox();
+  const step = { id: "s1", cls: "gather", name: "", step: "", workActions: [],
+    cells: { name: { value: "Data ingestion and feed validation", source: "ai-inferred", state: "stated", confidence: 0.9 } } };
+  const out = wbStepCardHtml(step, 0);
+  assert.ok(out.includes("Data ingestion and feed validation"), "real cell name rendered");
+  assert.ok(!out.includes("Step 1"), "generic 'Step 1' fallback is not used");
+});
+
 test("wbSplitStep: toasts 'coming in a later sprint'", () => {
   const toastCalls = [];
   const sb = buildSandbox(source, {

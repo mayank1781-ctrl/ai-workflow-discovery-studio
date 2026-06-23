@@ -6418,7 +6418,7 @@ function wbStepBodyHtml(step) {
 function wbStepCardHtml(step, idx) {
   const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
   const cls = step.cls || "assembly";
-  const name = step.name || step.step || `Step ${idx + 1}`;
+  const name = typeof stepDisplayName === "function" ? stepDisplayName(step, idx) : step.name || `Step ${idx + 1}`;
   const color = wbRungColor(cls);
   const isConfirmed = !!step.workbenchConfirmed;
   return `<div class="wb-step${isConfirmed ? " wb-step-confirmed" : ""}" id="wb-${esc(step.id)}">
