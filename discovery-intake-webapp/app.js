@@ -1576,6 +1576,7 @@ function bindEvents() {
       activateAnalysisTab(button.dataset.analysisTab);
     });
   });
+  wireMethodologyLink(); // C-7: rail footer methodology & provenance link
   document.querySelectorAll("[data-output-action]").forEach((button) => {
     button.addEventListener("click", () => {
       if (button.dataset.outputAction === "excel") exportWorkbook();
@@ -4993,7 +4994,10 @@ function patternLayerColor(pattern) {
   return PATTERN_LAYER_COLOR[pattern] || "#5b7186";
 }
 
-const ANALYSIS_TABS = ["grid", "opportunities", "leverage", "recipe", "engineering"];
+// C-7: 5-tab altitude-grouped nav (Workbench · Your Workflow · Recipe Book / Executive · Workforce).
+// Old values (grid/opportunities/leverage/engineering) are no longer valid tab keys; they normalise
+// to "workbench" so saved state from earlier builds lands gracefully.
+const ANALYSIS_TABS = ["workbench", "workflow", "recipe", "dashboard", "workforce"];
 
 // Implementation-complexity bucket per pattern. Low ends Phase 2, Medium ends
 // Phase 3, High ends Phase 4. Unknown patterns default to Medium.
@@ -5025,7 +5029,7 @@ const CELL_PLAIN_NAMES = {
 };
 
 function normalizeAnalysisTab(tab) {
-  return ANALYSIS_TABS.includes(tab) ? tab : "grid";
+  return ANALYSIS_TABS.includes(tab) ? tab : "workbench";
 }
 
 // --- shared grid-cell readers -------------------------------------------------
@@ -6272,15 +6276,10 @@ function workflowIntelligenceSummaryHtml() {
 }
 
 function renderWorkflowIntelligenceSummary() {
-  const analysis = document.querySelector(".analysis-studio");
-  const tabBar = analysis?.querySelector(".analysis-tab-bar");
-  if (!analysis || !tabBar) return;
-  let host = document.getElementById("workflowIntelligenceSummaryHost");
-  if (!host) {
-    host = document.createElement("div");
-    host.id = "workflowIntelligenceSummaryHost";
-    tabBar.insertAdjacentElement("beforebegin", host);
-  }
+  // C-7: host is now a static div in .studio-content-area (no longer inserted dynamically
+  // relative to the old horizontal tab bar — that element is gone with the rail layout).
+  const host = document.getElementById("workflowIntelligenceSummaryHost");
+  if (!host) return;
   host.innerHTML = workflowIntelligenceSummaryHtml();
 }
 
@@ -6303,32 +6302,17 @@ function trustPanelHtml() {
     </details>`;
 }
 
-// Mounts the trust panel into the Analysis Studio (mirrors the intelligence
-// summary host pattern) and emits why_panel_opened when the user expands it.
+// C-7: trust banner removed per P4 spec §3.5. Replaced by "Methodology & provenance" link
+// in the studio rail footer (wired via wireMethodologyLink). trustPanelHtml() is preserved for
+// unit tests and is rendered on-demand via the footer link; it is no longer mounted as a banner.
 function renderTrustPanel() {
-  const analysis = document.querySelector(".analysis-studio");
-  const tabBar = analysis?.querySelector(".analysis-tab-bar");
-  if (!analysis || !tabBar) return;
-  let host = document.getElementById("trustPanelHost");
-  if (!host) {
-    host = document.createElement("div");
-    host.id = "trustPanelHost";
-    tabBar.insertAdjacentElement("beforebegin", host);
-  }
-  host.innerHTML = trustPanelHtml();
-  const details = host.querySelector("#whyTrustPanel");
-  if (details) {
-    details.addEventListener("toggle", () => {
-      if (details.open) recordTelemetryClient("why_panel_opened", { count_a: 1 });
-    });
-  }
+  // no-op in the rail layout — content served via wireMethodologyLink instead
 }
 
 function renderAnalysisStudio() {
   const active = normalizeAnalysisTab(state.analysisActiveTab);
   if (state.analysisActiveTab !== active) state.analysisActiveTab = active;
   renderWorkflowIntelligenceSummary();
-  renderTrustPanel();
 
   document.querySelectorAll("[data-analysis-tab]").forEach((button) => {
     const selected = button.dataset.analysisTab === active;
@@ -6339,12 +6323,75 @@ function renderAnalysisStudio() {
     panel.classList.toggle("active", panel.id === `analysis-tab-${active}`);
   });
 
-  if (active === "grid") renderAnalysisTabGrid();
-  else if (active === "opportunities") renderAnalysisTabOpportunities();
-  else if (active === "leverage") renderAnalysisTabLeverage();
+  // C-7: 5-tab routing — Workbench / Your Workflow / Recipe Book / Executive Dashboard / Workforce
+  if (active === "workbench") renderAnalysisTabWorkbench();
+  else if (active === "workflow") renderAnalysisTabWorkflow();
   else if (active === "recipe") renderAnalysisTabRecipe();
-  else if (active === "engineering") renderAnalysisTabEngineering();
   else if (active === "dashboard") renderAnalysisTabDashboard();
+  else if (active === "workforce") renderAnalysisTabWorkforce();
+}
+
+// =============================================================================
+// C-7: Studio shell — three new surface stubs (populated in C-8 / C-9 / C-12)
+// =============================================================================
+
+function renderAnalysisTabWorkbench() {
+  // C-8: Workbench cockpit (multi-action confirm, adversarial, two-tier guard).
+  // Stub only — C-8 overwrites this entirely.
+  const panel = document.getElementById("analysis-tab-workbench");
+  if (!panel || panel.dataset.c8Ready) return;
+  panel.innerHTML = `<div style="padding:28px 24px;color:var(--txt-dim);font-size:13.5px;line-height:1.6;">
+    <strong style="color:var(--txt);">Workbench</strong><br>
+    Confirm your workflow steps here. Multi-action confirm gate and adversarial guard coming in C-8.
+  </div>`;
+}
+
+function renderAnalysisTabWorkflow() {
+  // C-9: Your Workflow — merged Leverage Map + per-workflow AI Opportunities.
+  // Stub: renders into the new #analysis-tab-workflow panel.
+  // C-9 will redesign this surface. For now, show a brief placeholder.
+  const panel = document.getElementById("analysis-tab-workflow");
+  if (!panel || panel.dataset.c9Ready) return;
+  panel.innerHTML = `<div style="padding:28px 24px;color:var(--txt-dim);font-size:13.5px;line-height:1.6;">
+    <strong style="color:var(--txt);">Your Workflow</strong><br>
+    Leverage-framed, plain language view of where AI helps. Merged from Leverage Map + AI Opportunities in C-9.
+  </div>`;
+}
+
+function renderAnalysisTabWorkforce() {
+  // C-12: Workforce Transformation — inputs panel, net value, role-exposure, redeployment.
+  // Stub only — C-12 populates this.
+  const panel = document.getElementById("analysis-tab-workforce");
+  if (!panel || panel.dataset.c12Ready) return;
+  panel.innerHTML = `<div style="padding:28px 24px;color:var(--txt-dim);font-size:13.5px;line-height:1.6;">
+    <strong style="color:var(--txt);">Workforce Transformation</strong><br>
+    Cross-workflow capacity model, role-exposure map, redeployment timeline. Coming in C-12.
+  </div>`;
+}
+
+function wireMethodologyLink() {
+  const btn = document.getElementById("methodologyLink");
+  if (!btn || btn.dataset.wired) return;
+  btn.dataset.wired = "1";
+  let panel = document.getElementById("methodologyOverlay");
+  btn.addEventListener("click", () => {
+    if (!panel) {
+      panel = document.createElement("div");
+      panel.id = "methodologyOverlay";
+      panel.style.cssText = "position:fixed;inset:0;z-index:9000;background:rgba(5,6,18,.72);display:flex;align-items:center;justify-content:center;";
+      panel.innerHTML = `<div style="background:var(--deep);border:1px solid var(--sg-line);border-radius:16px;padding:28px 32px;max-width:480px;width:90%;box-shadow:0 24px 64px rgba(0,0,0,.6);">
+        <h3 style="color:var(--txt);font-size:15px;margin:0 0 14px;">Methodology &amp; provenance</h3>
+        ${trustPanelHtml()}
+        <button type="button" id="closeMethodologyPanel" style="margin-top:16px;padding:7px 18px;background:var(--glass-2);border:1px solid var(--sg-line);border-radius:8px;color:var(--txt-dim);cursor:pointer;font-size:12px;">Close</button>
+      </div>`;
+      document.body.appendChild(panel);
+      panel.querySelector("#closeMethodologyPanel")?.addEventListener("click", () => panel.remove());
+      panel.addEventListener("click", (e) => { if (e.target === panel) panel.remove(); });
+    } else {
+      panel.remove(); panel = null;
+    }
+    recordTelemetryClient("why_panel_opened", { count_a: 1 });
+  });
 }
 
 // --- TAB 1: Workflow Grid -----------------------------------------------------
@@ -16617,11 +16664,10 @@ async function runDocumentUpload(file, el) {
   state.workflowGrid = buildWorkflowGridFromExtraction(single);
   state.extractionWarning = typeof payload.extractionWarning === "string" ? payload.extractionWarning : "";
   if (payload.extractionWarning) toast(payload.extractionWarning);
-  toast("Workflow extracted — review your grid");
-  // Land on the Analysis Studio Workflow Grid tab so the populated 3-layer grid
-  // is immediately visible (analysisActiveTab drives that tab, not activeWorkbenchTab).
+  toast("Workflow extracted — review your steps");
+  // C-7: land on Workbench (was "grid") so the confirmed step set is immediately visible.
   state.appMode = "analysis";
-  state.analysisActiveTab = "grid";
+  state.analysisActiveTab = "workbench";
   docUploadInProgress = false;
   persistState();
   render();
@@ -16746,10 +16792,10 @@ function selectPendingWorkflow(index) {
   state.workflowGrid = buildWorkflowGridFromExtraction(wf);
   state.pendingWorkflows = null;
   state.appMode = "analysis";
-  state.analysisActiveTab = "grid";
+  state.analysisActiveTab = "workbench"; // C-7: land on Workbench
   persistState();
   render();
-  toast("Workflow loaded — review your grid");
+  toast("Workflow loaded — review your steps");
 }
 
 function renderHeaderContext() {
@@ -22964,7 +23010,7 @@ function loadGuidedSample() {
   // Real, deterministic grid construction (writes doc-extracted provenance cells).
   state.workflowGrid = buildWorkflowGridFromExtraction(SAMPLE_EXTRACTION);
   state.appMode = "analysis";
-  state.analysisActiveTab = "grid";
+  state.analysisActiveTab = "workbench"; // C-7: land on Workbench
   closeGuidedFirstRun();
   render();
   // Structural telemetry only, via the single gated client path (server drops it

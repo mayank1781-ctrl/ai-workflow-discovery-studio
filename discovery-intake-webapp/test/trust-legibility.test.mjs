@@ -145,8 +145,9 @@ test("c: the cockpit elevates the next-best action above the metrics (progressiv
   assert.ok(src.includes("Show all signals"), "metrics are available on expand");
 });
 
-test("b/telemetry: the trust panel emits why_panel_opened only on open", () => {
-  const src = extractFunction(source, "renderTrustPanel");
-  assert.ok(src.includes('recordTelemetryClient("why_panel_opened"'), "panel wires the telemetry event");
-  assert.ok(src.includes("details.open"), "the event fires only when the panel is opened");
+test("b/telemetry: the methodology panel emits why_panel_opened when opened", () => {
+  // C-7: trust banner removed; the telemetry event is now fired by wireMethodologyLink
+  // (the rail-footer button), not by renderTrustPanel (which is now a no-op shell).
+  const src = extractFunction(source, "wireMethodologyLink");
+  assert.ok(src.includes('recordTelemetryClient("why_panel_opened"'), "methodology link wires the telemetry event");
 });

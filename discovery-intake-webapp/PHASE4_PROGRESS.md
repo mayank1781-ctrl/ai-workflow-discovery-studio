@@ -109,7 +109,24 @@ Files changed: `signal-glass.css`, `index.html`
 
 ## Track C — UI surfaces
 
-### C-7 through C-13  pending
+### C-7 · Studio shell: left rail + altitude-grouped 5-tab nav  [A] ✓
+**SHA:** pending  **Gate:** npm 930/0 · engine 369/0
+
+Horizontal `.analysis-tab-bar` (6 tabs) → vertical `.studio-rail` (5 tabs, altitude-grouped).
+Two groups: "This workflow" (Workbench · Your Workflow · Recipe Book) and "Portfolio"
+(Executive Dashboard · Workforce). `ANALYSIS_TABS` updated to the 5 new keys; saved states
+with old keys (grid/leverage/etc.) normalise to "workbench" gracefully. "Why you can trust
+this" banner removed; `renderTrustPanel()` → no-op; telemetry moved to `wireMethodologyLink`
+(rail footer button shows trust content in a lightweight overlay). Three stubs added:
+`renderAnalysisTabWorkbench` / `renderAnalysisTabWorkflow` / `renderAnalysisTabWorkforce`
+(C-8/C-9/C-12 will replace them). Legacy panel IDs (grid/leverage/opportunities/engineering)
+kept hidden in the DOM for compatibility during the C-8→C-13 build sequence.
+Rail CSS added to signal-glass.css; layout uses `display:flex;flex-direction:row` on
+`.analysis-studio`; intelligence summary host is now a static div in `.studio-content-area`.
+
+Files changed: `app.js`, `index.html`, `signal-glass.css`, `test/trust-legibility.test.mjs`
+
+### C-8 through C-13 + A3 + A4  pending
 
 ---
 

@@ -226,6 +226,123 @@ body[data-app-mode="interview"] .workspace{
 #analysis-tab-engineering .ds-grad-bar,
 #analysis-tab-engineering .ds-grad-bar-v{ background:var(--grad); }
 
+/* ============================================================================
+   C-7 (P4) — Studio shell: left rail, altitude-grouped 5-tab nav.
+   signal-glass.css loads last → beats cockpit.css cascade for the studio layout.
+   ========================================================================== */
+
+/* Analysis Studio becomes a flex row: rail (left) + content area (right) */
+.analysis-studio{
+  display:flex !important;
+  flex-direction:row !important;
+  align-items:stretch;
+  min-height:0;
+  flex:1;
+}
+
+/* ---- Left rail ---- */
+.studio-rail{
+  width:188px;
+  flex-shrink:0;
+  display:flex;
+  flex-direction:column;
+  background:var(--deep2);
+  border-right:1px solid var(--sg-line-soft);
+  padding:14px 0 0;
+  overflow-y:auto;
+  gap:0;
+  position:sticky;
+  top:0;
+  align-self:flex-start;
+  min-height:100%;
+}
+
+.rail-group{
+  padding:0 8px;
+}
+
+.rail-group-label{
+  display:block;
+  font-family:var(--gm-mono);
+  font-size:9px;
+  font-weight:500;
+  letter-spacing:.11em;
+  text-transform:uppercase;
+  color:var(--txt-faint);
+  padding:12px 10px 5px;
+}
+
+.rail-tab{
+  display:flex;
+  align-items:center;
+  gap:9px;
+  width:100%;
+  padding:8px 10px;
+  border:none;
+  background:none;
+  cursor:pointer;
+  font-family:var(--font);
+  font-size:13px;
+  font-weight:600;
+  color:var(--txt-dim);
+  border-radius:8px;
+  text-align:left;
+  transition:background .13s,color .13s;
+  white-space:nowrap;
+}
+.rail-tab:hover{ background:var(--glass); color:var(--txt); }
+.rail-tab.active{
+  background:var(--glass-2);
+  color:var(--txt);
+  box-shadow:inset 3px 0 0 var(--sg-cyan);
+}
+.rail-tab svg{ flex-shrink:0; width:15px; height:15px; opacity:.7; }
+.rail-tab.active svg{ opacity:1; }
+
+.rail-divider{
+  height:1px;
+  background:var(--sg-line-soft);
+  margin:10px 14px;
+}
+
+.rail-footer{
+  margin-top:auto;
+  padding:10px 8px 12px;
+  border-top:1px solid var(--sg-line-soft);
+}
+
+.rail-methodology-link{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  width:100%;
+  padding:6px 8px;
+  border:none;
+  background:none;
+  cursor:pointer;
+  font-family:var(--font);
+  font-size:11px;
+  color:var(--txt-faint);
+  border-radius:6px;
+  text-align:left;
+}
+.rail-methodology-link:hover{ color:var(--txt-dim); background:var(--glass); }
+.rail-methodology-link svg{ width:13px; height:13px; flex-shrink:0; }
+
+/* ---- Content area ---- */
+.studio-content-area{
+  flex:1;
+  min-width:0;
+  overflow-y:auto;
+  display:flex;
+  flex-direction:column;
+}
+
+/* Intelligence summary host sits above all tab panels */
+#workflowIntelligenceSummaryHost:not(:empty){
+  border-bottom:1px solid var(--sg-line-soft);
+}
+
 /* =================================================================
    C2 (Phase 3) — ACCESSIBILITY FLOOR. signal-glass.css loads last, so this fills the
    visible-focus + reduced-motion gap for the Studio + Discovery surfaces (cockpit.css /
