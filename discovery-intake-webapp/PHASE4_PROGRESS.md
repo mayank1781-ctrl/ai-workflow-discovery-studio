@@ -450,7 +450,71 @@ Files changed: `app.js`, `test/a3-portfolio-lens.test.mjs`
 
 ---
 
-### A-4  pending
+### A-4 · Portfolio Constellation  [A] ✓
+**SHA:** (see commit below)
+**Gate:** npm 1174/0 (+26 tests in `test/a4-constellation.test.mjs`)
+
+Visual companion to A-3. Where A-3 is the heatmap/lens (role × rung grid), A-4 is the
+relationship/cluster/constellation view: which confirmed workflows cluster into shared AI
+capability candidates, and where candidates are blocked by incompatible data tiers, systems,
+entitlements, controls, or handoffs.
+
+**Data sources (no new engine math):**
+- `engineAdjacency(records)` → `adj.enabledGroups` (connected components) + `adj.whyBlocked` (blocked pairs with dimension + reason)
+- `engineCapabilityMap(records)` → `cap.capabilities[]` (shared AI capability inventory: signature, reuseCount, buildOnce)
+Both wrapped in typeof+try guards; returns null when engine is absent.
+
+**Empty state (`a4EmptyHtml`):**
+Renders "Portfolio Constellation" title + "Go to Workbench →" CTA button when `lv.confirmedCount = 0`
+or `lv.note` present. Identical pattern to A-3 (`data-a4-to-workbench` attribute).
+
+**Shared AI capability inventory (`a4CapabilityPillsHtml`):**
+Pill row above the two-column cluster/blocked grid. Each capability from `cap.capabilities[]` shown
+with reuseCount and a "build-once" teal badge when `c.buildOnce = true` (reuseCount >= 2).
+Capability color keyed by `A4_CAP_COLOR` (classify/reconcile/extract/draft/summarize/compute/populate/route/post/misc).
+Empty cap → empty string (additive).
+
+**Enabled cluster cards (`a4ClusterCardHtml`):**
+Each `adj.enabledGroups[i]` entry becomes a teal-bordered card (#00d4b466) showing:
+- Teal dot + "Capability cluster · N workflows" badge
+- Workflow name list + freed hours from engine
+- Cluster reason string (engine-generated)
+- Cross-referenced capability pills for capabilities that include any of the cluster's workflows
+
+**Blocked candidate cards (`a4BlockedCardHtml`):**
+Each `adj.whyBlocked[i]` entry becomes a pink-bordered card (#FF4FD866) showing:
+- ⛉ icon + "Blocked candidate" label + dimension chip via `a4BlockedDimLabel`
+- Workflow pair with ↔ separator
+- Reason string from engine
+Capped at 8 visible; overflow count shown as italic note. NEVER silently drops blocked candidates.
+
+**Blocked dimension labels (`A4_DIM_LABEL`, `a4BlockedDimLabel`):**
+Maps engine `blockedDimension` keys to human-readable labels:
+data→"Data tier" · control→"Control checkpoint" · cadence→"Cadence / frequency" ·
+tooling→"System / reachability" · shape→"Solution shape" · system-class→"System class" ·
+entitlement→"Entitlement profile". Unknown dim falls back to the raw string.
+
+**Role-only clustering guard:**
+`a4ConstellationHtml` delegates entirely to `engineAdjacency` — it does NOT re-implement
+clustering or union-find logic. The engine already blocks pairs that only share a role if
+data/system/entitlement/control profiles differ (those pairs appear in `adj.whyBlocked` with
+the first incompatible dimension). Source-level test asserts no `sharedRoles` or `unionFind`
+reimplementation in `a4ConstellationHtml`.
+
+**Phase 6 exclusions (source-level tested):**
+No `workIntent`, `stepFunction`, `policyUpload`, or `unitEconomics` in any a4* function.
+
+**Wiring:**
+`wireA4(container)` event-delegates on container (`container.dataset.a4Wired` once-wired guard).
+Workbench CTA → `setAnalysisTab("workbench")`. No other interactivity (read-only view).
+`renderAnalysisTabDashboard` injects `a4ConstellationHtml(lv, records)` after A-3 (typeof-guarded);
+calls `wireA4(container)` after `wireA3(container)`.
+
+**Constants:** `A4_DIM_LABEL`, `A4_SHAPE_LABEL`, `A4_CAP_COLOR`
+
+**Rail-clean:** no patchField, no fetch, no invented endpoint, no headcount/reduction vocabulary, no banned phrase.
+
+Files changed: `app.js`, `test/a4-constellation.test.mjs`
 
 ### P5-1 · Legacy thin-step MODELED composition fallback  [A] pending
 

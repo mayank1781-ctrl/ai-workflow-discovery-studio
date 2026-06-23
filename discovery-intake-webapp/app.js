@@ -15160,6 +15160,143 @@ function wireA3(container) {
   });
 }
 
+// =============================================================================
+// A-4 · Portfolio Constellation — enabled clusters + blocked candidates
+// =============================================================================
+
+const A4_DIM_LABEL = {
+  "data":         "Data tier",
+  "control":      "Control checkpoint",
+  "cadence":      "Cadence / frequency",
+  "tooling":      "System / reachability",
+  "shape":        "Solution shape",
+  "system-class": "System class",
+  "entitlement":  "Entitlement profile"
+};
+const A4_SHAPE_LABEL = {
+  "prompt":             "Prompt",
+  "rag":                "RAG",
+  "deterministic-tool": "Tool",
+  "agentic":            "Agentic",
+  "human-in-loop":      "Human-in-loop"
+};
+const A4_CAP_COLOR = {
+  "classify":  "#6FB6FF",
+  "reconcile": "#00d4b4",
+  "extract":   "#4D8BFF",
+  "draft":     "#9D7BF0",
+  "summarize": "#9D7BF0",
+  "compute":   "#FFB454",
+  "populate":  "#FFB454",
+  "route":     "#EC4DA6",
+  "post":      "#C2528F",
+  "misc":      "#737A92"
+};
+
+function a4BlockedDimLabel(dim) {
+  return A4_DIM_LABEL[dim] || String(dim || "Compatibility check");
+}
+
+function a4ClusterCardHtml(group, caps) {
+  const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
+  const wfList = (group.workflows || []).map(w => esc(w)).join(", ");
+  const hrs = group.combinedFreedHrs ? ` · ${group.combinedFreedHrs} hr/wk freed` : "";
+  const sharedCaps = (caps || [])
+    .filter(c => (group.workflows || []).some(gw => (c.workflows || []).includes(gw)))
+    .map(c => c.capability).slice(0, 4);
+  const capPills = sharedCaps.map(cap => {
+    const color = A4_CAP_COLOR[cap] || "#737A92";
+    return `<span style="display:inline-block;font-size:9.5px;padding:1px 7px;border-radius:10px;border:1px solid ${color}55;color:${color};background:${color}11;margin:2px 2px 0 0;">${esc(cap)}</span>`;
+  }).join("");
+  return `<div style="padding:12px 14px;background:#0c1726;border:1px solid #00d4b466;border-radius:8px;margin-bottom:8px;">` +
+    `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">` +
+    `<span style="width:8px;height:8px;border-radius:50%;background:#00d4b4;display:inline-block;"></span>` +
+    `<span style="font-size:12px;font-weight:700;color:#EAEFFF;">Capability cluster · ${(group.workflows || []).length} workflow${(group.workflows || []).length !== 1 ? "s" : ""}</span>` +
+    `<span style="font-size:10px;color:#737A92;">${hrs}</span></div>` +
+    `<div style="font-size:11px;color:#A6ADC4;margin-bottom:${group.reason || capPills ? "6px" : "0"};">${wfList}</div>` +
+    (group.reason ? `<div style="font-size:11px;color:#737A92;font-style:italic;margin-bottom:${capPills ? "6px" : "0"};">${esc(group.reason)}</div>` : "") +
+    (capPills ? `<div>${capPills}</div>` : "") +
+    `</div>`;
+}
+
+function a4BlockedCardHtml(blocked) {
+  const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
+  const wfList = (blocked.workflows || []).map(w => esc(w)).join(" ↔ ");
+  const dimLabel = a4BlockedDimLabel(blocked.blockedDimension);
+  return `<div style="padding:12px 14px;background:#0c1726;border:1px solid #FF4FD866;border-radius:8px;margin-bottom:8px;">` +
+    `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">` +
+    `<span style="font-size:13px;color:#FF4FD8;">⛉</span>` +
+    `<span style="font-size:12px;font-weight:700;color:#EAEFFF;">Blocked candidate</span>` +
+    `<span style="font-size:9.5px;padding:1px 7px;border-radius:10px;border:1px solid #FF4FD855;color:#FF4FD8;background:#FF4FD811;">${esc(dimLabel)}</span>` +
+    `</div>` +
+    `<div style="font-size:11px;color:#A6ADC4;margin-bottom:4px;">${wfList}</div>` +
+    (blocked.reason ? `<div style="font-size:11px;color:#737A92;font-style:italic;">${esc(blocked.reason)}</div>` : "") +
+    `</div>`;
+}
+
+function a4CapabilityPillsHtml(cap) {
+  if (!cap || !cap.capabilities || !cap.capabilities.length) return "";
+  const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
+  const pills = cap.capabilities.map(c => {
+    const color = A4_CAP_COLOR[c.capability] || "#737A92";
+    const reuseStr = c.buildOnce
+      ? `<span style="color:#00d4b4;font-weight:700;"> · build-once ×${c.reuseCount}</span>`
+      : ` · ×${c.reuseCount}`;
+    return `<span style="display:inline-flex;align-items:center;font-size:10.5px;padding:2px 9px;border-radius:12px;border:1px solid ${color}44;color:${color};background:${color}11;margin:2px 3px 2px 0;">${esc(c.capability)}${reuseStr}</span>`;
+  }).join("");
+  return `<div style="margin-bottom:12px;"><div style="font-size:10px;font-weight:600;color:#737A92;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Shared AI capability inventory</div><div style="display:flex;flex-wrap:wrap;">${pills}</div></div>`;
+}
+
+function a4EmptyHtml(note) {
+  const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
+  const msg = note ? esc(note) : "Confirm workflow steps in the Workbench to unlock the Portfolio Constellation";
+  return `<section style="margin:0 0 14px;padding:14px;background:#0c1726;border:1px solid #16263a;border-radius:10px;"><div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:15px;font-weight:700;color:#EAEFFF;margin-bottom:8px;">Portfolio Constellation</div><div style="font-size:12px;color:#737A92;line-height:1.6;margin-bottom:12px;">${msg}</div><button data-a4-to-workbench style="padding:7px 16px;background:#42E8FF;color:#08111f;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Go to Workbench →</button></section>`;
+}
+
+function a4ConstellationHtml(lv, records) {
+  if (!lv || lv.note || !lv.confirmedCount) return a4EmptyHtml(lv && lv.note);
+  const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
+  let adj = null, cap = null;
+  try { if (typeof engineAdjacency === "function") adj = engineAdjacency(records || []); } catch (_) { adj = null; }
+  try { if (typeof engineCapabilityMap === "function") cap = engineCapabilityMap(records || []); } catch (_) { cap = null; }
+  const enabledGroups = (adj && adj.enabledGroups) || [];
+  const blocked = (adj && adj.whyBlocked) || [];
+  const caps = (cap && cap.capabilities) || [];
+  const noData = !enabledGroups.length && !blocked.length && !caps.length;
+  if (noData) {
+    return `<section style="margin:0 0 14px;padding:16px;background:#0c1726;border:1px solid #16263a;border-radius:10px;"><div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:15px;font-weight:700;color:#EAEFFF;margin-bottom:8px;">Portfolio Constellation</div><div style="font-size:12px;color:#737A92;">Constellation data not yet available — confirm multiple workflows to see cluster candidates</div></section>`;
+  }
+  const summaryNote = `<div style="font-size:10.5px;color:#737A92;margin-bottom:12px;">${lv.confirmedCount} confirmed workflow${lv.confirmedCount !== 1 ? "s" : ""} · ${enabledGroups.length} enabled cluster${enabledGroups.length !== 1 ? "s" : ""} · ${blocked.length} blocked candidate${blocked.length !== 1 ? "s" : ""}</div>`;
+  const clusterCards = enabledGroups.map(g => a4ClusterCardHtml(g, caps)).join("");
+  const visibleBlocked = blocked.slice(0, 8);
+  const moreBlockedNote = blocked.length > 8
+    ? `<div style="font-size:11px;color:#737A92;font-style:italic;margin-top:4px;">… and ${blocked.length - 8} more blocked candidate${blocked.length - 8 !== 1 ? "s" : ""} not shown</div>`
+    : "";
+  const blockedCards = visibleBlocked.map(b => a4BlockedCardHtml(b)).join("");
+  return `<section style="margin:0 0 14px;padding:16px;background:#0c1726;border:1px solid #16263a;border-radius:10px;">` +
+    `<div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:15px;font-weight:700;color:#EAEFFF;margin-bottom:10px;">Portfolio Constellation</div>` +
+    summaryNote +
+    a4CapabilityPillsHtml(cap) +
+    `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">` +
+    `<div><div style="font-size:10px;font-weight:600;color:#737A92;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Enabled clusters (${enabledGroups.length})</div>` +
+    (clusterCards || `<div style="font-size:11px;color:#737A92;font-style:italic;">No enabled clusters yet — confirm steps and check compatibility across workflows</div>`) +
+    `</div>` +
+    `<div><div style="font-size:10px;font-weight:600;color:#737A92;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Blocked candidates (${blocked.length})</div>` +
+    (blockedCards || `<div style="font-size:11px;color:#737A92;font-style:italic;">No blocked candidates identified</div>`) +
+    moreBlockedNote +
+    `</div></div>` +
+    `</section>`;
+}
+
+function wireA4(container) {
+  if (!container || container.dataset.a4Wired) return;
+  container.dataset.a4Wired = "1";
+  container.addEventListener("click", e => {
+    const wb = e.target.closest("[data-a4-to-workbench]");
+    if (wb && typeof setAnalysisTab === "function") setAnalysisTab("workbench");
+  });
+}
+
 function renderAnalysisTabDashboard(recordsOverride, opts) {
   const container = document.getElementById("analysis-tab-dashboard");
   if (!container) return;
@@ -15208,9 +15345,11 @@ function renderAnalysisTabDashboard(recordsOverride, opts) {
       (ed11MetricPanelHtml(lv, steps, ed11Metric, ed11Toggle) +
        ed11VerdictRowHtml(lv, steps) +
        (typeof a3PortfolioLensHtml === "function" ? a3PortfolioLensHtml(lv, steps, records) : "") +
+       (typeof a4ConstellationHtml === "function" ? a4ConstellationHtml(lv, records) : "") +
        e3OrgTier + dashHeaderHtml(lv) + dashEvidenceChainHtml(lv, flow) + dashCapacityNetHtml(lv) + dashFlowHtml(lv, sample, flow) + dashAgendasHtml(lv) + c3Leadership));
   wireDashboard(container);
   if (typeof wireA3 === "function") wireA3(container);
+  if (typeof wireA4 === "function") wireA4(container);
 }
 
 function wireDashboard(container) {
