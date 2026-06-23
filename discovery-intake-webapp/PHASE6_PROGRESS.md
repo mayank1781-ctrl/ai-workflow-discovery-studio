@@ -283,3 +283,89 @@ node --check app.js      # OK (exit 0)
 node --check server.mjs  # OK (exit 0)
 npm test                 # tests 1450 / pass 1450 / fail 0 (exit 0)
 ```
+
+---
+
+## P6-2 · Substep / work-action decomposition (suggestion only)
+
+**Status:** COMPLETE
+**Gate:** 1465/0 (+15 tests over P6-1's 1450/0)
+**Scope:** decomposition suggestion only — no policy upload (P6-3), no unit
+economics (P6-4), no dashboard / portfolio-preview surfacing (P6-5), and no
+remote assumptions (deterministic, no server endpoint).
+
+Turn a broad/compound parent step into a small set of **suggested** child work
+actions, built on the P6-0 flexible work graph, the P6-1 work-intent axis, and the
+P5-4A compound-step detector.
+
+### What was built
+
+- **Detection reuses P5-4A** — suggestions appear only for steps `detectCompoundStep`
+  flags as compound.
+- **`buildSuggestedSubsteps(step)`** — a **deterministic**, grounded suggester
+  (`SUBSTEP_TEMPLATES`): each candidate child is emitted only when its triggering
+  captured signal (systems, data processing, rules, exceptions, handoff, human
+  checkpoint, output) is present, so nothing is fabricated for a step with no
+  evidence. Each child is created via **`markSuggestedWorkAction`** (origin
+  `modelled`, confirmationState `suggested`) and carries the P6-0/P6-1 contract:
+  id, parentId, level, label, workIntent, actionVerb, class, systems, dataTier,
+  entitlement, control + policyCap placeholders, decisionOwnership — every relied
+  field an `ai-inferred`, low-confidence provenance triple.
+- **`decomposeStep(step)`** — assembles parent + explicit children (from captured
+  `workActions`) + non-dismissed suggestions, runs **`reconcileSuggestedChildren`**
+  (explicit always wins; any id/label collision is dropped), then
+  **`validateWorkGraph`**; an invalid graph (duplicate id / dangling parent /
+  cycle) drops the suggestions rather than show something unsafe.
+- **Dismissal sidecar** `state.dismissedSubsteps` (keyed by `step.id` → dismissed
+  work-intent keys) — the user can dismiss/restore a suggestion; suggestions
+  themselves are recomputed, never stored as records. Backfilled `{}` on load.
+- **Workbench panel** `decompositionPanelHtml` injected into `wbStepBodyHtml`
+  (typeof-guarded — byte-identical when the function is absent): each suggested
+  child shown with its contract fields + an `ai-inferred` badge, marked
+  "suggested — not captured", with a dismiss affordance and a "never count in
+  official totals" note. Wired through the existing delegated workbench listener.
+
+### Safety / trust rules encoded
+
+- Suggested children are **never written to `step.workActions`** (read-only) and
+  **never counted** in official rollups (`rollupCountableItems` excludes them by
+  origin/confirmationState — proven even against an over-eager "confirm-all" gate).
+- They can **never be born confirmed** (`markSuggestedWorkAction` coerces to
+  `suggested`/`modelled`).
+- **Explicit user-entered workActions stay authoritative** — collisions are
+  dropped, never merged or overwritten.
+- **No fabrication** — a non-compound step or a compound step with no captured
+  signals yields zero suggestions.
+
+### Changed files
+
+| File | Change |
+|---|---|
+| `app.js` | `state.dismissedSubsteps` in `defaultState` + normalize backfill; the P6-2 block (templates, suggester, dismissal sidecar, `decomposeStep`, panel, action handlers); a typeof-guarded `p62DecompHtml` injection in `wbStepBodyHtml`; two delegated handlers in `wireWorkbench` |
+| `test/p6-2-decomposition.test.mjs` | 15 focused tests (new) |
+
+### Adversarial review
+
+Reviewed across two lenses (trust + correctness/additivity), each finding
+skeptic-verified. One actionable item — no explicit test for the
+`validateWorkGraph` safety valve in `decomposeStep` — was addressed by adding a
+regression test (duplicate explicit-child ids invalidate the graph; the
+otherwise-present suggestions are dropped while explicit children are preserved).
+No other findings.
+
+### What was intentionally NOT touched
+
+- No policy upload (P6-3), unit economics (P6-4), or dashboard / portfolio-preview
+  surfacing (P6-5). No server endpoint and no remote assumptions.
+- No change to `index.html`, `server.mjs`, `studio_engine.mjs`, the scorers, the
+  confirmation/engine gate, the P6-0/P6-0A contract, or the P6-1 work-intent axis.
+- Suggested substeps are not promoted into the official graph — wiring confirmed
+  substeps into rollups is a later concern, deliberately out of P6-2 scope.
+
+### Verification (P6-2)
+
+```bash
+node --check app.js      # OK (exit 0)
+node --check server.mjs  # OK (exit 0)
+npm test                 # tests 1465 / pass 1465 / fail 0 (exit 0)
+```

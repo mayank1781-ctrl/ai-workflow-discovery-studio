@@ -1135,6 +1135,11 @@ const defaultState = {
   // total. ai-inferred never auto-hardens; normalizeLoadedState backfills {} and
   // never promotes.
   workIntents: {},
+  // P6-2: per-step dismissals of SUGGESTED substeps. Additive sidecar keyed by
+  // step.id → [dismissed substep keys]. Suggested substeps are recomputed
+  // deterministically and are draft/never-counted; this only remembers which the
+  // user has dismissed so they stay hidden. normalizeLoadedState backfills {}.
+  dismissedSubsteps: {},
   // V3-16: handoffs + decisions as first-class structural objects. Two additive
   // sidecars, each keyed by a STABLE id → { value, source, confidence } (same tag
   // shape as stepTypes). handoffTags: keyed by "h:<fromStepId>>"<toStepId>" (a
@@ -6537,9 +6542,15 @@ function wbStepBodyHtml(step) {
   if (typeof buildPlacementExplainer === "function" && typeof placementExplainerHtml === "function") {
     try { p54PlacementHtml = placementExplainerHtml(buildPlacementExplainer(step), "workbench") || ""; } catch (_e) { p54PlacementHtml = ""; }
   }
+  // P6-2 — suggested decomposition for compound steps (typeof-guarded, draft-only,
+  // never written to step.workActions and never counted).
+  let p62DecompHtml = "";
+  if (typeof decompositionPanelHtml === "function") {
+    try { p62DecompHtml = decompositionPanelHtml(step) || ""; } catch (_e) { p62DecompHtml = ""; }
+  }
   return `<div class="wb-sbody">
     <div class="wb-acts-section"><div class="wb-lbl">Actions in this step${acts.length ? ` <span class="wb-hint">· tap Owner or Channel to adjust</span>` : ""}</div>${actionsHtml}</div>
-    ${composedHtml}${p54PlacementHtml}${guardsHtml}
+    ${composedHtml}${p54PlacementHtml}${p62DecompHtml}${guardsHtml}
     <div class="wb-confirmbar"><button type="button" class="wb-split-btn" data-wb-split="${esc(step.id)}">Split step</button>${confirmBar}</div>
   </div>`;
 }
@@ -6623,6 +6634,11 @@ function wireWorkbench() {
     if (confirmEl && !confirmEl.classList.contains("wb-confirm-blocked")) { wbConfirmStep(confirmEl.dataset.wbConfirm); return; }
     const splitEl = e.target.closest("[data-wb-split]");
     if (splitEl) { wbSplitStep(splitEl.dataset.wbSplit); return; }
+    // P6-2 — dismiss / restore suggested substeps (draft-only).
+    const decDismissEl = e.target.closest("[data-wb-decompose-dismiss]");
+    if (decDismissEl) { wbDismissSubstep(decDismissEl.dataset.wbDecomposeDismiss); return; }
+    const decRestoreEl = e.target.closest("[data-wb-decompose-restore]");
+    if (decRestoreEl) { wbRestoreSubsteps(decRestoreEl.dataset.wbDecomposeRestore); return; }
   });
 }
 
@@ -7619,6 +7635,235 @@ function wireWorkIntent(container) {
   });
 }
 // === end P6-1: Work Intent ==================================================
+
+// === P6-2: Substep / work-action decomposition (suggestion only) ============
+// Turn a broad/compound parent step into a small set of SUGGESTED child work
+// actions. It builds on the P6-0 flexible work graph (markSuggestedWorkAction /
+// reconcileSuggestedChildren / validateWorkGraph / workItemField), the P6-1
+// workIntent axis, and the P5-4A compound-step detector. Suggestions are
+// DETERMINISTIC and GROUNDED in the step's captured signals — no live model, no
+// remote assumptions, and nothing is fabricated for a step with no evidence.
+//
+// Trust rules:
+//   • Suggestions appear ONLY for steps the P5-4A detector flags as compound.
+//   • Every suggested child is draft/modelled (origin "modelled",
+//     confirmationState "suggested") via markSuggestedWorkAction — it can never
+//     be born confirmed, never counts in official rollups, and is never written
+//     to step.workActions.
+//   • Explicit user-entered workActions stay authoritative —
+//     reconcileSuggestedChildren refuses any id/label collision (explicit wins).
+//   • The assembled graph is validated (validateWorkGraph): a duplicate id,
+//     dangling parent, or cycle drops the suggestions rather than show an unsafe
+//     decomposition.
+//   • The user can dismiss a suggestion; dismissals persist in a sidecar. The
+//     suggestions themselves are recomputed, never stored as confirmed records.
+
+// Each template emits one candidate child ONLY when its captured signal is
+// present, so the decomposition is grounded in evidence the user actually
+// captured. Ordered as a natural sequence (retrieve → … → approve → produce).
+const SUBSTEP_TEMPLATES = [
+  { signal: "systemsTools",       intent: "retrieve",  verb: "read",            cls: "gather",   owner: "ai-assisted",   ent: "read",    label: (sys) => sys ? `Retrieve inputs from ${sys}` : "Retrieve the inputs" },
+  { signal: "dataProcessing",     intent: "extract",   verb: "transform",       cls: "gather",   owner: "ai-assisted",   ent: "read",    label: () => "Extract the required fields" },
+  { signal: "rulesDecisionLogic", intent: "reconcile", verb: "transform",       cls: "build",    owner: "ai-assisted",   ent: "write",   label: () => "Apply the rules and reconcile the sources" },
+  { signal: "exceptionBranching", intent: "validate",  verb: "read",            cls: "judgment", owner: "human-in-loop", ent: "read",    label: () => "Assess exceptions and mismatches" },
+  { signal: "handoff",            intent: "route",     verb: "notify",          cls: "build",    owner: "ai-assisted",   ent: "write",   label: () => "Route to the next owner" },
+  { signal: "humanCheckpoint",    intent: "approve",   verb: "approve",         cls: "decision", owner: "human-held",    ent: "approve", label: () => "Review and approve" },
+  { signal: "output",             intent: "draft",     verb: "generate-output", cls: "build",    owner: "ai-assisted",   ent: "write",   label: () => "Produce the output", onlyIfNoneEmitted: true }
+];
+
+// The stable dismissal key for a suggested child — its work intent (each template
+// emits a distinct intent), so dismissals survive re-computation.
+function substepKey(child) {
+  return child && child.workIntent && typeof child.workIntent.value === "string" ? child.workIntent.value : "";
+}
+
+// Build the SUGGESTED child work actions for a compound step. Returns [] when the
+// step is not compound (never fabricate sub-work for a simple step) or when no
+// captured signal supports a substep. Pure / read-only — never mutates the step.
+function buildSuggestedSubsteps(step) {
+  if (!step || !step.id) return [];
+  const compound = (typeof detectCompoundStep === "function") ? detectCompoundStep(step) : null;
+  if (!compound) return [];
+  const gc = (k) => (typeof gridCellValue === "function") ? (gridCellValue(step, k) || "") : "";
+  const systems = gc("systemsTools");
+  const dataTier = (typeof engineDataTier === "function") ? (engineDataTier(step) || "") : ((step && step.data) || "");
+  const signals = {
+    systemsTools: systems,
+    dataProcessing: gc("dataProcessing"),
+    rulesDecisionLogic: gc("rulesDecisionLogic"),
+    exceptionBranching: gc("exceptionBranching"),
+    handoff: gc("handoff"),
+    humanCheckpoint: gc("humanCheckpoint"),
+    output: gc("output")
+  };
+  const conf = 0.4; // a low-confidence DRAFT — inferred, never captured
+  const out = [];
+  let n = 0;
+  for (const t of SUBSTEP_TEMPLATES) {
+    if (!signals[t.signal]) continue;
+    if (t.onlyIfNoneEmitted && out.length) continue;
+    out.push(markSuggestedWorkAction({
+      id: `${step.id}::sub${n}`,
+      parentId: step.id,
+      label: workItemField(t.label(systems), "ai-inferred", conf),
+      class: workItemField(t.cls, "ai-inferred", conf),
+      workIntent: workItemField(t.intent, "ai-inferred", conf),
+      actionVerb: workItemField(t.verb, "ai-inferred", conf),
+      systems: workItemField(systems, "ai-inferred", conf),
+      dataTier: workItemField(dataTier, "ai-inferred", conf),
+      entitlement: workItemField(t.ent, "ai-inferred", conf),
+      control: workItemField(""),
+      policyCap: workItemField(""),
+      decisionOwnership: workItemField(t.owner, "ai-inferred", conf)
+    }));
+    n += 1;
+  }
+  return out;
+}
+
+// The EXPLICIT (authoritative) children of a step, built from its captured
+// workActions. Origin "captured" — these always win over suggestions.
+function explicitSubstepItems(step) {
+  const acts = step && Array.isArray(step.workActions) ? step.workActions : [];
+  return acts.map((wa, i) => makeWorkItem({
+    id: (wa && wa.id) ? wa.id : `${step.id}:wa${i}`,
+    parentId: step.id,
+    level: "workAction",
+    label: workItemField((wa && wa.label) || [wa && wa.owner, wa && wa.channel].filter(Boolean).join(" ") || `action ${i + 1}`, "user-stated", 1),
+    actionVerb: workItemField((step && step.action) || ""),
+    origin: "captured",
+    confirmationState: "captured"
+  }));
+}
+
+// --- Dismissal sidecar (persists which suggestions the user has hidden) ---
+function ensureDismissedSubsteps() {
+  if (!state.dismissedSubsteps || typeof state.dismissedSubsteps !== "object") state.dismissedSubsteps = {};
+  return state.dismissedSubsteps;
+}
+function dismissedSubstepKeys(stepId) {
+  const map = state.dismissedSubsteps && typeof state.dismissedSubsteps === "object" ? state.dismissedSubsteps : {};
+  const arr = stepId ? map[stepId] : null;
+  return Array.isArray(arr) ? arr : [];
+}
+function dismissSuggestedSubstep(stepId, key) {
+  if (!stepId || !key) return false;
+  const map = ensureDismissedSubsteps();
+  const arr = Array.isArray(map[stepId]) ? map[stepId] : [];
+  if (arr.includes(key)) return false;
+  map[stepId] = arr.concat([key]);
+  return true;
+}
+function restoreSuggestedSubstep(stepId, key) {
+  const map = ensureDismissedSubsteps();
+  const arr = Array.isArray(map[stepId]) ? map[stepId] : [];
+  if (!arr.includes(key)) return false;
+  const next = arr.filter((k) => k !== key);
+  if (next.length) map[stepId] = next; else delete map[stepId];
+  return true;
+}
+function clearDismissedSubsteps(stepId) {
+  const map = ensureDismissedSubsteps();
+  if (!map[stepId]) return false;
+  delete map[stepId];
+  return true;
+}
+
+// Assemble the reviewable decomposition: the parent + its explicit children +
+// the non-dismissed suggestions, reconciled so explicit always wins and validated
+// so an unsafe graph drops the suggestions. Suggestions never count (the caller
+// surfaces them as draft; rollupCountableItems excludes them by origin/state).
+function decomposeStep(step) {
+  const parent = makeWorkItem({
+    id: step && step.id ? step.id : "",
+    parentId: null,
+    level: "step",
+    label: workItemField((step && (step.step || step.name)) || "", "user-stated", 1),
+    origin: "captured",
+    confirmationState: step && step.workbenchConfirmed ? "confirmed" : "captured"
+  });
+  const explicit = explicitSubstepItems(step);
+  const dismissed = dismissedSubstepKeys(step && step.id);
+  const suggestedAll = buildSuggestedSubsteps(step);
+  const suggestedKept = suggestedAll.filter((c) => !dismissed.includes(substepKey(c)));
+  const reconciled = reconcileSuggestedChildren(explicit, suggestedKept);
+  const items = [parent].concat(reconciled.explicit, reconciled.suggested);
+  const validation = validateWorkGraph(items);
+  const safeSuggested = validation.ok ? reconciled.suggested : [];
+  return {
+    parent,
+    explicit: reconciled.explicit,
+    suggested: safeSuggested,
+    dropped: reconciled.dropped,
+    dismissedCount: suggestedAll.length - suggestedKept.length,
+    valid: validation.ok,
+    reasons: (((typeof detectCompoundStep === "function") && detectCompoundStep(step)) || {}).reasons || []
+  };
+}
+
+// The draft decomposition panel for the Workbench. "" when the step is not
+// compound or has nothing to suggest (byte-identical-when-unused). Renders each
+// suggested child with its contract fields + an ai-inferred provenance badge,
+// clearly marked "suggested — not captured", with a dismiss affordance.
+function decompositionPanelHtml(step) {
+  if (!step || !step.id) return "";
+  const compound = (typeof detectCompoundStep === "function") ? detectCompoundStep(step) : null;
+  if (!compound) return "";
+  const d = decomposeStep(step);
+  const esc = typeof escapeHtml === "function" ? escapeHtml : (s) => String(s == null ? "" : s);
+  const hasDismissed = d.dismissedCount > 0;
+  const restoreBtn = hasDismissed ? ` <button type="button" class="wb-decomp-restore" data-wb-decompose-restore="${esc(step.id)}">restore dismissed</button>` : "";
+  if (!d.suggested.length) {
+    return hasDismissed
+      ? `<div class="wb-decomp"><div class="wb-decomp-head">Suggested decomposition · draft${restoreBtn}</div></div>`
+      : "";
+  }
+  const rows = d.suggested.map((c) => {
+    const f = (k) => (c[k] && typeof c[k].value === "string" ? c[k].value : "");
+    const intent = f("workIntent");
+    const badge = (typeof provenanceBadgeHtml === "function") ? provenanceBadgeHtml("ai-inferred", c.confidence) : "";
+    const meta = [
+      intent ? `intent <strong>${esc(intent)}</strong>` : "",
+      f("actionVerb") ? `verb ${esc(f("actionVerb"))}` : "",
+      f("class") ? `class ${esc(f("class"))}` : "",
+      f("dataTier") ? `data ${esc(f("dataTier"))}` : "",
+      f("entitlement") ? `entitlement ${esc(f("entitlement"))}` : "",
+      f("decisionOwnership") ? `owner ${esc(f("decisionOwnership"))}` : ""
+    ].filter(Boolean).join(" · ");
+    return `<li class="wb-decomp-row">
+      <div class="wb-decomp-label">${esc(f("label"))} ${badge} <span class="wb-decomp-suggested">(suggested — not captured)</span></div>
+      <div class="wb-decomp-meta">${meta}</div>
+      <button type="button" class="wb-decomp-dismiss" data-wb-decompose-dismiss="${esc(step.id)}::${esc(intent)}">dismiss</button>
+    </li>`;
+  }).join("");
+  const reasonHtml = d.reasons && d.reasons.length ? `<div class="wb-decomp-why">${esc(d.reasons[0])}</div>` : "";
+  return `<div class="wb-decomp">
+    <div class="wb-decomp-head">Suggested decomposition · draft, not counted${restoreBtn}</div>
+    ${reasonHtml}
+    <ul class="wb-decomp-list">${rows}</ul>
+    <div class="wb-decomp-note">Suggestions only — review and capture in discovery. Explicit captured actions stay authoritative; these never count in official totals.</div>
+  </div>`;
+}
+
+// Workbench action handlers (dismiss / restore), wrapped with persist + re-render.
+function wbDismissSubstep(token) {
+  const raw = String(token || "");
+  const idx = raw.lastIndexOf("::");
+  if (idx < 0) return;
+  const stepId = raw.slice(0, idx);
+  const key = raw.slice(idx + 2);
+  if (dismissSuggestedSubstep(stepId, key)) {
+    if (typeof persistState === "function") persistState();
+    if (typeof renderAnalysisTabWorkbench === "function") renderAnalysisTabWorkbench();
+  }
+}
+function wbRestoreSubsteps(stepId) {
+  if (clearDismissedSubsteps(stepId)) {
+    if (typeof persistState === "function") persistState();
+    if (typeof renderAnalysisTabWorkbench === "function") renderAnalysisTabWorkbench();
+  }
+}
+// === end P6-2: Substep decomposition ========================================
 
 // === V3-16: Handoffs + decisions as first-class structural objects ==========
 // Reuses the V3-15 {value,source,confidence} tag discipline via ONE generic core
@@ -40319,6 +40564,7 @@ function normalizeLoadedState(parsed = {}) {
     // ai-inferred tag is never promoted on load (it hardens only on explicit confirm).
     stepTypes: parsed.stepTypes && typeof parsed.stepTypes === "object" ? parsed.stepTypes : {},
     workIntents: parsed.workIntents && typeof parsed.workIntents === "object" ? parsed.workIntents : {},
+    dismissedSubsteps: parsed.dismissedSubsteps && typeof parsed.dismissedSubsteps === "object" ? parsed.dismissedSubsteps : {},
     // V3-16: backfill handoff/decision tags. Stored tags pass through UNCHANGED — an
     // ai-inferred tag is never promoted on load (it hardens only on explicit confirm).
     handoffTags: parsed.handoffTags && typeof parsed.handoffTags === "object" ? parsed.handoffTags : {},
