@@ -59,7 +59,23 @@ validateIntake checks valueTier enum + augmentationFloor 0..100. test/value-tier
 
 ## Track B — Intake capture (Discovery surface)
 
-### B-6 · Five-rung intake capture (UI)  pending
+### B-6 · Five-rung intake capture (UI)  [B] ✓ SEALED
+**Tag:** `phase-4-b6-intake`  **SHA:** fbeb78b  
+**Gate:** npm 911/0 · engine 369/0 · eval 0/20 (+31 tests)
+
+`engineStepClass` now returns gather/build/human_held as first-class rungs (legacy
+assembly/judgment/decision unchanged). `appStepToEngineStep` passes through
+`workActions`/`waitSegments`/`artifacts` when present (empty arrays omitted →
+byte-identical for existing steps). Three new pure inference functions derive
+structured arrays from free-text notes captured in the interview. Two new optional
+drilldown clusters: `work_composition` (key: `workCompositionNotes`) asks "one
+action or several?; owner/channel"; `wait_artifacts` (keys: `waitBreakdownNotes`,
+`artifactNotes`) asks "context vs person vs coordination" and artifact presence.
+`stepFieldMeta` + `newRecord("steps")` extended with the three optional string keys.
+
+Files changed: `app.js`, `test/b6-intake-capture.test.mjs`
+
+**Track B complete.** Awaiting design addendum (Phase_4_Design_Addendum.md) before Track C.
 
 ---
 
