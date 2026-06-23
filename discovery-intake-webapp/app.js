@@ -14330,6 +14330,155 @@ function wireDashboard(container) {
   if (typeof wireDashboardExports === "function") { try { wireDashboardExports(container); } catch (_e) { /* additive */ } }
 }
 
+// ── C-10 · Recipe Book Phase 4 additions ─────────────────────────────────────
+// TCO summary, gate register, audit export.  Pure renderers — no scorer, no
+// grid write, no server endpoint.  Uses step.cls / solutionShape / derivedShape
+// from the engine; does not re-compute domain numbers.
+
+const RB10_SHAPE_WEIGHT = {
+  "prompt": 1, "rag": 2, "deterministic-tool": 3, "tool": 3,
+  "agentic": 4, "human-in-loop": 0, "human": 0
+};
+
+function rb10ShapeWeight(shape) {
+  const s = String(shape || "").toLowerCase().trim();
+  return Object.prototype.hasOwnProperty.call(RB10_SHAPE_WEIGHT, s) ? RB10_SHAPE_WEIGHT[s] : 1;
+}
+
+function rb10BuildWeightHtml(shape) {
+  const w = rb10ShapeWeight(shape);
+  if (w === 0) {
+    return `<span style="font-family:var(--gm-mono,'JetBrains Mono',monospace);font-size:10px;color:var(--gm-held,#C2528F);">no build</span>`;
+  }
+  const dots = [1, 2, 3, 4].map(i => {
+    const active = i <= w;
+    const color = active ? (w === 4 ? "var(--gm-decision,#EC4DA6)" : "var(--gm-hours,#2BD8C8)") : "rgba(255,255,255,.12)";
+    return `<i aria-hidden="true" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};"></i>`;
+  }).join("");
+  const lbl = ["", "light", "medium", "medium-heavy", "agentic"][w] || "";
+  return `<span aria-label="Build weight: ${escapeHtml(lbl)}" style="display:inline-flex;align-items:center;gap:3px;">${dots}</span>`
+    + `<span style="font-family:var(--gm-mono,'JetBrains Mono',monospace);font-size:10px;color:var(--txt-faint,#5b7186);margin-left:6px;">${escapeHtml(lbl)}</span>`;
+}
+
+function rb10ShapePillHtml(shape) {
+  if (!shape) return "";
+  const RB10_SHAPE_COLORS = {
+    "prompt": "var(--gm-gather,#6FB6FF)", "rag": "var(--gm-build,#4D8BFF)",
+    "deterministic-tool": "var(--gm-judgment,#9D7BF0)", "tool": "var(--gm-judgment,#9D7BF0)",
+    "agentic": "var(--gm-decision,#EC4DA6)",
+    "human-in-loop": "var(--gm-held,#C2528F)", "human": "var(--gm-held,#C2528F)"
+  };
+  const s = String(shape).toLowerCase().trim();
+  const color = RB10_SHAPE_COLORS[s] || "var(--txt-faint,#5b7186)";
+  const label = s.replace(/-/g, " ");
+  return `<span style="background:rgba(255,255,255,.07);color:${color};border:1px solid rgba(255,255,255,.14);border-radius:6px;font-family:var(--gm-mono,'JetBrains Mono',monospace);font-size:10px;padding:2px 8px;white-space:nowrap;">${escapeHtml(label)}</span>`;
+}
+
+function rb10TcoHtml(steps) {
+  if (!steps.length) return "";
+  const humanLedCls = ["judgment", "decision", "human_held"];
+  const protectedCount = steps.filter(s => humanLedCls.includes(s.cls || "")).length;
+  const buildable = steps.length - protectedCount;
+  const confirmedCount = steps.filter(s => s.workbenchConfirmed).length;
+  const shapes = steps.map(s => s.solutionShape || s.derivedShape || "prompt");
+  const effortDays = Math.round(shapes.reduce((sum, sh) => sum + rb10ShapeWeight(sh) * 1.5, 0));
+  const heaviest = shapes.reduce((mx, sh) => rb10ShapeWeight(sh) > rb10ShapeWeight(mx) ? sh : mx, "prompt");
+  const cell = (lbl, val, sub) =>
+    `<div style="flex:1;padding:14px 16px;border-right:1px solid rgba(255,255,255,.06);">`
+    + `<div style="font-family:var(--gm-mono,'JetBrains Mono',monospace);font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-faint,#5b7186);margin-bottom:6px;">${escapeHtml(lbl)}</div>`
+    + `<div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:22px;font-weight:700;color:var(--txt,#e2eaf4);">${escapeHtml(String(val))}</div>`
+    + (sub ? `<div style="font-size:11px;color:var(--txt-dim,#8899aa);margin-top:3px;">${escapeHtml(sub)}</div>` : "")
+    + `</div>`;
+  return `<div style="display:flex;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(255,255,255,.03);margin-bottom:16px;overflow:hidden;">`
+    + cell("Buildable steps", buildable, `${protectedCount} protected · no build`)
+    + cell("Confirmed", confirmedCount, "steps through Workbench")
+    + cell("Build effort", `~${effortDays} days`, "across buildable steps")
+    + `<div style="flex:1;padding:14px 16px;">`
+    + `<div style="font-family:var(--gm-mono,'JetBrains Mono',monospace);font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-faint,#5b7186);margin-bottom:8px;">Heaviest shape</div>`
+    + `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">${rb10ShapePillHtml(heaviest)} ${rb10BuildWeightHtml(heaviest)}</div>`
+    + `</div></div>`;
+}
+
+function rb10GateRegisterHtml(steps) {
+  if (!steps.length) return "";
+  const rows = steps.map((step, idx) => {
+    const gate = (typeof recipeGateCheck === "function")
+      ? recipeGateCheck(step)
+      : { gaps: [], p9Unconfirmed: false };
+    const gaps = Array.isArray(gate.gaps) ? gate.gaps : [];
+    const p9 = Boolean(gate.p9Unconfirmed);
+    const name = step.name || step.id || String(idx + 1);
+    const isTrusted = gaps.length === 0 && !p9;
+    const statusColor = isTrusted ? "#00d4b4" : "#f5c451";
+    return `<div style="display:flex;align-items:center;gap:10px;padding:7px 12px;border-top:1px solid rgba(255,255,255,.05);">`
+      + `<span style="font-family:var(--gm-mono,'JetBrains Mono',monospace);font-size:10px;color:var(--txt-faint,#5b7186);min-width:22px;">${escapeHtml(String(idx + 1).padStart(2, "0"))}</span>`
+      + `<span style="font-size:12px;font-weight:600;color:var(--txt,#e2eaf4);flex:1;">${escapeHtml(name)}</span>`
+      + `<span style="font-family:var(--gm-mono,'JetBrains Mono',monospace);font-size:10px;font-weight:700;color:${statusColor};">${isTrusted ? "trusted" : "proposed"}</span>`
+      + (gaps.length ? `<span style="font-size:11px;color:var(--txt-faint,#5b7186);">${gaps.length} open gap${gaps.length > 1 ? "s" : ""}</span>` : "")
+      + (p9 ? `<span style="font-size:10px;color:var(--gm-judgment,#9D7BF0);">⚠ sensitivity</span>` : "")
+      + `</div>`;
+  }).join("");
+  return `<div style="border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(255,255,255,.03);margin-bottom:16px;overflow:hidden;">`
+    + `<div style="padding:11px 14px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;gap:10px;">`
+    + `<span style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:13px;font-weight:700;color:var(--txt,#e2eaf4);">Gate register</span>`
+    + `<span style="font-size:11px;color:var(--txt-faint,#5b7186);">per-step readiness — trusted = gaps filled + sensitivity confirmed</span>`
+    + `</div>${rows}</div>`;
+}
+
+function rb10AuditPackData(steps) {
+  const wName = (typeof analysisWorkflowName === "function") ? analysisWorkflowName() : "";
+  return {
+    workflowName: wName,
+    steps: steps.map((step, idx) => {
+      const gate = (typeof recipeGateCheck === "function")
+        ? recipeGateCheck(step)
+        : { gaps: [], p9Unconfirmed: false };
+      const gaps = Array.isArray(gate.gaps) ? gate.gaps : [];
+      const unit = (typeof recipeUnitSource === "function") ? recipeUnitSource(step.id) : null;
+      return {
+        index: idx + 1,
+        id: step.id,
+        name: step.name || step.id || String(idx + 1),
+        cls: step.cls || "assembly",
+        solutionShape: step.solutionShape || step.derivedShape || null,
+        workbenchConfirmed: Boolean(step.workbenchConfirmed),
+        gateStatus: (gaps.length === 0 && !gate.p9Unconfirmed) ? "trusted" : "proposed",
+        openGaps: gaps,
+        p9Unconfirmed: Boolean(gate.p9Unconfirmed),
+        recipeText: (unit && unit.text) || null,
+        recipeOrigin: (unit && unit.origin) || null
+      };
+    })
+  };
+}
+
+function rb10AuditExportHtml() {
+  return `<div style="padding:12px 0;display:flex;align-items:center;gap:10px;">`
+    + `<button type="button" id="rb10AuditExportBtn" style="padding:8px 16px;background:none;border:1px solid rgba(255,255,255,.18);border-radius:8px;color:var(--txt-dim,#8899aa);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">Export audit pack ↓</button>`
+    + `<span style="font-size:11px;color:var(--txt-faint,#5b7186);">JSON — gate status, open gaps, recipe text, provenance</span>`
+    + `</div>`;
+}
+
+function wireRb10(container) {
+  if (!container) return;
+  const btn = container.querySelector("#rb10AuditExportBtn");
+  if (!btn || btn.dataset.rb10Wired) return;
+  btn.dataset.rb10Wired = "1";
+  btn.addEventListener("click", () => {
+    const steps = (typeof analysisGridSteps === "function") ? analysisGridSteps() : [];
+    if (!steps.length) { toast("No steps to export."); return; }
+    const data = rb10AuditPackData(steps);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const safeName = (data.workflowName || "workflow").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+    a.download = `recipe-audit-${safeName}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+}
+
 function renderAnalysisTabRecipe() {
   const container = document.getElementById("analysis-tab-recipe");
   if (!container) return;
@@ -14468,6 +14617,8 @@ function renderAnalysisTabRecipe() {
   container.innerHTML =
     recipeWorkflowHeaderHtml() +
     artifactStudioHeaderHtml(steps) +
+    rb10TcoHtml(steps) +
+    rb10GateRegisterHtml(steps) +
     e3WorkbenchGate +
     b2Adversarial +
     b2Protected +
@@ -14480,9 +14631,11 @@ function renderAnalysisTabRecipe() {
     businessCaseBlockForCurrentWorkflow() +
     businessCaseScenariosBlockForCurrentWorkflow() +
     scoringTransparencyBlockForCurrentWorkflow() +
+    rb10AuditExportHtml() +
     `<div style="margin-top:16px;"><button class="secondary-button compact" type="button" id="downloadRecipeBookBtn">Download Recipe Book</button><button type="button" id="recipe-export-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download DOCX</button><button type="button" id="recipe-pdf-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download PDF</button></div>`;
 
   wireRecipeBook(container);
+  wireRb10(container);
   wireRecipeSpecCanvas(container);
 
   // E3/F6 — the confirm-the-map button enforces the controls (never hard-disabled; toast guard + return).
