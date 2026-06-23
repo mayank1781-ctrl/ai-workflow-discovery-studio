@@ -144,9 +144,75 @@ engine.isConfirmed({ recap: { confirmed: true } }) === false  # recap alone does
 
 ---
 
+## P5-4 · Solution Placement Explainer
+
+**Status:** COMPLETE  
+**Gate:** 1295/0 (+59 tests over P5-3 gate of 1236/0)  
+**Eval:** 0/24 dangerous-wrong (unchanged)
+
+---
+
+### What was built
+
+A per-step placement explainer visible in the Workbench. For every step, the app now shows:
+- **Shape badge** — the current `solutionShape` (prompt / rag / deterministic-tool / agentic / human-in-loop) with its source (user-confirmed / derived from actions / class-inferred)
+- **AI CARRIES** — what AI can handle at this step
+- **HUMAN HOLDS** — what stays human-held and why
+- **Blockers** — hard conflicts (class mismatch, elevated entitlement, sensitive data tier)
+- **Missing evidence** — what fields are absent that would tighten the assessment
+- **Evidence** (workbench + technical surfaces only) — provenance-tagged field list
+- **What would change this placement** — collapsible upgrade path
+
+The explainer never recomputes separate numbers for leadership/worker surfaces — it re-expresses the same placement with context for the audience.
+
+### Changed files
+
+| File | Change |
+|---|---|
+| `app.js` | `PLACEMENT_SHAPE_LABELS` const + `inferStepPlacementShape()` + `buildPlacementExplainer()` + `placementExplainerHtml()` + `wbStepBodyHtml` injection |
+| `test/p5-4-placement.test.mjs` | 59 new tests (new file) |
+
+### Functions added (all in `app.js`)
+
+| Function / Const | Purpose |
+|---|---|
+| `PLACEMENT_SHAPE_LABELS` | Shape label map — `human_in_loop` included as migration alias normalised to `"Human-in-loop"` |
+| `inferStepPlacementShape(cls, ent, tier)` | Pure: baseline shape inference from class + entitlement + data tier when no explicit shape or workActions present |
+| `buildPlacementExplainer(step)` | Returns structured `{shape, shapeSource, inferReason, aiCarries, humanHeld, blockers, evidence, missingEvidence, confidence, whatWouldChange, compoundWarning, note}` — read-only |
+| `placementExplainerHtml(explainer, surface)` | Renderer — surface "workbench"/"technical" shows evidence detail; "worker"/"leadership" shows placement + carries/holds only |
+
+### Shape resolution precedence
+
+1. **user-stated** sidecar (`solutionShapeOf(step.id).source === "user-stated"`) → `shapeSource: "stated"`
+2. **derivedShape** from `workActions` via `E.deriveStepSolutionShape(step)` → `shapeSource: "computed"`
+3. **ai-inferred** sidecar → `shapeSource: "inferred"`, inferReason "AI-suggested"
+4. **class-inferred** by `inferStepPlacementShape` → `shapeSource: "inferred"`, inferReason from class/entitlement/tier logic
+
+### `human_in_loop` canonical handling
+
+`deriveStepSolutionShape` (engine) returns `"human_in_loop"` (underscore). The explainer normalises via `norm()` to `"human-in-loop"` throughout. `PLACEMENT_SHAPE_LABELS` carries both keys; the canonical hyphenated form is always displayed.
+
+### P5-4A hook
+
+`compoundWarning: null` is present on every explainer object as a named, typed hook point. P5-4A will set it to a string when compound-step decomposition is needed. No other P5-4A work is included here.
+
+### Workbench injection
+
+`wbStepBodyHtml` calls `buildPlacementExplainer(step)` and `placementExplainerHtml(explainer, "workbench")` with a try/catch typeof-guard, injecting `p54PlacementHtml` between `composedHtml` and `guardsHtml`.
+
+### Rules observed
+
+- **No recomputation on other surfaces** — `placementExplainerHtml` renders from the same explainer object regardless of surface; evidence list hidden on worker/leadership only.
+- **Placement not from step label alone** — reads cls, workActions, entitlement, data tier, controls, grid cells.
+- **Rail-clean** — no headcount, FTE, reduction, eliminate framing.
+- **P5-1 + Phase 6 untouched** — source-level guard tests confirm no workIntent / stepFunction / policyUpload / unitEconomics.
+
+---
+
 ## Pending
 
 | Item | Status |
 |---|---|
+| P5-4A · Compound-step decomposition warning | Pending — compoundWarning hook ready |
 | P5-1 · Legacy thin-step modeled composition fallback | Pending — not started |
 | Phase 6 · workIntent / stepFunction / policy upload guardrails / unit economics | Pending — not started |

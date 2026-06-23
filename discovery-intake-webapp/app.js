@@ -6408,9 +6408,14 @@ function wbStepBodyHtml(step) {
   const confirmBar = isConfirmed
     ? `<span class="wb-confirmed-badge">● Confirmed</span>`
     : `<button type="button" class="wb-confirm-btn${hasBlockingGuard ? " wb-confirm-blocked" : ""}" data-wb-confirm="${esc(step.id)}">Confirm step ✓</button>${hasBlockingGuard ? `<span class="wb-confirm-note">Resolve the guard above first</span>` : ""}`;
+  // P5-4 — placement explainer: evidence-backed, read-only, typeof-guarded.
+  let p54PlacementHtml = "";
+  if (typeof buildPlacementExplainer === "function" && typeof placementExplainerHtml === "function") {
+    try { p54PlacementHtml = placementExplainerHtml(buildPlacementExplainer(step), "workbench") || ""; } catch (_e) { p54PlacementHtml = ""; }
+  }
   return `<div class="wb-sbody">
     <div class="wb-acts-section"><div class="wb-lbl">Actions in this step${acts.length ? ` <span class="wb-hint">· tap Owner or Channel to adjust</span>` : ""}</div>${actionsHtml}</div>
-    ${composedHtml}${guardsHtml}
+    ${composedHtml}${p54PlacementHtml}${guardsHtml}
     <div class="wb-confirmbar"><button type="button" class="wb-split-btn" data-wb-split="${esc(step.id)}">Split step</button>${confirmBar}</div>
   </div>`;
 }
@@ -14621,6 +14626,266 @@ function confirmationLadderHtml(ladder) {
     <div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:${CLR.pending};margin-bottom:4px;">Confirmation status · <span style="color:${level >= 5 ? CLR.done : level > 0 ? CLR.current : CLR.pending};">${esc(label)}</span></div>
     <div>${rungs}</div>${hintHtml}${mf}
   </div>`;
+}
+
+// === P5-4 · Solution Placement Explainer ======================================
+// Read-only per-step diagnostic: why this step is at its current solutionShape,
+// what AI can carry, what stays human-held, blockers, evidence with provenance,
+// what is missing, and what would need to change to upgrade placement.
+// P5-4A hook: compoundWarning field reserved; set to null here.
+
+const PLACEMENT_SHAPE_LABELS = {
+  "prompt":             "Prompt-based",
+  "rag":                "Knowledge-assisted (RAG)",
+  "deterministic-tool": "Tool-call / Deterministic",
+  "agentic":            "Agentic",
+  "human-in-loop":      "Human-in-loop",
+  "human_in_loop":      "Human-in-loop"     // migration alias — normalised before display
+};
+
+// Infer the baseline placement shape when no explicit shape or workActions are present.
+// Returns { shape, reason }. Conservative: reads actual class + entitlement + data tier.
+function inferStepPlacementShape(cls, entitlement, dataTier) {
+  if (cls === "decision" || cls === "human_held")
+    return { shape: "human-in-loop", reason: "class requires human decision" };
+  if (cls === "judgment")
+    return { shape: "human-in-loop", reason: "judgment class — AI supports, human decides" };
+  if (entitlement === "approve")
+    return { shape: "human-in-loop", reason: "approve entitlement — human must authorise" };
+  const sensitiveTiers = ["PII", "MNPI", "confidential", "PHI", "PCI"];
+  if (entitlement === "write" && sensitiveTiers.includes(dataTier))
+    return { shape: "human-in-loop", reason: "write entitlement on sensitive data" };
+  if (entitlement === "write")
+    return { shape: "deterministic-tool", reason: "write entitlement — tool call needed, human confirms" };
+  return { shape: "prompt", reason: "assembly-class read step — prompt or retrieval may carry this" };
+}
+
+// Returns a structured explainer object for the given step. Pure read — no writes.
+function buildPlacementExplainer(step) {
+  if (!step || !step.id) return null;
+  const gc = (k) => (typeof gridCellValue === "function") ? gridCellValue(step, k) : "";
+
+  // Resolve class (V3-15 typology preferred, falls back to step.cls).
+  const cls = (typeof engineStepClass === "function") ? engineStepClass(step) : ((step && step.cls) || "assembly");
+
+  // Resolve data tier (grid dataSensitivity or regulatory cues).
+  const dataTier = (typeof engineDataTier === "function") ? engineDataTier(step) : ((step && step.data) || "");
+
+  // Resolve entitlement: stated value wins; otherwise infer conservatively from action + class.
+  const VALID_ENT = ["read", "write", "approve"];
+  let entitlement = (step.entitlement && VALID_ENT.includes(step.entitlement)) ? step.entitlement : null;
+  if (!entitlement) {
+    if (step.action === "approve" || cls === "decision" || (step.control && step.control.type === "four-eyes"))
+      entitlement = "approve";
+    else if (step.action === "write-in-place")
+      entitlement = "write";
+    else
+      entitlement = "read";
+  }
+  const entitlementSource = step.entitlement ? "stated" : "inferred";
+
+  // Resolve solution shape.
+  // Precedence: user-stated sidecar > derivedShape (from workActions) > ai-inferred sidecar > class-inferred.
+  const hasWorkActions = Array.isArray(step.workActions) && step.workActions.length > 0;
+  const shapeTag = (typeof solutionShapeOf === "function" && step.id)
+    ? (solutionShapeOf(step.id) || null) : null;
+  const sidecardShape = (shapeTag && shapeTag.value) || step.solutionShape || null;
+  const statedByUser = !!(shapeTag && shapeTag.source === "user-stated");
+
+  // derivedShape: prefer pre-computed value on step; compute from engine if workActions present.
+  let derivedShape = step.derivedShape || null;
+  let composedAddr = null;
+  if (hasWorkActions) {
+    const E = (typeof studioEngine === "function") ? studioEngine() : null;
+    if (!derivedShape && E && typeof E.deriveStepSolutionShape === "function")
+      derivedShape = E.deriveStepSolutionShape(step);
+    if (!derivedShape) {
+      const hasHumanAct = step.workActions.some(
+        (a) => a.owner === "human" || a.channel === "offline" || a.channel === "synchronous_human");
+      derivedShape = hasHumanAct ? "human-in-loop" : (sidecardShape || null);
+    }
+    if (E && typeof E.composeStepAddressability === "function")
+      composedAddr = E.composeStepAddressability(step);
+  }
+
+  // Normalise human_in_loop alias to the canonical hyphenated form.
+  const norm = (s) => (s === "human_in_loop" ? "human-in-loop" : s);
+
+  let shape, shapeSource, inferReason;
+  if (statedByUser && sidecardShape) {
+    shape = norm(sidecardShape); shapeSource = "stated"; inferReason = null;
+  } else if (derivedShape) {
+    shape = norm(derivedShape); shapeSource = "computed"; inferReason = "derived from captured actions";
+  } else if (sidecardShape) {
+    shape = norm(sidecardShape); shapeSource = "inferred"; inferReason = "AI-suggested (not yet user-confirmed)";
+  } else {
+    const inf = inferStepPlacementShape(cls, entitlement, dataTier);
+    shape = norm(inf.shape); shapeSource = "inferred"; inferReason = inf.reason;
+  }
+
+  // ── Evidence ───────────────────────────────────────────────────────────────
+  const evidence = [];
+  const missingEvidence = [];
+
+  evidence.push({ field: "step class", value: cls, source: "captured" });
+  if (dataTier) {
+    evidence.push({ field: "data tier", value: dataTier, source: step.data ? "stated" : "inferred" });
+  } else {
+    missingEvidence.push("data sensitivity — label on this step or in session fields");
+  }
+  const sysTools = gc("systemsTools");
+  if (sysTools) { evidence.push({ field: "systems / tools", value: sysTools, source: "captured" }); }
+  else { missingEvidence.push("systems / tools touched by this step"); }
+  const humanChk = gc("humanCheckpoint");
+  if (humanChk) evidence.push({ field: "human checkpoint", value: humanChk, source: "captured" });
+  const excBranch = gc("exceptionBranching");
+  if (excBranch) evidence.push({ field: "exception branching", value: excBranch, source: "captured" });
+  const regCtx = gc("regulatoryContext");
+  if (regCtx) evidence.push({ field: "regulatory context", value: regCtx, source: "captured" });
+  evidence.push({ field: "entitlement", value: entitlement, source: entitlementSource });
+  if (hasWorkActions) {
+    const aiActs  = step.workActions.filter((a) => a.owner === "ai" && a.channel !== "offline" && a.channel !== "synchronous_human");
+    const humActs = step.workActions.filter((a) => a.owner === "human" || a.channel === "offline" || a.channel === "synchronous_human");
+    evidence.push({ field: "action decomposition", value: `${aiActs.length} AI-carriable / ${humActs.length} human-owner`, source: "computed" });
+    if (composedAddr != null) evidence.push({ field: "composed addressability", value: `${Math.round(composedAddr * 10) / 10}%`, source: "computed" });
+  } else {
+    missingEvidence.push("action decomposition — capture in the Discovery interview");
+  }
+  if (step.control && step.control.type)
+    evidence.push({ field: "control", value: step.control.type, source: "stated" });
+
+  // ── What AI carries / what human holds / blockers ─────────────────────────
+  const aiCarries = [];
+  const humanHeld = [];
+  const blockers  = [];
+
+  if (shape === "prompt") {
+    aiCarries.push("Reads, summarises, or drafts output from text input");
+    if (!humanChk) aiCarries.push("No human checkpoint recorded — step appears fully AI-carriable");
+    else humanHeld.push("Human checkpoint: " + humanChk.slice(0, 80));
+  } else if (shape === "rag") {
+    aiCarries.push("Retrieves from a knowledge source before generating");
+    aiCarries.push("Answers questions or fills templates using retrieved context");
+    if (!sysTools) missingEvidence.push("knowledge source or retrieval system name");
+  } else if (shape === "deterministic-tool") {
+    aiCarries.push("Executes deterministic tool calls — lookups, API reads, data transforms");
+    if (entitlement === "write" || entitlement === "approve")
+      humanHeld.push("Write or approve entitlement — human must authorise the action");
+    if (!sysTools) missingEvidence.push("target system or API the tool call reaches");
+  } else if (shape === "agentic") {
+    aiCarries.push("Orchestrates multi-step loops: reads, acts, validates, and retries");
+    if (entitlement === "approve") {
+      blockers.push("Approve entitlement — agent must not make approval decisions autonomously");
+      humanHeld.push("Approval stays with the authorised person");
+    }
+    if (!humanChk) humanHeld.push("No human checkpoint recorded — add one to bound agent autonomy");
+    if (!sysTools) blockers.push("No system named — confirm what the agent reaches and whether it has API access");
+  } else {
+    // human-in-loop (canonical) or any other
+    if (cls === "decision" || cls === "human_held") {
+      aiCarries.push("Prepares context, drafts options, and surfaces relevant information");
+      humanHeld.push("Human makes the final call — AI must not decide");
+      humanHeld.push("Step class confirms this as a human-held decision point");
+    } else {
+      aiCarries.push("Assists with analysis, retrieval, and drafting");
+      humanHeld.push("Human reviews and accepts or rejects AI output before it counts");
+    }
+    if (humanChk) humanHeld.push("Checkpoint: " + humanChk.slice(0, 80));
+  }
+
+  // Class-override blocker: decision/human_held + non-human-in-loop shape is suspicious.
+  if ((cls === "decision" || cls === "human_held") && shape !== "human-in-loop")
+    blockers.push("Class is " + cls + " — placement should be human-in-loop");
+  // Sensitive data blocker.
+  const highTiers = ["PII", "PHI", "PCI", "MNPI"];
+  if (highTiers.includes(dataTier))
+    blockers.push(dataTier + " data — elevated controls required; review policy before deploying");
+  // Approve entitlement paired with non-human-in-loop.
+  if (entitlement === "approve" && shape !== "human-in-loop")
+    blockers.push("Approve entitlement paired with " + (PLACEMENT_SHAPE_LABELS[shape] || shape) + " — review before deploying");
+
+  // ── What would need to change ──────────────────────────────────────────────
+  const whatWouldChange = [];
+  if (shape === "human-in-loop" && cls !== "decision" && cls !== "human_held" && cls !== "judgment") {
+    whatWouldChange.push("Confirm AI can carry the end-to-end action without human intervention");
+    whatWouldChange.push("Confirm entitlement is read-only — not write or approve");
+  }
+  if ((shape === "agentic" || shape === "deterministic-tool") && !sysTools)
+    whatWouldChange.push("Name the systems this step reaches and confirm they expose an API");
+  if (!dataTier)
+    whatWouldChange.push("Label data sensitivity to tighten the placement assessment");
+  if (!hasWorkActions)
+    whatWouldChange.push("Add action decomposition in the Discovery interview to derive placement from actual actions");
+
+  return {
+    stepId:         step.id,
+    stepName:       step.step || step.name || "",
+    cls,
+    shape,
+    shapeSource,
+    inferReason,
+    aiCarries,
+    humanHeld,
+    blockers,
+    evidence,
+    missingEvidence: [...new Set(missingEvidence)],
+    confidence:      shapeSource,
+    whatWouldChange,
+    compoundWarning: null,      // P5-4A hook — not yet implemented
+    note:            PLACEMENT_SHAPE_LABELS[shape] || shape
+  };
+}
+
+// Renders the placement explainer as a compact panel.
+// surface: "workbench" (default) | "technical" | "worker" | "leadership"
+// Worker / leadership re-express the same data; evidence detail is workbench/technical only.
+function placementExplainerHtml(explainer, surface) {
+  if (!explainer) return "";
+  const esc = (typeof escapeHtml === "function") ? escapeHtml : (s) => String(s == null ? "" : s);
+  const { shape, shapeSource, inferReason, aiCarries, humanHeld, blockers,
+          evidence, missingEvidence, whatWouldChange, compoundWarning } = explainer;
+  const label = PLACEMENT_SHAPE_LABELS[shape] || esc(shape || "Unknown");
+  const sfx = surface || "workbench";
+  const PCLR = {
+    panel: "#0c1726", border: "#16263a", ink: "#EAEFFF", dim: "#A6ADC4",
+    stated: "#00d4b4", computed: "#3b82f6", inferred: "#5b7186",
+    blocker: "#FF4FD8", warn: "#f59e0b", carry: "#00d4b4"
+  };
+  const srcDot = (src) => {
+    const c = src === "stated" ? PCLR.stated : src === "computed" ? PCLR.computed : PCLR.inferred;
+    return `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${c};margin-right:4px;vertical-align:middle;"></span>`;
+  };
+  const badgeColor = shape === "human-in-loop" ? PCLR.blocker
+    : shape === "agentic" ? "#8b5cf6"
+    : shape === "deterministic-tool" ? "#f59e0b"
+    : shape === "rag" ? PCLR.computed
+    : PCLR.carry;
+  const srcLabel = shapeSource === "stated" ? "user-confirmed"
+    : shapeSource === "computed" ? "derived from actions"
+    : inferReason || "class-inferred";
+  const badgeHtml = `<span style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:4px;background:${badgeColor}22;border:1px solid ${badgeColor}55;color:${badgeColor};font-size:11px;font-weight:600;">${esc(label)}</span> <span style="font-size:10px;color:${PCLR.dim};">${esc(srcLabel)}</span>`;
+  const listHtml = (items, color) => items.length
+    ? `<ul style="margin:4px 0 0 0;padding-left:0;list-style:none;">${items.map((t) => `<li style="font-size:11.5px;color:${color};margin-bottom:2px;">· ${esc(t)}</li>`).join("")}</ul>`
+    : "";
+  const carryHtml = aiCarries.length
+    ? `<div style="margin-top:6px;"><span style="font-size:10px;font-weight:600;color:${PCLR.carry};letter-spacing:.04em;">AI CARRIES</span>${listHtml(aiCarries, PCLR.ink)}</div>` : "";
+  const heldHtml  = humanHeld.length
+    ? `<div style="margin-top:6px;"><span style="font-size:10px;font-weight:600;color:${PCLR.dim};letter-spacing:.04em;">HUMAN HOLDS</span>${listHtml(humanHeld, PCLR.dim)}</div>` : "";
+  const blockersHtml = blockers.length
+    ? `<div style="margin-top:6px;">${blockers.map((b) => `<div style="font-size:11px;color:${PCLR.blocker};margin-bottom:2px;">⚠ ${esc(b)}</div>`).join("")}</div>` : "";
+  const missingHtml = missingEvidence.length
+    ? `<div style="margin-top:5px;">${missingEvidence.map((m) => `<div style="font-size:11px;color:${PCLR.warn};margin-bottom:1px;">? Missing: ${esc(m)}</div>`).join("")}</div>` : "";
+  // Full evidence list only on workbench and technical surfaces.
+  let evidenceHtml = "";
+  if (sfx === "workbench" || sfx === "technical") {
+    evidenceHtml = evidence.length
+      ? `<details style="margin-top:6px;"><summary style="font-size:10px;color:${PCLR.dim};cursor:pointer;list-style:none;">Evidence (${evidence.length})</summary><ul style="margin:4px 0 0 12px;padding:0;list-style:none;">${evidence.map((ev) => `<li style="font-size:11px;color:${PCLR.dim};margin-bottom:1px;">${srcDot(ev.source)}${esc(ev.field)}: ${esc(String(ev.value).slice(0, 60))}</li>`).join("")}</ul></details>` : "";
+  }
+  const changeHtml = whatWouldChange.length
+    ? `<details style="margin-top:5px;"><summary style="font-size:10px;color:${PCLR.dim};cursor:pointer;list-style:none;">What would change this placement</summary><ul style="margin:4px 0 0 12px;padding:0;list-style:none;">${whatWouldChange.map((c) => `<li style="font-size:11px;color:${PCLR.dim};margin-bottom:2px;">→ ${esc(c)}</li>`).join("")}</ul></details>` : "";
+  const cwHtml = compoundWarning
+    ? `<div style="font-size:11px;color:${PCLR.warn};margin-top:5px;">⚠ ${esc(compoundWarning)}</div>` : "";
+  return `<div class="p54-placement" style="background:${PCLR.panel};border:1px solid ${PCLR.border};border-radius:6px;padding:8px 10px;margin:6px 0;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><span style="font-size:10px;font-weight:700;color:${PCLR.dim};letter-spacing:.05em;text-transform:uppercase;">Placement</span>${badgeHtml}</div>${carryHtml}${heldHtml}${blockersHtml}${missingHtml}${evidenceHtml}${changeHtml}${cwHtml}</div>`;
 }
 
 function dashFmtUsd(v) {
