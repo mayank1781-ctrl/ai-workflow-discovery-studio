@@ -6701,15 +6701,149 @@ function renderAnalysisTabWorkflow() {
   panel.innerHTML = ywHeroHtml(wfName, model) + bucketsHtml + ywReinvestHtml() + ywPromiseHtml();
 }
 
-function renderAnalysisTabWorkforce() {
-  // C-12: Workforce Transformation — inputs panel, net value, role-exposure, redeployment.
-  // Stub only — C-12 populates this.
+// ── C-12 · Workforce Transformation ──────────────────────────────────────────
+// Freed capacity → redesigned roles / redeployment / reskilling.
+// C12a seniority lens: roles mapped to three bands (Analyst / Manager / Senior).
+// Executive Dashboard diagnoses; Workforce shows the action.
+// Sources: same dashboardModel (engineLeaderView) as C-11 + engineRoleView.
+// No patchField, no scorer, no server endpoint.
+
+// C12a — seniority band inference from role title, pure derived, never a scorer
+function wfSeniorityBand(roleTitle) {
+  const t = String(roleTitle || "").toLowerCase();
+  if (/\b(director|vp|vice.president|head\s+of|chief|president|partner|md|managing\s+director)\b/.test(t)) return "senior";
+  if (/\b(manager|lead|supervisor)\b/.test(t) || /senior\s+\w*\s*(analyst|associate|specialist)/.test(t)) return "manager";
+  if (/\bsenior\b/.test(t)) return "manager";
+  return "analyst";
+}
+
+const WF_BAND = {
+  analyst: { label: "Analyst / Associate", color: "#6FB6FF", action: "Assembly work AI-assisted → time for deeper analysis and exception review" },
+  manager: { label: "Manager / Lead", color: "#9D7BF0", action: "Judgment scope expands → coaching, reviewing AI output, owning the edge cases" },
+  senior:  { label: "Director / Senior", color: "#EC4DA6", action: "Decision reserve protected → strategic agenda and stakeholder relationships" }
+};
+
+function wfHrsLabel(h) {
+  if (h == null || !isFinite(h)) return "—";
+  if (Math.abs(h) >= 1000) return (h / 1000).toFixed(1) + "k hr/wk";
+  if (Math.abs(h) < 1) return Math.round(h * 60) + " min/wk";
+  return h.toFixed(1) + " hr/wk";
+}
+
+function wfRoleCardHtml(role) {
+  const band = wfSeniorityBand(role.role);
+  const bc = WF_BAND[band];
+  const assemblyPct = Math.min(100, Math.round((role.assemblyShare || 0) * 100));
+  const judgmentPct = Math.min(100, Math.round((role.humanHeldShare || 0) * 100));
+  return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:14px 16px;margin-bottom:10px;">`
+    + `<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;">`
+    + `<div><div style="font-size:14px;font-weight:600;color:#ECEAF6;">${escapeHtml(role.role)}</div>`
+    + `<span style="display:inline-flex;align-items:center;margin-top:4px;padding:2px 8px;background:${bc.color}1A;border:1px solid ${bc.color}40;border-radius:20px;font-size:10px;color:${bc.color};font-weight:600;">${escapeHtml(bc.label)}</span></div>`
+    + `<div style="text-align:right;"><div style="font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:700;color:#63E6D6;">${escapeHtml(wfHrsLabel(role.freedHrs))}</div>`
+    + `<div style="font-size:10px;color:rgba(255,255,255,.3);">freed capacity</div></div></div>`
+    + `<div style="margin-bottom:6px;"><div style="display:flex;justify-content:space-between;font-size:10px;color:rgba(255,255,255,.35);margin-bottom:3px;"><span>Assembly — AI carries</span><span>${assemblyPct}%</span></div>`
+    + `<div style="height:5px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${assemblyPct}%;background:#4D8BFF;border-radius:3px;"></div></div></div>`
+    + `<div style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;font-size:10px;color:rgba(255,255,255,.35);margin-bottom:3px;"><span>Judgment / Decision — stays yours</span><span>${judgmentPct}%</span></div>`
+    + `<div style="height:5px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${judgmentPct}%;background:#9D7BF0;border-radius:3px;"></div></div></div>`
+    + `<div style="font-size:11px;color:${bc.color};line-height:1.45;border-top:1px solid rgba(255,255,255,.06);padding-top:8px;">${escapeHtml(bc.action)}</div>`
+    + (role.shift && role.shift !== "—" ? `<div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:rgba(255,255,255,.25);margin-top:4px;">${escapeHtml(role.shift)}</div>` : "")
+    + `</div>`;
+}
+
+function wfSeniorityLensHtml(roles) {
+  const byBand = { analyst: [], manager: [], senior: [] };
+  roles.forEach(r => byBand[wfSeniorityBand(r.role)].push(r));
+  const bandCard = (band, bandRoles) => {
+    const bc = WF_BAND[band];
+    const total = bandRoles.reduce((s, r) => s + (r.freedHrs || 0), 0);
+    const names = bandRoles.map(r => r.role).join(" · ");
+    return `<div style="flex:1;min-width:160px;background:rgba(255,255,255,.03);border:1px solid ${bc.color}33;border-radius:12px;padding:14px 16px;">`
+      + `<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:${bc.color};margin-bottom:6px;">${escapeHtml(bc.label)}</div>`
+      + (bandRoles.length ? `<div style="font-size:11px;color:rgba(255,255,255,.38);margin-bottom:8px;">${escapeHtml(names)}</div>` : `<div style="font-size:11px;color:rgba(255,255,255,.25);margin-bottom:8px;">No roles in this band yet</div>`)
+      + (total > 0 ? `<div style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:600;color:#63E6D6;margin-bottom:6px;">${escapeHtml(wfHrsLabel(total))}</div>` : "")
+      + `<div style="font-size:11px;color:rgba(255,255,255,.45);line-height:1.45;">${escapeHtml(bc.action)}</div></div>`;
+  };
+  return `<div style="margin-bottom:20px;">`
+    + `<div style="font-family:'JetBrains Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:rgba(255,255,255,.3);margin-bottom:10px;">Seniority lens — the shift looks different at each level</div>`
+    + `<div style="display:flex;gap:12px;flex-wrap:wrap;">${bandCard("analyst",byBand.analyst)}${bandCard("manager",byBand.manager)}${bandCard("senior",byBand.senior)}</div></div>`;
+}
+
+function wfRedeployTracksHtml(lv) {
+  const freed = (lv && lv.breakdown && lv.breakdown.deployable && lv.breakdown.deployable.chain && lv.breakdown.deployable.chain.freedHrs) || 0;
+  const track = (num, accent, title, body) =>
+    `<div style="flex:1;min-width:160px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-left:3px solid ${accent};border-radius:8px;padding:14px 16px;">`
+    + `<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:${accent};margin-bottom:5px;">Track ${num}</div>`
+    + `<div style="font-size:13px;font-weight:600;color:#ECEAF6;margin-bottom:6px;">${escapeHtml(title)}</div>`
+    + `<div style="font-size:11.5px;color:rgba(255,255,255,.45);line-height:1.5;">${escapeHtml(body)}</div></div>`;
+  return `<div style="margin-bottom:20px;">`
+    + `<div style="font-family:'JetBrains Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:rgba(255,255,255,.3);margin-bottom:10px;">Where freed capacity goes — three tracks, not mutually exclusive</div>`
+    + `<div style="display:flex;gap:12px;flex-wrap:wrap;">`
+    + track(1,"#6FB6FF","Redeploy","Point freed capacity at the highest-priority backlog: new client work, underserved requests, or work that had no capacity before.")
+    + track(2,"#9D7BF0","Reskill — the builder ladder","Use → Shape → Evaluate. People graduate from tool-user to AI-capability-builder. The team builds institutional muscle.")
+    + track(3,"#63E6D6","Redesign the role","Update role descriptions to reflect the judgment-first, assembly-assisted pattern. The role earns more leverage.")
+    + `</div>`
+    + (freed > 0 ? `<div style="margin-top:10px;font-size:11px;color:rgba(255,255,255,.25);">${escapeHtml(wfHrsLabel(freed))} freed from confirmed workflows · reallocate to these tracks</div>` : "")
+    + `</div>`;
+}
+
+function wfMixBarHtml(mix) {
+  const ai = mix.ai || 0, hybrid = mix.hybrid || 0, human = mix.human || 0;
+  return `<div style="margin-bottom:20px;">`
+    + `<div style="font-family:'JetBrains Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:rgba(255,255,255,.3);margin-bottom:8px;">Assembly / Hybrid / Human split</div>`
+    + `<div style="height:10px;border-radius:5px;overflow:hidden;display:flex;margin-bottom:8px;">`
+    + `<div style="width:${ai}%;background:#4D8BFF;" title="AI carries (gather/build)"></div>`
+    + `<div style="width:${hybrid}%;background:#9D7BF0;" title="Hybrid (judgment)"></div>`
+    + `<div style="width:${human}%;background:#EC4DA6;" title="Human-held (decisions)"></div></div>`
+    + `<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:rgba(255,255,255,.38);">`
+    + `<span><span style="display:inline-block;width:9px;height:9px;background:#4D8BFF;border-radius:2px;margin-right:4px;vertical-align:middle;"></span>AI carries ${ai}%</span>`
+    + `<span><span style="display:inline-block;width:9px;height:9px;background:#9D7BF0;border-radius:2px;margin-right:4px;vertical-align:middle;"></span>Hybrid ${hybrid}% (judgment — AI assists)</span>`
+    + `<span><span style="display:inline-block;width:9px;height:9px;background:#EC4DA6;border-radius:2px;margin-right:4px;vertical-align:middle;"></span>Human-held ${human}% (decisions)</span></div></div>`;
+}
+
+function wfEmptyHtml(note) {
+  return `<div style="padding:28px 24px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.07);border-radius:12px;color:rgba(255,255,255,.38);font-size:13px;line-height:1.6;">`
+    + `<div style="font-size:15px;font-weight:700;color:#ECEAF6;margin-bottom:6px;">Workforce Transformation</div>`
+    + `<div>${escapeHtml(note || "No confirmed units yet — confirm units on the Workbench to populate the workforce view.")}</div>`
+    + `<div style="margin-top:12px;"><button type="button" class="primary-button compact" data-workforce-to-workbench="1">Go to the Workbench</button></div></div>`;
+}
+
+function wireWorkforce(container) {
+  if (!container) return;
+  container.querySelectorAll("[data-workforce-to-workbench]").forEach(btn => {
+    if (btn.dataset.wired) return;
+    btn.dataset.wired = "1";
+    btn.addEventListener("click", () => { if (typeof setAnalysisTab === "function") setAnalysisTab("workbench"); });
+  });
+  container.querySelectorAll("[data-wf-to-dashboard]").forEach(btn => {
+    if (btn.dataset.wired) return;
+    btn.dataset.wired = "1";
+    btn.addEventListener("click", () => { if (typeof setAnalysisTab === "function") setAnalysisTab("dashboard"); });
+  });
+}
+
+function renderAnalysisTabWorkforce(recordsOverride, opts) {
   const panel = document.getElementById("analysis-tab-workforce");
-  if (!panel || panel.dataset.c12Ready) return;
-  panel.innerHTML = `<div style="padding:28px 24px;color:var(--txt-dim);font-size:13.5px;line-height:1.6;">
-    <strong style="color:var(--txt);">Workforce Transformation</strong><br>
-    Cross-workflow capacity model, role-exposure map, redeployment timeline. Coming in C-12.
-  </div>`;
+  if (!panel) return;
+  if (!studioEngine()) { panel.innerHTML = wfEmptyHtml("The workforce view is loading the Studio engine…"); wireWorkforce(panel); return; }
+  const { lv, records } = dashboardModel(recordsOverride, opts);
+  if (!lv || lv.note || !lv.confirmedCount) { panel.innerHTML = wfEmptyHtml(lv && lv.note); wireWorkforce(panel); return; }
+  const rv = (typeof engineRoleView === "function") ? engineRoleView(records) : null;
+  const mix = (typeof engineLeadership === "function") ? engineLeadership("buildAiHybridHumanMix", records) : null;
+  const roles = (rv && rv.roles && rv.roles.length) ? rv.roles : [];
+  const header = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">`
+    + `<div><div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:22px;font-weight:700;color:#ECEAF6;letter-spacing:-.02em;">Workforce Transformation</div>`
+    + `<div style="font-size:12px;color:rgba(255,255,255,.35);margin-top:2px;">Freed capacity · role redesign · the builder ladder</div></div>`
+    + `<button type="button" data-wf-to-dashboard="1" style="background:none;border:none;font-size:12px;color:#8FB6FF;cursor:pointer;padding:0;font-family:inherit;">← Executive Dashboard</button></div>`;
+  const mixSection = mix ? wfMixBarHtml(mix) : "";
+  const roleSection = roles.length
+    ? `<div style="margin-bottom:20px;"><div style="font-family:'JetBrains Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:rgba(255,255,255,.3);margin-bottom:10px;">Role redesign — what changes for each role</div>${roles.map(wfRoleCardHtml).join("")}</div>`
+    : "";
+  const senioritySection = roles.length ? wfSeniorityLensHtml(roles) : "";
+  const footer = `<div style="border-top:1px solid rgba(255,255,255,.07);padding-top:14px;margin-top:4px;display:flex;align-items:center;gap:10px;">`
+    + `<div style="font-size:11px;color:rgba(255,255,255,.25);line-height:1.5;flex:1;">Executive Dashboard shows the economics of freed capacity · Workforce Transformation shows where it goes</div>`
+    + `<button type="button" data-wf-to-dashboard="1" style="background:none;border:none;font-size:11px;color:#8FB6FF;cursor:pointer;padding:0;white-space:nowrap;font-family:inherit;">View economics →</button></div>`;
+  panel.innerHTML = `<div style="padding:24px 20px;max-width:900px;">${header}${mixSection}${roleSection}${senioritySection}${wfRedeployTracksHtml(lv)}${footer}</div>`;
+  wireWorkforce(panel);
 }
 
 function wireMethodologyLink() {

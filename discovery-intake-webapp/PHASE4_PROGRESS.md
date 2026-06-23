@@ -258,7 +258,93 @@ Files changed: `app.js` (1 line), `test/c8-workbench.test.mjs` (+33 lines)
 
 ---
 
-### C-12 through C-13 + A3 + A4  pending
+### C-12 · Workforce Transformation — freed capacity → redesigned roles / redeployment / reskilling  [A] ✓
+**SHA:** (pending commit)  
+**Gate:** npm 1096/0 (+30 tests in `test/c12-workforce.test.mjs`)
+
+**P5 data-bridge (captured before build):** No-injection bridge check confirmed: the
+natural app session path cannot produce `confirmedCount > 0`. `dashboardRecords()` calls
+`appWorkflowToIntake({ recap: { confirmed: allConfirmed } })` but never passes
+`header.persona`, `header.dept`, `trigger.trigger`, `trigger.cadence`, `seams[3-dim]`,
+`judgment.*`, or `confirm.*` from session state → engine's `isConfirmed` returns false
+(10+ blockers, listed above). Gate stays unchanged. Bridge implementation is a separate
+future item (populate these fields from interview state → `appWorkflowToIntake` opts).
+
+**C-11 verification status:** render-path verified only (synthetic confirmed-engine-record
+injection). Full fresh-session end-to-end verification requires the P5 bridge.
+
+Replaces `renderAnalysisTabWorkforce` stub (C-7). Four sections, confirmed-engine-record
+assumptions (same as C-11 — gate unchanged):
+
+- **Assembly / Hybrid / Human split bar** (`wfMixBarHtml`): time-weighted AI/hybrid/human
+  split from `buildAiHybridHumanMix`. Three colored segments (blue=#4D8BFF / violet=#9D7BF0 /
+  pink=#EC4DA6) + legend. Only shown when engine returns a mix result.
+- **Role redesign cards** (`wfRoleCardHtml`): per-role from `buildRoleView`. Each card:
+  role name, seniority band chip, freed capacity (teal), assembly bar (blue) + judgment bar
+  (violet), shift string in mono font. Framing: "Assembly — AI carries" / "Judgment / Decision
+  — stays yours".
+- **C12a Seniority lens** (`wfSeniorityLensHtml`): three band cards (Analyst/Associate ·
+  Manager/Lead · Director/Senior). Band inferred from role title string (`wfSeniorityBand`
+  — pure derived, never a scorer, never touches server). Roles assigned by keyword match
+  (director/VP/chief/head-of → senior; manager/lead/supervisor/senior-analyst → manager;
+  all others → analyst). Empty-band state shows "No roles in this band yet".
+- **Three redeployment tracks** (`wfRedeployTracksHtml`): Track 1 Redeploy (blue) → Track 2
+  Reskill / builder ladder `Use → Shape → Evaluate` (violet) → Track 3 Redesign the role (teal).
+  Not mutually exclusive. Freed hours note when available.
+
+**Navigation:** "← Executive Dashboard" link (header) + "View economics →" link (footer),
+both using `data-wf-to-dashboard` → `setAnalysisTab("dashboard")`. Empty state CTA →
+`setAnalysisTab("workbench")`. `wireWorkforce(panel)` wires event listeners once per render.
+
+**WF_BAND const:** 3 entries (analyst/manager/senior) with color, label, action string.
+`wfHrsLabel` formats freed hours (k hr/wk above 1000, min/wk below 1, hr/wk otherwise).
+`wfEmptyHtml` shows Workforce Transformation heading + Workbench CTA.
+
+**Rail-clean:** no headcount, no reduction, no eliminate, no layoff, no firm names,
+no banned phrase. No `patchField`, no scorer, no server endpoint. Empty state is
+never a dead end.
+
+Files changed: `app.js`, `test/c12-workforce.test.mjs`
+
+---
+
+### P5-2 · Executive/Workforce data-bridge  [pending]
+
+`appWorkflowToIntake({ recap: { confirmed } })` never populates the engine's REQUIRED
+fields from interview state. Missing: `header.persona`, `header.dept`, `trigger.trigger`,
+`trigger.cadence`, `seams[3-dim]` (friction/latency/crit), `judgment.*` (4 fields),
+`confirm.*` (3 fields). Engine gate stays; bridge needs to read captured interview fields
+and pass them through `appWorkflowToIntake` opts → `dashboardRecords()`.
+
+---
+
+### C-13 through C-13 + A3 + A4  pending
+
+### P5-1 · Legacy thin-step MODELED composition fallback  [A] pending
+
+Captured from the frozen Claude-chat design decision. This is the legacy-session
+companion to the fresh B-6 proof loop, not a replacement for B-6 capture.
+
+Problem: legacy/thin sessions can have step names and grid cells but no captured
+`workActions[]` or five-rung composition, so Workbench can show `assembly` and
+"No actions captured yet" even when the likely shape is obvious.
+
+Decision to build after Fixture A/B/C prove the fresh path: derive a fallback
+composition for thin steps (likely `cls`, default action(s), likely artifact) from
+the step verb/name + available grid cells; render it as **MODELED** with an
+"inferred - confirm to upgrade" affordance. Never count it as measured.
+
+Rails:
+- MODELED composition stays out of confirmed, portfolio, Executive, Workforce,
+  and export rollups until confirmed in Workbench.
+- Loading legacy sessions never silently hardens inferred values.
+- Surfaces render the engine-emitted fallback; they do not re-infer their own
+  classes or numbers.
+- If the fallback cannot be made safely, show the recapture CTA instead.
+
+Acceptance: thin legacy step renders MODELED composition; confirm promotes to
+measured/user-stated; inferred values do not enter confirmed rollups; canonical
+confirmed seed outputs remain byte-identical.
 
 ---
 
