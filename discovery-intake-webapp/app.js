@@ -1190,6 +1190,12 @@ const defaultState = {
   // deterministically from state.aiPolicy; only the review decisions persist.
   // Never silently active — only a confirmed guardrail is readable downstream.
   policyGuardrailReviews: {},
+  // P6-4: human review decisions for the per-unit economics ASSUMPTIONS (rates and
+  // efforts). Additive sidecar keyed by "<stepId>:<assumptionKey>" → {value, source,
+  // confidence, state}. Absent = the ai-inferred draft default. Only the decisions
+  // persist; economics re-derives deterministically. Draft economics never feeds
+  // scoring/gates/counted; only a confirmed assumption is read by later rollups.
+  economicsAssumptions: {},
   // V3-4: engagement-scoped, append-only, hash-chained audit trail. Persists on
   // the session blob (NOT a new store). Written ONLY by recordAuditEvent (push of
   // a frozen entry); verifyAuditTrail makes any edit/delete/reorder detectable.
@@ -5841,6 +5847,292 @@ function policyEntitlementFitForStep(step, policy) {
 }
 // === end P6-3: Permission & entitlement guardrails core ======================
 
+// === P6-4: AI unit economics (separate economic-fit layer, reviewable) =======
+// A per-unit economic-fit lens that keeps RUN COST, TCO / BUILD COST, and VALUE
+// SEPARATE, with reviewable assumptions ({value, source, confidence}). It is a
+// SEPARATE layer from technical fit and policy fit, and it NEVER feeds the
+// opportunity score, the confirmation/engine gate, or any official counted rollup.
+//
+// Honesty rules (mirroring the business-case's blank→not-computed discipline):
+//   • Missing captured inputs (volume, time) produce a QUESTION and a null total —
+//     never a fabricated number, never $0.
+//   • Rate / effort ASSUMPTIONS are ai-inferred drafts the user reviews, confirms,
+//     edits, or rejects. A rate left blank (e.g. department labor rate) stays "not
+//     computed" rather than invented.
+//   • Sensitive data / a sensitive system does NOT increase cost on its own. Review
+//     / logging / control OVERHEAD is added ONLY when the confirmed permission /
+//     control model (P6-3) actually requires those controls.
+//   • Draft economics is shown but never read by official logic; only a confirmed
+//     assumption set is read by later portfolio / roadmap views.
+
+// Run-cost drivers (per-run / per-case operating cost). controlGated drivers are
+// included ONLY when the confirmed control model requires them.
+const ECON_RUN_DRIVERS = [
+  { key: "modelToolUsage",         label: "Model / tool usage" },
+  { key: "perCaseReview",          label: "Human review per case", controlGated: "review" },
+  { key: "exceptionRework",        label: "Exception / rework" },
+  { key: "loggingControlOverhead", label: "Logging / control overhead", controlGated: "logging" }
+];
+// TCO / build-cost drivers (one-time build + ongoing ownership).
+const ECON_TCO_DRIVERS = [
+  { key: "setup",            label: "Setup / build effort" },
+  { key: "integration",      label: "Connector / integration" },
+  { key: "governanceReview", label: "Governance / review build" },
+  { key: "maintenance",      label: "Maintenance per year" },
+  { key: "trainingChange",   label: "Training / change effort" }
+];
+// Value drivers (benefit returned).
+const ECON_VALUE_DRIVERS = [
+  { key: "timeReturned",          label: "Time returned to higher-value work" },
+  { key: "cycleTimeImprovement",  label: "Cycle-time improvement" },
+  { key: "qualityReworkAvoided",  label: "Rework avoided / quality lift" },
+  { key: "throughputImprovement", label: "Throughput / service improvement" }
+];
+
+// Reviewable rate / effort assumptions. value:null = department-specific and not
+// assumed (a question until supplied — never fabricated). Numeric defaults are
+// ai-inferred drafts aligned with the engine's cost model where applicable.
+const ECON_DEFAULT_ASSUMPTIONS = [
+  { key: "periodsPerYear",   label: "Run periods per year",          value: 48,   unit: "periods/yr", confidence: 0.5 },
+  { key: "modelCostPerRun",  label: "Model / tool cost per run",     value: 0.05, unit: "$/run",      confidence: 0.4 },
+  { key: "reviewMinPerCase", label: "Human review per case",         value: 2,    unit: "min/case",   confidence: 0.4 },
+  { key: "exceptionRate",    label: "Exception / rework rate",       value: 0.1,  unit: "fraction",   confidence: 0.4 },
+  { key: "reworkMinPerCase", label: "Rework effort per case",        value: 10,   unit: "min/case",   confidence: 0.4 },
+  { key: "loggingMinPerCase",label: "Logging / control time / case", value: 1,    unit: "min/case",   confidence: 0.4 },
+  { key: "laborPerHour",     label: "Loaded labor rate",             value: null, unit: "$/hour",     confidence: 0.3 },
+  { key: "aiCarryFraction",  label: "Share of the case AI carries",  value: null, unit: "fraction",   confidence: 0.3 },
+  { key: "buildRate",        label: "Build rate",                    value: 6000, unit: "$/week",     confidence: 0.4 },
+  { key: "setupWeeks",       label: "Setup / build effort",          value: 2,    unit: "weeks",      confidence: 0.3 },
+  { key: "integrationWeeks", label: "Connector / integration",       value: 1,    unit: "weeks",      confidence: 0.3 },
+  { key: "governanceWeeks",  label: "Governance / review build",     value: 0.5,  unit: "weeks",      confidence: 0.3 },
+  { key: "maintWeeksPerYr",  label: "Maintenance per year",          value: 1.5,  unit: "weeks/yr",   confidence: 0.3 },
+  { key: "trainingWeeks",    label: "Training / change effort",      value: 0.5,  unit: "weeks",      confidence: 0.3 },
+  { key: "cycleTimeSaved",   label: "Cycle-time saved per case",     value: null, unit: "hours/case", confidence: 0.3 }
+];
+
+function econDefaultAssumption(key) {
+  return ECON_DEFAULT_ASSUMPTIONS.find((a) => a.key === key) || null;
+}
+
+// --- Reviewable-assumption sidecar (only the human decisions persist) ---
+function ensureEconomicsAssumptions() {
+  if (!state.economicsAssumptions || typeof state.economicsAssumptions !== "object") state.economicsAssumptions = {};
+  return state.economicsAssumptions;
+}
+function econAssumptionKey(stepId, key) { return `${stepId}:${key}`; }
+
+// The EFFECTIVE assumption for a step: the user's stored decision if present, else
+// the ai-inferred draft default (state "suggested"). state ∈ suggested|confirmed|rejected.
+function economicAssumption(stepId, key) {
+  const def = econDefaultAssumption(key);
+  if (!def) return null;
+  const map = state.economicsAssumptions && typeof state.economicsAssumptions === "object" ? state.economicsAssumptions : {};
+  const stored = stepId ? map[econAssumptionKey(stepId, key)] : null;
+  if (stored && typeof stored === "object") {
+    const st = stored.state === "confirmed" || stored.state === "rejected" ? stored.state : "confirmed";
+    // A rejected assumption has NO value — it must read blank, never fall back to the
+    // default number (the calculation path already treats rejected as null).
+    const v = st === "rejected" ? null : (typeof stored.value === "number" ? stored.value : def.value);
+    return { key, label: def.label, unit: def.unit, value: v, source: stored.source || "user-stated", confidence: typeof stored.confidence === "number" ? stored.confidence : 1, state: st };
+  }
+  return { key, label: def.label, unit: def.unit, value: def.value, source: "ai-inferred", confidence: def.confidence, state: "suggested" };
+}
+
+// Set a user value for an assumption (an edit confirms it). null clears to draft.
+function setEconomicAssumption(stepId, key, value) {
+  if (!stepId || !econDefaultAssumption(key)) return false;
+  const map = ensureEconomicsAssumptions();
+  const id = econAssumptionKey(stepId, key);
+  if (value == null || value === "" || !Number.isFinite(Number(value))) { delete map[id]; return false; }
+  map[id] = { value: Number(value), source: "user-edited", confidence: 1, state: "confirmed" };
+  return true;
+}
+// Confirm the current (default or stored) value as user-stated, value preserved.
+function confirmEconomicAssumption(stepId, key) {
+  const eff = economicAssumption(stepId, key);
+  if (!stepId || !eff) return false;
+  ensureEconomicsAssumptions()[econAssumptionKey(stepId, key)] = { value: typeof eff.value === "number" ? eff.value : null, source: "user-stated", confidence: 1, state: "confirmed" };
+  return true;
+}
+// Reject an assumption — its dependent drivers become questions (no fabricated value).
+function rejectEconomicAssumption(stepId, key) {
+  if (!stepId || !econDefaultAssumption(key)) return false;
+  ensureEconomicsAssumptions()[econAssumptionKey(stepId, key)] = { value: null, source: "user-stated", confidence: 1, state: "rejected" };
+  return true;
+}
+function resetEconomicAssumption(stepId, key) {
+  const map = ensureEconomicsAssumptions();
+  const id = econAssumptionKey(stepId, key);
+  if (!map[id]) return false;
+  delete map[id];
+  return true;
+}
+
+// The numeric value usable in a calculation: null when missing or rejected (so the
+// driver becomes a question rather than a fabricated number).
+function econAssumeValue(stepId, key) {
+  const a = economicAssumption(stepId, key);
+  if (!a || a.state === "rejected") return null;
+  return typeof a.value === "number" ? a.value : null;
+}
+
+// Captured economic inputs for a step (read-only). null when not captured.
+function economicInputs(step, opts) {
+  const o = opts || {};
+  const gc = (k) => (typeof gridCellValue === "function") ? (gridCellValue(step, k) || "") : "";
+  const num = (s) => { const m = String(s).replace(/,/g, "").match(/-?\d+(?:\.\d+)?/); return m ? Number(m[0]) : null; };
+  const volume = o.volume != null ? o.volume : num(gc("frequencyVolume") || gc("runsPerPeriod"));
+  const timePerCaseMin = o.timePerCaseMin != null ? o.timePerCaseMin : num(gc("timeTaken"));
+  const controls = Array.isArray(o.requiredControls) ? o.requiredControls : [];
+  return { volume, timePerCaseMin, controls };
+}
+
+// Build one driver result. compute() returns a number or null; null ⇒ a question.
+function econDriver(def, basis, compute) {
+  let value = null;
+  try { value = compute(); } catch (_e) { value = null; }
+  const ok = typeof value === "number" && Number.isFinite(value);
+  return { key: def.key, label: def.label, value: ok ? value : null, basis: basis, source: ok ? "computed" : "" };
+}
+
+// The per-unit economic-fit object: run cost, TCO, and value kept SEPARATE, each a
+// list of drivers + a total (null when an input is missing — never fabricated), plus
+// the reviewable assumptions, the open questions, and a (never-blocking) economicFit.
+function buildUnitEconomics(step, opts) {
+  const stepId = step && step.id;
+  const o = opts || {};
+  const inputs = economicInputs(step, o);
+  const A = (k) => econAssumeValue(stepId, k);
+  const reviewControls = inputs.controls.filter((c) => ["review", "approval", "four-eyes", "human-checkpoint"].includes(c));
+  const annualVolume = () => (typeof inputs.volume === "number" && typeof A("periodsPerYear") === "number") ? inputs.volume * A("periodsPerYear") : null;
+  const perHr = () => A("laborPerHour");
+  const questions = [];
+
+  // --- run cost ---
+  const runDrivers = ECON_RUN_DRIVERS.filter((d) => {
+    if (d.controlGated === "review") return reviewControls.length > 0;
+    if (d.controlGated === "logging") return inputs.controls.includes("logging");
+    return true;
+  }).map((d) => {
+    if (d.key === "modelToolUsage") return econDriver(d, "annual runs × model cost/run", () => { const v = annualVolume(), c = A("modelCostPerRun"); return (v != null && c != null) ? v * c : null; });
+    if (d.key === "perCaseReview") return econDriver(d, "annual runs × review min × labor rate (control-required)", () => { const v = annualVolume(), m = A("reviewMinPerCase"), r = perHr(); return (v != null && m != null && r != null) ? v * (m / 60) * r : null; });
+    if (d.key === "exceptionRework") return econDriver(d, "annual runs × exception rate × rework min × labor rate", () => { const v = annualVolume(), e = A("exceptionRate"), m = A("reworkMinPerCase"), r = perHr(); return (v != null && e != null && m != null && r != null) ? v * e * (m / 60) * r : null; });
+    if (d.key === "loggingControlOverhead") return econDriver(d, "annual runs × logging min × labor rate (control-required)", () => { const v = annualVolume(), m = A("loggingMinPerCase"), r = perHr(); return (v != null && m != null && r != null) ? v * (m / 60) * r : null; });
+    return econDriver(d, "", () => null);
+  });
+
+  // --- TCO / build cost ---
+  const wkCost = (weeksKey) => { const w = A(weeksKey), br = A("buildRate"); return (w != null && br != null) ? w * br : null; };
+  const tcoDrivers = ECON_TCO_DRIVERS.map((d) => {
+    const map = { setup: "setupWeeks", integration: "integrationWeeks", governanceReview: "governanceWeeks", maintenance: "maintWeeksPerYr", trainingChange: "trainingWeeks" };
+    return econDriver(d, `${map[d.key]} × build rate`, () => wkCost(map[d.key]));
+  });
+
+  // --- value ---
+  const valueDrivers = ECON_VALUE_DRIVERS.map((d) => {
+    if (d.key === "timeReturned") return econDriver(d, "annual runs × time/case × AI-carry share × labor rate", () => { const v = annualVolume(), t = inputs.timePerCaseMin, f = A("aiCarryFraction"), r = perHr(); return (v != null && t != null && f != null && r != null) ? v * (t / 60) * f * r : null; });
+    if (d.key === "cycleTimeImprovement") return econDriver(d, "annual runs × cycle-time saved × labor rate", () => { const v = annualVolume(), c = A("cycleTimeSaved"), r = perHr(); return (v != null && c != null && r != null) ? v * c * r : null; });
+    if (d.key === "qualityReworkAvoided") return econDriver(d, "annual runs × exception rate × rework min × labor rate", () => { const v = annualVolume(), e = A("exceptionRate"), m = A("reworkMinPerCase"), r = perHr(); return (v != null && e != null && m != null && r != null) ? v * e * (m / 60) * r : null; });
+    if (d.key === "throughputImprovement") return econDriver(d, "directional — needs throughput target", () => null);
+    return econDriver(d, "", () => null);
+  });
+
+  const lensTotal = (drivers) => {
+    const present = drivers.filter((x) => x.value != null);
+    if (!present.length) return { total: null, complete: false };
+    const total = present.reduce((acc, x) => acc + x.value, 0);
+    return { total: Math.round(total), complete: drivers.every((x) => x.value != null) };
+  };
+  const run = lensTotal(runDrivers), tco = lensTotal(tcoDrivers), val = lensTotal(valueDrivers);
+
+  // open questions for every missing-input driver (a question, never a fabricated $)
+  [["run cost", runDrivers], ["build cost (TCO)", tcoDrivers], ["value", valueDrivers]].forEach(([lens, ds]) => {
+    ds.forEach((x) => { if (x.value == null) questions.push({ lens, driver: x.key, question: `Provide the inputs for ${x.label} (${x.basis}) — left as a question, not assumed.` }); });
+  });
+
+  // never a hard block: a fit verdict only when value AND cost are both known.
+  const totalCost = (run.total != null || tco.total != null) ? (run.total || 0) + (tco.total || 0) : null;
+  let economicFit = "needs-economics-info";
+  if (val.total != null && totalCost != null) economicFit = val.total > totalCost ? "justified" : (val.total >= totalCost * 0.5 ? "marginal" : "not-justified");
+
+  // assumptions used + whether the whole set is confirmed (the read gate for rollups)
+  const assumptions = ECON_DEFAULT_ASSUMPTIONS.map((d) => economicAssumption(stepId, d.key));
+  const draft = assumptions.some((a) => a.state !== "confirmed" && a.state !== "rejected");
+
+  return {
+    runCost: { lens: "run", drivers: runDrivers, total: run.total, complete: run.complete },
+    tco: { lens: "tco", drivers: tcoDrivers, total: tco.total, complete: tco.complete },
+    value: { lens: "value", drivers: valueDrivers, total: val.total, complete: val.complete },
+    economicFit, questions, assumptions, draft, workIntent: (typeof workIntentOf === "function" && stepId) ? (workIntentOf(stepId) || null) : null
+  };
+}
+
+// Confirmed-only read API for later portfolio / roadmap (P6-5). Returns the
+// economics ONLY when every assumption it relies on is confirmed AND both a value
+// and a cost total exist; otherwise null (a draft is never read as official).
+function confirmedUnitEconomics(step, opts) {
+  const econ = buildUnitEconomics(step, opts);
+  if (econ.draft) return null;
+  if (econ.value.total == null || (econ.runCost.total == null && econ.tco.total == null)) return null;
+  return econ;
+}
+
+// The per-unit economics review panel for the Workbench. Run cost, TCO, and value
+// are shown SEPARATELY; a driver with a missing input shows a question, never a
+// fabricated number. Assumptions are reviewable (confirm / edit / reject / reset).
+// "" when there is no step (byte-identical-when-unused via the typeof guard at the
+// mount point). Clearly labelled draft — it never changes scoring or counted totals.
+function unitEconomicsPanelHtml(step, opts) {
+  if (!step || !step.id) return "";
+  const econ = buildUnitEconomics(step, opts);
+  const esc = typeof escapeHtml === "function" ? escapeHtml : (s) => String(s == null ? "" : s);
+  const usd = (n) => (typeof n === "number" ? `$${Math.round(n).toLocaleString("en-US")}` : null);
+  const lensHtml = (title, lens, suffix) => {
+    const t = usd(lens.total);
+    const head = t ? `${esc(title)}: <strong style="color:#cfe0f2;">${t}${suffix || ""}</strong>${lens.complete ? "" : ` <span style="color:#f6c453;">(partial)</span>`}` : `${esc(title)}: <span style="color:#f6c453;">needs inputs</span>`;
+    const rows = lens.drivers.map((d) => {
+      const dv = usd(d.value);
+      return `<li style="list-style:none;color:#9fb3c8;font-size:11px;margin-left:-16px;">${esc(d.label)} — ${dv ? `<span style="color:#cfe0f2;">${dv}</span>` : `<span style="color:#f6c453;">capture inputs</span>`}</li>`;
+    }).join("");
+    return `<div style="margin-top:6px;"><div style="font-size:11px;color:#8aa0b8;">${head}</div><ul style="margin:3px 0 0;padding-left:16px;">${rows}</ul></div>`;
+  };
+  const fitColor = econ.economicFit === "justified" ? "#00d4b4" : (econ.economicFit === "not-justified" ? "#ff8da1" : "#f6c453");
+  const assumeRows = econ.assumptions.map((a) => {
+    const badge = (typeof provenanceBadgeHtml === "function") ? provenanceBadgeHtml(a.source, a.confidence) : "";
+    const val = a.value == null ? "—" : `${a.value}`;
+    const stateColor = a.state === "confirmed" ? "#00d4b4" : (a.state === "rejected" ? "#7a93b4" : "#f6c453");
+    const acts = a.state === "confirmed"
+      ? `<button type="button" class="secondary-button compact" data-econ-reset="${esc(step.id)}:${esc(a.key)}">reset</button>`
+      : `<input type="number" step="any" data-econ-input="${esc(step.id)}:${esc(a.key)}" placeholder="${esc(val)}" style="width:72px;background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:2px 6px;color:#dde8f5;font-size:11px;"> <button type="button" class="secondary-button compact" data-econ-set="${esc(step.id)}:${esc(a.key)}">set</button> <button type="button" class="secondary-button compact" data-econ-confirm="${esc(step.id)}:${esc(a.key)}">confirm</button> <button type="button" class="secondary-button compact" data-econ-reject="${esc(step.id)}:${esc(a.key)}">reject</button>`;
+    return `<li style="list-style:none;margin-left:-16px;margin-top:5px;color:#9fb3c8;font-size:11px;">${esc(a.label)}: <strong style="color:#cfe0f2;">${esc(val)}</strong> <span style="color:#5b7186;">${esc(a.unit)}</span> ${badge} <span style="color:${stateColor};">${esc(a.state)}</span><div style="margin-top:2px;">${acts}</div></li>`;
+  }).join("");
+  return `<div class="wb-econ" style="margin-top:10px;padding:10px 12px;background:#08111c;border:1px solid #1e3350;border-radius:9px;">
+    <div class="ds-micro" style="margin-bottom:3px;">Unit economics · draft <span style="color:${fitColor};">economic fit: ${esc(econ.economicFit)}</span></div>
+    <p style="margin:0 0 4px;color:#8aa0b8;font-size:11px;line-height:1.5;">A separate economic-fit lens — run cost, build cost, and value kept apart. Draft until you confirm the assumptions; it never changes the opportunity score, the confirmation gate, or counted totals. Missing inputs stay as questions, never invented numbers.</p>
+    ${lensHtml("Run cost", econ.runCost, "/yr")}
+    ${lensHtml("Build cost (TCO)", econ.tco, "")}
+    ${lensHtml("Value", econ.value, "/yr")}
+    <details style="margin-top:8px;"><summary style="font-size:11px;color:#8aa0b8;cursor:pointer;">Assumptions (review · ${econ.draft ? "draft" : "confirmed"})</summary><ul style="margin:4px 0 0;padding-left:16px;">${assumeRows}</ul></details>
+  </div>`;
+}
+
+// Parse a "stepId:assumptionKey" token from a data attribute.
+function econTokenParts(token) {
+  const raw = String(token || "");
+  const i = raw.lastIndexOf(":");
+  return i < 0 ? null : { stepId: raw.slice(0, i), key: raw.slice(i + 1) };
+}
+function wbEconAct(token, fn, readInput) {
+  const p = econTokenParts(token);
+  if (!p) return;
+  const ok = readInput ? fn(p.stepId, p.key, readInput()) : fn(p.stepId, p.key);
+  if (ok) {
+    if (typeof persistState === "function") persistState();
+    if (typeof renderAnalysisTabWorkbench === "function") renderAnalysisTabWorkbench();
+  }
+}
+// === end P6-4: AI unit economics ============================================
+
 function buildAgentRecipeIr(step, workflowContext = {}, options = {}) {
   const profile = buildRecipeDeploymentProfile(step, workflowContext, options);
   const transition = detectTransitionStep(step);
@@ -6855,9 +7147,23 @@ function wbStepBodyHtml(step) {
   if (typeof decompositionPanelHtml === "function") {
     try { p62DecompHtml = decompositionPanelHtml(step) || ""; } catch (_e) { p62DecompHtml = ""; }
   }
+  // P6-4 — per-unit economics (typeof-guarded, draft-only, never feeds scoring/counted).
+  // Required controls come from the CONFIRMED permission/control model (P6-3), so
+  // control overhead is added only when the controls are actually required.
+  let p64EconHtml = "";
+  if (typeof unitEconomicsPanelHtml === "function") {
+    try {
+      let reqControls = [];
+      if (typeof policyEntitlementFitForStep === "function" && typeof currentAiPolicy === "function") {
+        const fit = policyEntitlementFitForStep(step, currentAiPolicy());
+        reqControls = (fit && Array.isArray(fit.requiredControls)) ? fit.requiredControls : [];
+      }
+      p64EconHtml = unitEconomicsPanelHtml(step, { requiredControls: reqControls }) || "";
+    } catch (_e) { p64EconHtml = ""; }
+  }
   return `<div class="wb-sbody">
     <div class="wb-acts-section"><div class="wb-lbl">Actions in this step${acts.length ? ` <span class="wb-hint">· tap Owner or Channel to adjust</span>` : ""}</div>${actionsHtml}</div>
-    ${composedHtml}${p54PlacementHtml}${p62DecompHtml}${guardsHtml}
+    ${composedHtml}${p54PlacementHtml}${p62DecompHtml}${p64EconHtml}${guardsHtml}
     <div class="wb-confirmbar"><button type="button" class="wb-split-btn" data-wb-split="${esc(step.id)}">Split step</button>${confirmBar}</div>
   </div>`;
 }
@@ -6946,6 +7252,19 @@ function wireWorkbench() {
     if (decDismissEl) { wbDismissSubstep(decDismissEl.dataset.wbDecomposeDismiss); return; }
     const decRestoreEl = e.target.closest("[data-wb-decompose-restore]");
     if (decRestoreEl) { wbRestoreSubsteps(decRestoreEl.dataset.wbDecomposeRestore); return; }
+    // P6-4 — review the per-unit economics assumptions (draft-only; never official).
+    const econSetEl = e.target.closest("[data-econ-set]");
+    if (econSetEl) {
+      const inp = econSetEl.parentElement && econSetEl.parentElement.querySelector(`[data-econ-input="${econSetEl.dataset.econSet}"]`);
+      wbEconAct(econSetEl.dataset.econSet, setEconomicAssumption, () => (inp ? inp.value : null));
+      return;
+    }
+    const econConfirmEl = e.target.closest("[data-econ-confirm]");
+    if (econConfirmEl) { wbEconAct(econConfirmEl.dataset.econConfirm, confirmEconomicAssumption); return; }
+    const econRejectEl = e.target.closest("[data-econ-reject]");
+    if (econRejectEl) { wbEconAct(econRejectEl.dataset.econReject, rejectEconomicAssumption); return; }
+    const econResetEl = e.target.closest("[data-econ-reset]");
+    if (econResetEl) { wbEconAct(econResetEl.dataset.econReset, resetEconomicAssumption); return; }
   });
 }
 
@@ -40930,6 +41249,7 @@ function normalizeLoadedState(parsed = {}) {
     workIntents: parsed.workIntents && typeof parsed.workIntents === "object" ? parsed.workIntents : {},
     dismissedSubsteps: parsed.dismissedSubsteps && typeof parsed.dismissedSubsteps === "object" ? parsed.dismissedSubsteps : {},
     policyGuardrailReviews: parsed.policyGuardrailReviews && typeof parsed.policyGuardrailReviews === "object" ? parsed.policyGuardrailReviews : {},
+    economicsAssumptions: parsed.economicsAssumptions && typeof parsed.economicsAssumptions === "object" ? parsed.economicsAssumptions : {},
     // V3-16: backfill handoff/decision tags. Stored tags pass through UNCHANGED — an
     // ai-inferred tag is never promoted on load (it hardens only on explicit confirm).
     handoffTags: parsed.handoffTags && typeof parsed.handoffTags === "object" ? parsed.handoffTags : {},

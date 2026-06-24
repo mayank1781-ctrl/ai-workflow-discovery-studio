@@ -486,3 +486,100 @@ node --check app.js      # OK (exit 0)
 node --check server.mjs  # OK (exit 0)
 npm test                 # tests 1479 / pass 1479 / fail 0 (exit 0)
 ```
+
+---
+
+## P6-4 · AI unit economics (separate economic-fit layer, reviewable)
+
+**Status:** COMPLETE
+**Gate:** 1490/0 (+11 tests over P6-3's 1479/0)
+**Scope:** the per-unit economic-fit layer only — no dashboard / portfolio-preview
+surfacing (P6-5), no corp integration, no change to official counted rollups or the
+confirmation gate, and the existing business case (`computeBusinessCaseNow` /
+`businessCaseSnapshot`) is left untouched.
+
+A per-unit economic-fit lens that keeps **run cost**, **TCO / build cost**, and
+**value** SEPARATE, with reviewable assumptions (`{value, source, confidence}`),
+built additively over the engine cost model and the P6-1/P6-3 confirmed signals.
+
+### Carry-forward from P6-3 (permission/entitlement-first)
+
+- Sensitive data / a sensitive system does **not** raise cost on its own. Review /
+  logging / control **overhead** is added **only** when the confirmed permission /
+  control model requires those controls (the mount derives `requiredControls` from
+  `policyEntitlementFitForStep`, which reads confirmed-only guardrails).
+- User-described work in a system implies ordinary access; unknown access stays a
+  question — economics never invents a cost from a sensitivity flag.
+
+### What was built
+
+- **Three separated lenses** (`ECON_RUN_DRIVERS` / `ECON_TCO_DRIVERS` /
+  `ECON_VALUE_DRIVERS`): run cost (model/tool usage, per-case review, exception/
+  rework, logging/control overhead — the last two control-gated); TCO (setup,
+  integration, governance/review, maintenance, training/change); value (time
+  returned, cycle-time improvement, rework avoided / quality lift, throughput).
+- **`buildUnitEconomics(step, opts)`** — deterministic. A driver computes a number
+  only from present inputs × assumptions; a missing captured input (volume/time) or
+  a blank rate yields a **question + null total**, never a fabricated number or $0
+  (mirrors the business case's `valueComputed:false` discipline). `economicFit`
+  (justified / marginal / not-justified / needs-economics-info) is advisory only —
+  never a hard block — and is set only when value *and* cost are both known.
+- **Reviewable assumptions** (`ECON_DEFAULT_ASSUMPTIONS`, ai-inferred drafts;
+  department-specific rates like labor `$/hr` and AI-carry share default to *null* —
+  configurable, not invented). `economicAssumption` / `setEconomicAssumption`
+  (edit) / `confirmEconomicAssumption` / `rejectEconomicAssumption` (→ dependent
+  driver becomes a question) / `resetEconomicAssumption`, persisted in
+  `state.economicsAssumptions` (backfilled `{}`).
+- **`confirmedUnitEconomics(step, opts)`** — the read API for later portfolio /
+  roadmap (P6-5): returns the economics **only** when every assumption is confirmed
+  and a value + cost both exist; a draft is never read as official.
+- **Workbench panel** `unitEconomicsPanelHtml` injected into `wbStepBodyHtml`
+  (typeof-guarded — byte-identical when absent): run cost, TCO, and value shown
+  **separately**, each driver value or a "capture inputs" question; assumptions
+  reviewable (confirm / edit / reject / reset); a "draft — never changes the
+  opportunity score, the confirmation gate, or counted totals" caveat. Wired in
+  `wireWorkbench`.
+
+### Safety / trust rules encoded
+
+- **Separate from technical fit and policy fit** — nothing here feeds the
+  opportunity score, scorers, the confirmation/engine gate, or counted rollups
+  (proven functionally and source-level); no grid cell or step is written.
+- **No fabrication** — missing inputs and blank rates stay questions / "not
+  computed", never $0 or invented payback.
+- **Run cost and TCO are distinct lenses** with their own drivers and totals.
+- **Rail-clean** — no headcount / FTE / reduction / eliminate / automate / workforce
+  language (the value driver was renamed away from "reduction" to "Rework avoided /
+  quality lift").
+
+### Changed files
+
+| File | Change |
+|---|---|
+| `app.js` | `state.economicsAssumptions` in `defaultState` + normalize backfill; the P6-4 core block (driver consts, assumption sidecar, `buildUnitEconomics`, `confirmedUnitEconomics`); `unitEconomicsPanelHtml` + a typeof-guarded mount in `wbStepBodyHtml`; econ handlers in `wireWorkbench` |
+| `test/p6-4-unit-economics.test.mjs` | 11 focused tests (new) |
+
+### Adversarial review
+
+Reviewed across two lenses (no-fabrication/separation + control-gating/rails/
+correctness), each finding skeptic-verified. One real finding fixed before commit:
+a **rejected** assumption still displayed its default number in the UI (the
+calculation path was already correct). Fixed so a rejected assumption reads blank
+(`—`), consistent with "rejected → blank, never a fabricated number"; regression
+test added.
+
+### What was intentionally NOT touched
+
+- The existing business case (`computeBusinessCaseNow`, `businessCaseSnapshot`,
+  scenarios), the engine cost model (`costToServe` / `buildTco` / `roleCapacity`),
+  the scorers, the confirmation/engine gate, and counted rollups.
+- No dashboard / portfolio-preview surfacing (P6-5), no corp integration. No
+  `server.mjs`, `index.html`, `studio_engine.mjs`, or P6-0/P6-1/P6-2/P6-3 change.
+
+### Verification (P6-4)
+
+```bash
+node --check app.js      # OK (exit 0)
+node --check server.mjs  # OK (exit 0)
+npm test                 # tests 1490 / pass 1490 / fail 0 (exit 0)
+```
