@@ -535,3 +535,112 @@ body[data-app-mode="interview"] .support-actions.quiet-actions{ gap:6px; margin-
 body[data-app-mode="interview"] .voice-actions.secondary-voice-actions{ gap:8px; }
 body[data-app-mode="interview"] .conversation-card{ gap:10px; }
 body[data-app-mode="interview"] #voiceHint.hint{ margin:6px 0; }
+
+/* ============================================================================
+   LIGHT ENTERPRISE THEME (default) — post-P6 UX restructure
+   ----------------------------------------------------------------------------
+   Premium consulting / executive studio surface: white/off-white panels, soft
+   gray page bands, deep navy/ink text, restrained electric-blue/cyan accents.
+   Implemented by (1) redefining the Signal Glass surface/text/line TOKENS to
+   light here (loads last → wins), and (2) migrating app.js inline surface /
+   border / near-white-text hexes to the SEMANTIC tokens below. Data-meaning
+   hues (teal/blue/amber/pink/violet for provenance, status, work-type) are kept
+   so charts/maps stay legible and boardroom-ready; warning colours are reserved
+   for true blockers. No logic / routing / scoring / gate change.
+   ========================================================================== */
+:root{
+  /* Migrated inline styles reference the EXISTING namespaced tokens below
+     (--deep / --deep2 / --deep3 surfaces, --sg-line border, --txt* ink ramp).
+     We deliberately do NOT introduce bare --surface/--ink/--line names: those
+     collide with pre-existing contextually-scoped app vars (the same reason
+     Signal Glass namespaced to --sg-*). --lt-accent is the one new accent. */
+  --deep3:          #E9EFF7;   /* deepest insets / tracks (namespaced)        */
+  --lt-accent:      #2E6BF0;   /* restrained electric blue (primary action)   */
+  --lt-accent-soft: #E7EEFD;
+
+  /* Redefine the dark Signal Glass tokens to their light equivalents so every
+     var-based surface flips automatically. */
+  --sg-ink:#EDF1F8; --deep:#FFFFFF; --deep2:#F4F7FC;
+  --porcelain:#FFFFFF; --mist:#F4F7FC;
+  --sg-line:rgba(21,36,59,.12); --sg-line-soft:rgba(21,36,59,.07);
+  --glass:#FFFFFF; --glass-2:#F4F7FC;
+  --txt:#15243B; --txt-dim:#46566F; --txt-faint:#6C7A92;
+  --gray:#6C7A92;
+  /* Chrome accent — flatten the saturated prism to a restrained blue sweep. */
+  --grad:linear-gradient(120deg,#2E6BF0 0%,#3B82F6 60%,#06B6D4 100%);
+  /* Glass-McKinsey panel ground → light. */
+  --gm-base:#F4F7FC; --gm-card:rgba(21,36,59,.03); --gm-card-2:rgba(21,36,59,.05);
+  --gm-border:rgba(21,36,59,.12); --gm-border-2:rgba(21,36,59,.18);
+
+  /* future.css palette → light (future.css styles the Studio shell + cards). */
+  --future-bg:#EDF1F8; --future-panel:#FFFFFF; --future-panel-2:#F4F7FC; --future-panel-3:#E9EFF7;
+  --future-white:#15243B; --future-muted:#46566F; --future-subtle:#6C7A92;
+  --future-line:rgba(21,36,59,.12);
+}
+
+/* Page ground — soft cool-gray enterprise band, no saturated glows. The
+   existing per-mode ground rules (above) reference --sg-ink/--txt which are now
+   light, so both surfaces flip with these overrides winning by load order. */
+body{ color:var(--txt); }
+body[data-app-mode="analysis"]{ color:var(--txt); }
+.analysis-studio,
+.analysis-studio .analysis-tab-panel{ color:var(--txt); }
+body[data-app-mode="analysis"] .app-shell.session-shell,
+body[data-app-mode="analysis"] .workspace,
+body[data-app-mode="interview"] .app-shell.session-shell,
+body[data-app-mode="interview"] .workspace{
+  background:
+    radial-gradient(1100px 680px at 12% -8%, rgba(46,107,240,.06), transparent 60%),
+    radial-gradient(900px 620px at 96% 2%, rgba(6,182,212,.05), transparent 60%),
+    var(--sg-ink);
+}
+
+/* Light-surface defaults for the common design-system primitives so any panel
+   that still relies on white-alpha glass reads as a crisp white card on light. */
+.ds-panel{ background:var(--deep); border-color:var(--sg-line); }
+.ds-card{ background:var(--deep); border-color:var(--sg-line); }
+.ds-card-inner{ background:var(--deep2); border-color:var(--sg-line-soft); }
+
+/* Modal/overlay scrims must stay a dark translucent veil even on a light app. */
+#discoveryModePicker,
+.doc-disclosure-overlay,
+.settings-overlay,
+.modal-overlay{ background:rgba(15,23,42,.55) !important; }
+
+/* ---- Discovery hero / stage → light enterprise (flatten the dark glow card) ---- */
+body[data-app-mode="interview"] .question-stage-card,
+body[data-app-mode="interview"] .discovery-hero-card{
+  background:
+    radial-gradient(900px 520px at 78% 30%, rgba(46,107,240,.05), transparent 60%),
+    var(--deep) !important;
+  border:1px solid var(--sg-line) !important;
+  box-shadow:0 1px 2px rgba(21,36,59,.04), 0 12px 32px -24px rgba(21,36,59,.25) !important;
+}
+/* Retire the decorative glow rings drawn on ::before. */
+body[data-app-mode="interview"] .question-stage-card::before,
+body[data-app-mode="interview"] .discovery-hero-card::before{ background:none !important; opacity:0 !important; }
+body[data-app-mode="interview"] .embedded-transcript-card,
+body[data-app-mode="interview"] .embedded-transcript-card .conversation-card,
+body[data-app-mode="interview"] .embedded-transcript-card .conversation-log{
+  background:transparent !important; border-color:var(--sg-line) !important;
+}
+body[data-app-mode="interview"] .discovery-completion-pill{ background:var(--deep2); border:1px solid var(--sg-line); }
+body[data-app-mode="interview"] .discovery-completion-track{ background:var(--deep3); }
+body[data-app-mode="interview"] .question-stage-card .eyebrow,
+body[data-app-mode="interview"] #currentQuestion,
+body[data-app-mode="interview"] .current-question-card h2{ color:var(--txt) !important; }
+
+/* The active rail/mode tab keeps a single restrained-blue chrome accent; its
+   label flips to white for contrast on the blue. */
+.mode-tab.active,
+body[data-app-mode="analysis"] .rail-tab.active{ color:#FFFFFF !important; }
+.mode-tab.active i,
+body[data-app-mode="analysis"] .rail-tab.active i{ color:#FFFFFF !important; }
+
+/* Top-bar action buttons (New / Open / Save / Help / Settings) → crisp light
+   chips with ink text (they had near-white text, invisible on a light bar). */
+.topbar-trio-button{ background:var(--deep) !important; border:1px solid var(--sg-line) !important; color:var(--txt) !important; }
+.topbar-trio-button i{ color:var(--txt-dim) !important; }
+.topbar-trio-button:hover{ border-color:var(--lt-accent) !important; }
+/* The top bar itself → a clean white app bar with a hairline base. */
+.topbar, .session-topbar, header.app-header{ background:rgba(255,255,255,.86) !important; border-bottom:1px solid var(--sg-line); }

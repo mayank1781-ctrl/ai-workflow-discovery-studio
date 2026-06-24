@@ -1,8 +1,8 @@
 :root {
-  --future-bg: #05050a;
-  --future-panel: #0c0e17;
-  --future-panel-2: #111422;
-  --future-panel-3: #171a2b;
+  --future-bg: var(--deep3);
+  --future-panel: var(--deep);
+  --future-panel-2: var(--deep2);
+  --future-panel-3: var(--deep3);
   --future-white: #f8fbff;
   --future-muted: #aab1c4;
   --future-subtle: #707990;
@@ -25,11 +25,13 @@
 }
 
 html body {
+  /* Light enterprise ground — a faint ink dot grid + restrained blue/cyan wash
+     on a soft cool-gray band (the saturated dark glows are retired). */
   background:
-    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(135deg, rgba(90, 167, 255, 0.18), transparent 28%),
-    linear-gradient(315deg, rgba(255, 99, 186, 0.14), transparent 34%),
+    linear-gradient(rgba(21, 36, 59, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(21, 36, 59, 0.035) 1px, transparent 1px),
+    radial-gradient(1100px 680px at 12% -8%, rgba(46, 107, 240, 0.06), transparent 60%),
+    radial-gradient(900px 620px at 96% 2%, rgba(6, 182, 212, 0.05), transparent 60%),
     var(--future-bg);
   background-size: 42px 42px, 42px 42px, auto, auto, auto;
   color: var(--future-white);
@@ -74,7 +76,7 @@ select:disabled {
   grid-template-columns: 300px minmax(320px, 1fr) 246px 372px;
   min-height: 76px;
   border-bottom-color: var(--future-line);
-  background: rgba(5, 5, 10, 0.88);
+  background: var(--deep);
   backdrop-filter: blur(18px);
 }
 
@@ -87,7 +89,7 @@ select:disabled {
   height: 38px;
   border-radius: 10px;
   background: conic-gradient(from 180deg, var(--future-blue), var(--future-purple), var(--future-pink), var(--future-cyan), var(--future-blue));
-  color: #05050a;
+  color: var(--deep3);
   font-weight: 900;
 }
 
@@ -109,7 +111,7 @@ select:disabled {
 .context-chip,
 .status-pill {
   border-color: var(--future-line);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--deep);
   color: var(--future-muted);
 }
 
@@ -134,7 +136,7 @@ select:disabled {
 
 .mode-switch {
   border-color: var(--future-line);
-  background: rgba(255, 255, 255, 0.045);
+  background: var(--deep);
 }
 
 .mode-tab.active {
@@ -152,7 +154,7 @@ select:disabled {
 .icon-button,
 .mini-button {
   border-color: var(--future-line);
-  background: rgba(255, 255, 255, 0.055);
+  background: var(--deep);
   color: var(--future-white);
 }
 
@@ -250,7 +252,7 @@ select:disabled {
   margin-top: 2px;
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--deep);
   color: var(--future-muted);
   font-size: 10px;
   font-weight: 850;
@@ -262,7 +264,7 @@ select:disabled {
 }
 
 .section-button.active {
-  border-color: rgba(255, 255, 255, 0.18);
+  border-color: rgba(21,36,59,0.18);
   background: linear-gradient(135deg, var(--future-blue), var(--future-purple) 52%, var(--future-pink));
   box-shadow:
     0 12px 30px rgba(155, 120, 255, 0.18),
@@ -274,13 +276,13 @@ select:disabled {
 }
 
 .section-button.active .section-icon {
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--deep);
   color: white;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
 }
 
 .section-button.active .section-score {
-  background: rgba(5, 5, 10, 0.24);
+  background: var(--deep);
   color: white;
 }
 
@@ -321,7 +323,7 @@ select:disabled {
   border-radius: 14px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025)),
-    rgba(12, 14, 23, 0.9);
+    var(--deep2);
   box-shadow: none;
 }
 
@@ -338,7 +340,7 @@ select:disabled {
   padding: 0 12px;
   border: 1px solid var(--future-line);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--deep);
 }
 
 .voice-toggle span {
@@ -401,12 +403,12 @@ select:disabled {
   background:
     linear-gradient(90deg, rgba(90, 167, 255, 0.16), transparent 42%),
     #f8fbff;
-  color: #080a10;
+  color: var(--deep3);
 }
 
 .step-workspace-card strong,
 .step-workspace-card h3 {
-  color: #080a10;
+  color: var(--deep3);
 }
 
 .skeleton-confirmation-panel {
@@ -434,7 +436,7 @@ select:disabled {
   border-radius: 999px;
   padding: 8px 12px;
   background: linear-gradient(135deg, rgba(90, 167, 255, 0.18), rgba(255, 99, 186, 0.08));
-  color: #0f172a;
+  color: var(--deep2);
   font-size: 12px;
   font-weight: 900;
 }
@@ -452,11 +454,11 @@ select:disabled {
   grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  border: 1px solid rgba(8, 10, 16, 0.09);
+  border: 1px solid var(--deep2);
   border-radius: 12px;
   padding: 9px;
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: 0 10px 22px rgba(8, 10, 16, 0.04);
+  background: var(--deep);
+  box-shadow: 0 10px 22px var(--deep2);
 }
 
 .skeleton-step-row.active {
@@ -471,7 +473,7 @@ select:disabled {
   height: 32px;
   border-radius: 10px;
   background: linear-gradient(135deg, rgba(90, 167, 255, 0.2), rgba(255, 99, 186, 0.12));
-  color: #0f172a;
+  color: var(--deep2);
   font-size: 13px;
   font-weight: 900;
 }
@@ -486,10 +488,10 @@ select:disabled {
   border-radius: 10px;
   padding: 9px 10px;
   background: rgba(248, 251, 255, 0.9);
-  color: #080a10;
+  color: var(--deep3);
   font: inherit;
   font-weight: 900;
-  outline: 1px solid rgba(8, 10, 16, 0.06);
+  outline: 1px solid var(--deep2);
 }
 
 .skeleton-step-main small {
@@ -557,9 +559,9 @@ select:disabled {
   height: 92px;
   border-radius: 12px;
   background: #f8fbff;
-  color: #080a10;
+  color: var(--deep3);
   font-size: 16px;
-  box-shadow: inset 0 0 0 1px rgba(8, 10, 16, 0.04);
+  box-shadow: inset 0 0 0 1px var(--deep2);
 }
 
 #answerInput::placeholder {
@@ -570,7 +572,7 @@ select:disabled {
   padding: 8px;
   border: 1px solid var(--future-line);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .quiet-actions .secondary-button {
@@ -584,7 +586,7 @@ select:disabled {
 .recap-empty,
 .recap-card {
   border-color: var(--future-line);
-  background: rgba(255, 255, 255, 0.045);
+  background: var(--deep);
 }
 
 .recap-empty {
@@ -667,11 +669,11 @@ select:disabled {
   border-color: rgba(90, 167, 255, 0.22);
   border-radius: 12px;
   background:
-    linear-gradient(rgba(8, 10, 16, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(8, 10, 16, 0.035) 1px, transparent 1px),
+    linear-gradient(var(--deep2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--deep2) 1px, transparent 1px),
     #f8fbff;
   background-size: 28px 28px;
-  color: #080a10;
+  color: var(--deep3);
 }
 
 .map-feedback {
@@ -708,7 +710,7 @@ select:disabled {
   margin: -16px -16px 12px;
   padding: 16px;
   border-bottom: 1px solid var(--future-line);
-  background: rgba(12, 14, 23, 0.96);
+  background: var(--deep2);
 }
 
 .inspector-heading h2 {
@@ -724,7 +726,7 @@ select:disabled {
 .inspector-next {
   border-color: var(--future-line);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.045);
+  background: var(--deep);
 }
 
 .inspector-block:hover,
@@ -793,7 +795,7 @@ input,
 select {
   border-color: var(--future-line-strong);
   background: #f8fbff;
-  color: #080a10;
+  color: var(--deep3);
 }
 
 .field input::placeholder,
@@ -824,12 +826,12 @@ select {
 
 .workbench-tab {
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.045);
+  background: var(--deep);
 }
 
 .workbench-tab.active {
   background: #f8fbff;
-  color: #080a10;
+  color: var(--deep3);
 }
 
 .message,
@@ -840,7 +842,7 @@ select {
 .metric-card,
 .signal-item {
   border-color: var(--future-line);
-  background: rgba(255, 255, 255, 0.045);
+  background: var(--deep);
 }
 
 .message.user {
@@ -1087,7 +1089,7 @@ body[data-app-mode="interview"] .turn-signal-icon {
 
 body[data-app-mode="interview"] .turn-signal-main h3 {
   margin: 2px 0 4px;
-  color: #f8fafc;
+  color: var(--txt);
   font-size: 19px;
   line-height: 1.1;
 }
@@ -1110,7 +1112,7 @@ body[data-app-mode="interview"] .turn-signal-flow {
 body[data-app-mode="interview"] .turn-signal-flow .turn-step {
   min-height: 58px;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.045);
+  background: var(--deep);
 }
 
 body[data-app-mode="interview"] .turn-signal-meta {
@@ -1238,7 +1240,7 @@ body[data-app-mode="interview"] .session-pulse-discovery {
   border: 1px solid rgba(148, 163, 184, 0.14);
   border-radius: 999px;
   color: rgba(248, 250, 252, 0.76);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--deep);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
   font-size: 12px;
   font-weight: 900;
@@ -1503,7 +1505,7 @@ body[data-app-mode="interview"] .session-pulse-discovery {
   border-radius: 18px;
   background:
     linear-gradient(150deg, rgba(155, 120, 255, 0.12), transparent 62%),
-    rgba(12, 14, 23, 0.74);
+    var(--deep2);
   box-shadow: 0 14px 40px rgba(0, 0, 0, 0.32);
 }
 
@@ -1551,7 +1553,7 @@ body[data-app-mode="interview"] .session-pulse-discovery {
   height: 24px;
   border-radius: 8px;
   background: linear-gradient(135deg, var(--future-purple), var(--future-pink));
-  color: #0b0712;
+  color: var(--deep3);
   font-size: 12px;
   font-weight: 900;
 }
@@ -1703,7 +1705,7 @@ body[data-app-mode="interview"] .session-pulse-discovery {
   padding: 14px;
   border: 1.5px dashed rgba(124, 92, 230, 0.42);
   border-radius: 18px;
-  background: rgba(12, 14, 23, 0.4);
+  background: var(--deep2);
   color: rgba(201, 182, 255, 0.85);
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
@@ -1814,7 +1816,7 @@ body[data-app-mode="interview"] .session-pulse-discovery {
 
 .frame-anchor-pill.current .frame-anchor-pill-number {
   background: linear-gradient(135deg, var(--future-purple), var(--future-pink));
-  color: #0b0712;
+  color: var(--deep3);
 }
 
 .frame-anchor-pill.current .frame-anchor-pill-label {
@@ -1889,7 +1891,7 @@ body[data-app-mode="interview"] .session-rail {
   align-content: start;
   height: calc(100vh - 128px);
   padding: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(21,36,59,0.18);
   border-radius: 28px;
   background:
     linear-gradient(180deg, rgba(92, 84, 255, 0.22), transparent 36%),
@@ -2247,7 +2249,7 @@ body[data-app-mode="interview"] .session-topbar {
   padding: 10px;
   border: 1px solid rgba(148, 163, 184, 0.14);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.045);
+  background: var(--deep);
 }
 
 .help-popover li strong {
@@ -2480,7 +2482,7 @@ body[data-app-mode="interview"] .router-heading > span {
 body[data-app-mode="interview"] .router-heading strong {
   display: block;
   margin-top: 2px;
-  color: #f8fafc;
+  color: var(--txt);
   font-size: 15px;
 }
 
@@ -2507,7 +2509,7 @@ body[data-app-mode="interview"] .intake-router-card small {
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 999px;
   color: rgba(226, 232, 240, 0.76);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--deep);
   font-size: 12px;
   line-height: 1.2;
 }
@@ -2886,7 +2888,7 @@ body[data-app-mode="analysis"] .workbench-tab {
   padding: 14px;
   border: 1px solid var(--future-line);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .product-handoff-grid > section:first-child {
@@ -2925,7 +2927,7 @@ body[data-app-mode="analysis"] .workbench-tab {
   padding: 12px;
   border: 1px solid var(--future-line);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.045);
+  background: var(--deep);
 }
 
 .translation-lens span {
@@ -3016,7 +3018,7 @@ body[data-app-mode="analysis"] .analytics-inspector-panel {
   padding: 14px;
   border: 1px solid var(--future-line);
   border-radius: 18px;
-  background: rgba(5, 5, 10, 0.44);
+  background: var(--deep);
 }
 
 .demo-case-loader label {
@@ -3035,7 +3037,7 @@ body[data-app-mode="analysis"] .analytics-inspector-panel {
   min-height: 42px;
   border-radius: 12px;
   border: 1px solid var(--future-line);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--deep);
   color: var(--future-white);
 }
 
@@ -3052,7 +3054,7 @@ body[data-app-mode="analysis"] .analytics-inspector-panel {
   padding: 14px;
   border: 1px solid var(--future-line);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.045);
+  background: var(--deep);
 }
 
 .console-metric-card {
@@ -3132,9 +3134,9 @@ body[data-app-mode="analysis"] .analytics-inspector-panel {
   gap: 6px;
   min-height: 30px;
   padding: 6px 10px;
-  border: 1px solid rgba(8, 10, 16, 0.11);
+  border: 1px solid var(--deep2);
   border-radius: 999px;
-  background: rgba(8, 10, 16, 0.045);
+  background: var(--deep2);
   color: #4b5565;
   font-size: 12px;
   font-weight: 800;
@@ -3143,7 +3145,7 @@ body[data-app-mode="analysis"] .analytics-inspector-panel {
 .drilldown-cluster-pill.active {
   border-color: rgba(90, 167, 255, 0.55);
   background: linear-gradient(135deg, rgba(90, 167, 255, 0.2), rgba(255, 99, 186, 0.13));
-  color: #080a10;
+  color: var(--deep3);
 }
 
 .drilldown-cluster-pill.complete {
@@ -3163,7 +3165,7 @@ body[data-app-mode="analysis"] .analytics-inspector-panel {
   padding: 16px;
   border: 1px solid var(--future-line);
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .case-comparison-heading {
@@ -3199,7 +3201,7 @@ body[data-app-mode="analysis"] .analytics-inspector-panel {
   padding: 14px;
   border: 1px solid var(--future-line);
   border-radius: 17px;
-  background: rgba(255, 255, 255, 0.045);
+  background: var(--deep);
 }
 
 .case-comparison-card.active {
@@ -3266,7 +3268,7 @@ body[data-app-mode="analysis"] .analytics-inspector-panel {
   height: 7px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--deep);
 }
 
 .case-score-track i {
@@ -3287,7 +3289,7 @@ body[data-app-mode="analysis"] .analytics-inspector-panel {
   padding: 5px 8px;
   border: 1px solid var(--future-line);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.045);
+  background: var(--deep);
 }
 
 .case-gap {
@@ -3306,7 +3308,7 @@ body[data-app-mode="analysis"] .analytics-inspector-panel {
 .handoff-snapshot-column {
   border: 1px solid var(--future-line);
   border-radius: 17px;
-  background: rgba(255, 255, 255, 0.045);
+  background: var(--deep);
 }
 
 .handoff-snapshot-hero {
@@ -3710,7 +3712,7 @@ body[data-app-mode="analysis"] .workbench-panel {
   justify-content: center;
   min-width: 74px;
   min-height: 48px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(21,36,59,0.16);
   border-radius: 999px;
   color: var(--future-cyan);
   font-weight: 900;
@@ -3852,7 +3854,7 @@ body[data-app-mode="analysis"] .workbench-panel {
   margin-top: 10px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--deep);
 }
 
 .gate-meter i {
@@ -3955,7 +3957,7 @@ body[data-app-mode="analysis"] .workbench-panel {
   padding: 12px;
   border: 1px solid rgba(148, 163, 184, 0.14);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .lens-grid h4 {
@@ -4081,11 +4083,11 @@ body[data-app-mode="analysis"] .workbench-panel {
   place-items: center;
   min-height: 240px;
   padding: 24px;
-  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border: 1px dashed rgba(21,36,59,0.18);
   border-radius: 18px;
   text-align: center;
   color: var(--future-muted);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--deep);
 }
 
 .session-empty-state i {
@@ -4155,10 +4157,10 @@ body[data-app-mode="analysis"] .workbench-panel {
   min-height: 26px;
   align-items: center;
   padding: 5px 9px;
-  border: 1px solid rgba(255, 255, 255, 0.13);
+  border: 1px solid rgba(21,36,59,0.13);
   border-radius: 999px;
   color: var(--future-muted);
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
   font-size: 11px;
   font-weight: 800;
 }
@@ -4211,7 +4213,7 @@ body[data-app-mode="interview"] .process-map-visual {
 body[data-app-mode="interview"] .process-step-card {
   position: relative;
   padding: 14px;
-  border-color: rgba(255, 255, 255, 0.15);
+  border-color: rgba(21,36,59,0.15);
   background:
     linear-gradient(135deg, rgba(90, 167, 255, 0.09), transparent 40%),
     rgba(255, 255, 255, 0.045);
@@ -4274,7 +4276,7 @@ body[data-app-mode="interview"] .step-number {
   height: 7px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--deep);
 }
 
 .step-map-status div i {
@@ -4435,7 +4437,7 @@ body[data-app-mode="interview"] .step-flow-footer {
   padding: 11px;
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .mvp-launch-card > i {
@@ -4509,7 +4511,7 @@ body[data-app-mode="interview"] .step-flow-footer {
   padding: 14px;
   border: 1px solid var(--future-line);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .pilot-control-field.wide {
@@ -4529,7 +4531,7 @@ body[data-app-mode="interview"] .step-flow-footer {
 .pilot-control-field textarea {
   width: 100%;
   min-width: 0;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(21,36,59,0.14);
   border-radius: 12px;
   background: rgba(7, 8, 19, 0.62);
   color: var(--future-white);
@@ -4647,7 +4649,7 @@ body[data-app-mode="interview"] .step-flow-footer {
   padding: 15px;
   border: 1px solid var(--future-line);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .pilot-gate-card > i {
@@ -4682,19 +4684,19 @@ body[data-app-mode="interview"] .step-flow-footer {
 .pilot-gate-card.ready {
   color: var(--future-cyan);
   border-color: rgba(100, 244, 255, 0.34);
-  background: linear-gradient(135deg, rgba(100, 244, 255, 0.12), transparent 52%), rgba(255, 255, 255, 0.035);
+  background: linear-gradient(135deg, rgba(100, 244, 255, 0.12), transparent 52%), var(--deep);
 }
 
 .pilot-gate-card.warn {
   color: #f7c873;
   border-color: rgba(247, 200, 115, 0.35);
-  background: linear-gradient(135deg, rgba(247, 200, 115, 0.1), transparent 52%), rgba(255, 255, 255, 0.035);
+  background: linear-gradient(135deg, rgba(247, 200, 115, 0.1), transparent 52%), var(--deep);
 }
 
 .pilot-gate-card.risk {
   color: var(--future-pink);
   border-color: rgba(255, 99, 186, 0.42);
-  background: linear-gradient(135deg, rgba(255, 99, 186, 0.12), transparent 52%), rgba(255, 255, 255, 0.035);
+  background: linear-gradient(135deg, rgba(255, 99, 186, 0.12), transparent 52%), var(--deep);
 }
 
 .pilot-feedback-shell {
@@ -4791,7 +4793,7 @@ body[data-app-mode="interview"] .step-flow-footer {
   font-weight: 900;
   text-overflow: ellipsis;
   white-space: nowrap;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .pilot-feedback-request ol {
@@ -4811,7 +4813,7 @@ body[data-app-mode="interview"] .step-flow-footer {
   color: rgba(255, 255, 255, 0.82);
   font-size: 12px;
   line-height: 1.35;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .pilot-feedback-hero {
@@ -4865,7 +4867,7 @@ body[data-app-mode="interview"] .step-flow-footer {
   padding: 14px;
   border: 1px solid var(--future-line);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .pilot-feedback-field.wide {
@@ -4885,7 +4887,7 @@ body[data-app-mode="interview"] .step-flow-footer {
 .pilot-feedback-field textarea {
   width: 100%;
   min-width: 0;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(21,36,59,0.14);
   border-radius: 12px;
   background: rgba(7, 8, 19, 0.62);
   color: var(--future-white);
@@ -4912,7 +4914,7 @@ body[data-app-mode="interview"] .step-flow-footer {
   padding: 14px;
   border: 1px solid rgba(139, 92, 246, 0.24);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .feedback-log-card div {
@@ -4984,7 +4986,7 @@ body[data-app-mode="interview"] .step-flow-footer {
   height: 8px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--deep);
 }
 
 .guided-pilot-track span {
@@ -5134,7 +5136,7 @@ body[data-app-mode="interview"] .step-flow-footer {
   padding: 14px;
   border: 1px solid var(--future-line);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .pilot-theme-card > span {
@@ -5199,7 +5201,7 @@ body[data-app-mode="interview"] .step-flow-footer {
   padding: 14px;
   border: 1px solid rgba(100, 244, 255, 0.22);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .pilot-action-list span {
@@ -5564,7 +5566,7 @@ body[data-app-mode="analysis"] .analysis-console-title h2 {
 }
 
 .confidence-matrix-table td.matrix-missing {
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--deep);
 }
 
 .matrix-footnote {
@@ -5808,12 +5810,12 @@ body[data-app-mode="analysis"] .analysis-zone-strip.workspace-picker {
 }
 
 .handoff-checklist-row.status-review em {
-  color: #281705;
+  color: var(--deep3);
   background: #ffd28a;
 }
 
 .handoff-checklist-row.status-missing em {
-  color: #2b0618;
+  color: var(--deep3);
   background: #ff9ace;
 }
 
@@ -5829,9 +5831,9 @@ body[data-app-mode="analysis"] .analysis-zone-strip.workspace-picker {
   grid-template-columns: 42px minmax(0, 1fr);
   gap: 10px;
   padding: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(21,36,59,0.12);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .handoff-mini-card > span {
@@ -5861,9 +5863,9 @@ body[data-app-mode="analysis"] .analysis-zone-strip.workspace-picker {
 .compact-blueprint-detail {
   margin-top: 12px;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(21,36,59,0.12);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .compact-blueprint-detail summary {
@@ -5976,7 +5978,7 @@ body[data-app-mode="analysis"] .analysis-zone-strip.workspace-picker {
   place-items: center;
   width: 112px;
   height: 112px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(21,36,59,0.16);
   border-radius: 28px;
   background:
     radial-gradient(circle at 50% 50%, rgba(7, 8, 19, 0.86) 0 52%, transparent 53%),
@@ -6023,7 +6025,7 @@ body[data-app-mode="analysis"] .analysis-zone-strip.workspace-picker {
   min-width: 0;
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--deep);
 }
 
 .template-readiness-card {
@@ -6103,7 +6105,7 @@ body[data-app-mode="analysis"] .analysis-zone-strip.workspace-picker {
   height: 8px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--deep);
 }
 
 .template-meter i {
@@ -6160,7 +6162,7 @@ body[data-app-mode="analysis"] .analysis-zone-strip.workspace-picker {
 
 .template-section-preview {
   padding: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(21,36,59,0.1);
   border-radius: 14px;
   background: rgba(7, 8, 19, 0.36);
 }
@@ -6182,7 +6184,7 @@ body[data-app-mode="analysis"] .analysis-zone-strip.workspace-picker {
   gap: 10px;
   padding: 9px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .template-field-row dt {
@@ -6352,7 +6354,7 @@ body[data-app-mode="interview"] .question-lens-next {
   padding: 6px 10px;
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.055);
+  background: var(--deep);
   color: rgba(226, 232, 240, 0.76);
   font-size: 12px;
   font-weight: 850;
@@ -6491,7 +6493,7 @@ body[data-app-mode="interview"] .discovery-completion-track {
   height: 11px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--deep);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
@@ -6644,7 +6646,7 @@ body[data-app-mode="interview"] .step-workspace-card::-webkit-scrollbar-track,
 body[data-app-mode="interview"] .embedded-transcript-card .conversation-log::-webkit-scrollbar-track,
 body[data-app-mode="interview"] .discovery-pulse-next::-webkit-scrollbar-track,
 body[data-app-mode="interview"] .pulse-mini-card::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--deep);
   border-radius: 999px;
 }
 
@@ -6767,7 +6769,7 @@ body[data-app-mode="interview"] .current-question-card h2 {
   height: 7px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--deep);
 }
 
 .readiness-meter i {
@@ -7031,7 +7033,7 @@ body[data-app-mode="analysis"] .analysis-zone-group.merged-zone-group .analysis-
   place-items: center;
   width: 92px;
   height: 92px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(21,36,59,0.16);
   border-radius: 24px;
   background:
     radial-gradient(circle at center, rgba(7, 8, 19, 0.92) 0 55%, transparent 57%),
@@ -7341,10 +7343,10 @@ body[data-app-mode="analysis"] .analysis-zone-group.merged-zone-group .analysis-
 
 .handoff-bridge-fields small {
   padding: 5px 7px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(21,36,59,0.1);
   border-radius: 999px;
   color: rgba(248, 251, 255, 0.78);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--deep);
   font-size: 10px;
   font-weight: 850;
 }
@@ -7603,7 +7605,7 @@ body[data-app-mode="analysis"] .analysis-zone-group.merged-zone-group .analysis-
   height: 7px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--deep);
 }
 
 .output-lane-meter i {
@@ -7790,7 +7792,7 @@ body[data-app-mode="analysis"] .analysis-zone-group.merged-zone-group .analysis-
   padding: 9px 12px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.045);
+  background: var(--deep);
 }
 
 .live-test-status-pill span {
@@ -8015,7 +8017,7 @@ body[data-app-mode="analysis"] .analysis-zone-group.merged-zone-group .analysis-
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 16px;
   color: var(--future-muted);
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
   cursor: pointer;
 }
 
@@ -8097,7 +8099,7 @@ body[data-app-mode="analysis"] .analysis-zone-group.merged-zone-group .analysis-
   padding: 10px;
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 15px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .testing-release-checklist article.ready {
@@ -8181,7 +8183,7 @@ body[data-app-mode="analysis"] .analysis-zone-group.merged-zone-group .analysis-
   padding: 11px 12px;
   border: 1px solid rgba(148, 163, 184, 0.14);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--deep);
 }
 
 .testing-release-decisions h3 {
@@ -8284,7 +8286,7 @@ body[data-app-mode="analysis"] .analysis-zone-group.merged-zone-group .analysis-
   padding: 13px;
   border: 1px solid rgba(148, 163, 184, 0.15);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .testing-release-move-card span {
@@ -8324,7 +8326,7 @@ body[data-app-mode="analysis"] .analysis-zone-group.merged-zone-group .analysis-
   padding: 12px;
   border: 1px solid rgba(148, 163, 184, 0.15);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.032);
+  background: var(--deep);
 }
 
 .testing-release-step-plan article.ready {
@@ -8430,7 +8432,7 @@ body[data-app-mode="analysis"] .analysis-zone-group.merged-zone-group .analysis-
   padding: 10px;
   border: 1px solid rgba(148, 163, 184, 0.15);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--deep);
 }
 
 .testing-host-grid article.ready {
@@ -8582,7 +8584,7 @@ body[data-app-mode="analysis"] .analysis-zone-group.merged-zone-group .analysis-
   padding: 10px;
   border: 1px solid rgba(148, 163, 184, 0.15);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.032);
+  background: var(--deep);
 }
 
 .testing-source-grid article.ready {
@@ -8748,7 +8750,7 @@ body[data-app-mode="analysis"] .analysis-zone-group.merged-zone-group .analysis-
   padding: 10px;
   border: 1px solid rgba(148, 163, 184, 0.15);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.032);
+  background: var(--deep);
 }
 
 .reviewer-decision-grid span,
@@ -8801,7 +8803,7 @@ body[data-app-mode="analysis"] .analysis-zone-group.merged-zone-group .analysis-
   padding: 9px 10px;
   border: 1px solid rgba(148, 163, 184, 0.14);
   border-radius: 13px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--deep);
 }
 
 .testing-release-now-grid {
@@ -8817,7 +8819,7 @@ body[data-app-mode="analysis"] .analysis-zone-group.merged-zone-group .analysis-
   padding: 13px;
   border: 1px solid rgba(148, 163, 184, 0.15);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .testing-release-now-card.primary {
@@ -8989,7 +8991,7 @@ body[data-app-mode="analysis"] .analysis-zone-group.merged-zone-group .analysis-
   padding: 12px;
   border: 1px solid rgba(148, 163, 184, 0.15);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .pilot-round-grid article.evidence-captured {
@@ -9065,7 +9067,7 @@ body[data-app-mode="analysis"] .analysis-zone-group.merged-zone-group .analysis-
   padding: 10px 12px;
   border: 1px solid rgba(148, 163, 184, 0.12);
   border-radius: 13px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .pilot-round-footer span {
@@ -9134,7 +9136,7 @@ body[data-app-mode="analysis"] .analysis-zone-group.merged-zone-group .analysis-
   padding: 12px;
   border: 1px solid rgba(148, 163, 184, 0.15);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .small-team-pilot-grid article > i {
@@ -9173,7 +9175,7 @@ body[data-app-mode="analysis"] .analysis-zone-group.merged-zone-group .analysis-
   padding: 10px 12px;
   border: 1px solid rgba(148, 163, 184, 0.12);
   border-radius: 13px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .small-team-pilot-footer span {
@@ -9222,7 +9224,7 @@ body[data-app-mode="analysis"] .analysis-zone-group.merged-zone-group .analysis-
   border: 1px solid rgba(148, 163, 184, 0.14);
   border-radius: 16px;
   color: var(--future-muted);
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 @media (max-width: 980px) {
@@ -9624,7 +9626,7 @@ body[data-app-mode="interview"] .handoff-signal-heading > span {
   height: 8px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--deep);
 }
 
 .handoff-signal-meter i {
@@ -9655,7 +9657,7 @@ body[data-app-mode="interview"] .handoff-signal-heading > span {
   padding: 10px 12px;
   border: 1px solid rgba(100, 244, 255, 0.16);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .handoff-signal-next span {
@@ -9902,7 +9904,7 @@ body[data-app-mode="analysis"] .legacy-output-logic {
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-left: 3px solid rgba(255, 99, 186, 0.55);
   border-radius: 15px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
 }
 
 .template-alignment-card.aligned {
@@ -10420,7 +10422,7 @@ body[data-app-mode="analysis"] .legacy-output-logic {
   display: block;
   overflow: hidden;
   padding: 6px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(21,36,59,0.09);
   border-radius: 10px;
   color: rgba(248, 251, 255, 0.78);
   background: rgba(7, 8, 19, 0.28);
@@ -10567,10 +10569,10 @@ body[data-app-mode="analysis"] .legacy-output-logic {
 
 .readiness-document-counts span {
   padding: 4px 6px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(21,36,59,0.09);
   border-radius: 999px;
   color: rgba(248, 251, 255, 0.72);
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--deep);
   font-size: 10px;
   font-weight: 850;
 }
@@ -10945,7 +10947,7 @@ body[data-app-mode="interview"] #sendChatButton {
 }
 
 .addon-metric strong {
-  color: #f8fafc;
+  color: var(--txt);
   font-size: 24px;
   line-height: 1;
 }
@@ -11081,7 +11083,7 @@ body[data-app-mode="interview"] #sendChatButton {
 
 .addons-setup-grid strong {
   display: block;
-  color: #f8fafc;
+  color: var(--txt);
   font-size: 24px;
   line-height: 1.1;
 }
@@ -11117,7 +11119,7 @@ body[data-app-mode="interview"] #sendChatButton {
 
 .addons-setup-sequence strong {
   display: block;
-  color: #f8fafc;
+  color: var(--txt);
   font-size: 13px;
   line-height: 1.35;
 }
@@ -11146,7 +11148,7 @@ body[data-app-mode="interview"] #sendChatButton {
 
 .addon-test-empty strong {
   display: block;
-  color: #f8fafc;
+  color: var(--txt);
   font-size: 14px;
 }
 
@@ -11181,7 +11183,7 @@ body[data-app-mode="interview"] #sendChatButton {
 }
 
 .addon-test-metric strong {
-  color: #f8fafc;
+  color: var(--txt);
   font-size: 22px;
   line-height: 1;
 }
@@ -11239,7 +11241,7 @@ body[data-app-mode="interview"] #sendChatButton {
 
 .addon-test-result strong {
   display: block;
-  color: #f8fafc;
+  color: var(--txt);
   font-size: 13px;
 }
 
@@ -11322,7 +11324,7 @@ body[data-app-mode="interview"] #sendChatButton {
 
 .addons-next-steps li strong {
   display: block;
-  color: #f8fafc;
+  color: var(--txt);
   font-size: 13px;
   line-height: 1.35;
 }
@@ -11399,7 +11401,7 @@ body[data-app-mode="interview"] #sendChatButton {
 
 .addon-card-top strong {
   display: block;
-  color: #f8fafc;
+  color: var(--txt);
   font-size: 14px;
   line-height: 1.25;
 }
@@ -11517,7 +11519,7 @@ body[data-app-mode="interview"] #sendChatButton {
 }
 
 .workflow-map-stats strong {
-  color: #f8fafc;
+  color: var(--txt);
   font-size: 22px;
   line-height: 1;
 }
@@ -11574,7 +11576,7 @@ body[data-app-mode="interview"] #sendChatButton {
 
 .workflow-map-node-card strong {
   display: block;
-  color: #f8fafc;
+  color: var(--txt);
   font-size: 13px;
   line-height: 1.35;
 }
@@ -11624,7 +11626,7 @@ body[data-app-mode="interview"] #sendChatButton {
 
 .workflow-map-review-row strong {
   display: block;
-  color: #f8fafc;
+  color: var(--txt);
   font-size: 13px;
 }
 
@@ -11679,7 +11681,7 @@ body[data-app-mode="interview"] #sendChatButton {
 }
 
 .enterprise-build-pack-score span {
-  color: #f8fafc;
+  color: var(--txt);
   font-size: 26px;
   font-weight: 950;
   line-height: 1;
@@ -11687,7 +11689,7 @@ body[data-app-mode="interview"] #sendChatButton {
 
 .enterprise-build-pack-score strong,
 .enterprise-build-pack-foot strong {
-  color: #f8fafc;
+  color: var(--txt);
   font-size: 13px;
 }
 
@@ -11717,7 +11719,7 @@ body[data-app-mode="interview"] #sendChatButton {
 
 .enterprise-build-option-grid strong {
   display: block;
-  color: #f8fafc;
+  color: var(--txt);
   font-size: 13px;
   line-height: 1.3;
 }
@@ -11980,7 +11982,7 @@ body[data-app-mode="interview"] .discovery-start-button {
 
 .evidence-metric-card strong {
   display: block;
-  color: #f8fafc;
+  color: var(--txt);
   font-size: 22px;
   line-height: 1;
 }
@@ -12198,7 +12200,7 @@ body:has(#openSessionsMenu[open]) .session-topbar {
   padding: var(--future-space-5);
   border: 1px dashed var(--future-line-strong);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--deep);
   color: var(--future-white);
   cursor: pointer;
   text-align: left;
@@ -12529,7 +12531,7 @@ body[data-discovery-entry="upload"] .main-turn-actions {
 
 .live-grid-cell[data-cell-state="empty"],
 .live-grid-cell.is-empty {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--deep);
   color: var(--future-subtle);
 }
 

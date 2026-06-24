@@ -9,12 +9,12 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ── Base ── */
-body { background: #0d1b2e !important; color: #c8d8e8; }
+/* ── Base ── (light enterprise theme; signal-glass.css layers the surface tokens) */
+body { background: #EDF1F8 !important; color: #15243B; }
 
 /* ── Dot grid texture ── */
 .ds-dot-grid {
-  background-image: radial-gradient(circle, rgba(255,255,255,0.025) 1px, transparent 1px);
+  background-image: radial-gradient(circle, var(--deep) 1px, transparent 1px);
   background-size: 20px 20px;
 }
 
@@ -33,30 +33,30 @@ body { background: #0d1b2e !important; color: #c8d8e8; }
 
 /* ── Card depth system ── */
 .ds-panel {
-  background: #0a1525;
-  border: 1px solid #152236;
+  background: var(--deep3);
+  border: 1px solid var(--sg-line);
   border-radius: 14px;
 }
 .ds-card {
-  background: #162438;
-  border: 1px solid #1e3350;
+  background: var(--deep);
+  border: 1px solid var(--sg-line);
   border-radius: 12px;
   animation: fade-up 0.3s ease forwards;
 }
 .ds-card-inner {
-  background: #0f1e30;
-  border: 1px solid #1a2d42;
+  background: var(--deep2);
+  border: 1px solid var(--deep2);
   border-radius: 8px;
 }
 .ds-chip {
-  background: #09131f;
-  border: 1px solid #162438;
+  background: var(--deep3);
+  border: 1px solid var(--deep);
   border-radius: 7px;
   padding: 5px 10px;
 }
 .ds-inset {
-  background: #07101a;
-  border: 1px solid #152236;
+  background: var(--deep3);
+  border: 1px solid var(--sg-line);
   border-radius: 6px;
 }
 
@@ -82,7 +82,7 @@ body { background: #0d1b2e !important; color: #c8d8e8; }
 .ds-progress {
   height: 4px;
   border-radius: 3px;
-  background: rgba(255,255,255,0.06);
+  background: var(--deep);
   overflow: hidden;
 }
 .ds-progress-fill {
@@ -95,8 +95,8 @@ body { background: #0d1b2e !important; color: #c8d8e8; }
 .ds-tab-wrap {
   display: flex;
   gap: 2px;
-  background: #081525;
-  border: 1px solid rgba(255,255,255,0.05);
+  background: var(--deep3);
+  border: 1px solid rgba(21,36,59,0.05);
   border-radius: 10px;
   padding: 3px;
 }
@@ -114,9 +114,9 @@ body { background: #0d1b2e !important; color: #c8d8e8; }
   transition: color 0.15s;
 }
 .ds-tab.ds-active {
-  background: #1a2d42;
-  color: #e8f4ff;
-  border: 1px solid rgba(255,255,255,0.08);
+  background: var(--deep2);
+  color: var(--txt);
+  border: 1px solid rgba(21,36,59,0.08);
   box-shadow: 0 0 12px rgba(0,212,180,0.08);
 }
 
@@ -133,7 +133,7 @@ body { background: #0d1b2e !important; color: #c8d8e8; }
   gap: 8px;
   font-size: 0.78rem;
   font-weight: 600;
-  color: #c8d8e8;
+  color: var(--txt);
 }
 .ds-section-meta {
   font-size: 0.68rem;
@@ -164,7 +164,7 @@ body { background: #0d1b2e !important; color: #c8d8e8; }
 .ds-badge-purple { background: rgba(168,85,247,0.1);  color: #a855f7; border: 1px solid rgba(168,85,247,0.22); }
 .ds-badge-amber  { background: rgba(245,158,11,0.1);  color: #f59e0b; border: 1px solid rgba(245,158,11,0.22); }
 .ds-badge-blue   { background: rgba(56,189,248,0.1);  color: #38bdf8; border: 1px solid rgba(56,189,248,0.22); }
-.ds-badge-dim    { background: rgba(255,255,255,0.05); color: #445566; border: 1px solid rgba(255,255,255,0.08); }
+.ds-badge-dim    { background: var(--deep); color: #445566; border: 1px solid var(--deep); }
 
 /* ── Status dots ── */
 .ds-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
@@ -178,7 +178,7 @@ body { background: #0d1b2e !important; color: #c8d8e8; }
 /* ── Buttons ── */
 .ds-btn-teal {
   background: #00d4b4;
-  color: #0d1b2e;
+  color: var(--deep);
   border: none;
   border-radius: 7px;
   padding: 8px 16px;
@@ -195,7 +195,7 @@ body { background: #0d1b2e !important; color: #c8d8e8; }
 .ds-btn-ghost {
   background: transparent;
   color: #445566;
-  border: 1px solid rgba(255,255,255,0.07);
+  border: 1px solid rgba(21,36,59,0.07);
   border-radius: 7px;
   padding: 7px 14px;
   font-size: 0.78rem;
@@ -210,7 +210,7 @@ body { background: #0d1b2e !important; color: #c8d8e8; }
 /* ── Gradient CTA button ── */
 .ds-btn-grad {
   background: linear-gradient(135deg, #00d4b4, #ff4fc8);
-  color: #0d1b2e;
+  color: var(--deep);
   border: none;
   border-radius: 7px;
   padding: 9px 20px;
@@ -226,20 +226,20 @@ body { background: #0d1b2e !important; color: #c8d8e8; }
 }
 
 /* ── Divider ── */
-.ds-divider { border: none; border-top: 1px solid #152236; margin: 0; }
+.ds-divider { border: none; border-top: 1px solid var(--sg-line); margin: 0; }
 
 /* ── Glass overlay ── */
 .ds-glass {
   background: rgba(13,27,46,0.85);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid rgba(21,36,59,0.06);
   border-radius: 12px;
 }
 
 /* ── Bar chart rows ── */
 .ds-bar-row  { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
 .ds-bar-name { font-size: 0.72rem; color: #556a7e; flex-shrink: 0; }
-.ds-bar-track { flex: 1; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.05); }
+.ds-bar-track { flex: 1; height: 5px; border-radius: 3px; background: var(--deep); }
 .ds-bar-fill  { height: 100%; border-radius: 3px; }
 .ds-bar-val   { font-size: 0.68rem; min-width: 28px; text-align: right; }

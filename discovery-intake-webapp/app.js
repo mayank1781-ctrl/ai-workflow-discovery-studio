@@ -1450,13 +1450,13 @@ document.addEventListener("DOMContentLoaded", () => {
     securityLevel: "loose",
     theme: "base",
     themeVariables: {
-      primaryColor: "#101a3d",
+      primaryColor: "var(--deep2)",
       primaryTextColor: "#f8fafc",
       primaryBorderColor: "#8b5cf6",
       lineColor: "#60a5fa",
-      secondaryColor: "#241047",
-      tertiaryColor: "#061127",
-      edgeLabelBackground: "#09142f",
+      secondaryColor: "var(--deep2)",
+      tertiaryColor: "var(--deep3)",
+      edgeLabelBackground: "var(--deep2)",
       fontFamily: "Inter, ui-sans-serif, system-ui"
     }
   });
@@ -4254,10 +4254,10 @@ function buildLiveGridState() {
 
 // Confidence → cell background + left border (see PR brief).
 function liveGridCellStyle(color, confidence, hasValue) {
-  if (!hasValue) return "background:#0a1525;border-left:2px solid transparent;";
+  if (!hasValue) return "background:var(--deep3);border-left:2px solid transparent;";
   if (confidence >= 0.7) return `background:${hexToRgba(color, 0.15)};border-left:2px solid ${color};`;
   if (confidence >= 0.4) return `background:${hexToRgba(color, 0.07)};border-left:1px dashed ${color};`;
-  return "background:#1e3350;border-left:1px dashed #445566;";
+  return "background:var(--sg-line);border-left:1px dashed #445566;";
 }
 
 function renderLiveExtractionGrid() {
@@ -4284,7 +4284,7 @@ function renderLiveExtractionGrid() {
   const completeness = `
     <div style="margin-bottom:14px;">
       <div style="font-size:11px;margin-bottom:5px;">${barLabel}</div>
-      <div style="height:6px;border-radius:99px;background:#0a1525;overflow:hidden;">
+      <div style="height:6px;border-radius:99px;background:var(--deep3);overflow:hidden;">
         <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#00d4b4,#a855f7);border-radius:99px;transition:width 300ms ease;"></div>
       </div>
     </div>`;
@@ -4296,7 +4296,7 @@ function renderLiveExtractionGrid() {
       const hasValue = Boolean(cell.value);
       const style = liveGridCellStyle(layer.color, cell.confidence, hasValue);
       const valueHtml = hasValue
-        ? `<div style="font-size:12px;color:#c7d4e3;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${escapeHtml(cell.value)}</div>`
+        ? `<div style="font-size:12px;color:var(--txt-dim);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${escapeHtml(cell.value)}</div>`
         : `<div style="font-size:12px;color:#3f5878;">—</div>`;
       // PR 28: cells lay out horizontally within the layer (flex row, wrapping
       // when the rail is narrow) rather than stacking vertically.
@@ -4319,7 +4319,7 @@ function renderLiveExtractionGrid() {
   host.innerHTML = `
     <div class="ds-card" style="padding:14px 16px;margin-top:14px;">
       <div data-lg-toggle role="button" tabindex="0" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
-        <strong style="font-size:13px;color:#e8f4ff;">Live extraction grid</strong>
+        <strong style="font-size:13px;color:var(--txt);">Live extraction grid</strong>
         <span data-lg-chevron style="color:#5b7186;font-size:12px;transition:transform 200ms ease;transform:rotate(${liveGridCollapsed ? "-90" : "0"}deg);">▾</span>
       </div>
       <div data-lg-body style="${liveGridCollapsed ? "display:none;" : ""}margin-top:12px;">
@@ -4755,10 +4755,10 @@ function renderActiveQuestionLabel() {
   if (!label) {
     label = document.createElement("div");
     label.id = "activeQuestionLabel";
-    label.style.cssText = "display:flex;align-items:flex-start;gap:8px;background:#0d1b2a;border:1px solid #1e3350;border-radius:6px;padding:6px 10px;margin-bottom:8px;";
+    label.style.cssText = "display:flex;align-items:flex-start;gap:8px;background:var(--deep);border:1px solid var(--sg-line);border-radius:6px;padding:6px 10px;margin-bottom:8px;";
     composer.insertBefore(label, input);
   }
-  label.innerHTML = `<span style="flex:1;min-width:0;font-size:12px;color:#8aa0b8;line-height:1.4;">Answering: <span style="color:#cfe0f0;">${escapeHtml(activeGapQuestion)}</span></span><kbd style="flex-shrink:0;font-size:10px;color:#5b7186;border:1px solid #1e3350;border-radius:4px;padding:1px 5px;line-height:1.3;font-family:inherit;" title="Press Esc to clear">Esc</kbd><span data-clear-question role="button" tabindex="0" title="Clear (Esc)" style="color:#5b7186;font-size:16px;line-height:1;cursor:pointer;flex-shrink:0;">×</span>`;
+  label.innerHTML = `<span style="flex:1;min-width:0;font-size:12px;color:var(--txt-dim);line-height:1.4;">Answering: <span style="color:var(--txt);">${escapeHtml(activeGapQuestion)}</span></span><kbd style="flex-shrink:0;font-size:10px;color:#5b7186;border:1px solid var(--sg-line);border-radius:4px;padding:1px 5px;line-height:1.3;font-family:inherit;" title="Press Esc to clear">Esc</kbd><span data-clear-question role="button" tabindex="0" title="Clear (Esc)" style="color:#5b7186;font-size:16px;line-height:1;cursor:pointer;flex-shrink:0;">×</span>`;
   label.querySelector("[data-clear-question]")?.addEventListener("click", clearActiveGapQuestion);
 }
 
@@ -4795,13 +4795,13 @@ function renderInlineKeyQuestions() {
   // Every entry keeps its data-gap-* hooks so the wiring below is unchanged.
   const [primary, ...rest] = top3;
   const primaryCard = `
-    <button data-gap-question="${escapeHtml(primary.question)}" data-gap-key="${escapeHtml(primary.key)}" data-action-lane="${escapeHtml(primary.lane)}" type="button" style="width:100%;min-width:0;text-align:left;background:#0d1b2a;border:1px solid #1e3350;border-left:3px solid ${primary.accent};border-radius:8px;padding:10px 12px;cursor:pointer;color:#cfe0f0;line-height:1.4;transition:border-color 0.15s ease;">
+    <button data-gap-question="${escapeHtml(primary.question)}" data-gap-key="${escapeHtml(primary.key)}" data-action-lane="${escapeHtml(primary.lane)}" type="button" style="width:100%;min-width:0;text-align:left;background:var(--deep);border:1px solid var(--sg-line);border-left:3px solid ${primary.accent};border-radius:8px;padding:10px 12px;cursor:pointer;color:var(--txt);line-height:1.4;transition:border-color 0.15s ease;">
       <span style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:7px;">
         <span style="font-size:10px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:${primary.accent};">${escapeHtml(primary.lane)}</span>
         <span style="font-size:10px;color:#5b7186;">${escapeHtml(primary.treatment)}</span>
       </span>
-      <span style="display:block;font-size:13px;color:${primary.confirm ? "#aebbd0" : "#e8f4ff"};">${escapeHtml(primary.question)}</span>
-      <span style="display:block;margin-top:7px;font-size:11px;color:#8aa0b8;"><strong style="color:#c8d8e8;">Why this matters:</strong> ${escapeHtml(primary.why)}</span>
+      <span style="display:block;font-size:13px;color:${primary.confirm ? "var(--txt-dim)" : "var(--txt)"};">${escapeHtml(primary.question)}</span>
+      <span style="display:block;margin-top:7px;font-size:11px;color:var(--txt-dim);"><strong style="color:var(--txt);">Why this matters:</strong> ${escapeHtml(primary.why)}</span>
       <span style="display:block;margin-top:5px;font-size:11px;color:#5b7186;"><strong>Improves:</strong> ${escapeHtml(primary.improves)} · ${escapeHtml(primary.source)}</span>
     </button>`;
   const restList = rest.length ? `
@@ -4809,9 +4809,9 @@ function renderInlineKeyQuestions() {
       <div class="ds-micro" style="color:#5b7186;margin-bottom:6px;">Also worth confirming</div>
       <div style="display:flex;flex-direction:column;gap:2px;">
         ${rest.map((field) => `
-          <button data-gap-question="${escapeHtml(field.question)}" data-gap-key="${escapeHtml(field.key)}" data-action-lane="${escapeHtml(field.lane)}" type="button" style="width:100%;min-width:0;text-align:left;background:transparent;border:none;border-left:2px solid ${field.accent};border-radius:0;padding:5px 0 5px 10px;cursor:pointer;color:#aebbd0;line-height:1.4;display:flex;gap:8px;align-items:baseline;">
+          <button data-gap-question="${escapeHtml(field.question)}" data-gap-key="${escapeHtml(field.key)}" data-action-lane="${escapeHtml(field.lane)}" type="button" style="width:100%;min-width:0;text-align:left;background:transparent;border:none;border-left:2px solid ${field.accent};border-radius:0;padding:5px 0 5px 10px;cursor:pointer;color:var(--txt-dim);line-height:1.4;display:flex;gap:8px;align-items:baseline;">
             <span style="font-size:9px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:${field.accent};flex-shrink:0;">${escapeHtml(field.lane)}</span>
-            <span style="font-size:12px;color:#aebbd0;min-width:0;">${escapeHtml(field.question)}</span>
+            <span style="font-size:12px;color:var(--txt-dim);min-width:0;">${escapeHtml(field.question)}</span>
           </button>`).join("")}
       </div>
     </div>` : "";
@@ -4819,7 +4819,7 @@ function renderInlineKeyQuestions() {
     <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-end;margin-bottom:8px;flex-wrap:wrap;">
       <div>
         <div class="ds-micro">Action queue</div>
-        <strong style="display:block;color:#e8f4ff;font-size:13px;margin-top:2px;">Next-best confirmations</strong>
+        <strong style="display:block;color:var(--txt);font-size:13px;margin-top:2px;">Next-best confirmations</strong>
       </div>
       <span class="ds-badge ds-badge-dim">${top3.length} active</span>
     </div>
@@ -4897,18 +4897,18 @@ function renderWorkflowGridPanel() {
       ? `<span style="display:inline-block;background:${layerColor}22;color:${layerColor};border:1px solid ${layerColor}55;border-radius:99px;padding:2px 9px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.03em;">${escapeHtml(pattern)}</span>`
       : `<span style="font-size:11px;color:#3f5878;">No AI pattern yet</span>`;
     return `
-      <div style="background:#0d1b2a;border:1px solid #1a2a3a;border-left:3px solid ${layerColor};border-radius:8px;padding:12px;">
+      <div style="background:var(--deep);border:1px solid var(--deep2);border-left:3px solid ${layerColor};border-radius:8px;padding:12px;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
           <span style="font-size:10px;color:#5b7186;letter-spacing:0.06em;">${num}</span>
-          <strong style="font-size:14px;color:#dde8f5;flex:1;min-width:0;">${escapeHtml(name)}</strong>
+          <strong style="font-size:14px;color:var(--txt);flex:1;min-width:0;">${escapeHtml(name)}</strong>
           <span class="sensitivity-badge" style="background:${confColor}22;color:${confColor};">${escapeHtml(confLabel)}</span>
         </div>
         <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:12px;margin-bottom:8px;">
-          <span style="color:#5b7186;">Persona</span><span style="color:#9fb3c8;">${escapeHtml(persona)}</span>
-          <span style="color:#5b7186;">System</span><span style="color:#9fb3c8;">${escapeHtml(system)}</span>
+          <span style="color:#5b7186;">Persona</span><span style="color:var(--txt-dim);">${escapeHtml(persona)}</span>
+          <span style="color:#5b7186;">System</span><span style="color:var(--txt-dim);">${escapeHtml(system)}</span>
         </div>
         <div style="margin-bottom:8px;">${patternHtml}</div>
-        <div style="font-size:12px;color:#8aa0b8;line-height:1.4;border-top:1px solid #16263a;padding-top:7px;">${escapeHtml(stepUnderstandingLine(step))}</div>
+        <div style="font-size:12px;color:var(--txt-dim);line-height:1.4;border-top:1px solid var(--sg-line);padding-top:7px;">${escapeHtml(stepUnderstandingLine(step))}</div>
       </div>`;
   }).join("");
 
@@ -4916,9 +4916,9 @@ function renderWorkflowGridPanel() {
   // interview to fill the fields the document didn't cover. (The "key questions"
   // themselves render at the top of the left column via renderInlineKeyQuestions.)
   const nudgeHtml = (state.appMode === "document" && gaps.length)
-    ? `<div style="margin-top:16px;background:#10243a;border:1px solid #1e4060;border-radius:8px;padding:12px 14px;">
-        <div style="font-size:13px;color:#dde8f5;line-height:1.45;margin-bottom:10px;">${gaps.length} field${gaps.length === 1 ? "" : "s"} still need input — continue with an interview?</div>
-        <button type="button" data-start-interview style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Start interview</button>
+    ? `<div style="margin-top:16px;background:var(--deep2);border:1px solid var(--deep2);border-radius:8px;padding:12px 14px;">
+        <div style="font-size:13px;color:var(--txt);line-height:1.45;margin-bottom:10px;">${gaps.length} field${gaps.length === 1 ? "" : "s"} still need input — continue with an interview?</div>
+        <button type="button" data-start-interview style="background:#00d4b4;color:var(--deep);border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Start interview</button>
       </div>`
     : "";
 
@@ -4946,7 +4946,7 @@ function renderWorkflowGridPanel() {
 // Coverage -> accent colour. Mirrors the confidence-card glow scale. The
 // current-step pink override is applied by the caller, not here.
 function pfMapGlowColor(coverage) {
-  if (coverage === 0) return "#1a2a3a";
+  if (coverage === 0) return "var(--deep2)";
   if (coverage < 0.25) return "#f59e0b";
   if (coverage < 0.5) return "rgba(0,212,180,0.67)";
   return "#00d4b4";
@@ -4979,8 +4979,8 @@ function pfMapBuildNodes(steps, mode, currentIndex) {
         ? "font-size:9px;color:#3d5470;letter-spacing:0.06em;"
         : "font-size:8px;color:#3d5470;letter-spacing:0.06em;";
       const nameStyle = full
-        ? "font-size:12px;font-weight:700;color:#dde8f5;line-height:1.25;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;"
-        : "font-size:10px;font-weight:700;color:#dde8f5;line-height:1.25;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+        ? "font-size:12px;font-weight:700;color:var(--txt);line-height:1.25;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;"
+        : "font-size:10px;font-weight:700;color:var(--txt);line-height:1.25;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
 
       // Coverage % only in full mode, right-aligned, coloured by glow state.
       const pctHtml = full
@@ -6129,30 +6129,30 @@ function unitEconomicsPanelHtml(step, opts) {
   const usd = (n) => (typeof n === "number" ? `$${Math.round(n).toLocaleString("en-US")}` : null);
   const lensHtml = (title, lens, suffix) => {
     const t = usd(lens.total);
-    const head = t ? `${esc(title)}: <strong style="color:#cfe0f2;">${t}${suffix || ""}</strong>${lens.complete ? "" : ` <span style="color:#f6c453;">(partial)</span>`}` : `${esc(title)}: <span style="color:#f6c453;">needs inputs</span>`;
+    const head = t ? `${esc(title)}: <strong style="color:var(--txt);">${t}${suffix || ""}</strong>${lens.complete ? "" : ` <span style="color:#f6c453;">(partial)</span>`}` : `${esc(title)}: <span style="color:#f6c453;">needs inputs</span>`;
     const rows = lens.drivers.map((d) => {
       const dv = usd(d.value);
-      return `<li style="list-style:none;color:#9fb3c8;font-size:11px;margin-left:-16px;">${esc(d.label)} — ${dv ? `<span style="color:#cfe0f2;">${dv}</span>` : `<span style="color:#f6c453;">capture inputs</span>`}</li>`;
+      return `<li style="list-style:none;color:var(--txt-dim);font-size:11px;margin-left:-16px;">${esc(d.label)} — ${dv ? `<span style="color:var(--txt);">${dv}</span>` : `<span style="color:#f6c453;">capture inputs</span>`}</li>`;
     }).join("");
-    return `<div style="margin-top:6px;"><div style="font-size:11px;color:#8aa0b8;">${head}</div><ul style="margin:3px 0 0;padding-left:16px;">${rows}</ul></div>`;
+    return `<div style="margin-top:6px;"><div style="font-size:11px;color:var(--txt-dim);">${head}</div><ul style="margin:3px 0 0;padding-left:16px;">${rows}</ul></div>`;
   };
   const fitColor = econ.economicFit === "justified" ? "#00d4b4" : (econ.economicFit === "not-justified" ? "#ff8da1" : "#f6c453");
   const assumeRows = econ.assumptions.map((a) => {
     const badge = (typeof provenanceBadgeHtml === "function") ? provenanceBadgeHtml(a.source, a.confidence) : "";
     const val = a.value == null ? "—" : `${a.value}`;
-    const stateColor = a.state === "confirmed" ? "#00d4b4" : (a.state === "rejected" ? "#7a93b4" : "#f6c453");
+    const stateColor = a.state === "confirmed" ? "#00d4b4" : (a.state === "rejected" ? "var(--txt-dim)" : "#f6c453");
     const acts = a.state === "confirmed"
       ? `<button type="button" class="secondary-button compact" data-econ-reset="${esc(step.id)}:${esc(a.key)}">reset</button>`
-      : `<input type="number" step="any" data-econ-input="${esc(step.id)}:${esc(a.key)}" placeholder="${esc(val)}" style="width:72px;background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:2px 6px;color:#dde8f5;font-size:11px;"> <button type="button" class="secondary-button compact" data-econ-set="${esc(step.id)}:${esc(a.key)}">set</button> <button type="button" class="secondary-button compact" data-econ-confirm="${esc(step.id)}:${esc(a.key)}">confirm</button> <button type="button" class="secondary-button compact" data-econ-reject="${esc(step.id)}:${esc(a.key)}">reject</button>`;
-    return `<li style="list-style:none;margin-left:-16px;margin-top:5px;color:#9fb3c8;font-size:11px;">${esc(a.label)}: <strong style="color:#cfe0f2;">${esc(val)}</strong> <span style="color:#5b7186;">${esc(a.unit)}</span> ${badge} <span style="color:${stateColor};">${esc(a.state)}</span><div style="margin-top:2px;">${acts}</div></li>`;
+      : `<input type="number" step="any" data-econ-input="${esc(step.id)}:${esc(a.key)}" placeholder="${esc(val)}" style="width:72px;background:var(--deep);border:1px solid var(--sg-line);border-radius:6px;padding:2px 6px;color:var(--txt);font-size:11px;"> <button type="button" class="secondary-button compact" data-econ-set="${esc(step.id)}:${esc(a.key)}">set</button> <button type="button" class="secondary-button compact" data-econ-confirm="${esc(step.id)}:${esc(a.key)}">confirm</button> <button type="button" class="secondary-button compact" data-econ-reject="${esc(step.id)}:${esc(a.key)}">reject</button>`;
+    return `<li style="list-style:none;margin-left:-16px;margin-top:5px;color:var(--txt-dim);font-size:11px;">${esc(a.label)}: <strong style="color:var(--txt);">${esc(val)}</strong> <span style="color:#5b7186;">${esc(a.unit)}</span> ${badge} <span style="color:${stateColor};">${esc(a.state)}</span><div style="margin-top:2px;">${acts}</div></li>`;
   }).join("");
-  return `<div class="wb-econ" style="margin-top:10px;padding:10px 12px;background:#08111c;border:1px solid #1e3350;border-radius:9px;">
+  return `<div class="wb-econ" style="margin-top:10px;padding:10px 12px;background:var(--deep3);border:1px solid var(--sg-line);border-radius:9px;">
     <div class="ds-micro" style="margin-bottom:3px;">Unit economics · draft <span style="color:${fitColor};">economic fit: ${esc(econ.economicFit)}</span></div>
-    <p style="margin:0 0 4px;color:#8aa0b8;font-size:11px;line-height:1.5;">A separate economic-fit lens — run cost, build cost, and value kept apart. Draft until you confirm the assumptions; it never changes the opportunity score, the confirmation gate, or counted totals. Missing inputs stay as questions, never invented numbers.</p>
+    <p style="margin:0 0 4px;color:var(--txt-dim);font-size:11px;line-height:1.5;">A separate economic-fit lens — run cost, build cost, and value kept apart. Draft until you confirm the assumptions; it never changes the opportunity score, the confirmation gate, or counted totals. Missing inputs stay as questions, never invented numbers.</p>
     ${lensHtml("Run cost", econ.runCost, "/yr")}
     ${lensHtml("Build cost (TCO)", econ.tco, "")}
     ${lensHtml("Value", econ.value, "/yr")}
-    <details style="margin-top:8px;"><summary style="font-size:11px;color:#8aa0b8;cursor:pointer;">Assumptions (review · ${econ.draft ? "draft" : "confirmed"})</summary><ul style="margin:4px 0 0;padding-left:16px;">${assumeRows}</ul></details>
+    <details style="margin-top:8px;"><summary style="font-size:11px;color:var(--txt-dim);cursor:pointer;">Assumptions (review · ${econ.draft ? "draft" : "confirmed"})</summary><ul style="margin:4px 0 0;padding-left:16px;">${assumeRows}</ul></details>
   </div>`;
 }
 
@@ -6839,7 +6839,7 @@ function opportunityScore(step) {
 
 // Border glow used by confidence cards / flow map, reused on opportunity cards.
 function coverageGlowColor(coverage) {
-  if (coverage === 0) return "#1a2a3a";
+  if (coverage === 0) return "var(--deep2)";
   if (coverage < 0.25) return "#f59e0b";
   if (coverage < 0.5) return "#00d4b4aa";
   return "#00d4b4";
@@ -6856,7 +6856,7 @@ function patternPill(step) {
   const pattern = stepPrimaryPattern(step);
   if (!pattern) return "";
   const color = patternColor(pattern);
-  return `<span style="display:inline-flex;align-items:center;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:700;color:#0d1b2a;background:${color};">${escapeHtml(pattern)}</span>`;
+  return `<span style="display:inline-flex;align-items:center;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:700;color:var(--deep);background:${color};">${escapeHtml(pattern)}</span>`;
 }
 
 // --- tab switching ------------------------------------------------------------
@@ -6876,7 +6876,7 @@ function workflowIntelligenceSummaryHtml() {
     return `
       <section class="ds-panel" style="padding:16px 18px;margin-bottom:14px;">
         <div class="ds-micro" style="margin-bottom:6px;">Workflow Intelligence Summary</div>
-        <div style="color:#8aa0b8;font-size:13px;line-height:1.5;">Capture or upload a workflow to see readiness, platform fit, provenance, generated assets, and next actions.</div>
+        <div style="color:var(--txt-dim);font-size:13px;line-height:1.5;">Capture or upload a workflow to see readiness, platform fit, provenance, generated assets, and next actions.</div>
       </section>`;
   }
   const compiler = ensureArtifactCompilerState();
@@ -6912,15 +6912,15 @@ function workflowIntelligenceSummaryHtml() {
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;align-items:start;min-width:0;">
         <div style="min-width:0;">
           <div class="ds-micro" style="margin-bottom:5px;">Workflow package summary</div>
-          <h3 style="margin:0;color:#e8f4ff;font-size:16px;line-height:1.35;">Best fit: ${escapeHtml(first.recommendedArtifact.label)}</h3>
-          <p style="margin:6px 0 0;color:#8aa0b8;font-size:12px;line-height:1.45;">${escapeHtml(first.recommendationReason)}</p>
+          <h3 style="margin:0;color:var(--txt);font-size:16px;line-height:1.35;">Best fit: ${escapeHtml(first.recommendedArtifact.label)}</h3>
+          <p style="margin:6px 0 0;color:var(--txt-dim);font-size:12px;line-height:1.45;">${escapeHtml(first.recommendationReason)}</p>
           <p style="margin:6px 0 0;color:#5b7186;font-size:11px;line-height:1.45;">${escapeHtml(NO_INTEGRATION_MVP_NOTE)}</p>
         </div>
         <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-start;min-width:0;">
           <div style="display:flex;gap:7px;flex-wrap:wrap;">${summaryPills}</div>
-          <div style="font-size:12px;color:#c8d8e8;line-height:1.45;"><strong style="color:#e8f4ff;">Next:</strong> ${escapeHtml(nextAction)}</div>
+          <div style="font-size:12px;color:var(--txt);line-height:1.45;"><strong style="color:var(--txt);">Next:</strong> ${escapeHtml(nextAction)}</div>
           ${blockerLine ? `<div style="font-size:11px;color:#f5c451;line-height:1.45;"><strong>Confirm:</strong> ${escapeHtml(blockerLine)}</div>` : ""}
-          ${futureLine ? `<div style="font-size:11px;color:#8aa0b8;line-height:1.45;"><strong>Later:</strong> ${escapeHtml(futureLine)}</div>` : ""}
+          ${futureLine ? `<div style="font-size:11px;color:var(--txt-dim);line-height:1.45;"><strong>Later:</strong> ${escapeHtml(futureLine)}</div>` : ""}
         </div>
       </div>
     </section>`;
@@ -6946,8 +6946,8 @@ function trustPanelHtml() {
   ];
   return `
     <details id="whyTrustPanel" class="ds-panel trust-panel" style="padding:12px 16px;margin-bottom:12px;border-left:3px solid #00d4b4;">
-      <summary style="cursor:pointer;font-weight:600;color:#e8f4ff;font-size:13px;">Why you can trust this</summary>
-      <ul style="margin:10px 0 0;padding-left:18px;color:#8aa0b8;font-size:12px;line-height:1.6;">
+      <summary style="cursor:pointer;font-weight:600;color:var(--txt);font-size:13px;">Why you can trust this</summary>
+      <ul style="margin:10px 0 0;padding-left:18px;color:var(--txt-dim);font-size:12px;line-height:1.6;">
         ${points.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}
       </ul>
     </details>`;
@@ -7136,7 +7136,7 @@ function modeledWorkActionsHtml(modeled) {
   if (!modeled || !Array.isArray(modeled.modeledActs) || !modeled.modeledActs.length) return "";
   const esc = (typeof escapeHtml === "function") ? escapeHtml : (s) => String(s == null ? "" : s);
   const C = {
-    panel: "#0c1726", border: "#16263a", ink: "#EAEFFF", dim: "#A6ADC4",
+    panel: "var(--deep2)", border: "var(--sg-line)", ink: "var(--txt)", dim: "var(--txt-dim)",
     warn: "#f59e0b", ai: "#3b82f6", human: "#FF4FD8"
   };
   const confText  = modeled.confidence === "moderate" ? "moderate evidence" : "limited evidence";
@@ -7698,7 +7698,7 @@ function ywReinvestHtml() {
 }
 
 function ywPromiseHtml() {
-  return `<div style="margin:20px 24px 28px;padding:20px 22px;background:var(--deep2,#08111f);border:1px solid rgba(255,255,255,.10);border-radius:12px;">
+  return `<div style="margin:20px 24px 28px;padding:20px 22px;background:var(--deep2,var(--deep3));border:1px solid rgba(255,255,255,.10);border-radius:12px;">
     <div style="font-family:var(--gm-mono,'JetBrains Mono',monospace);font-size:10px;letter-spacing:.10em;text-transform:uppercase;color:var(--txt-faint);margin-bottom:8px;">The promise</div>
     <div style="font-size:14px;font-weight:600;color:var(--txt);line-height:1.6;">AI clears the mechanical path. What needs you — judgment, trust, nuance — stays with you. This view never shows costs or headcount: the moment it does, trust is gone.</div>
   </div>`;
@@ -7759,7 +7759,7 @@ function wfRoleCardHtml(role) {
   const judgmentPct = Math.min(100, Math.round((role.humanHeldShare || 0) * 100));
   return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:14px 16px;margin-bottom:10px;">`
     + `<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;">`
-    + `<div><div style="font-size:14px;font-weight:600;color:#ECEAF6;">${escapeHtml(role.role)}</div>`
+    + `<div><div style="font-size:14px;font-weight:600;color:var(--txt);">${escapeHtml(role.role)}</div>`
     + `<span style="display:inline-flex;align-items:center;margin-top:4px;padding:2px 8px;background:${bc.color}1A;border:1px solid ${bc.color}40;border-radius:20px;font-size:10px;color:${bc.color};font-weight:600;">${escapeHtml(bc.label)}</span></div>`
     + `<div style="text-align:right;"><div style="font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:700;color:#63E6D6;">${escapeHtml(wfHrsLabel(role.freedHrs))}</div>`
     + `<div style="font-size:10px;color:rgba(255,255,255,.3);">freed capacity</div></div></div>`
@@ -7795,7 +7795,7 @@ function wfRedeployTracksHtml(lv) {
   const track = (num, accent, title, body) =>
     `<div style="flex:1;min-width:160px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-left:3px solid ${accent};border-radius:8px;padding:14px 16px;">`
     + `<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:${accent};margin-bottom:5px;">Track ${num}</div>`
-    + `<div style="font-size:13px;font-weight:600;color:#ECEAF6;margin-bottom:6px;">${escapeHtml(title)}</div>`
+    + `<div style="font-size:13px;font-weight:600;color:var(--txt);margin-bottom:6px;">${escapeHtml(title)}</div>`
     + `<div style="font-size:11.5px;color:rgba(255,255,255,.45);line-height:1.5;">${escapeHtml(body)}</div></div>`;
   return `<div style="margin-bottom:20px;">`
     + `<div style="font-family:'JetBrains Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:rgba(255,255,255,.3);margin-bottom:10px;">Where freed capacity goes — three tracks, not mutually exclusive</div>`
@@ -7824,7 +7824,7 @@ function wfMixBarHtml(mix) {
 
 function wfEmptyHtml(note) {
   return `<div style="padding:28px 24px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.07);border-radius:12px;color:rgba(255,255,255,.38);font-size:13px;line-height:1.6;">`
-    + `<div style="font-size:15px;font-weight:700;color:#ECEAF6;margin-bottom:6px;">Workforce Transformation</div>`
+    + `<div style="font-size:15px;font-weight:700;color:var(--txt);margin-bottom:6px;">Workforce Transformation</div>`
     + `<div>${escapeHtml(note || "No confirmed units yet — confirm units on the Workbench to populate the workforce view.")}</div>`
     + `<div style="margin-top:12px;"><button type="button" class="primary-button compact" data-workforce-to-workbench="1">Go to the Workbench</button></div></div>`;
 }
@@ -7853,7 +7853,7 @@ function renderAnalysisTabWorkforce(recordsOverride, opts) {
   const mix = (typeof engineLeadership === "function") ? engineLeadership("buildAiHybridHumanMix", records) : null;
   const roles = (rv && rv.roles && rv.roles.length) ? rv.roles : [];
   const header = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">`
-    + `<div><div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:22px;font-weight:700;color:#ECEAF6;letter-spacing:-.02em;">Workforce Transformation</div>`
+    + `<div><div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:22px;font-weight:700;color:var(--txt);letter-spacing:-.02em;">Workforce Transformation</div>`
     + `<div style="font-size:12px;color:rgba(255,255,255,.35);margin-top:2px;">Freed capacity · role redesign · the builder ladder</div></div>`
     + `<button type="button" data-wf-to-dashboard="1" style="background:none;border:none;font-size:12px;color:#8FB6FF;cursor:pointer;padding:0;font-family:inherit;">← Executive Dashboard</button></div>`;
   const mixSection = mix ? wfMixBarHtml(mix) : "";
@@ -7878,8 +7878,9 @@ function wireMethodologyLink() {
       panel = document.createElement("div");
       panel.id = "methodologyOverlay";
       panel.style.cssText = "position:fixed;inset:0;z-index:9000;background:rgba(5,6,18,.72);display:flex;align-items:center;justify-content:center;";
-      panel.innerHTML = `<div style="background:var(--deep);border:1px solid var(--sg-line);border-radius:16px;padding:28px 32px;max-width:480px;width:90%;box-shadow:0 24px 64px rgba(0,0,0,.6);">
-        <h3 style="color:var(--txt);font-size:15px;margin:0 0 14px;">Methodology &amp; provenance</h3>
+      panel.innerHTML = `<div style="background:var(--deep);border:1px solid var(--sg-line);border-radius:16px;padding:28px 32px;max-width:560px;width:90%;box-shadow:0 24px 64px rgba(21,36,59,.28);">
+        <h3 style="color:var(--txt);font-size:16px;margin:0 0 4px;letter-spacing:-.01em;">Evidence &amp; Rules</h3>
+        <p style="color:var(--txt-faint);font-size:12px;margin:0 0 14px;line-height:1.55;">Why the app reached its conclusions. Every relied-on value carries its source; nothing is recomputed or changed silently. This panel is the home for the deeper reasoning kept secondary elsewhere — provenance, the gate register, policy and economic assumptions, the scoring explanation, and the audit / export trail.</p>
         ${trustPanelHtml()}
         <button type="button" id="closeMethodologyPanel" style="margin-top:16px;padding:7px 18px;background:var(--glass-2);border:1px solid var(--sg-line);border-radius:8px;color:var(--txt-dim);cursor:pointer;font-size:12px;">Close</button>
       </div>`;
@@ -8089,7 +8090,7 @@ function stepTypeTagHtml(step) {
   const cr = suggested
     ? ` <button type="button" data-step-type-confirm="${escapeHtml(step.id)}" style="background:none;border:none;color:#00d4b4;cursor:pointer;font-size:11px;padding:0;">confirm</button> <button type="button" data-step-type-reject="${escapeHtml(step.id)}" style="background:none;border:none;color:#ff4fc8;cursor:pointer;font-size:11px;padding:0;">reject</button>`
     : "";
-  return `Step type: <strong style="color:#cfe0f2;">${escapeHtml(tag.value)}</strong> ${provenanceBadgeHtml(tag.source, tag.confidence)}${suggested ? ` <span style="color:#7a93b4;">(suggested)</span>` : ""}${cr}`;
+  return `Step type: <strong style="color:var(--txt);">${escapeHtml(tag.value)}</strong> ${provenanceBadgeHtml(tag.source, tag.confidence)}${suggested ? ` <span style="color:var(--txt-dim);">(suggested)</span>` : ""}${cr}`;
 }
 
 // The manual picker + AI-suggest control (additive; always available in the badge).
@@ -8100,15 +8101,15 @@ function stepTypePickerHtml(step) {
     .concat(STEP_TYPE_OPTIONS.map((t) => `<option value="${t}" ${t === current ? "selected" : ""}>${t}</option>`))
     .join("");
   return `<span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
-    <select data-step-type-id="${escapeHtml(step.id)}" style="background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:2px 6px;color:#dde8f5;font-size:11px;">${opts}</select>
-    <button type="button" data-step-type-suggest="${escapeHtml(step.id)}" style="background:none;border:1px solid #3a2a5a;color:#a855f7;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">Suggest (AI)</button>
+    <select data-step-type-id="${escapeHtml(step.id)}" style="background:var(--deep);border:1px solid var(--sg-line);border-radius:6px;padding:2px 6px;color:var(--txt);font-size:11px;">${opts}</select>
+    <button type="button" data-step-type-suggest="${escapeHtml(step.id)}" style="background:none;border:1px solid var(--sg-line);color:#a855f7;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">Suggest (AI)</button>
   </span>`;
 }
 
 // Combined typology line for the composite badge's expanded list (tag + picker).
 function stepTypologyHtml(step) {
   const tag = stepTypeTagHtml(step);
-  return `<li style="list-style:none;margin-left:-16px;margin-top:6px;padding-top:6px;border-top:1px solid #16263a;">${tag}${tag ? "<br>" : ""}${stepTypePickerHtml(step)}</li>`;
+  return `<li style="list-style:none;margin-left:-16px;margin-top:6px;padding-top:6px;border-top:1px solid var(--sg-line);">${tag}${tag ? "<br>" : ""}${stepTypePickerHtml(step)}</li>`;
 }
 
 // Wires the typology controls inside the grid tab. The pure mutators are wrapped
@@ -8263,7 +8264,7 @@ function workIntentTagHtml(step) {
   const cr = suggested
     ? ` <button type="button" data-work-intent-confirm="${escapeHtml(step.id)}" style="background:none;border:none;color:#00d4b4;cursor:pointer;font-size:11px;padding:0;">confirm</button> <button type="button" data-work-intent-reject="${escapeHtml(step.id)}" style="background:none;border:none;color:#ff4fc8;cursor:pointer;font-size:11px;padding:0;">reject</button>`
     : "";
-  return `Work intent: <strong style="color:#cfe0f2;">${escapeHtml(tag.value)}</strong> ${provenanceBadgeHtml(tag.source, tag.confidence)}${suggested ? ` <span style="color:#7a93b4;">(suggested)</span>` : ""}${cr}`;
+  return `Work intent: <strong style="color:var(--txt);">${escapeHtml(tag.value)}</strong> ${provenanceBadgeHtml(tag.source, tag.confidence)}${suggested ? ` <span style="color:var(--txt-dim);">(suggested)</span>` : ""}${cr}`;
 }
 
 // The manual picker + AI-suggest control (additive; always available in the badge).
@@ -8274,15 +8275,15 @@ function workIntentPickerHtml(step) {
     .concat(WORK_INTENT_OPTIONS.map((t) => `<option value="${t}" ${t === current ? "selected" : ""}>${t}</option>`))
     .join("");
   return `<span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
-    <select data-work-intent-id="${escapeHtml(step.id)}" style="background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:2px 6px;color:#dde8f5;font-size:11px;">${opts}</select>
-    <button type="button" data-work-intent-suggest="${escapeHtml(step.id)}" style="background:none;border:1px solid #3a2a5a;color:#a855f7;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">Suggest (AI)</button>
+    <select data-work-intent-id="${escapeHtml(step.id)}" style="background:var(--deep);border:1px solid var(--sg-line);border-radius:6px;padding:2px 6px;color:var(--txt);font-size:11px;">${opts}</select>
+    <button type="button" data-work-intent-suggest="${escapeHtml(step.id)}" style="background:none;border:1px solid var(--sg-line);color:#a855f7;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">Suggest (AI)</button>
   </span>`;
 }
 
 // Combined work-intent line for the composite badge's expanded list (tag + picker).
 function stepWorkIntentHtml(step) {
   const tag = workIntentTagHtml(step);
-  return `<li style="list-style:none;margin-left:-16px;margin-top:6px;padding-top:6px;border-top:1px solid #16263a;">${tag}${tag ? "<br>" : ""}${workIntentPickerHtml(step)}</li>`;
+  return `<li style="list-style:none;margin-left:-16px;margin-top:6px;padding-top:6px;border-top:1px solid var(--sg-line);">${tag}${tag ? "<br>" : ""}${workIntentPickerHtml(step)}</li>`;
 }
 
 // Wires the work-intent controls inside the grid tab. The pure mutators are wrapped
@@ -8680,7 +8681,7 @@ function structuralTagHtml(label, kind, id, allowed) {
   const cr = suggested
     ? ` <button type="button" data-struct-confirm="${escapeHtml(dataId)}" style="background:none;border:none;color:#00d4b4;cursor:pointer;font-size:11px;padding:0;">confirm</button> <button type="button" data-struct-reject="${escapeHtml(dataId)}" style="background:none;border:none;color:#ff4fc8;cursor:pointer;font-size:11px;padding:0;">reject</button>`
     : "";
-  return `${escapeHtml(label)}: <strong style="color:#cfe0f2;">${escapeHtml(tag.value)}</strong> ${provenanceBadgeHtml(tag.source, tag.confidence)}${suggested ? ` <span style="color:#7a93b4;">(suggested)</span>` : ""}${cr}`;
+  return `${escapeHtml(label)}: <strong style="color:var(--txt);">${escapeHtml(tag.value)}</strong> ${provenanceBadgeHtml(tag.source, tag.confidence)}${suggested ? ` <span style="color:var(--txt-dim);">(suggested)</span>` : ""}${cr}`;
 }
 // The manual picker + AI-suggest control (additive; always available).
 function structuralPickerHtml(label, kind, id, allowed) {
@@ -8690,9 +8691,9 @@ function structuralPickerHtml(label, kind, id, allowed) {
   const opts = [`<option value="">unclassified</option>`]
     .concat(allowed.map((v) => `<option value="${v}" ${v === current ? "selected" : ""}>${v}</option>`)).join("");
   return `<span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
-    <span style="color:#7a93b4;">${escapeHtml(label)}:</span>
-    <select data-struct-id="${escapeHtml(dataId)}" style="background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:2px 6px;color:#dde8f5;font-size:11px;">${opts}</select>
-    <button type="button" data-struct-suggest="${escapeHtml(dataId)}" style="background:none;border:1px solid #3a2a5a;color:#a855f7;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">Suggest (AI)</button>
+    <span style="color:var(--txt-dim);">${escapeHtml(label)}:</span>
+    <select data-struct-id="${escapeHtml(dataId)}" style="background:var(--deep);border:1px solid var(--sg-line);border-radius:6px;padding:2px 6px;color:var(--txt);font-size:11px;">${opts}</select>
+    <button type="button" data-struct-suggest="${escapeHtml(dataId)}" style="background:none;border:1px solid var(--sg-line);color:#a855f7;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">Suggest (AI)</button>
   </span>`;
 }
 // Per-step structural block: this step's decision classification + the handoff FROM
@@ -8852,7 +8853,7 @@ function frictionTagHtml(step) {
     ? ` <button type="button" data-friction-confirm="${escapeHtml(id)}" style="background:none;border:none;color:#00d4b4;cursor:pointer;font-size:11px;padding:0;">confirm</button> <button type="button" data-friction-reject="${escapeHtml(id)}" style="background:none;border:none;color:#ff4fc8;cursor:pointer;font-size:11px;padding:0;">reject</button>`
     : "";
   const noteHtml = tag.note ? ` <span style="color:#9fb3cc;">— ${escapeHtml(tag.note)}</span>` : "";
-  return `Friction: <strong style="color:#cfe0f2;">${escapeHtml(tag.value)}</strong> ${provenanceBadgeHtml(tag.source, tag.confidence)}${suggested ? ` <span style="color:#7a93b4;">(suggested)</span>` : ""}${noteHtml}${cr}`;
+  return `Friction: <strong style="color:var(--txt);">${escapeHtml(tag.value)}</strong> ${provenanceBadgeHtml(tag.source, tag.confidence)}${suggested ? ` <span style="color:var(--txt-dim);">(suggested)</span>` : ""}${noteHtml}${cr}`;
 }
 
 // The manual annotation control: friction-kind picker + "what's painful here" note
@@ -8866,10 +8867,10 @@ function frictionPickerHtml(step) {
   const opts = [`<option value="">no friction tag</option>`]
     .concat(FRICTION_KINDS.map((v) => `<option value="${v}" ${v === current ? "selected" : ""}>${v}</option>`)).join("");
   return `<span data-friction-row="${escapeHtml(id)}" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
-    <span style="color:#7a93b4;">Friction:</span>
-    <select data-friction-id="${escapeHtml(id)}" style="background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:2px 6px;color:#dde8f5;font-size:11px;">${opts}</select>
-    <input type="text" data-friction-note="${escapeHtml(id)}" value="${escapeHtml(note)}" placeholder="what's painful here (optional)" style="background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:2px 6px;color:#dde8f5;font-size:11px;width:200px;" />
-    <button type="button" data-friction-suggest="${escapeHtml(id)}" style="background:none;border:1px solid #3a2a5a;color:#a855f7;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">Suggest (AI)</button>
+    <span style="color:var(--txt-dim);">Friction:</span>
+    <select data-friction-id="${escapeHtml(id)}" style="background:var(--deep);border:1px solid var(--sg-line);border-radius:6px;padding:2px 6px;color:var(--txt);font-size:11px;">${opts}</select>
+    <input type="text" data-friction-note="${escapeHtml(id)}" value="${escapeHtml(note)}" placeholder="what's painful here (optional)" style="background:var(--deep);border:1px solid var(--sg-line);border-radius:6px;padding:2px 6px;color:var(--txt);font-size:11px;width:200px;" />
+    <button type="button" data-friction-suggest="${escapeHtml(id)}" style="background:none;border:1px solid var(--sg-line);color:#a855f7;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">Suggest (AI)</button>
   </span>`;
 }
 
@@ -9017,7 +9018,7 @@ function captureIntegrityHtml() {
   const head = `<div class="ds-micro" style="margin-bottom:4px;">Capture frame · policy <strong style="color:#00d4b4;">${escapeHtml(profile)}</strong>${queue.length ? ` · <span style="color:#ff8da1;">${queue.length} to reconcile</span>` : ""}${splits.length ? ` · <span style="color:#f6c453;">${splits.length} to split</span>` : ""}</div>`;
   const splitHtml = splits.map((f) => `<div style="font-size:12px;color:#f6c453;line-height:1.45;">⎘ Split &ldquo;${escapeHtml(f.step)}&rdquo; — ${escapeHtml(f.suggestion || "bundles assembly with a human call")}</div>`).join("");
   const queueHtml = queue.map((c) => `<div style="font-size:12px;color:#ff8da1;line-height:1.45;">⚠ ${escapeHtml(c.detail || "")}</div>`).join("");
-  return `<div style="margin-top:12px;border-top:1px solid rgba(148,163,184,.18);padding-top:10px;">${head}${splitHtml}${queueHtml}${(!splits.length && !queue.length) ? `<div style="font-size:12px;color:#8aa0b8;">No split or contradiction flags — capture is internally consistent.</div>` : ""}</div>`;
+  return `<div style="margin-top:12px;border-top:1px solid rgba(148,163,184,.18);padding-top:10px;">${head}${splitHtml}${queueHtml}${(!splits.length && !queue.length) ? `<div style="font-size:12px;color:var(--txt-dim);">No split or contradiction flags — capture is internally consistent.</div>` : ""}</div>`;
 }
 
 // ===================================================================
@@ -9045,10 +9046,10 @@ function protectedByDesignHtml(records, opts = {}) {
   const pink = (typeof HUMAN_HOLD_HUE === "string") ? HUMAN_HOLD_HUE : "#FF4FD8";
   let pbd = { items: [], count: 0, note: "" };
   try { pbd = engineProtectedByDesign(records, opts); } catch (_e) { pbd = { items: [], count: 0, note: "" }; }
-  const rows = pbd.items.map((i) => `<div style="font-size:12px;line-height:1.5;"><span style="color:${pink};">🔒 ${escapeHtml(i.item)}</span> <span style="color:#8aa0b8;">— ${escapeHtml(i.why)}</span></div>`).join("");
+  const rows = pbd.items.map((i) => `<div style="font-size:12px;line-height:1.5;"><span style="color:${pink};">🔒 ${escapeHtml(i.item)}</span> <span style="color:var(--txt-dim);">— ${escapeHtml(i.why)}</span></div>`).join("");
   return `<div class="ds-panel" style="padding:12px 14px;border:1px solid ${pink}33;border-radius:10px;">
     <div class="ds-micro" style="color:${pink};margin-bottom:6px;">Protected by design · ${pbd.count} human-held</div>
-    ${rows || `<div style="font-size:12px;color:#8aa0b8;">${escapeHtml(pbd.note || "No decision steps or high-criticality seams captured yet.")}</div>`}
+    ${rows || `<div style="font-size:12px;color:var(--txt-dim);">${escapeHtml(pbd.note || "No decision steps or high-criticality seams captured yet.")}</div>`}
   </div>`;
 }
 
@@ -9067,10 +9068,10 @@ function recipeProofHtml(opts = {}) {
   const lever = p.modelFitLever || { routed: 0, frontier: 0, delta: 0 };
   const remedy = p.governanceRemedy && p.governanceRemedy.gated
     ? `<div style="font-size:12px;color:#f6c453;line-height:1.5;margin-top:6px;"><strong>The governance remedy:</strong> ${escapeHtml(p.governanceRemedy.remedy)}</div>`
-    : `<div style="font-size:12px;color:#8aa0b8;margin-top:6px;">No policy gap — deployable now (no governance change needed).</div>`;
-  return `<div class="ds-panel" style="padding:12px 14px;border:1px solid #1e3350;border-radius:10px;margin-top:10px;">
+    : `<div style="font-size:12px;color:var(--txt-dim);margin-top:6px;">No policy gap — deployable now (no governance change needed).</div>`;
+  return `<div class="ds-panel" style="padding:12px 14px;border:1px solid var(--sg-line);border-radius:10px;margin-top:10px;">
     <div class="ds-micro" style="margin-bottom:6px;color:#00d4b4;">Recipe proof · shape ${shapes} · eval ${escapeHtml(p.evalEffort || "—")}</div>
-    <div style="font-size:12px;color:#aebfd4;line-height:1.6;">
+    <div style="font-size:12px;color:var(--txt-dim);line-height:1.6;">
       <div><strong>Eval plan:</strong> ${escapeHtml((p.evalPlan || []).join("; "))}</div>
       <div><strong>Owner:</strong> ${escapeHtml(String(p.owner || "—"))} · <strong>Fallback:</strong> ${escapeHtml(p.fallback || "—")}</div>
       <div><strong>Maintenance:</strong> $${Number(p.maintenanceCost?.annualPoint || 0).toLocaleString("en-US")}/yr (band $${Number(p.maintenanceCost?.band?.low || 0).toLocaleString("en-US")}–$${Number(p.maintenanceCost?.band?.high || 0).toLocaleString("en-US")})</div>
@@ -9110,10 +9111,10 @@ function threeLensTileHtml(lenses) {
   if (!g.ok) return `<div class="ds-panel" style="padding:10px 12px;border:1px solid #ff8da155;border-radius:8px;color:#ff8da1;font-size:12px;">⚠ ${escapeHtml(g.reason)}</div>`;
   const c = lenses.capacity, cost = lenses.cost, flow = lenses.flow;
   const usd = (n) => `$${Number(n || 0).toLocaleString("en-US")}`;
-  return `<div class="ds-panel" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:12px 14px;border:1px solid #1e3350;border-radius:10px;">
-    <div><div class="ds-micro">Capacity</div><div style="font-size:18px;font-weight:800;color:#00d4b4;">${usd(c.net)}</div><div style="font-size:11px;color:#8aa0b8;">net/yr · ${Number(c.policyGapHrs || 0).toLocaleString("en-US")} h/wk policy gap</div></div>
-    <div><div class="ds-micro">Cost</div><div style="font-size:18px;font-weight:800;color:#aebfd4;">${usd(cost.costToServe)}</div><div style="font-size:11px;color:#8aa0b8;">cost-to-serve · ${usd(cost.modelFitLever)} model-fit lever</div></div>
-    <div><div class="ds-micro">Flow</div><div style="font-size:18px;font-weight:800;color:#FFB454;">${flow.azReductionPct == null ? "—" : flow.azReductionPct + "%"}</div><div style="font-size:11px;color:#8aa0b8;">A–Z reduction · ${flow.pctSavingFromWait == null ? "—" : flow.pctSavingFromWait + "% from wait"}</div></div>
+  return `<div class="ds-panel" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:12px 14px;border:1px solid var(--sg-line);border-radius:10px;">
+    <div><div class="ds-micro">Capacity</div><div style="font-size:18px;font-weight:800;color:#00d4b4;">${usd(c.net)}</div><div style="font-size:11px;color:var(--txt-dim);">net/yr · ${Number(c.policyGapHrs || 0).toLocaleString("en-US")} h/wk policy gap</div></div>
+    <div><div class="ds-micro">Cost</div><div style="font-size:18px;font-weight:800;color:var(--txt-dim);">${usd(cost.costToServe)}</div><div style="font-size:11px;color:var(--txt-dim);">cost-to-serve · ${usd(cost.modelFitLever)} model-fit lever</div></div>
+    <div><div class="ds-micro">Flow</div><div style="font-size:18px;font-weight:800;color:#FFB454;">${flow.azReductionPct == null ? "—" : flow.azReductionPct + "%"}</div><div style="font-size:11px;color:var(--txt-dim);">A–Z reduction · ${flow.pctSavingFromWait == null ? "—" : flow.pctSavingFromWait + "% from wait"}</div></div>
   </div>`;
 }
 
@@ -9126,10 +9127,10 @@ function dashboardSliceControlHtml(records) {
   const valueKey = slice.dimension === "function" ? "department" : slice.dimension;
   const values = (opts[valueKey] || []);
   const valOpts = [`<option value="all"${slice.value === "all" ? " selected" : ""}>All</option>`].concat(values.map((v) => `<option value="${escapeHtml(String(v))}"${String(slice.value) === String(v) ? " selected" : ""}>${escapeHtml(String(v))}</option>`)).join("");
-  return `<div class="ds-panel" style="display:flex;gap:8px;align-items:center;padding:8px 12px;border:1px solid #1e3350;border-radius:8px;margin-bottom:10px;">
+  return `<div class="ds-panel" style="display:flex;gap:8px;align-items:center;padding:8px 12px;border:1px solid var(--sg-line);border-radius:8px;margin-bottom:10px;">
     <span class="ds-micro">Slice all dashboards by</span>
-    <select data-dashboard-slice-dim style="background:#0d1b2e;color:#aebfd4;border:1px solid #1e3350;border-radius:6px;padding:4px 8px;font-size:12px;">${dims}</select>
-    ${slice.dimension === "all" ? "" : `<select data-dashboard-slice-val style="background:#0d1b2e;color:#aebfd4;border:1px solid #1e3350;border-radius:6px;padding:4px 8px;font-size:12px;">${valOpts}</select>`}
+    <select data-dashboard-slice-dim style="background:var(--deep);color:var(--txt-dim);border:1px solid var(--sg-line);border-radius:6px;padding:4px 8px;font-size:12px;">${dims}</select>
+    ${slice.dimension === "all" ? "" : `<select data-dashboard-slice-val style="background:var(--deep);color:var(--txt-dim);border:1px solid var(--sg-line);border-radius:6px;padding:4px 8px;font-size:12px;">${valOpts}</select>`}
   </div>`;
 }
 function setDashboardSlice(dimension, value) {
@@ -9165,15 +9166,15 @@ function engineExplainers(audience) { const E = studioEngine(); if (!E || typeof
 function explainerNoteHtml(figureId, audience) {
   const e = engineExplainFigure(figureId, audience);
   if (!e) return "";
-  return `<details class="explainer-note" style="margin-top:4px;"><summary style="font-size:10.5px;color:#8aa0b8;cursor:pointer;">ⓘ ${escapeHtml(e.label || "What this means")}</summary>
-    <div style="font-size:11px;color:#aebfd4;line-height:1.45;margin-top:4px;"><div>${escapeHtml(e.whatThisMeans)}</div><div style="color:#8aa0b8;margin-top:3px;">How it's computed: ${escapeHtml(e.howComputed)}</div></div></details>`;
+  return `<details class="explainer-note" style="margin-top:4px;"><summary style="font-size:10.5px;color:var(--txt-dim);cursor:pointer;">ⓘ ${escapeHtml(e.label || "What this means")}</summary>
+    <div style="font-size:11px;color:var(--txt-dim);line-height:1.45;margin-top:4px;"><div>${escapeHtml(e.whatThisMeans)}</div><div style="color:var(--txt-dim);margin-top:3px;">How it's computed: ${escapeHtml(e.howComputed)}</div></div></details>`;
 }
 
 // the WORKER plain-language note — rail-clean (no cost / capacity / headcount); rendered under the worker view.
 function plainLanguageWorkerHtml() {
   const note = explainerNoteHtml("time_given_back", "worker");
   if (!note) return "";
-  return `<div style="margin-top:10px;border-top:1px solid #1e3350;padding-top:8px;">${note}</div>`;
+  return `<div style="margin-top:10px;border-top:1px solid var(--sg-line);padding-top:8px;">${note}</div>`;
 }
 
 // the first-encounter explainers strip (the five richer ideas — what each is + why it changes the
@@ -9194,13 +9195,13 @@ function firstEncounterStripHtml() {
 // ===================================================================
 function engineAccessibleStatus(kind, value) { const E = studioEngine(); if (!E || typeof E.accessibleStatus !== "function") return null; return E.accessibleStatus(kind, value); }
 // tone -> the dashboard palette. The color is DERIVED; the icon + text carry the status without it.
-const A11Y_TONE = { positive: "#00d4b4", caution: "#FFB454", blocked: "#FF4FD8", neutral: "#A6ADC4", info: "#3b82f6" };
+const A11Y_TONE = { positive: "#00d4b4", caution: "#FFB454", blocked: "#FF4FD8", neutral: "var(--txt-dim)", info: "#3b82f6" };
 // an accessible status chip: icon (aria-hidden) + text label + color + role=status + aria-label. The
 // status is legible without color (icon + words); "" for an unknown status (additive).
 function statusCueHtml(kind, value) {
   const c = engineAccessibleStatus(kind, value);
   if (!c) return "";
-  const color = A11Y_TONE[c.tone] || "#A6ADC4";
+  const color = A11Y_TONE[c.tone] || "var(--txt-dim)";
   return `<span class="status-cue" role="status" aria-label="${escapeHtml(c.label)}" style="display:inline-flex;align-items:center;gap:4px;color:${color};font-size:11px;font-weight:700;"><span aria-hidden="true">${c.icon}</span>${escapeHtml(c.label)}</span>`;
 }
 // an accessible "tag" describing an export for its download control (a labeled / tagged export).
@@ -9215,7 +9216,7 @@ function exportIsIllustrative() { return !(typeof state !== "undefined" && state
 function dashboardAudienceControlHtml() {
   const a = ensureDashboardAudience();
   const label = { leadership: "Leadership", worker: "Worker", tech: "Tech & Governance" };
-  const btns = DASHBOARD_AUDIENCES.map((x) => `<button type="button" data-dashboard-audience="${x}" aria-pressed="${a === x ? "true" : "false"}" aria-label="View the ${escapeHtml(label[x])} dashboard" style="background:${a === x ? "#00d4b4" : "#0d1b2e"};color:${a === x ? "#0d1b2e" : "#aebfd4"};border:1px solid #1e3350;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;">${escapeHtml(label[x])}</button>`).join("");
+  const btns = DASHBOARD_AUDIENCES.map((x) => `<button type="button" data-dashboard-audience="${x}" aria-pressed="${a === x ? "true" : "false"}" aria-label="View the ${escapeHtml(label[x])} dashboard" style="background:${a === x ? "#00d4b4" : "var(--deep)"};color:${a === x ? "var(--deep)" : "var(--txt-dim)"};border:1px solid var(--sg-line);border-radius:6px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;">${escapeHtml(label[x])}</button>`).join("");
   return `<div role="group" aria-label="Dashboard audience" style="display:flex;gap:6px;align-items:center;margin-bottom:10px;"><span class="ds-micro" id="dash-audience-label">Audience</span>${btns}</div>`;
 }
 
@@ -9223,15 +9224,15 @@ function dashboardAudienceControlHtml() {
 function workerViewHtml(records) {
   const wv = engineWorkerView(records);
   if (!wv) return `<div class="ds-panel" style="padding:12px 14px;">The worker view is loading the Studio engine…</div>`;
-  if (!wv.confirmedCount) return `<div class="ds-panel" style="padding:12px 14px;color:#8aa0b8;">${escapeHtml(wv.note || "No confirmed work yet.")}</div>`;
-  const rows = wv.roles.map((r) => `<div class="ds-panel" style="padding:12px 14px;border:1px solid #1e3350;border-radius:10px;margin-bottom:8px;">
-    <div style="font-size:14px;font-weight:700;color:#e2e8f0;">${escapeHtml(r.role)}</div>
+  if (!wv.confirmedCount) return `<div class="ds-panel" style="padding:12px 14px;color:var(--txt-dim);">${escapeHtml(wv.note || "No confirmed work yet.")}</div>`;
+  const rows = wv.roles.map((r) => `<div class="ds-panel" style="padding:12px 14px;border:1px solid var(--sg-line);border-radius:10px;margin-bottom:8px;">
+    <div style="font-size:14px;font-weight:700;color:var(--txt);">${escapeHtml(r.role)}</div>
     <div style="font-size:12px;color:#00d4b4;margin-top:4px;">✓ ${escapeHtml(r.aiCarries)}</div>
     <div style="font-size:12px;color:#FF4FD8;margin-top:2px;">🔒 ${escapeHtml(r.staysMine)}</div>
-    <div style="font-size:12px;color:#aebfd4;margin-top:2px;">↩ Time given back: ${escapeHtml(r.givenBackTo)}</div>
+    <div style="font-size:12px;color:var(--txt-dim);margin-top:2px;">↩ Time given back: ${escapeHtml(r.givenBackTo)}</div>
   </div>`).join("");
   return `<div>
-    <div style="font-size:13px;color:#aebfd4;line-height:1.5;margin-bottom:10px;">${escapeHtml(wv.headline)}</div>
+    <div style="font-size:13px;color:var(--txt-dim);line-height:1.5;margin-bottom:10px;">${escapeHtml(wv.headline)}</div>
     ${rows}
     ${(typeof plainLanguageWorkerHtml === "function") ? plainLanguageWorkerHtml() : ""}
     <div style="margin-top:10px;"><button type="button" id="downloadLeverageSummaryBtn" class="secondary-button compact" ${(typeof exportTagLabel === "function") ? `aria-label="${escapeHtml(exportTagLabel("my leverage summary", "worker", false))}"` : ""}>⬇ Download my leverage summary</button></div>
@@ -9367,32 +9368,32 @@ function ecosystemLeadershipHtml(records, opts) {
 function ecosystemTechGovHtml(records, opts) {
   const eco = engineEcosystemTechGov(records, opts);
   if (!eco || !eco.dependencies || !eco.dependencies.length) return "";
-  const rows = eco.dependencies.slice(0, 6).map((d) => `<div style="background:#0d1b2e;border:1px solid #1e3350;border-radius:10px;padding:8px 12px;margin-bottom:6px;">
-    <div style="font-size:12px;font-weight:700;color:#e2e8f0;">${escapeHtml(d.system)} <span style="font-size:10px;color:#8aa0b8;">${escapeHtml(d.systemClass)}</span></div>
-    <div style="font-size:11px;color:${d.singlePointOfFailure ? "#ff8da1" : "#aebfd4"};">${d.singlePointOfFailure ? "⚠ single point of failure" : "dependency"} · ${d.workflowCount} workflow(s) / ${d.departmentCount} dept(s)</div>
-    <div style="font-size:10px;color:#8aa0b8;">${escapeHtml(d.risk)}</div></div>`).join("");
-  return `<div style="margin-top:12px;"><div style="font-size:11px;color:#8aa0b8;margin-bottom:4px;">Ecosystem dependencies — single points of failure / risk concentration${eco.directional ? " (directional)" : ""}</div>${rows}</div>`;
+  const rows = eco.dependencies.slice(0, 6).map((d) => `<div style="background:var(--deep);border:1px solid var(--sg-line);border-radius:10px;padding:8px 12px;margin-bottom:6px;">
+    <div style="font-size:12px;font-weight:700;color:var(--txt);">${escapeHtml(d.system)} <span style="font-size:10px;color:var(--txt-dim);">${escapeHtml(d.systemClass)}</span></div>
+    <div style="font-size:11px;color:${d.singlePointOfFailure ? "#ff8da1" : "var(--txt-dim)"};">${d.singlePointOfFailure ? "⚠ single point of failure" : "dependency"} · ${d.workflowCount} workflow(s) / ${d.departmentCount} dept(s)</div>
+    <div style="font-size:10px;color:var(--txt-dim);">${escapeHtml(d.risk)}</div></div>`).join("");
+  return `<div style="margin-top:12px;"><div style="font-size:11px;color:var(--txt-dim);margin-bottom:4px;">Ecosystem dependencies — single points of failure / risk concentration${eco.directional ? " (directional)" : ""}</div>${rows}</div>`;
 }
 
 function techGovViewHtml(records, opts) {
   const view = engineTechGovView(records, opts);
   if (!view) return `<div class="ds-panel" style="padding:12px 14px;">The Tech &amp; Governance view is loading the Studio engine…</div>`;
-  if (!view.confirmedCount) return `<div class="ds-panel" style="padding:12px 14px;color:#8aa0b8;">${escapeHtml(view.note || "No confirmed units yet.")}</div>`;
+  if (!view.confirmedCount) return `<div class="ds-panel" style="padding:12px 14px;color:var(--txt-dim);">${escapeHtml(view.note || "No confirmed units yet.")}</div>`;
   const kpiCards = view.kpis.kpis.map((k) => {
     const val = (k.unit === "mix") ? Object.entries(k.value || {}).map(([t, n]) => `${t}:${n}`).join(" ") : `${k.value}${k.unit === "%" ? "%" : ""}`;
-    return `<div style="background:#0d1b2e;border:1px solid #1e3350;border-radius:10px;padding:10px 12px;"><div style="font-size:10.5px;color:#8aa0b8;">${escapeHtml(k.label)}</div><div style="font-size:16px;font-weight:800;color:#00d4b4;">${escapeHtml(String(val))}</div></div>`;
+    return `<div style="background:var(--deep);border:1px solid var(--sg-line);border-radius:10px;padding:10px 12px;"><div style="font-size:10.5px;color:var(--txt-dim);">${escapeHtml(k.label)}</div><div style="font-size:16px;font-weight:800;color:#00d4b4;">${escapeHtml(String(val))}</div></div>`;
   }).join("");
-  const builds = view.builds.map((b) => `<div style="background:#0d1b2e;border:1px solid #1e3350;border-radius:10px;padding:10px 12px;margin-bottom:6px;">
-    <div style="font-size:13px;font-weight:700;color:#e2e8f0;">${escapeHtml(b.workflow)}</div>
-    <div style="font-size:11px;color:#aebfd4;">shape: ${escapeHtml(Object.keys(b.shapes || {}).join(", ") || "—")} · tiers: ${escapeHtml(b.tiers.join("/"))} · owner: ${escapeHtml(String(b.owner))}</div>
+  const builds = view.builds.map((b) => `<div style="background:var(--deep);border:1px solid var(--sg-line);border-radius:10px;padding:10px 12px;margin-bottom:6px;">
+    <div style="font-size:13px;font-weight:700;color:var(--txt);">${escapeHtml(b.workflow)}</div>
+    <div style="font-size:11px;color:var(--txt-dim);">shape: ${escapeHtml(Object.keys(b.shapes || {}).join(", ") || "—")} · tiers: ${escapeHtml(b.tiers.join("/"))} · owner: ${escapeHtml(String(b.owner))}</div>
     <div style="font-size:11px;color:${b.controlEvidence.ok ? "#00d4b4" : "#ff8da1"};">control evidence: ${b.controlEvidence.ok ? "PASS" : "BLOCKED — " + escapeHtml(b.controlEvidence.violations.map((v) => v.rule).join(", "))} · ${b.controlEvidence.controls.length} control(s)</div>
   </div>`).join("");
-  const ladder = view.builderLadder.map((r) => `<div style="font-size:11px;color:#aebfd4;">Rung ${r.rung} · <strong>${escapeHtml(r.name)}</strong> — ${escapeHtml(r.detail)} <span style="color:#8aa0b8;">(realization ${Math.round(r.realization * 100)}%)</span></div>`).join("");
+  const ladder = view.builderLadder.map((r) => `<div style="font-size:11px;color:var(--txt-dim);">Rung ${r.rung} · <strong>${escapeHtml(r.name)}</strong> — ${escapeHtml(r.detail)} <span style="color:var(--txt-dim);">(realization ${Math.round(r.realization * 100)}%)</span></div>`).join("");
   return `<div>
     <div style="font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#5b7186;margin:0 0 6px;">G · Tech &amp; Governance — build · control evidence · AI-policy KPIs</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:12px;">${kpiCards}</div>
-    <div style="font-size:11px;color:#8aa0b8;margin-bottom:4px;">Build view (per recipe)</div>${builds}
-    <div style="font-size:11px;color:#8aa0b8;margin:10px 0 4px;">Realization / enablement — the builder ladder</div>${ladder}
+    <div style="font-size:11px;color:var(--txt-dim);margin-bottom:4px;">Build view (per recipe)</div>${builds}
+    <div style="font-size:11px;color:var(--txt-dim);margin:10px 0 4px;">Realization / enablement — the builder ladder</div>${ladder}
     ${(typeof ecosystemTechGovHtml === "function") ? ecosystemTechGovHtml(records, opts) : ""}
     ${(typeof firstEncounterStripHtml === "function") ? firstEncounterStripHtml() : ""}
     <div style="margin-top:12px;"><button type="button" id="downloadEvidencePackBtn" class="secondary-button compact" ${(typeof exportTagLabel === "function") ? `aria-label="${escapeHtml(exportTagLabel("the audit-ready evidence pack", "tech & governance", (typeof exportIsIllustrative === "function") ? exportIsIllustrative() : false))}"` : ""}>⬇ Audit-ready evidence pack</button></div>
@@ -9497,7 +9498,7 @@ function roleTagHtml(step) {
   const cr = suggested
     ? ` <button type="button" data-role-confirm="${escapeHtml(id)}" style="background:none;border:none;color:#00d4b4;cursor:pointer;font-size:11px;padding:0;">confirm</button> <button type="button" data-role-reject="${escapeHtml(id)}" style="background:none;border:none;color:#ff4fc8;cursor:pointer;font-size:11px;padding:0;">reject</button>`
     : "";
-  return `Role: <strong style="color:#cfe0f2;">${escapeHtml(tag.value)}</strong> ${provenanceBadgeHtml(tag.source, tag.confidence)}${suggested ? ` <span style="color:#7a93b4;">(suggested)</span>` : ""}${cr}`;
+  return `Role: <strong style="color:var(--txt);">${escapeHtml(tag.value)}</strong> ${provenanceBadgeHtml(tag.source, tag.confidence)}${suggested ? ` <span style="color:var(--txt-dim);">(suggested)</span>` : ""}${cr}`;
 }
 
 // The manual assignment control: role picker (single select) + AI-suggest (additive;
@@ -9509,9 +9510,9 @@ function rolePickerHtml(step) {
   const opts = [`<option value="">no role assigned</option>`]
     .concat(ROLE_VALUES.map((v) => `<option value="${v}" ${v === current ? "selected" : ""}>${v}</option>`)).join("");
   return `<span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
-    <span style="color:#7a93b4;">Role:</span>
-    <select data-role-id="${escapeHtml(id)}" style="background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:2px 6px;color:#dde8f5;font-size:11px;">${opts}</select>
-    <button type="button" data-role-suggest="${escapeHtml(id)}" style="background:none;border:1px solid #3a2a5a;color:#a855f7;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">Suggest (AI)</button>
+    <span style="color:var(--txt-dim);">Role:</span>
+    <select data-role-id="${escapeHtml(id)}" style="background:var(--deep);border:1px solid var(--sg-line);border-radius:6px;padding:2px 6px;color:var(--txt);font-size:11px;">${opts}</select>
+    <button type="button" data-role-suggest="${escapeHtml(id)}" style="background:none;border:1px solid var(--sg-line);color:#a855f7;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">Suggest (AI)</button>
   </span>`;
 }
 
@@ -9534,12 +9535,12 @@ function roleFootprintHtml() {
     const hits = footprints[role];
     const workflowCount = new Set(hits.map((h) => h.workflowId)).size;
     const inferred = hits.filter((h) => h.source === "ai-inferred").length;
-    const prov = inferred ? ` <span style="color:#7a93b4;font-size:11px;">(${inferred} suggested, unconfirmed)</span>` : "";
-    return `<li style="margin:4px 0;color:#b8c7da;"><strong style="color:#cfe0f2;">${escapeHtml(role)}</strong> — ${hits.length} step${hits.length === 1 ? "" : "s"} across ${workflowCount} workflow${workflowCount === 1 ? "" : "s"}${prov}</li>`;
+    const prov = inferred ? ` <span style="color:var(--txt-dim);font-size:11px;">(${inferred} suggested, unconfirmed)</span>` : "";
+    return `<li style="margin:4px 0;color:var(--txt-dim);"><strong style="color:var(--txt);">${escapeHtml(role)}</strong> — ${hits.length} step${hits.length === 1 ? "" : "s"} across ${workflowCount} workflow${workflowCount === 1 ? "" : "s"}${prov}</li>`;
   }).join("");
-  return `<div class="role-footprint" style="background:#0c1726;border:1px solid #16263a;border-radius:12px;padding:16px 18px;margin:0 0 18px;">
-    <div style="font-size:0.95rem;font-weight:600;color:#e2e8f0;margin:0 0 4px;">Role across workflows</div>
-    <div style="font-size:12px;color:#7a93b4;margin:0 0 10px;">Where each role's work lives across your saved workflows — a leverage view of the steps each role owns.</div>
+  return `<div class="role-footprint" style="background:var(--deep2);border:1px solid var(--sg-line);border-radius:12px;padding:16px 18px;margin:0 0 18px;">
+    <div style="font-size:0.95rem;font-weight:600;color:var(--txt);margin:0 0 4px;">Role across workflows</div>
+    <div style="font-size:12px;color:var(--txt-dim);margin:0 0 10px;">Where each role's work lives across your saved workflows — a leverage view of the steps each role owns.</div>
     <ul style="list-style:none;margin:0;padding:0;">${rows}</ul>
   </div>`;
 }
@@ -9688,7 +9689,7 @@ function heatmapSourceDot(state) {
 // Always-on legend mapping the three source-dots + human-hold (legible without prior
 // knowledge — the heatmap is never shown without it).
 function heatmapLegendHtml() {
-  const sw = (color, label) => `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:14px;"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${color};"></span><span style="font-size:11px;color:#8aa0b8;">${escapeHtml(label)}</span></span>`;
+  const sw = (color, label) => `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:14px;"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${color};"></span><span style="font-size:11px;color:var(--txt-dim);">${escapeHtml(label)}</span></span>`;
   return `<div class="hm-legend" style="display:flex;flex-wrap:wrap;align-items:center;margin:0 0 10px;">${sw(HEATMAP_STATE_DOTS.stated, "stated")}${sw(HEATMAP_STATE_DOTS.computed, "computed")}${sw(HEATMAP_STATE_DOTS.inferred, "inferred (suggestion)")}${sw(HUMAN_HOLD_HUE, "human-hold")}</div>`;
 }
 // One tile: hue = work type (judgment => reserved Human Pink), shade = strength, a
@@ -9700,35 +9701,35 @@ function heatmapTileHtml(tile) {
   const bg = tile.strength ? `${hue}${alpha}` : "transparent";
   const hold = tile.humanHeld ? `<span title="human-hold — a person owns this judgment" style="color:${HUMAN_HOLD_HUE};font-size:9px;display:block;">human-hold</span>` : "";
   const body = tile.count
-    ? `<span style="color:#e2e8f0;font-weight:600;">${escapeHtml(String(tile.count))}</span>${heatmapSourceDot(tile.state)}`
+    ? `<span style="color:var(--txt);font-weight:600;">${escapeHtml(String(tile.count))}</span>${heatmapSourceDot(tile.state)}`
     : `<span style="color:#3f5878;">·</span>`;
-  return `<div class="hm-tile" title="${escapeHtml(tile.workType)}" style="min-width:54px;padding:6px 4px;border:1px solid #16263a;border-radius:6px;background:${bg};text-align:center;">${body}<span style="display:block;font-size:9px;color:#7a93b4;">${escapeHtml(tile.workType)}</span>${hold}</div>`;
+  return `<div class="hm-tile" title="${escapeHtml(tile.workType)}" style="min-width:54px;padding:6px 4px;border:1px solid var(--sg-line);border-radius:6px;background:${bg};text-align:center;">${body}<span style="display:block;font-size:9px;color:var(--txt-dim);">${escapeHtml(tile.workType)}</span>${hold}</div>`;
 }
 // The department heatmap. Returns "" when no role is tagged in any saved workflow
 // (byte-identical-when-unused). LEVERAGE view — never headcount / FTE / automatable-%.
 function departmentHeatmapHtml() {
   const model = buildDepartmentHeatmap(collectStructuralWorkflows());
   if (!model.rows.length) return "";
-  const headCols = model.workTypes.map((wt) => `<th style="padding:4px 6px;font-weight:600;color:#8aa0b8;font-size:10px;">${escapeHtml(wt)}</th>`).join("");
+  const headCols = model.workTypes.map((wt) => `<th style="padding:4px 6px;font-weight:600;color:var(--txt-dim);font-size:10px;">${escapeHtml(wt)}</th>`).join("");
   const body = model.rows.map((row) => {
     const tiles = row.tiles.map((t) => `<td style="padding:3px;">${heatmapTileHtml(t)}</td>`).join("");
     const frictionCell = row.friction.count
-      ? `<span style="color:#e2e8f0;">${row.friction.count}</span>${heatmapSourceDot(row.friction.state)}`
+      ? `<span style="color:var(--txt);">${row.friction.count}</span>${heatmapSourceDot(row.friction.state)}`
       : `<span style="color:#3f5878;">·</span>`;
     return `<tr>
-      <th style="text-align:left;padding:4px 8px;color:#cfe0f2;font-weight:600;white-space:nowrap;">${escapeHtml(row.role)}</th>
-      <td style="padding:4px 8px;color:#b8c7da;white-space:nowrap;">${row.footprint.count} steps${heatmapSourceDot(row.footprint.state)}<span style="display:block;font-size:9px;color:#7a93b4;">across ${row.workflowCount} workflow${row.workflowCount === 1 ? "" : "s"}</span></td>
+      <th style="text-align:left;padding:4px 8px;color:var(--txt);font-weight:600;white-space:nowrap;">${escapeHtml(row.role)}</th>
+      <td style="padding:4px 8px;color:var(--txt-dim);white-space:nowrap;">${row.footprint.count} steps${heatmapSourceDot(row.footprint.state)}<span style="display:block;font-size:9px;color:var(--txt-dim);">across ${row.workflowCount} workflow${row.workflowCount === 1 ? "" : "s"}</span></td>
       ${tiles}
       <td style="padding:4px 8px;text-align:center;">${frictionCell}</td>
-      <td style="padding:4px 8px;text-align:center;"><span style="color:#b8c7da;">${row.handoffs.count}</span>${heatmapSourceDot(row.handoffs.state)}</td>
+      <td style="padding:4px 8px;text-align:center;"><span style="color:var(--txt-dim);">${row.handoffs.count}</span>${heatmapSourceDot(row.handoffs.state)}</td>
     </tr>`;
   }).join("");
-  return `<div class="department-heatmap" style="background:#0c1726;border:1px solid #16263a;border-radius:12px;padding:16px 18px;margin:0 0 18px;overflow-x:auto;">
-    <div style="font-size:0.95rem;font-weight:600;color:#e2e8f0;margin:0 0 4px;">Department heatmap</div>
-    <div style="font-size:12px;color:#7a93b4;margin:0 0 10px;">How each role's work concentrates across your saved workflows — a leverage view, with every tile showing where its value came from. The least-asserted source wins: any inferred input makes the tile read as a suggestion.</div>
+  return `<div class="department-heatmap" style="background:var(--deep2);border:1px solid var(--sg-line);border-radius:12px;padding:16px 18px;margin:0 0 18px;overflow-x:auto;">
+    <div style="font-size:0.95rem;font-weight:600;color:var(--txt);margin:0 0 4px;">Department heatmap</div>
+    <div style="font-size:12px;color:var(--txt-dim);margin:0 0 10px;">How each role's work concentrates across your saved workflows — a leverage view, with every tile showing where its value came from. The least-asserted source wins: any inferred input makes the tile read as a suggestion.</div>
     ${heatmapLegendHtml()}
-    <table style="border-collapse:collapse;font-size:11px;color:#b8c7da;">
-      <thead><tr><th style="text-align:left;padding:4px 8px;color:#8aa0b8;font-size:10px;">Role</th><th style="padding:4px 8px;color:#8aa0b8;font-size:10px;">Footprint</th>${headCols}<th style="padding:4px 8px;color:#8aa0b8;font-size:10px;">Friction</th><th style="padding:4px 8px;color:#8aa0b8;font-size:10px;">Handoffs</th></tr></thead>
+    <table style="border-collapse:collapse;font-size:11px;color:var(--txt-dim);">
+      <thead><tr><th style="text-align:left;padding:4px 8px;color:var(--txt-dim);font-size:10px;">Role</th><th style="padding:4px 8px;color:var(--txt-dim);font-size:10px;">Footprint</th>${headCols}<th style="padding:4px 8px;color:var(--txt-dim);font-size:10px;">Friction</th><th style="padding:4px 8px;color:var(--txt-dim);font-size:10px;">Handoffs</th></tr></thead>
       <tbody>${body}</tbody>
     </table>
   </div>`;
@@ -10308,7 +10309,7 @@ function workbenchControlGateHtml(record) {
   return `<section class="workbench-control-gate" style="margin-top:12px;padding:10px 12px;border:1px solid var(--sg-line);border-radius:10px;">
     <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--gray);margin-bottom:6px;">Confirm the map — controls enforced</div>
     ${rows}
-    <div style="margin-top:8px;"><button type="button" data-workbench-confirm style="background:var(--sg-cyan);color:#08111f;border:none;border-radius:6px;padding:6px 14px;font-weight:700;font-size:12px;cursor:pointer;${muted}">Confirm the map</button>${note}</div></section>`;
+    <div style="margin-top:8px;"><button type="button" data-workbench-confirm style="background:var(--sg-cyan);color:var(--deep3);border:none;border-radius:6px;padding:6px 14px;font-weight:700;font-size:12px;cursor:pointer;${muted}">Confirm the map</button>${note}</div></section>`;
 }
 
 // ============ Edition 3 · F7 — Recipe (the multi-actor build artifact) ===============================
@@ -10497,7 +10498,7 @@ if (typeof window !== "undefined") {
         const banner = document.createElement("div");
         banner.id = "engine-load-error";
         banner.setAttribute("role", "alert");
-        banner.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99999;background:#7f1d1d;color:#fff;padding:10px 16px;font:600 13px/1.45 system-ui,-apple-system,sans-serif;text-align:center;";
+        banner.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99999;background:var(--deep2);color:#fff;padding:10px 16px;font:600 13px/1.45 system-ui,-apple-system,sans-serif;text-align:center;";
         banner.textContent = "Studio engine failed to load — analysis figures and safety rails are unavailable. This is an error state, not a result. Reload the page; if it persists, the engine module is not being served as text/javascript.";
         const mount = () => { if (document.body && !document.getElementById("engine-load-error")) document.body.prepend(banner); else if (document.body) document.body.prepend(banner); };
         if (document.body) mount(); else document.addEventListener("DOMContentLoaded", mount);
@@ -10537,7 +10538,7 @@ function seamCriticalityDim(humanHeld, decA, decB) {
 function seamDimChipHtml(label, dim, hue) {
   if (!dim || !dim.value) return "";
   const alpha = { low: "33", medium: "55", high: "88" }[dim.value] || "33";
-  return `<span title="${escapeHtml(label)}: ${escapeHtml(dim.value)} (${escapeHtml(dim.source)})" style="display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border:1px solid #16263a;border-radius:5px;background:${hue}${alpha};color:#e2e8f0;font-weight:600;font-size:10px;">${escapeHtml(label)} ${escapeHtml(dim.value)}${heatmapSourceDot(dim.source)}</span>`;
+  return `<span title="${escapeHtml(label)}: ${escapeHtml(dim.value)} (${escapeHtml(dim.source)})" style="display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border:1px solid var(--sg-line);border-radius:5px;background:${hue}${alpha};color:var(--txt);font-weight:600;font-size:10px;">${escapeHtml(label)} ${escapeHtml(dim.value)}${heatmapSourceDot(dim.source)}</span>`;
 }
 // The three-dim row for a seam — rendered ONLY when latency or criticality is present, so a
 // friction-only seam is byte-identical to today.
@@ -10646,7 +10647,7 @@ function buildWorkflowLeverage(steps, sidecars) {
 function leverageTileHtml(level, state, humanHeld) {
   const hue = humanHeld ? HUMAN_HOLD_HUE : LEVERAGE_HUE;
   const bg = `${hue}${LEVERAGE_SHADE[level] || "3a"}`;
-  return `<span class="lev-tile" title="${escapeHtml(level)} leverage" style="display:inline-block;min-width:34px;text-align:center;padding:2px 8px;border:1px solid #16263a;border-radius:6px;background:${bg};color:#e2e8f0;font-weight:600;font-size:11px;">${escapeHtml(level)}${heatmapSourceDot(state)}</span>`;
+  return `<span class="lev-tile" title="${escapeHtml(level)} leverage" style="display:inline-block;min-width:34px;text-align:center;padding:2px 8px;border:1px solid var(--sg-line);border-radius:6px;background:${bg};color:var(--txt);font-weight:600;font-size:11px;">${escapeHtml(level)}${heatmapSourceDot(state)}</span>`;
 }
 
 // The Leverage Map for the CURRENT workflow. Shapes the captured grid (tool /
@@ -10672,11 +10673,11 @@ function leverageMapHtml() {
   if (!model.steps.length && !model.seams.length) return "";
 
   const row = (head, level, dotState, humanHeld, assist, evidence) => `
-    <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-top:1px solid #16263a;">
+    <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-top:1px solid var(--sg-line);">
       <div style="flex:none;padding-top:1px;">${leverageTileHtml(level, dotState, humanHeld)}</div>
       <div style="flex:1;min-width:0;">
-        <div style="color:#cfe0f2;font-weight:600;font-size:12px;">${head}${humanHeld ? `<span style="color:${HUMAN_HOLD_HUE};font-size:10px;font-weight:700;margin-left:8px;">human-hold</span>` : ""}</div>
-        <div style="color:#7a93b4;font-size:11px;margin-top:2px;">${escapeHtml(assist)}${evidence.length ? " — " + escapeHtml(evidence.join("; ")) : ""}</div>
+        <div style="color:var(--txt);font-weight:600;font-size:12px;">${head}${humanHeld ? `<span style="color:${HUMAN_HOLD_HUE};font-size:10px;font-weight:700;margin-left:8px;">human-hold</span>` : ""}</div>
+        <div style="color:var(--txt-dim);font-size:11px;margin-top:2px;">${escapeHtml(assist)}${evidence.length ? " — " + escapeHtml(evidence.join("; ")) : ""}</div>
       </div>
     </div>`;
 
@@ -10684,15 +10685,15 @@ function leverageMapHtml() {
   const seamRows = model.seams.map((s) => row(`${escapeHtml(s.fromName || "Step")} <span style="color:#3f5878;">&rarr;</span> ${escapeHtml(s.toName || "Step")}`, s.level, s.state, s.humanHeld, s.assist, s.evidence) + (typeof seamDimsHtml === "function" ? seamDimsHtml(s) : "")).join("");
 
   const stepSection = model.steps.length
-    ? `<div><div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#8aa0b8;margin:0 0 4px;">By step</div>${stepRows}</div>`
+    ? `<div><div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--txt-dim);margin:0 0 4px;">By step</div>${stepRows}</div>`
     : "";
   const seamSection = model.seams.length
-    ? `<div style="margin-top:14px;"><div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#8aa0b8;margin:0 0 2px;">By connection</div><div style="font-size:11px;color:#7a93b4;margin:0 0 4px;">Seams between adjacent steps — surfaced only where the capture shows a shared tool, a manual handoff, system-switching, or a classified transition.</div>${seamRows}</div>`
+    ? `<div style="margin-top:14px;"><div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--txt-dim);margin:0 0 2px;">By connection</div><div style="font-size:11px;color:var(--txt-dim);margin:0 0 4px;">Seams between adjacent steps — surfaced only where the capture shows a shared tool, a manual handoff, system-switching, or a classified transition.</div>${seamRows}</div>`
     : "";
 
-  return `<div class="leverage-map" style="background:#0c1726;border:1px solid #16263a;border-radius:12px;padding:16px 18px;margin:0 0 18px;">
-    <div style="font-size:0.95rem;font-weight:600;color:#e2e8f0;margin:0 0 4px;">Leverage Map</div>
-    <div style="font-size:12px;color:#7a93b4;margin:0 0 10px;">Where and how much AI can assist across this workflow — per step and per connection. A leverage read of the captured shape; AI suggests, you verify. Each mark wears where its signal came from, and a person still owns every human-hold.</div>
+  return `<div class="leverage-map" style="background:var(--deep2);border:1px solid var(--sg-line);border-radius:12px;padding:16px 18px;margin:0 0 18px;">
+    <div style="font-size:0.95rem;font-weight:600;color:var(--txt);margin:0 0 4px;">Leverage Map</div>
+    <div style="font-size:12px;color:var(--txt-dim);margin:0 0 10px;">Where and how much AI can assist across this workflow — per step and per connection. A leverage read of the captured shape; AI suggests, you verify. Each mark wears where its signal came from, and a person still owns every human-hold.</div>
     ${heatmapLegendHtml()}
     ${stepSection}
     ${seamSection}
@@ -10710,9 +10711,9 @@ function renderAnalysisTabLeverage() {
     return;
   }
   const map = leverageMapHtml();
-  container.innerHTML = map || `<div class="leverage-map" style="background:#0c1726;border:1px solid #16263a;border-radius:12px;padding:16px 18px;">
-    <div style="font-size:0.95rem;font-weight:600;color:#e2e8f0;margin:0 0 4px;">Leverage Map</div>
-    <div style="font-size:12px;color:#7a93b4;">No leverage signal yet — confirm a step's shape (role · type · friction) to see where AI can assist. Nothing here is blocked; the map fills in as the shape is captured.</div>
+  container.innerHTML = map || `<div class="leverage-map" style="background:var(--deep2);border:1px solid var(--sg-line);border-radius:12px;padding:16px 18px;">
+    <div style="font-size:0.95rem;font-weight:600;color:var(--txt);margin:0 0 4px;">Leverage Map</div>
+    <div style="font-size:12px;color:var(--txt-dim);">No leverage signal yet — confirm a step's shape (role · type · friction) to see where AI can assist. Nothing here is blocked; the map fills in as the shape is captured.</div>
   </div>`;
 }
 
@@ -10750,7 +10751,7 @@ function stepCompositeBadgeHtml(step) {
     `Readiness: ${s.readinessLabel}${s.readinessScore !== null ? ` (${s.readinessScore}/100)` : ""}`,
     `Provenance: ${s.captured} captured field${s.captured === 1 ? "" : "s"}, each with a tracked source`
   ];
-  return `<details class="step-trust-badge" style="display:inline-block;margin-left:8px;"><summary style="cursor:pointer;list-style:none;display:inline-block;"><span class="ds-badge ${posture.cls}">${escapeHtml(posture.label)}</span></summary><ul style="margin:6px 0 0;padding-left:16px;color:#8aa0b8;font-size:11px;line-height:1.5;">${dims.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}${stepTypologyHtml(step)}${stepWorkIntentHtml(step)}${stepStructuralHtml(step)}${stepFrictionHtml(step)}${stepRoleHtml(step)}${stepCriticalityHtml(step)}</ul></details>`;
+  return `<details class="step-trust-badge" style="display:inline-block;margin-left:8px;"><summary style="cursor:pointer;list-style:none;display:inline-block;"><span class="ds-badge ${posture.cls}">${escapeHtml(posture.label)}</span></summary><ul style="margin:6px 0 0;padding-left:16px;color:var(--txt-dim);font-size:11px;line-height:1.5;">${dims.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}${stepTypologyHtml(step)}${stepWorkIntentHtml(step)}${stepStructuralHtml(step)}${stepFrictionHtml(step)}${stepRoleHtml(step)}${stepCriticalityHtml(step)}</ul></details>`;
 }
 
 // V3-7: knowledge-library panel for the grid tab. Shows (1) the entries applied
@@ -10767,10 +10768,10 @@ function knowledgeLibraryPanelHtml() {
     ? applied.map((ref) => {
         const src = ref.originalSource ? ` · source: ${esc(ref.originalSource)}` : "";
         return `
-          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#0a1422;border:1px solid #1a2a3a;border-radius:8px;">
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--deep3);border:1px solid var(--deep2);border-radius:8px;">
             <span style="flex:1;min-width:0;">
-              <span style="color:#e8f4ff;font-size:13px;font-weight:600;">${esc(ref.name)}</span>
-              <span style="color:#7a93b4;font-size:11px;"> v${ref.version} · ${esc(ref.kind)}${src}</span>
+              <span style="color:var(--txt);font-size:13px;font-weight:600;">${esc(ref.name)}</span>
+              <span style="color:var(--txt-dim);font-size:11px;"> v${ref.version} · ${esc(ref.kind)}${src}</span>
             </span>
             ${provenanceBadgeHtml("knowledge-library")}
             <button type="button" data-knowledge-remove="${esc(ref.entryId)}" title="Remove from this workflow" style="background:none;border:none;color:#5b7186;cursor:pointer;font-size:15px;line-height:1;">×</button>
@@ -10784,19 +10785,19 @@ function knowledgeLibraryPanelHtml() {
         const cur = knowledgeEntryCurrent(entry) || {};
         const applyLabel = appliedIds.has(entry.id) ? "Re-apply (upgrade)" : "Apply";
         return `
-          <div style="padding:10px 12px;background:#0d1b2e;border:1px solid #1e3350;border-radius:8px;">
+          <div style="padding:10px 12px;background:var(--deep);border:1px solid var(--sg-line);border-radius:8px;">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <strong style="color:#e8f4ff;font-size:13px;">${esc(entry.name)}</strong>
+              <strong style="color:var(--txt);font-size:13px;">${esc(entry.name)}</strong>
               <span class="ds-badge ds-badge-dim">${esc(cur.kind || entry.kind || "reference")}</span>
               <span style="color:#5b7186;font-size:11px;">v${cur.version || (Array.isArray(entry.versions) ? entry.versions.length : 1)}</span>
               <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;">
-                <button type="button" data-knowledge-apply="${esc(entry.id)}" style="background:#a855f7;color:#0d1b2e;border:none;border-radius:6px;padding:5px 12px;font-weight:600;font-size:12px;cursor:pointer;">${applyLabel}</button>
+                <button type="button" data-knowledge-apply="${esc(entry.id)}" style="background:#a855f7;color:var(--deep);border:none;border-radius:6px;padding:5px 12px;font-weight:600;font-size:12px;cursor:pointer;">${applyLabel}</button>
                 <button type="button" data-knowledge-edit="${esc(entry.id)}" class="secondary-button compact">Edit</button>
                 <button type="button" data-knowledge-delete="${esc(entry.id)}" class="secondary-button compact">Delete</button>
               </span>
             </div>
-            ${cur.originalSource ? `<div style="margin-top:4px;color:#7a93b4;font-size:11px;">Original source: ${esc(cur.originalSource)}</div>` : ""}
-            ${cur.body ? `<p style="margin:6px 0 0;color:#9fb3c8;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word;">${esc(policyClip(cur.body, 240))}</p>` : ""}
+            ${cur.originalSource ? `<div style="margin-top:4px;color:var(--txt-dim);font-size:11px;">Original source: ${esc(cur.originalSource)}</div>` : ""}
+            ${cur.body ? `<p style="margin:6px 0 0;color:var(--txt-dim);font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word;">${esc(policyClip(cur.body, 240))}</p>` : ""}
           </div>`;
       }).join("")
     : `<p style="margin:6px 0 0;color:#5b7186;font-size:12px;">The shared library is empty. Create a reusable entry below — a decision framework, standard, or policy-derived context you want to apply across workflows.</p>`;
@@ -10806,27 +10807,27 @@ function knowledgeLibraryPanelHtml() {
     <details data-knowledge-form style="margin-top:10px;">
       <summary style="cursor:pointer;font-size:12px;color:#a855f7;font-weight:600;">+ New knowledge entry</summary>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
-        <input data-knowledge-name type="text" placeholder="Name (e.g. Credit decision framework)" style="background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:8px 10px;color:#dde8f5;font-size:13px;">
+        <input data-knowledge-name type="text" placeholder="Name (e.g. Credit decision framework)" style="background:var(--deep);border:1px solid var(--sg-line);border-radius:6px;padding:8px 10px;color:var(--txt);font-size:13px;">
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <select data-knowledge-kind style="background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:8px 10px;color:#dde8f5;font-size:13px;">${kindOptions}</select>
-          <input data-knowledge-source type="text" placeholder="Original source (e.g. Risk Policy section 4)" style="flex:1;min-width:160px;background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:8px 10px;color:#dde8f5;font-size:13px;">
+          <select data-knowledge-kind style="background:var(--deep);border:1px solid var(--sg-line);border-radius:6px;padding:8px 10px;color:var(--txt);font-size:13px;">${kindOptions}</select>
+          <input data-knowledge-source type="text" placeholder="Original source (e.g. Risk Policy section 4)" style="flex:1;min-width:160px;background:var(--deep);border:1px solid var(--sg-line);border-radius:6px;padding:8px 10px;color:var(--txt);font-size:13px;">
         </div>
-        <textarea data-knowledge-body rows="3" placeholder="Knowledge content (the framework / standard / context)" style="background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:8px 10px;color:#dde8f5;font-size:13px;resize:vertical;"></textarea>
+        <textarea data-knowledge-body rows="3" placeholder="Knowledge content (the framework / standard / context)" style="background:var(--deep);border:1px solid var(--sg-line);border-radius:6px;padding:8px 10px;color:var(--txt);font-size:13px;resize:vertical;"></textarea>
         <input type="hidden" data-knowledge-edit-id value="">
-        <button type="button" data-knowledge-save style="align-self:flex-start;background:#a855f7;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Save to library</button>
+        <button type="button" data-knowledge-save style="align-self:flex-start;background:#a855f7;color:var(--deep);border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Save to library</button>
       </div>
     </details>`;
 
   return `
     <div class="ds-card" style="margin:0 20px 20px;padding:16px 18px;">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-        <strong style="font-size:1rem;color:#e8f4ff;">Knowledge library</strong>
+        <strong style="font-size:1rem;color:var(--txt);">Knowledge library</strong>
         <span class="ds-badge" style="background:#a855f722;color:#a855f7;border:1px solid #a855f755;">Shared · versioned</span>
       </div>
-      <div style="margin-top:6px;color:#8aa0b8;font-size:0.82rem;">Reusable knowledge applied explicitly to a workflow. Editing an entry creates a new version; workflows already using a prior version are never changed.</div>
-      <div style="margin-top:12px;font-size:11px;color:#7a93b4;text-transform:uppercase;letter-spacing:0.05em;">Applied to this workflow</div>
+      <div style="margin-top:6px;color:var(--txt-dim);font-size:0.82rem;">Reusable knowledge applied explicitly to a workflow. Editing an entry creates a new version; workflows already using a prior version are never changed.</div>
+      <div style="margin-top:12px;font-size:11px;color:var(--txt-dim);text-transform:uppercase;letter-spacing:0.05em;">Applied to this workflow</div>
       <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px;">${appliedRows}</div>
-      <div style="margin-top:14px;font-size:11px;color:#7a93b4;text-transform:uppercase;letter-spacing:0.05em;">Shared library</div>
+      <div style="margin-top:14px;font-size:11px;color:var(--txt-dim);text-transform:uppercase;letter-spacing:0.05em;">Shared library</div>
       <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px;">${libraryRows}</div>
       ${form}
     </div>`;
@@ -10916,10 +10917,10 @@ function renderAnalysisTabGrid() {
     `<span style="display:flex;align-items:center;gap:4px;font-size:0.7rem;color:#556a7e;"><span class="${dotClass}"></span>${count} ${label}</span>`;
 
   const header = `
-    <div style="padding:16px 20px;background:#0a1525;border-bottom:1px solid #152236;">
+    <div style="padding:16px 20px;background:var(--deep3);border-bottom:1px solid var(--deep2);">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div style="display:flex;align-items:center;gap:10px;">
-          <span style="font-size:1.1rem;font-weight:700;color:#e8f4ff;">${escapeHtml(grid.workflowName || sessionNameForHeader() || "Untitled Workflow")}</span>
+          <span style="font-size:1.1rem;font-weight:700;color:var(--txt);">${escapeHtml(grid.workflowName || sessionNameForHeader() || "Untitled Workflow")}</span>
           ${lockBadge}
           ${sensitivityBadge}
         </div>
@@ -10928,7 +10929,7 @@ function renderAnalysisTabGrid() {
           ${dotPill("ds-dot ds-dot-purple", inferredCells.length, "inferred")}
           ${dotPill("ds-dot ds-dot-amber", unknownCells.length, "need input")}
           ${dotPill("ds-dot ds-dot-teal ds-dot-pulse", aiOppSteps.length, "AI opps")}
-          <span style="width:1px;height:16px;background:#1e3350;"></span>
+          <span style="width:1px;height:16px;background:var(--sg-line);"></span>
           <span class="ds-micro">${steps.length} steps</span>
         </div>
       </div>
@@ -10954,7 +10955,7 @@ function renderAnalysisTabGrid() {
       <div class="ds-card ds-accent-teal" style="padding:20px;">
         <div class="ds-micro">Confirmed</div>
         <div class="ds-num-teal" style="font-size:2rem;font-weight:700;">${confirmedCells.length}</div>
-        <div style="font-size:0.7rem;color:#1a4a40;">${coveragePct}% complete</div>
+        <div style="font-size:0.7rem;color:var(--deep2);">${coveragePct}% complete</div>
       </div>
       <div class="ds-card ds-accent-purple" style="padding:20px;">
         <div class="ds-micro">Inferred by AI</div>
@@ -10966,7 +10967,7 @@ function renderAnalysisTabGrid() {
       <div class="ds-card ds-accent-amber" style="padding:20px;">
         <div class="ds-micro">Need input</div>
         <div class="ds-num-amber" style="font-size:2rem;font-weight:700;">${unknownCells.length}</div>
-        <div style="font-size:0.7rem;color:#4a3010;">fields awaiting review</div>
+        <div style="font-size:0.7rem;color:var(--deep2);">fields awaiting review</div>
       </div>
     </div>`;
 
@@ -11007,8 +11008,8 @@ function renderAnalysisTabGrid() {
   }).join("");
 
   const panels = `
-    <div style="display:flex;border-top:1px solid #152236;">
-      <div style="flex:1;padding:20px;border-right:1px solid #152236;">
+    <div style="display:flex;border-top:1px solid var(--deep2);">
+      <div style="flex:1;padding:20px;border-right:1px solid var(--deep2);">
         ${sectionHead("height:14px;", "Coverage by field type", "% cells confirmed per field")}
         ${leftRows}
       </div>
@@ -11026,10 +11027,10 @@ function renderAnalysisTabGrid() {
     return v || (field.label === "Step Name" ? `Step ${i + 1}` : "");
   };
   const groupHeaderRow = GRID_LAYER_DEF.map((layer) =>
-    `<th colspan="${layer.fields.length}" style="padding:6px 10px;text-align:left;background:#0a1525;border:1px solid #152236;border-left:3px solid ${layer.color};color:${layer.color};font-size:0.62rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;">${layer.name}</th>`
+    `<th colspan="${layer.fields.length}" style="padding:6px 10px;text-align:left;background:var(--deep3);border:1px solid var(--deep2);border-left:3px solid ${layer.color};color:${layer.color};font-size:0.62rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;">${layer.name}</th>`
   ).join("");
   const colHeaderRow = GRID_LAYER_DEF.flatMap((layer) =>
-    layer.fields.map((f) => `<th style="padding:8px 10px;text-align:left;background:#09131f;border:1px solid #152236;color:${layer.color};font-size:0.66rem;font-weight:600;letter-spacing:0.03em;white-space:nowrap;">${escapeHtml(f.label)}</th>`)
+    layer.fields.map((f) => `<th style="padding:8px 10px;text-align:left;background:var(--deep2);border:1px solid var(--deep2);color:${layer.color};font-size:0.66rem;font-weight:600;letter-spacing:0.03em;white-space:nowrap;">${escapeHtml(f.label)}</th>`)
   ).join("");
   const flatFields = GRID_LAYER_DEF.flatMap((layer) => layer.fields);
   // PR 31: every matrix cell is an Edit affordance — click opens the field
@@ -11038,11 +11039,11 @@ function renderAnalysisTabGrid() {
   const gridRows = steps.map((s, i) =>
     `<tr>${flatFields.map((f, fi) => {
       const v = fieldValue(s, f, i);
-      return `<td data-fedit-step="${escapeHtml(s.id)}" data-fedit-field="${fi}" role="button" tabindex="0" style="padding:6px 10px;border:1px solid #152236;vertical-align:top;font-size:0.72rem;color:${v ? "#c8d8e8" : "#2a3f5f"};cursor:pointer;" title="${escapeHtml(v ? `${v} — click to edit` : "Click to add a value")}">${v ? escapeHtml(truncate(v, 60)) : "—"}${gridCellTrustIndicator(s, f.keys)}<span style="color:#2a3f5f;font-size:10px;margin-left:6px;">✎</span></td>`;
+      return `<td data-fedit-step="${escapeHtml(s.id)}" data-fedit-field="${fi}" role="button" tabindex="0" style="padding:6px 10px;border:1px solid var(--deep2);vertical-align:top;font-size:0.72rem;color:${v ? "var(--txt)" : "var(--sg-line)"};cursor:pointer;" title="${escapeHtml(v ? `${v} — click to edit` : "Click to add a value")}">${v ? escapeHtml(truncate(v, 60)) : "—"}${gridCellTrustIndicator(s, f.keys)}<span style="color:var(--sg-line);font-size:10px;margin-left:6px;">✎</span></td>`;
     }).join("")}</tr>`
   ).join("");
   const matrix = `
-    <div style="padding:20px;border-top:1px solid #152236;overflow-x:auto;">
+    <div style="padding:20px;border-top:1px solid var(--deep2);overflow-x:auto;">
       ${sectionHead("height:14px;", "Workflow grid", "9 fields across 3 layers")}
       <table style="width:100%;border-collapse:collapse;min-width:1180px;">
         <thead>
@@ -11392,7 +11393,7 @@ function opportunityPortfolioStripHtml() {
       .filter((t) => tierCounts[t] > 0)
       .map((t) => `<span style="display:block;height:100%;width:${((tierCounts[t] / tieredTotal) * 100).toFixed(1)}%;background:${tierColor[t]};"></span>`)
       .join("")
-    : `<span style="display:block;height:100%;width:100%;background:#1e3350;"></span>`;
+    : `<span style="display:block;height:100%;width:100%;background:var(--sg-line);"></span>`;
   const barCell = `
     <div style="${cellStyle}">
       <div style="display:flex;height:14px;border-radius:4px;overflow:hidden;margin:6px 4px 0;">${segments}</div>
@@ -11400,7 +11401,7 @@ function opportunityPortfolioStripHtml() {
     </div>`;
 
   return `
-    <div class="ds-panel" style="display:flex;gap:8px;align-items:stretch;padding:14px 16px;margin-bottom:20px;border-bottom:1px solid #1e3350;">
+    <div class="ds-panel" style="display:flex;gap:8px;align-items:stretch;padding:14px 16px;margin-bottom:20px;border-bottom:1px solid var(--sg-line);">
       <div style="${cellStyle}">${bigNum(num(quickWins), "#00d4b4")}${cellLabel("Quick Wins identified")}</div>
       <div style="${cellStyle}">${bigNum(hoursValue, "#00d4b4")}${cellLabel("Est. hours saved")}</div>
       <div style="${cellStyle}">${bigNum(dollarValue, "#f59e0b")}${cellLabel("Est. time value")}</div>
@@ -11690,15 +11691,15 @@ function renderCapacityAssumptionsEditorHtml(capacityBands, personaKeys) {
   const weekly = Number(cb.weeklyHoursBasis) || 40;
   const hpy = Number(cb.hoursPerFteYear) || (CAPACITY_WORKING_WEEKS * weekly);
   const keys = [...new Set([...(Array.isArray(personaKeys) ? personaKeys : []), ...Object.keys(bands)].filter(Boolean))].sort();
-  const inputCss = "background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:6px 8px;color:#dde8f5;font-size:12px;width:110px;";
+  const inputCss = "background:var(--deep);border:1px solid var(--sg-line);border-radius:6px;padding:6px 8px;color:var(--txt);font-size:12px;width:110px;";
   const rows = keys.length
     ? keys.map((k) => {
         const b = bands[k] || {};
         return `
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;" data-capacity-band="${escapeHtml(k)}">
-            <span style="flex:1;min-width:120px;color:#cfe0f2;font-size:12px;">${escapeHtml(k)}</span>
-            <label style="font-size:10px;color:#7a93b4;">Fully-loaded $/hr<input type="number" min="1" data-capacity-fl placeholder="—" value="${b.fullyLoadedCost != null ? escapeHtml(String(b.fullyLoadedCost)) : ""}" style="${inputCss}display:block;"></label>
-            <label style="font-size:10px;color:#7a93b4;">Bill $/hr<input type="number" min="1" data-capacity-bill placeholder="—" value="${b.billRate != null ? escapeHtml(String(b.billRate)) : ""}" style="${inputCss}display:block;"></label>
+            <span style="flex:1;min-width:120px;color:var(--txt);font-size:12px;">${escapeHtml(k)}</span>
+            <label style="font-size:10px;color:var(--txt-dim);">Fully-loaded $/hr<input type="number" min="1" data-capacity-fl placeholder="—" value="${b.fullyLoadedCost != null ? escapeHtml(String(b.fullyLoadedCost)) : ""}" style="${inputCss}display:block;"></label>
+            <label style="font-size:10px;color:var(--txt-dim);">Bill $/hr<input type="number" min="1" data-capacity-bill placeholder="—" value="${b.billRate != null ? escapeHtml(String(b.billRate)) : ""}" style="${inputCss}display:block;"></label>
           </div>`;
       }).join("")
     : `<div style="color:#5b7186;font-size:12px;margin-top:6px;">No personas captured in the portfolio yet — capture <em>Persona / Actors</em> in the grid first.</div>`;
@@ -11706,17 +11707,17 @@ function renderCapacityAssumptionsEditorHtml(capacityBands, personaKeys) {
     <details data-capacity-editor style="margin-top:10px;">
       <summary style="cursor:pointer;font-size:12px;color:#a855f7;font-weight:600;">Capacity assumptions (persona bands — required to estimate)</summary>
       <div style="margin-top:8px;">
-        <div style="color:#8aa0b8;font-size:11px;">Persona-band rates only — never individual salaries. Leave a rate blank to keep that persona "not computed."</div>
+        <div style="color:var(--txt-dim);font-size:11px;">Persona-band rates only — never individual salaries. Leave a rate blank to keep that persona "not computed."</div>
         ${rows}
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;padding-top:8px;border-top:1px solid #16263a;">
-          <label style="font-size:10px;color:#7a93b4;">Weekly hours basis<input type="number" min="1" max="80" data-capacity-weekly value="${escapeHtml(String(weekly))}" style="${inputCss}display:block;"></label>
-          <span style="font-size:11px;color:#8aa0b8;">1.0 FTE = ${CAPACITY_WORKING_WEEKS} weeks × ${escapeHtml(String(weekly))} hrs = <strong>${escapeHtml(String(hpy))}</strong> hrs/yr</span>
-          <button type="button" data-capacity-save style="margin-left:auto;background:#a855f7;color:#0d1b2e;border:none;border-radius:6px;padding:7px 14px;font-weight:600;font-size:12px;cursor:pointer;">Save assumptions</button>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;padding-top:8px;border-top:1px solid var(--sg-line);">
+          <label style="font-size:10px;color:var(--txt-dim);">Weekly hours basis<input type="number" min="1" max="80" data-capacity-weekly value="${escapeHtml(String(weekly))}" style="${inputCss}display:block;"></label>
+          <span style="font-size:11px;color:var(--txt-dim);">1.0 FTE = ${CAPACITY_WORKING_WEEKS} weeks × ${escapeHtml(String(weekly))} hrs = <strong>${escapeHtml(String(hpy))}</strong> hrs/yr</span>
+          <button type="button" data-capacity-save style="margin-left:auto;background:#a855f7;color:var(--deep);border:none;border-radius:6px;padding:7px 14px;font-weight:600;font-size:12px;cursor:pointer;">Save assumptions</button>
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;">
-          <span style="font-size:11px;color:#7a93b4;">Tag this session's department:</span>
+          <span style="font-size:11px;color:var(--txt-dim);">Tag this session's department:</span>
           <input type="text" data-capacity-dept placeholder="e.g. Operations" value="${escapeHtml(state.sessionMeta?.departmentTag?.value || "")}" style="${inputCss}width:160px;">
-          <button type="button" data-capacity-dept-save style="background:#0d1b2e;color:#a855f7;border:1px solid #3a2a5a;border-radius:6px;padding:6px 12px;font-weight:600;font-size:11px;cursor:pointer;">Tag department</button>
+          <button type="button" data-capacity-dept-save style="background:var(--deep);color:#a855f7;border:1px solid var(--sg-line);border-radius:6px;padding:6px 12px;font-weight:600;font-size:11px;cursor:pointer;">Tag department</button>
         </div>
       </div>
     </details>`;
@@ -11732,26 +11733,26 @@ function renderPortfolioCapacityRollupHtml(model) {
   const cell = (v) => v == null ? `<span style="color:#5b7186;">not computed</span>` : usdRound(v);
   const deptRows = model.departments.map((d) => {
     const personaRows = d.personas.map((p) => `
-      <tr style="border-top:1px solid #16263a;">
-        <td style="padding:5px 8px;color:#cfe0f2;">${escapeHtml(p.persona)} ${provenanceBadgeHtml(p.personaProvenance.source, p.personaProvenance.confidence)}</td>
-        <td style="padding:5px 8px;text-align:right;color:#8aa0b8;">${fte(p.fte)}</td>
+      <tr style="border-top:1px solid var(--sg-line);">
+        <td style="padding:5px 8px;color:var(--txt);">${escapeHtml(p.persona)} ${provenanceBadgeHtml(p.personaProvenance.source, p.personaProvenance.confidence)}</td>
+        <td style="padding:5px 8px;text-align:right;color:var(--txt-dim);">${fte(p.fte)}</td>
         <td style="padding:5px 8px;text-align:right;" class="ds-num-amber">${cell(p.cost)}</td>
         <td style="padding:5px 8px;text-align:right;" class="ds-num-teal">${cell(p.bill)}</td>
       </tr>`).join("");
     return `
       <tbody>
-        <tr><td colspan="4" style="padding:8px 8px 2px;color:#7a93b4;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;">${escapeHtml(d.department)} ${provenanceBadgeHtml(d.personas[0]?.departmentProvenance?.source, d.personas[0]?.departmentProvenance?.confidence)}</td></tr>
+        <tr><td colspan="4" style="padding:8px 8px 2px;color:var(--txt-dim);font-size:11px;text-transform:uppercase;letter-spacing:0.05em;">${escapeHtml(d.department)} ${provenanceBadgeHtml(d.personas[0]?.departmentProvenance?.source, d.personas[0]?.departmentProvenance?.confidence)}</td></tr>
         ${personaRows}
       </tbody>`;
   }).join("");
   const t = model.recurringTotals;
   const dedupNote = model.dedupedCount ? ` · ${model.dedupedCount} duplicate-mapped workflow${model.dedupedCount === 1 ? "" : "s"} de-duplicated` : "";
   const projectLine = model.projectTotals.count
-    ? `<div style="margin-top:10px;color:#8aa0b8;font-size:12px;">One-off project savings (kept separate from run-rate): <strong>${fte(model.projectTotals.hours)} hrs</strong> · <span class="ds-num-amber">${usdRound(model.projectTotals.value)}</span> across ${model.projectTotals.count} project workflow${model.projectTotals.count === 1 ? "" : "s"}.</div>`
+    ? `<div style="margin-top:10px;color:var(--txt-dim);font-size:12px;">One-off project savings (kept separate from run-rate): <strong>${fte(model.projectTotals.hours)} hrs</strong> · <span class="ds-num-amber">${usdRound(model.projectTotals.value)}</span> across ${model.projectTotals.count} project workflow${model.projectTotals.count === 1 ? "" : "s"}.</div>`
     : "";
   return `
     <div style="margin-top:12px;">
-      <div style="font-size:11px;color:#7a93b4;margin-bottom:6px;">Recurring run-rate by department / persona (estimated)${dedupNote}</div>
+      <div style="font-size:11px;color:var(--txt-dim);margin-bottom:6px;">Recurring run-rate by department / persona (estimated)${dedupNote}</div>
       <table style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead><tr style="color:#5b7186;font-size:10px;text-transform:uppercase;letter-spacing:0.05em;">
           <th style="text-align:left;padding:4px 8px;">Department / persona</th>
@@ -11760,9 +11761,9 @@ function renderPortfolioCapacityRollupHtml(model) {
           <th style="text-align:right;padding:4px 8px;">Bill value/yr</th>
         </tr></thead>
         ${deptRows}
-        <tfoot><tr style="border-top:2px solid #1e3350;font-weight:700;">
-          <td style="padding:6px 8px;color:#e8f4ff;">Run-rate total · ${fte(t.fte)} FTE</td>
-          <td style="padding:6px 8px;text-align:right;color:#8aa0b8;">${fte(t.fte)}</td>
+        <tfoot><tr style="border-top:2px solid var(--sg-line);font-weight:700;">
+          <td style="padding:6px 8px;color:var(--txt);">Run-rate total · ${fte(t.fte)} FTE</td>
+          <td style="padding:6px 8px;text-align:right;color:var(--txt-dim);">${fte(t.fte)}</td>
           <td style="padding:6px 8px;text-align:right;" class="ds-num-amber">${t.costComputed ? usdRound(t.cost) : `${usdRound(t.cost)} +`}</td>
           <td style="padding:6px 8px;text-align:right;" class="ds-num-teal">${t.billComputed ? usdRound(t.bill) : `${usdRound(t.bill)} +`}</td>
         </tr></tfoot>
@@ -11784,14 +11785,14 @@ function renderPortfolioCapacityHtml() {
   const model = buildPortfolioCapacityModel(items, state.capacityBands);
   const personaKeys = portfolio.filter((it) => it.valueComputed && it.mode === "recurring").map((it) => it.personaKey).filter(Boolean);
   const rollup = renderPortfolioCapacityRollupHtml(model);
-  const inputsNeeded = rollup ? "" : `<div style="margin-top:10px;color:#8aa0b8;font-size:12px;">Add at least one persona-band rate (or tag a department) below to estimate capacity. Values are estimates, drawn only from workflows whose business case you computed.</div>`;
+  const inputsNeeded = rollup ? "" : `<div style="margin-top:10px;color:var(--txt-dim);font-size:12px;">Add at least one persona-band rate (or tag a department) below to estimate capacity. Values are estimates, drawn only from workflows whose business case you computed.</div>`;
   return `
-    <div class="ds-panel" style="padding:16px 18px;margin-bottom:20px;border:1px solid #1e3350;border-radius:10px;">
+    <div class="ds-panel" style="padding:16px 18px;margin-bottom:20px;border:1px solid var(--sg-line);border-radius:10px;">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
-        <strong style="font-size:1rem;color:#e8f4ff;">Capacity (estimated)</strong>
+        <strong style="font-size:1rem;color:var(--txt);">Capacity (estimated)</strong>
         <span class="ds-badge ds-badge-amber">Estimate · explicit compute only</span>
       </div>
-      <div style="font-size:11px;color:#8aa0b8;">Recurring run-rate vs one-off project savings, by department and persona — using only workflows whose business case you computed, and persona-band rates you supply.</div>
+      <div style="font-size:11px;color:var(--txt-dim);">Recurring run-rate vs one-off project savings, by department and persona — using only workflows whose business case you computed, and persona-band rates you supply.</div>
       ${rollup}${inputsNeeded}
       ${renderCapacityAssumptionsEditorHtml(state.capacityBands, personaKeys)}
     </div>`;
@@ -11854,17 +11855,17 @@ function portfolioIntelligenceHtml() {
   const dots = valued.map((it) => {
     const x = padL + (Math.max(0, Math.min(100, it.readinessScore || 0)) / 100) * plotW;
     const y = padT + plotH - (it.value / maxValue) * plotH;
-    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="7" fill="${opportunityTierColor(it.tier)}" opacity="0.85" stroke="#0d1b2e" stroke-width="1.5"><title>${escapeHtml(it.name)} · ${usd(it.value)} · readiness ${it.readinessScore}</title></circle>`;
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="7" fill="${opportunityTierColor(it.tier)}" opacity="0.85" stroke="var(--deep)" stroke-width="1.5"><title>${escapeHtml(it.name)} · ${usd(it.value)} · readiness ${it.readinessScore}</title></circle>`;
   }).join("");
   const scatter = valued.length
-    ? `<svg viewBox="0 0 ${W} ${H}" width="100%" style="background:#111e2e;border-radius:8px;">
-         <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + plotH}" stroke="#2a3f5f"></line>
-         <line x1="${padL}" y1="${padT + plotH}" x2="${padL + plotW}" y2="${padT + plotH}" stroke="#2a3f5f"></line>
+    ? `<svg viewBox="0 0 ${W} ${H}" width="100%" style="background:var(--deep2);border-radius:8px;">
+         <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + plotH}" stroke="var(--sg-line)"></line>
+         <line x1="${padL}" y1="${padT + plotH}" x2="${padL + plotW}" y2="${padT + plotH}" stroke="var(--sg-line)"></line>
          <text x="${padL + plotW / 2}" y="${H - 6}" text-anchor="middle" font-size="10" fill="#556677">Readiness →</text>
          <text x="12" y="${padT + plotH / 2}" text-anchor="middle" font-size="10" fill="#556677" transform="rotate(-90 12 ${padT + plotH / 2})">Value ↑</text>
          ${dots}
        </svg>`
-    : `<div style="color:#8aa0b8;font-size:0.82rem;padding:10px 0;">No workflow in the portfolio has an explicit business case yet — compute one to place it on the value axis.</div>`;
+    : `<div style="color:var(--txt-dim);font-size:0.82rem;padding:10px 0;">No workflow in the portfolio has an explicit business case yet — compute one to place it on the value axis.</div>`;
 
   const rankRow = (it, idx) => {
     const valueCell = it.valueComputed
@@ -11872,26 +11873,26 @@ function portfolioIntelligenceHtml() {
       : `<span style="font-size:12px;color:#5b7186;">value not computed</span>`;
     const readyCell = it.readinessScore == null ? "—" : `${it.readinessScore} · ${escapeHtml(it.readinessLabel)}`;
     return `
-      <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:#0d1b2e;border:1px solid #1a2a3a;border-radius:8px;">
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--deep);border:1px solid var(--deep2);border-radius:8px;">
         <span style="color:#5b7186;font-size:12px;width:18px;text-align:right;">${idx + 1}</span>
-        <span style="flex:1;color:#dde8f5;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(it.name)}</span>
+        <span style="flex:1;color:var(--txt);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(it.name)}</span>
         ${valueCell}
-        <span style="font-size:11px;color:#8aa0b8;width:150px;text-align:right;">${readyCell}</span>
+        <span style="font-size:11px;color:var(--txt-dim);width:150px;text-align:right;">${readyCell}</span>
       </div>`;
   };
   const rankedList = model.ranked.map(rankRow).join("");
 
   const clusterHtml = model.clusters.length
     ? model.clusters.slice(0, 8).map((c) => `
-        <div style="display:flex;gap:8px;align-items:baseline;font-size:12px;color:#8aa0b8;padding:4px 0;">
+        <div style="display:flex;gap:8px;align-items:baseline;font-size:12px;color:var(--txt-dim);padding:4px 0;">
           <span style="color:#00d4b4;font-weight:600;">${escapeHtml(c.label)}</span>
           <span>${c.sessionIds.length} workflows</span>
         </div>`).join("")
     : `<div style="color:#5b7186;font-size:12px;">No shared systems or knowledge across saved workflows yet.</div>`;
 
   const currentNote = model.current
-    ? `<span style="font-size:11px;color:#8aa0b8;">This session (<strong>${escapeHtml(model.current.name)}</strong>) is shown separately and is not counted in these portfolio figures.</span>`
-    : `<span style="font-size:11px;color:#8aa0b8;">Portfolio reads your saved workflows; the current session is counted only once it is saved.</span>`;
+    ? `<span style="font-size:11px;color:var(--txt-dim);">This session (<strong>${escapeHtml(model.current.name)}</strong>) is shown separately and is not counted in these portfolio figures.</span>`
+    : `<span style="font-size:11px;color:var(--txt-dim);">Portfolio reads your saved workflows; the current session is counted only once it is saved.</span>`;
 
   const totals = model.totals;
   const totalsStrip = `
@@ -11902,9 +11903,9 @@ function portfolioIntelligenceHtml() {
     </div>`;
 
   return `
-    <div class="ds-panel" style="padding:16px 18px;margin-bottom:20px;border:1px solid #1e3350;border-radius:10px;">
+    <div class="ds-panel" style="padding:16px 18px;margin-bottom:20px;border:1px solid var(--sg-line);border-radius:10px;">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
-        <strong style="font-size:1rem;color:#e8f4ff;">Portfolio intelligence</strong>
+        <strong style="font-size:1rem;color:var(--txt);">Portfolio intelligence</strong>
         <span class="ds-badge ds-badge-teal">Across saved workflows</span>
       </div>
       ${currentNote}
@@ -11944,7 +11945,7 @@ function renderAnalysisTabOpportunities() {
     : "—";
 
   const statCard = (label, value) => `
-    <div style="background:#1a2d42;border:1px solid #2a3f5f;border-radius:10px;padding:24px 20px;flex:1;text-align:center;">
+    <div style="background:var(--deep2);border:1px solid var(--sg-line);border-radius:10px;padding:24px 20px;flex:1;text-align:center;">
       <div style="font-size:2rem;font-weight:700;color:#00d4b4;">${value}</div>
       <div style="font-size:0.72rem;color:#8899aa;text-transform:uppercase;letter-spacing:0.08em;margin-top:6px;">${label}</div>
     </div>`;
@@ -11964,16 +11965,16 @@ function renderAnalysisTabOpportunities() {
         const cx = oppMapRange(Number.isFinite(minutes) ? minutes : 30, 0, 180, 30, 350);
         const cy = oppMapRange(oppImpact(step) * 100, 0, 100, 240, 20);
         const label = `${stepDisplayName(step, index)} · ${stepPrimaryPattern(step)}`;
-        return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="9" fill="${opportunityTierColor(getStepOpportunityMeta(step).tier)}" opacity="0.85" stroke="#0d1b2e" stroke-width="1.5"><title>${escapeHtml(label)}</title></circle>`;
+        return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="9" fill="${opportunityTierColor(getStepOpportunityMeta(step).tier)}" opacity="0.85" stroke="var(--deep)" stroke-width="1.5"><title>${escapeHtml(label)}</title></circle>`;
       }).join("")
     : `<text x="190" y="135" text-anchor="middle" fill="#445566" font-size="12">No opportunities yet</text>`;
 
   const bubbleMap = `
-    <div style="flex:1.2;background:#111e2e;border-radius:10px;padding:20px;">
+    <div style="flex:1.2;background:var(--deep2);border-radius:10px;padding:20px;">
       <div style="font-size:0.85rem;color:#8899aa;margin-bottom:12px;">Effort vs Impact</div>
-      <svg viewBox="0 0 380 260" width="100%" style="background:#111e2e;">
-        <line x1="190" y1="10" x2="190" y2="250" stroke="#2a3f5f" stroke-dasharray="4"></line>
-        <line x1="10" y1="130" x2="370" y2="130" stroke="#2a3f5f" stroke-dasharray="4"></line>
+      <svg viewBox="0 0 380 260" width="100%" style="background:var(--deep2);">
+        <line x1="190" y1="10" x2="190" y2="250" stroke="var(--sg-line)" stroke-dasharray="4"></line>
+        <line x1="10" y1="130" x2="370" y2="130" stroke="var(--sg-line)" stroke-dasharray="4"></line>
         <text x="14" y="22" font-size="10" fill="#445566">QUICK WINS</text>
         <text x="210" y="22" font-size="10" fill="#445566">STRATEGIC BETS</text>
         <text x="14" y="252" font-size="10" fill="#445566">MONITOR</text>
@@ -11987,8 +11988,8 @@ function renderAnalysisTabOpportunities() {
   // --- Section 2, right: two stacked distribution bar charts -----------------
   const barRow = (label, fillColor, fillPct, valueText) => `
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-      <span style="color:#e2e8f0;font-size:0.8rem;width:110px;">${escapeHtml(label)}</span>
-      <div style="flex:1;background:#111e2e;border-radius:3px;height:14px;">
+      <span style="color:var(--txt);font-size:0.8rem;width:110px;">${escapeHtml(label)}</span>
+      <div style="flex:1;background:var(--deep2);border-radius:3px;height:14px;">
         <div style="background:${fillColor};height:100%;border-radius:3px;width:${fillPct}%;"></div>
       </div>
       <span style="color:#8899aa;font-size:0.75rem;width:20px;text-align:right;">${valueText}</span>
@@ -12046,9 +12047,9 @@ function renderAnalysisTabOpportunities() {
     return pa - pb || a.index - b.index;
   });
   const chip = (label, value) => `
-    <div style="background:#0d1b2e;border-radius:6px;padding:6px 12px;">
+    <div style="background:var(--deep);border-radius:6px;padding:6px 12px;">
       <span style="font-size:0.72rem;color:#8899aa;display:block;margin-bottom:2px;">${label}</span>
-      <span style="font-size:0.82rem;color:#e2e8f0;font-weight:600;">${escapeHtml(value)}</span>
+      <span style="font-size:0.82rem;color:var(--txt);font-weight:600;">${escapeHtml(value)}</span>
     </div>`;
 
   const cards = ranked.map(({ step, index }) => {
@@ -12059,10 +12060,10 @@ function renderAnalysisTabOpportunities() {
     let description = gridCellValue(step, "description") || gridCellValue(step, "painFriction") || "";
     if (description.length > 120) description = description.slice(0, 120) + "…";
     return `
-      <div style="background:#1a2d42;border:1px solid #2a3f5f;border-radius:10px;padding:20px;">
+      <div style="background:var(--deep2);border:1px solid var(--sg-line);border-radius:10px;padding:20px;">
         <div style="display:flex;justify-content:space-between;align-items:center;">
-          <span style="font-weight:600;color:#e2e8f0;font-size:0.95rem;">${escapeHtml(stepDisplayName(step, index))}</span>
-          <span style="background:#00d4b4;color:#0d1b2e;font-size:0.7rem;font-weight:700;border-radius:99px;padding:3px 10px;text-transform:uppercase;">${escapeHtml(stepPrimaryPattern(step))}</span>
+          <span style="font-weight:600;color:var(--txt);font-size:0.95rem;">${escapeHtml(stepDisplayName(step, index))}</span>
+          <span style="background:#00d4b4;color:var(--deep);font-size:0.7rem;font-weight:700;border-radius:99px;padding:3px 10px;text-transform:uppercase;">${escapeHtml(stepPrimaryPattern(step))}</span>
         </div>
         <div style="display:flex;gap:12px;margin-top:12px;">
           ${chip("CONFIDENCE", (oppConfidence(step) * 100).toFixed(0) + "%")}
@@ -12077,7 +12078,7 @@ function renderAnalysisTabOpportunities() {
   }).join("");
 
   const sectionThree = opps.length
-    ? `<h3 style="font-size:1rem;font-weight:600;color:#e2e8f0;margin-bottom:14px;">Ranked Opportunities</h3>
+    ? `<h3 style="font-size:1rem;font-weight:600;color:var(--txt);margin-bottom:14px;">Ranked Opportunities</h3>
        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">${cards}</div>`
     : `<div style="text-align:center;padding:60px 20px;color:#445566;font-size:0.9rem;">No AI opportunities identified yet. Complete the workflow grid to generate opportunities.</div>`;
 
@@ -12096,7 +12097,7 @@ function renderAnalysisTabOpportunities() {
   // workflow (byte-identical when unused).
   const departmentHeatmap = departmentHeatmapHtml();
   const thisWorkflowHeading = (portfolioHtml || capacityHtml || roleFootprint || departmentHeatmap)
-    ? `<h3 style="font-size:1rem;font-weight:600;color:#e2e8f0;margin:0 0 14px;">This workflow</h3>`
+    ? `<h3 style="font-size:1rem;font-weight:600;color:var(--txt);margin:0 0 14px;">This workflow</h3>`
     : "";
   container.innerHTML = opportunityPortfolioStripHtml() + portfolioHtml + capacityHtml + roleFootprint + departmentHeatmap + thisWorkflowHeading + statsRow + sectionTwo + sectionThree;
   wireCapacitySection(container);
@@ -12184,7 +12185,7 @@ function recipeHowToUse(step) {
 // Dark monospace code block holding the prompt, with a "Copy prompt" button in
 // the top-right corner.
 function recipePromptBlockHtml(prompt) {
-  return `<div style="position:relative;background:#0a1422;border:1px solid #1a2a3a;border-radius:8px;padding:16px 16px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.6;color:#cfe0f0;white-space:pre-wrap;word-break:break-word;"><button type="button" data-recipe-copy style="position:absolute;top:8px;right:8px;background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:4px 11px;font-size:11px;font-weight:700;cursor:pointer;">Copy prompt</button>${escapeHtml(prompt)}</div>`;
+  return `<div style="position:relative;background:var(--deep3);border:1px solid var(--deep2);border-radius:8px;padding:16px 16px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.6;color:var(--txt);white-space:pre-wrap;word-break:break-word;"><button type="button" data-recipe-copy style="position:absolute;top:8px;right:8px;background:#00d4b4;color:var(--deep);border:none;border-radius:6px;padding:4px 11px;font-size:11px;font-weight:700;cursor:pointer;">Copy prompt</button>${escapeHtml(prompt)}</div>`;
 }
 
 // === Business case estimate (PR 7, rate personalised PR 12a) ===============
@@ -12244,7 +12245,7 @@ function businessCaseBlockHtml(bc) {
   return `
     <div class="ds-card" style="padding:20px;margin-top:16px;">
       <div style="display:flex;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
-        <strong style="font-size:1rem;color:#e8f4ff;">Business Case Estimate</strong>
+        <strong style="font-size:1rem;color:var(--txt);">Business Case Estimate</strong>
         <span class="ds-badge ds-badge-teal" style="margin-left:8px;">Computed on request</span>
         ${estBadge}
       </div>
@@ -12265,9 +12266,9 @@ function businessCaseBlockForCurrentWorkflow() {
     return `
       <div class="ds-card" style="padding:14px 16px;margin-top:16px;">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-          <strong style="font-size:13px;color:#e8f4ff;">Business Case Estimate</strong>
-          <span style="font-size:12px;color:#8aa0b8;">Not computed yet — figures appear only when you ask for them.</span>
-          <button type="button" data-bc-compute style="margin-left:auto;background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Compute business case</button>
+          <strong style="font-size:13px;color:var(--txt);">Business Case Estimate</strong>
+          <span style="font-size:12px;color:var(--txt-dim);">Not computed yet — figures appear only when you ask for them.</span>
+          <button type="button" data-bc-compute style="margin-left:auto;background:#00d4b4;color:var(--deep);border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Compute business case</button>
         </div>
       </div>`;
   }
@@ -12283,12 +12284,12 @@ function businessCaseBlockForCurrentWorkflow() {
   // Invariant 2 footer: when computed, with what rate source, and the prior
   // figure preserved on recompute so a changed number is visibly a change.
   const footer = `
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid #16263a;font-size:11px;color:#5b7186;">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--sg-line);font-size:11px;color:#5b7186;">
       <span>Computed ${escapeHtml(when(snapshot.computedAt))}</span>
       <span>·</span>
       <span>Rate source: ${snapshot.rateSource === "override" ? "Settings override" : "role table"}</span>
       ${prior ? `<span>·</span><span>Previous: ${escapeHtml(priorFigure)} (computed ${escapeHtml(when(prior.computedAt))})</span>` : ""}
-      <button type="button" data-bc-compute style="margin-left:auto;background:#0d1b2e;color:#00d4b4;border:1px solid #1e4a44;border-radius:6px;padding:6px 14px;font-weight:600;font-size:12px;cursor:pointer;">Recompute</button>
+      <button type="button" data-bc-compute style="margin-left:auto;background:var(--deep);color:#00d4b4;border:1px solid var(--deep2);border-radius:6px;padding:6px 14px;font-weight:600;font-size:12px;cursor:pointer;">Recompute</button>
     </div>`;
   return businessCaseBlockHtml(snapshot).replace(/<\/div>\s*$/, footer + "</div>");
 }
@@ -12313,15 +12314,15 @@ function businessCaseScenariosBlockForCurrentWorkflow() {
   // toast-guards a missing name. The rate input pins a custom rate when given.
   const form = `
     <div data-bc-scenario-form style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px;">
-      <input data-bc-scenario-name type="text" placeholder="Scenario name (e.g. Conservative)" style="flex:1;min-width:160px;background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:8px 10px;color:#dde8f5;font-size:13px;">
-      <select data-bc-scenario-level style="background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:8px 10px;color:#dde8f5;font-size:13px;">${levelOptions}</select>
-      <input data-bc-scenario-rate type="number" min="1" placeholder="Rate $ (optional)" style="width:140px;background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;padding:8px 10px;color:#dde8f5;font-size:13px;">
-      <button type="button" data-bc-scenario-compute style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Compute scenario</button>
+      <input data-bc-scenario-name type="text" placeholder="Scenario name (e.g. Conservative)" style="flex:1;min-width:160px;background:var(--deep);border:1px solid var(--sg-line);border-radius:6px;padding:8px 10px;color:var(--txt);font-size:13px;">
+      <select data-bc-scenario-level style="background:var(--deep);border:1px solid var(--sg-line);border-radius:6px;padding:8px 10px;color:var(--txt);font-size:13px;">${levelOptions}</select>
+      <input data-bc-scenario-rate type="number" min="1" placeholder="Rate $ (optional)" style="width:140px;background:var(--deep);border:1px solid var(--sg-line);border-radius:6px;padding:8px 10px;color:var(--txt);font-size:13px;">
+      <button type="button" data-bc-scenario-compute style="background:#00d4b4;color:var(--deep);border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Compute scenario</button>
     </div>`;
 
   const header = `
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-      <strong style="font-size:1rem;color:#e8f4ff;">Business-case scenarios</strong>
+      <strong style="font-size:1rem;color:var(--txt);">Business-case scenarios</strong>
       <span class="ds-badge ds-badge-teal">Computed on request</span>
     </div>`;
 
@@ -12329,7 +12330,7 @@ function businessCaseScenariosBlockForCurrentWorkflow() {
     return `
       <div class="ds-card" style="padding:18px 20px;margin-top:16px;">
         ${header}
-        <div style="margin-top:6px;color:#8aa0b8;font-size:0.82rem;">Name a scenario and compute it to compare rate/level assumptions side by side. Each scenario is a saved snapshot — never recomputed on its own.</div>
+        <div style="margin-top:6px;color:var(--txt-dim);font-size:0.82rem;">Name a scenario and compute it to compare rate/level assumptions side by side. Each scenario is a saved snapshot — never recomputed on its own.</div>
         ${form}
       </div>`;
   }
@@ -12337,7 +12338,7 @@ function businessCaseScenariosBlockForCurrentWorkflow() {
   const range = businessCaseScenarioRange(scenarios);
   const rangeLine = range.count >= 2
     ? `<div style="margin-top:6px;color:#00d4b4;font-size:0.82rem;">Range across ${range.count} scenarios: <strong>${usd(range.min)}</strong> – <strong>${usd(range.max)}</strong>${range.mode === "role" ? " / year" : " project value"}</div>`
-    : `<div style="margin-top:6px;color:#8aa0b8;font-size:0.82rem;">Add another scenario to see a comparison range.</div>`;
+    : `<div style="margin-top:6px;color:var(--txt-dim);font-size:0.82rem;">Add another scenario to see a comparison range.</div>`;
 
   const cols = scenarios.map((entry) => {
     const s = entry.snapshot || {};
@@ -12355,17 +12356,17 @@ function businessCaseScenariosBlockForCurrentWorkflow() {
       ? `<div style="font-size:10px;color:#5b7186;margin-top:6px;">Prev: ${usd(businessCaseScenarioValue(entry.prior))}</div>`
       : "";
     return `
-      <div style="flex:1;min-width:150px;background:#0d1b2e;border:1px solid #1e3350;border-radius:8px;padding:12px;">
+      <div style="flex:1;min-width:150px;background:var(--deep);border:1px solid var(--sg-line);border-radius:8px;padding:12px;">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
-          <strong style="font-size:13px;color:#e8f4ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(entry.name)}</strong>
+          <strong style="font-size:13px;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(entry.name)}</strong>
           <button type="button" data-bc-scenario-remove="${escapeHtml(entry.name)}" title="Remove scenario" style="background:none;border:none;color:#5b7186;cursor:pointer;font-size:15px;line-height:1;">×</button>
         </div>
         <div class="ds-num-amber" style="font-size:1.4rem;font-weight:800;margin-top:8px;">${usd(value)}</div>
         <div style="font-size:10px;color:#5b7186;text-transform:uppercase;letter-spacing:0.05em;">${isRole ? "Annual value" : "Project value"}</div>
-        <div style="font-size:11px;color:#8aa0b8;margin-top:8px;">${Number.isFinite(hours) ? hours.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : "—"} ${hoursLabel}</div>
-        <div style="font-size:11px;color:#8aa0b8;">${escapeHtml(rateLabel)}</div>
+        <div style="font-size:11px;color:var(--txt-dim);margin-top:8px;">${Number.isFinite(hours) ? hours.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : "—"} ${hoursLabel}</div>
+        <div style="font-size:11px;color:var(--txt-dim);">${escapeHtml(rateLabel)}</div>
         ${priorLine}
-        <button type="button" data-bc-scenario-recompute="${escapeHtml(entry.name)}" style="margin-top:10px;width:100%;background:#0d1b2e;color:#00d4b4;border:1px solid #1e4a44;border-radius:6px;padding:6px 10px;font-weight:600;font-size:11px;cursor:pointer;">Recompute</button>
+        <button type="button" data-bc-scenario-recompute="${escapeHtml(entry.name)}" style="margin-top:10px;width:100%;background:var(--deep);color:#00d4b4;border:1px solid var(--deep2);border-radius:6px;padding:6px 10px;font-weight:600;font-size:11px;cursor:pointer;">Recompute</button>
       </div>`;
   }).join("");
 
@@ -12706,7 +12707,7 @@ function composeWhatIfMeta(originalScores, originalReasons, current) {
 // live what-if repaint use the same markup).
 function scoringSensitivityWarningHtml(sensitivity) {
   if (!sensitivity) return "";
-  return `<div style="display:flex;gap:8px;align-items:flex-start;background:#1a1500;border:1px solid #f59e0b55;border-radius:8px;padding:9px 12px;margin-top:10px;">
+  return `<div style="display:flex;gap:8px;align-items:flex-start;background:var(--deep2);border:1px solid #f59e0b55;border-radius:8px;padding:9px 12px;margin-top:10px;">
         <span style="color:#f59e0b;font-size:13px;line-height:1;flex-shrink:0;margin-top:1px;">⚠</span>
         <span style="font-size:12px;color:#f5c451;line-height:1.45;">${escapeHtml(sensitivity.message)}</span>
       </div>`;
@@ -12739,7 +12740,7 @@ function scoringTransparencyBlockHtml(step) {
   const rows = SCORING_PRINCIPLES.map((p) => {
     const reason = ps[p.key]?.reason || "";
     const buttons = [1, 2, 3].map((v) =>
-      `<button type="button" data-sc-btn="${p.key}" data-sc-val="${v}" style="width:26px;height:26px;border-radius:6px;border:1px solid #1e3350;background:#0d1b2e;color:#8899aa;font-size:12px;font-weight:700;cursor:pointer;">${v}</button>`
+      `<button type="button" data-sc-btn="${p.key}" data-sc-val="${v}" style="width:26px;height:26px;border-radius:6px;border:1px solid var(--sg-line);background:var(--deep);color:#8899aa;font-size:12px;font-weight:700;cursor:pointer;">${v}</button>`
     ).join("");
     // Slice 4: per-principle evidence — provenance badge is the primary visual;
     // the confidence number lives in the badge tooltip only (hover).
@@ -12750,7 +12751,7 @@ function scoringTransparencyBlockHtml(step) {
             <div style="display:flex;align-items:baseline;gap:8px;min-width:0;">
               ${provenanceBadgeHtml(item.source, item.confidence)}
               <span style="font-size:11px;color:#5b7186;flex-shrink:0;">${escapeHtml(CELL_PLAIN_NAMES[item.field] || item.field)}</span>
-              <span style="font-size:11px;color:#8aa0b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">“${escapeHtml(item.excerpt)}”</span>
+              <span style="font-size:11px;color:var(--txt-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">“${escapeHtml(item.excerpt)}”</span>
             </div>`).join("")}
         </div>`
       : "";
@@ -12762,18 +12763,18 @@ function scoringTransparencyBlockHtml(step) {
     if (p.key === "dataSensitivity") {
       const locked = p9SensitivityLocked(step);
       const hasBasis = FIELD_EDIT_DEFS.sensitivity.keys.some((key) => gridCellValue(step, key));
-      const btnCss = "background:#0d1b2e;color:#00d4b4;border:1px solid #1e4a44;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;";
+      const btnCss = "background:var(--deep);color:#00d4b4;border:1px solid var(--deep2);border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;";
       if (locked) {
         p9Controls = `
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px;">
-            <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#00d4b4;background:#0c2a26;border:1px solid #1e4a44;border-radius:99px;padding:2px 10px;">🔒 Locked by you — re-extraction can't change it</span>
+            <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#00d4b4;background:var(--deep2);border:1px solid var(--deep2);border-radius:99px;padding:2px 10px;">🔒 Locked by you — re-extraction can't change it</span>
             <button type="button" data-sc-p9-edit style="${btnCss}">Reclassify</button>
           </div>`;
       } else if (hasBasis) {
         p9Controls = `
           <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
             <button type="button" data-sc-p9-lock style="${btnCss}">Confirm &amp; lock</button>
-            <button type="button" data-sc-p9-edit style="background:#0d1b2e;color:#8899aa;border:1px solid #1e3350;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;">Edit basis</button>
+            <button type="button" data-sc-p9-edit style="background:var(--deep);color:#8899aa;border:1px solid var(--sg-line);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;">Edit basis</button>
           </div>`;
       } else {
         p9Controls = `
@@ -12783,9 +12784,9 @@ function scoringTransparencyBlockHtml(step) {
       }
     }
     return `
-      <div data-sc-row="${p.key}" style="display:flex;align-items:flex-start;gap:12px;padding:8px 0;border-top:1px solid #1e3350;">
+      <div data-sc-row="${p.key}" style="display:flex;align-items:flex-start;gap:12px;padding:8px 0;border-top:1px solid var(--sg-line);">
         <div style="flex:1;min-width:0;">
-          <div style="font-size:13px;color:#e8f4ff;">P${p.n} ${escapeHtml(p.name)}</div>
+          <div style="font-size:13px;color:var(--txt);">P${p.n} ${escapeHtml(p.name)}</div>
           <div data-sc-reason title="Click to expand" style="font-size:12px;color:#8899aa;line-height:1.4;margin-top:2px;cursor:pointer;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;">${escapeHtml(reason)}</div>
           ${evidenceHtml}
           ${p9Controls}
@@ -12804,8 +12805,8 @@ function scoringTransparencyBlockHtml(step) {
   return `
     <div class="ds-card" data-scoring-card data-step-id="${escapeHtml(String(stepId))}" data-originals='${escapeHtml(JSON.stringify(originals))}' data-reasons='${escapeHtml(JSON.stringify(reasons))}' style="padding:14px 16px;margin-top:16px;">
       <div data-sc-toggle role="button" tabindex="0" title="Click to expand or collapse the scoring breakdown" style="display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;">
-        <strong style="font-size:13px;color:#e8f4ff;">Scoring breakdown (10 principles)</strong>
-        <span data-sc-chevron style="flex-shrink:0;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;color:#00d4b4;font-size:15px;line-height:1;border:1px solid #1e4a44;border-radius:6px;background:#0c2a26;transition:transform 200ms ease;transform:rotate(-90deg);">▾</span>
+        <strong style="font-size:13px;color:var(--txt);">Scoring breakdown (10 principles)</strong>
+        <span data-sc-chevron style="flex-shrink:0;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;color:#00d4b4;font-size:15px;line-height:1;border:1px solid var(--deep2);border-radius:6px;background:var(--deep2);transition:transform 200ms ease;transform:rotate(-90deg);">▾</span>
       </div>
       <div data-sc-sensitivity>${sensitivityHtml}</div>
       <div data-sc-body style="display:none;margin-top:12px;">
@@ -12844,9 +12845,9 @@ function paintScoringCard(root) {
     if (ov != null && ov !== originals[p.key]) modified = true;
     root.querySelectorAll(`[data-sc-btn="${p.key}"]`).forEach((btn) => {
       const on = Number(btn.dataset.scVal) === Number(current[p.key]);
-      btn.style.background = on ? "#00d4b4" : "#0d1b2e";
-      btn.style.color = on ? "#0d1b2e" : "#8899aa";
-      btn.style.borderColor = on ? "#00d4b4" : "#1e3350";
+      btn.style.background = on ? "#00d4b4" : "var(--deep)";
+      btn.style.color = on ? "var(--deep)" : "#8899aa";
+      btn.style.borderColor = on ? "#00d4b4" : "var(--sg-line)";
     });
   });
 
@@ -12966,13 +12967,13 @@ function recipeWorkflowHeaderHtml() {
     : "";
   const familyChip = `
     <div style="position:relative;display:inline-block;margin-top:6px;">
-      <button type="button" data-family-chip title="Click to change the workflow family" style="display:inline-flex;align-items:center;gap:6px;background:transparent;color:#8899aa;border:1px solid #2a3f5f;border-radius:99px;padding:2px 10px;font-size:10px;font-weight:500;letter-spacing:0.03em;cursor:pointer;">${familyDot}${escapeHtml(family || "Set family")} ▾</button>
-      <div data-family-menu style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:40;background:#0d1b2e;border:1px solid #1e3350;border-radius:8px;padding:4px 0;box-shadow:0 8px 24px rgba(0,0,0,0.45);">${familyOptions}</div>
+      <button type="button" data-family-chip title="Click to change the workflow family" style="display:inline-flex;align-items:center;gap:6px;background:transparent;color:#8899aa;border:1px solid var(--sg-line);border-radius:99px;padding:2px 10px;font-size:10px;font-weight:500;letter-spacing:0.03em;cursor:pointer;">${familyDot}${escapeHtml(family || "Set family")} ▾</button>
+      <div data-family-menu style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:40;background:var(--deep);border:1px solid var(--sg-line);border-radius:8px;padding:4px 0;box-shadow:0 8px 24px rgba(0,0,0,0.45);">${familyOptions}</div>
     </div>`;
   return `
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px;">
       <div>
-        <div style="font-size:16px;font-weight:700;color:#e8f4ff;">${escapeHtml(label)}</div>
+        <div style="font-size:16px;font-weight:700;color:var(--txt);">${escapeHtml(label)}</div>
         ${engagement ? `<div style="font-size:12px;color:#8899aa;margin-top:2px;">${escapeHtml(engagement)}</div>` : ""}
         ${familyChip}
       </div>
@@ -13276,18 +13277,18 @@ function currentOutcomeStatus() {
   return OUTCOME_STATUS_ORDER.includes(s) ? s : "not_started";
 }
 
-// Status pill + inline 3-button toggle. Background is always #1e3350; only the
+// Status pill + inline 3-button toggle. Background is always var(--sg-line); only the
 // text/border colour changes per status. The active button is highlighted, not
 // disabled, so every option stays clickable.
 function outcomeTrackerHtml(status) {
   const pillMeta = OUTCOME_STATUS_META[status];
-  const pill = `<span style="background:#1e3350;color:${pillMeta.text};font-size:11px;font-weight:600;padding:3px 10px;border-radius:99px;">${pillMeta.label}</span>`;
+  const pill = `<span style="background:var(--sg-line);color:${pillMeta.text};font-size:11px;font-weight:600;padding:3px 10px;border-radius:99px;">${pillMeta.label}</span>`;
   const toggle = OUTCOME_STATUS_ORDER.map((s) => {
     const meta = OUTCOME_STATUS_META[s];
     const active = s === status;
-    return `<button type="button" data-outcome-set="${s}" style="background:${active ? "#1e3350" : "transparent"};color:${active ? meta.text : "#5b7186"};border:1px solid ${active ? meta.text : "#1e3350"};border-radius:6px;padding:2px 9px;font-size:11px;font-weight:600;cursor:pointer;">${meta.label}</button>`;
+    return `<button type="button" data-outcome-set="${s}" style="background:${active ? "var(--sg-line)" : "transparent"};color:${active ? meta.text : "#5b7186"};border:1px solid ${active ? meta.text : "var(--sg-line)"};border-radius:6px;padding:2px 9px;font-size:11px;font-weight:600;cursor:pointer;">${meta.label}</button>`;
   }).join("");
-  return `<div style="margin-top:10px;padding-top:10px;border-top:1px solid #16263a;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+  return `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--sg-line);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
     <span style="color:#5b7186;font-size:11px;">Outcome:</span>
     ${pill}
     <span style="display:inline-flex;gap:5px;margin-left:4px;">${toggle}</span>
@@ -13975,8 +13976,8 @@ function artifactMetricPill(label, value, cls = "ds-badge-dim", options = {}) {
 
 function artifactList(items, fallback = "Nothing critical to show yet.") {
   const list = (Array.isArray(items) ? items : []).filter(Boolean);
-  if (!list.length) return `<p style="margin:0;color:#8aa0b8;font-size:12px;line-height:1.5;">${escapeHtml(fallback)}</p>`;
-  return `<ul style="margin:0;padding-left:18px;color:#8aa0b8;font-size:12px;line-height:1.55;">${list.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+  if (!list.length) return `<p style="margin:0;color:var(--txt-dim);font-size:12px;line-height:1.5;">${escapeHtml(fallback)}</p>`;
+  return `<ul style="margin:0;padding-left:18px;color:var(--txt-dim);font-size:12px;line-height:1.55;">${list.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
 }
 
 function artifactActionFromGap(item = "") {
@@ -14024,10 +14025,10 @@ function artifactTestCasePackHtml(ir) {
   return `
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;">
       ${primary.map(({ label, test }) => `
-        <div style="background:#0a1422;border:1px solid #16263a;border-radius:8px;padding:10px 12px;">
+        <div style="background:var(--deep3);border:1px solid var(--sg-line);border-radius:8px;padding:10px 12px;">
           <div class="ds-micro" style="margin-bottom:6px;">${escapeHtml(label)}</div>
-          <p style="margin:0 0 6px;color:#c8d8e8;font-size:12px;line-height:1.45;"><strong>Given:</strong> ${escapeHtml(test.given || "Representative input is available.")}</p>
-          <p style="margin:0 0 6px;color:#8aa0b8;font-size:12px;line-height:1.45;"><strong>Expect:</strong> ${escapeHtml(test.expected || "Output is ready for review.")}</p>
+          <p style="margin:0 0 6px;color:var(--txt);font-size:12px;line-height:1.45;"><strong>Given:</strong> ${escapeHtml(test.given || "Representative input is available.")}</p>
+          <p style="margin:0 0 6px;color:var(--txt-dim);font-size:12px;line-height:1.45;"><strong>Expect:</strong> ${escapeHtml(test.expected || "Output is ready for review.")}</p>
           <p style="margin:0;color:#5b7186;font-size:11px;line-height:1.45;"><strong>Reviewer:</strong> ${escapeHtml(test.reviewer || "Human reviewer confirms before use.")}</p>
         </div>`).join("")}
     </div>
@@ -14048,7 +14049,7 @@ function artifactEvidenceQualityHtml(ir) {
     ${artifactList(ir?.humanReview || [], "Human review rule not captured yet.")}
     <div class="ds-micro" style="margin:12px 0 6px;">Do not automate</div>
     ${artifactList(ir?.doNotAutomateNotes || [], "No automation limits captured yet.")}
-    <div style="margin-top:10px;background:#160d24;border:1px solid #a78bfa44;border-radius:8px;padding:10px 12px;color:#c4b5fd;font-size:12px;line-height:1.5;">${escapeHtml(ir?.noIntegrationNote || NO_INTEGRATION_MVP_NOTE)}</div>
+    <div style="margin-top:10px;background:var(--deep2);border:1px solid #a78bfa44;border-radius:8px;padding:10px 12px;color:#c4b5fd;font-size:12px;line-height:1.5;">${escapeHtml(ir?.noIntegrationNote || NO_INTEGRATION_MVP_NOTE)}</div>
     <div style="margin-top:10px;">
       <div class="ds-micro" style="margin-bottom:6px;">Future integrations</div>
       ${artifactList(future, FUTURE_INTEGRATION_NOTE)}
@@ -14058,15 +14059,15 @@ function artifactEvidenceQualityHtml(ir) {
 function artifactAccordionHtml(title, subtitle, body, options = {}) {
   const badge = options.badge ? `<span class="ds-badge ${options.badgeClass || "ds-badge-dim"}">${escapeHtml(options.badge)}</span>` : "";
   return `
-    <details class="artifact-accordion" ${options.open ? "open" : ""} style="border:1px solid #16263a;border-radius:8px;background:#0a1422;margin-top:8px;overflow:hidden;">
-      <summary style="display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;padding:10px 12px;color:#e8f4ff;font-size:13px;font-weight:700;list-style:none;">
+    <details class="artifact-accordion" ${options.open ? "open" : ""} style="border:1px solid var(--sg-line);border-radius:8px;background:var(--deep3);margin-top:8px;overflow:hidden;">
+      <summary style="display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;padding:10px 12px;color:var(--txt);font-size:13px;font-weight:700;list-style:none;">
         <span style="display:flex;flex-direction:column;gap:3px;min-width:0;">
           <span>${escapeHtml(title)}</span>
           ${subtitle ? `<span style="color:#5b7186;font-size:11px;font-weight:600;line-height:1.35;">${escapeHtml(subtitle)}</span>` : ""}
         </span>
         ${badge}
       </summary>
-      <div style="border-top:1px solid #16263a;padding:12px;">${body}</div>
+      <div style="border-top:1px solid var(--sg-line);padding:12px;">${body}</div>
     </details>`;
 }
 
@@ -14085,7 +14086,7 @@ function engineeringImplementationTestPlanHtml(packages = []) {
   return `
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;">
       ${Object.entries(groups).map(([label, items]) => `
-        <div style="background:#0a1422;border:1px solid #16263a;border-radius:8px;padding:10px 12px;">
+        <div style="background:var(--deep3);border:1px solid var(--sg-line);border-radius:8px;padding:10px 12px;">
           <div class="ds-micro" style="margin-bottom:6px;">${escapeHtml(label)}</div>
           ${artifactList(items.slice(0, 4), `Add a ${label.toLowerCase()} test after a package is available.`)}
         </div>`).join("")}
@@ -14187,7 +14188,7 @@ function irDiffHtml(priorIr, currentIr) {
   }
   const kindColor = { added: "#00d4b4", removed: "#ff4fc8", changed: "#f59e0b" };
   const rows = diff.fields.map((f) => {
-    const color = kindColor[f.kind] || "#8aa0b8";
+    const color = kindColor[f.kind] || "var(--txt-dim)";
     const badge = `<span style="display:inline-block;background:${color}22;color:${color};border:1px solid ${color}55;border-radius:99px;padding:0 7px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">${f.kind}</span>`;
     let detail;
     if (f.addedItems || f.removedItems) {
@@ -14195,13 +14196,13 @@ function irDiffHtml(priorIr, currentIr) {
         ...(f.addedItems || []).map((v) => `<span style="color:#00d4b4;">+ ${escapeHtml(irDiffItemLabel(v))}</span>`),
         ...(f.removedItems || []).map((v) => `<span style="color:#ff4fc8;">− ${escapeHtml(irDiffItemLabel(v))}</span>`)
       ];
-      detail = lines.length ? lines.join("<br>") : `<span style="color:#8aa0b8;">order changed (${f.beforeCount} → ${f.afterCount})</span>`;
+      detail = lines.length ? lines.join("<br>") : `<span style="color:var(--txt-dim);">order changed (${f.beforeCount} → ${f.afterCount})</span>`;
     } else {
-      detail = `<span style="color:#8aa0b8;">${escapeHtml(irDiffScalar(f.before))}</span> → <span style="color:#cfe0f2;">${escapeHtml(irDiffScalar(f.after))}</span>`;
+      detail = `<span style="color:var(--txt-dim);">${escapeHtml(irDiffScalar(f.before))}</span> → <span style="color:var(--txt);">${escapeHtml(irDiffScalar(f.after))}</span>`;
     }
     return `
-      <div style="padding:6px 0;border-top:1px solid #16263a;">
-        <div style="display:flex;align-items:center;gap:6px;">${badge}<strong style="color:#cfe0f2;font-size:11px;">${escapeHtml(f.field)}</strong></div>
+      <div style="padding:6px 0;border-top:1px solid var(--sg-line);">
+        <div style="display:flex;align-items:center;gap:6px;">${badge}<strong style="color:var(--txt);font-size:11px;">${escapeHtml(f.field)}</strong></div>
         <div style="margin-top:3px;font-size:11px;line-height:1.5;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">${detail}</div>
       </div>`;
   }).join("");
@@ -14210,7 +14211,7 @@ function irDiffHtml(priorIr, currentIr) {
 
 function artifactSnapshotHtml(snapshot, prior, emptyText) {
   if (!snapshot) {
-    return `<div style="background:#0a1422;border:1px dashed #1a2a3a;border-radius:8px;padding:12px 14px;color:#5b7186;font-size:12px;line-height:1.5;">${escapeHtml(emptyText)}</div>`;
+    return `<div style="background:var(--deep3);border:1px dashed var(--deep2);border-radius:8px;padding:12px 14px;color:#5b7186;font-size:12px;line-height:1.5;">${escapeHtml(emptyText)}</div>`;
   }
   const meta = artifactSnapshotMeta(snapshot);
   const priorMeta = artifactSnapshotMeta(prior);
@@ -14221,16 +14222,16 @@ function artifactSnapshotHtml(snapshot, prior, emptyText) {
     ? `<span class="ds-badge ds-badge-teal" title="${escapeHtml(`Reviewer: ${reviewed.review.reviewer.name}${reviewed.review.reviewer.email ? ` (${reviewed.review.reviewer.email})` : ""}${reviewed.review.reviewedAt ? ` · ${new Date(Date.parse(reviewed.review.reviewedAt)).toLocaleString("en-US")}` : ""}`)}">🔒 ${escapeHtml(reviewed.review.label)}</span>`
     : "";
   return `
-    <div style="background:#0a1422;border:1px solid #1a2a3a;border-radius:8px;padding:12px 14px;">
+    <div style="background:var(--deep3);border:1px solid var(--deep2);border-radius:8px;padding:12px 14px;">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
         <span class="ds-badge ds-badge-teal">${escapeHtml(meta.artifactLabel)}</span>
         <span class="ds-badge ${artifactReadinessBadgeClass(meta.readinessLabel)}">${escapeHtml(meta.readinessLabel)}${meta.readinessScore !== null ? ` · ${meta.readinessScore}/100` : ""}</span>
         ${reviewedBadge}
         ${meta.when ? `<span style="font-size:11px;color:#5b7186;">Compiled ${escapeHtml(meta.when)}</span>` : ""}
       </div>
-      <div style="font-size:12px;color:#8aa0b8;line-height:1.55;">${escapeHtml(shortArtifactPreview(meta.content))}</div>
-      ${(prior && prior.package && prior.package.ir && snapshot.package && snapshot.package.ir) ? `<details style="margin-top:8px;"><summary style="font-size:11px;color:#8aa0b8;cursor:pointer;">IR changes vs previous version</summary><div style="margin-top:6px;">${irDiffHtml(prior.package.ir, snapshot.package.ir)}</div></details>` : ""}
-      ${prior ? `<details style="margin-top:8px;"><summary style="font-size:11px;color:#8aa0b8;cursor:pointer;">Previous artifact preserved${priorMeta.when ? ` · ${escapeHtml(priorMeta.when)}` : ""}</summary><div style="margin-top:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.55;color:#8aa0b8;white-space:pre-wrap;">${escapeHtml((priorMeta.content || "").slice(0, 1800))}</div></details>` : ""}
+      <div style="font-size:12px;color:var(--txt-dim);line-height:1.55;">${escapeHtml(shortArtifactPreview(meta.content))}</div>
+      ${(prior && prior.package && prior.package.ir && snapshot.package && snapshot.package.ir) ? `<details style="margin-top:8px;"><summary style="font-size:11px;color:var(--txt-dim);cursor:pointer;">IR changes vs previous version</summary><div style="margin-top:6px;">${irDiffHtml(prior.package.ir, snapshot.package.ir)}</div></details>` : ""}
+      ${prior ? `<details style="margin-top:8px;"><summary style="font-size:11px;color:var(--txt-dim);cursor:pointer;">Previous artifact preserved${priorMeta.when ? ` · ${escapeHtml(priorMeta.when)}` : ""}</summary><div style="margin-top:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.55;color:var(--txt-dim);white-space:pre-wrap;">${escapeHtml((priorMeta.content || "").slice(0, 1800))}</div></details>` : ""}
     </div>`;
 }
 
@@ -14267,16 +14268,16 @@ function artifactStudioHeaderHtml(steps) {
       <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap;">
         <div style="flex:1;min-width:260px;">
           <div class="ds-micro" style="margin-bottom:6px;">Implementation Package Builder</div>
-          <h3 style="margin:0;color:#e8f4ff;font-size:18px;">Best starting point: ${escapeHtml(first?.recommendedArtifact?.label || "Recommended package")}</h3>
-          <p style="margin:8px 0 0;color:#8aa0b8;font-size:13px;line-height:1.55;">${escapeHtml(first?.recommendationReason || "Capture a workflow step to see the recommended artifact.")}</p>
+          <h3 style="margin:0;color:var(--txt);font-size:18px;">Best starting point: ${escapeHtml(first?.recommendedArtifact?.label || "Recommended package")}</h3>
+          <p style="margin:8px 0 0;color:var(--txt-dim);font-size:13px;line-height:1.55;">${escapeHtml(first?.recommendationReason || "Capture a workflow step to see the recommended artifact.")}</p>
           <p style="margin:8px 0 0;color:#5b7186;font-size:12px;line-height:1.45;">${escapeHtml(NO_INTEGRATION_MVP_NOTE)}</p>
         </div>
         <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
           <label style="display:flex;flex-direction:column;gap:5px;font-size:11px;color:#5b7186;text-transform:uppercase;letter-spacing:0.06em;">Use this in
-            <select id="artifactTargetSurfaceSelect" style="background:#0a1525;color:#e8f4ff;border:1px solid #1e3350;border-radius:7px;padding:8px 10px;font-size:13px;min-width:220px;">${surfaceOptions}</select>
+            <select id="artifactTargetSurfaceSelect" style="background:var(--deep3);color:var(--txt);border:1px solid var(--sg-line);border-radius:7px;padding:8px 10px;font-size:13px;min-width:220px;">${surfaceOptions}</select>
           </label>
           <label style="display:flex;flex-direction:column;gap:5px;font-size:11px;color:#5b7186;text-transform:uppercase;letter-spacing:0.06em;">Build for
-            <select id="artifactScopeSelect" style="background:#0a1525;color:#e8f4ff;border:1px solid #1e3350;border-radius:7px;padding:8px 10px;font-size:13px;min-width:160px;">${scopeOptions}</select>
+            <select id="artifactScopeSelect" style="background:var(--deep3);color:var(--txt);border:1px solid var(--sg-line);border-radius:7px;padding:8px 10px;font-size:13px;min-width:160px;">${scopeOptions}</select>
           </label>
         </div>
       </div>
@@ -14297,7 +14298,7 @@ function artifactOverviewHtml(pkg) {
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
       <div class="ds-card-inner" style="padding:10px 12px;">
         <div class="ds-micro" style="margin-bottom:4px;">Recommended surface</div>
-        <strong style="color:#e8f4ff;font-size:13px;">${escapeHtml(surfaceLabel)}</strong>
+        <strong style="color:var(--txt);font-size:13px;">${escapeHtml(surfaceLabel)}</strong>
       </div>
       <div class="ds-card-inner" style="padding:10px 12px;">
         <div class="ds-micro" style="margin-bottom:4px;">Readiness</div>
@@ -14316,14 +14317,14 @@ function artifactOverviewHtml(pkg) {
 function artifactImportableConfigHtml(pkg) {
   const blocks = Array.isArray(pkg?.recommendedArtifact?.copyBlocks) ? pkg.recommendedArtifact.copyBlocks : [];
   if (!blocks.length) return `<div style="color:#5b7186;font-size:12px;">No importable configuration for this surface.</div>`;
-  const intro = `<p style="margin:0 0 8px;color:#8aa0b8;font-size:12px;line-height:1.5;">Copy-paste / import-ready configuration for the recommended surface. No live integrations — actions are a future candidate only.</p>`;
+  const intro = `<p style="margin:0 0 8px;color:var(--txt-dim);font-size:12px;line-height:1.5;">Copy-paste / import-ready configuration for the recommended surface. No live integrations — actions are a future candidate only.</p>`;
   return intro + blocks.map((b) => `
     <div style="margin-top:8px;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">
-        <span style="font-size:11px;color:#8aa0b8;">${escapeHtml(b.label)}</span>
+        <span style="font-size:11px;color:var(--txt-dim);">${escapeHtml(b.label)}</span>
         <button type="button" class="secondary-button compact" data-config-copy="${escapeHtml(b.id)}">Copy</button>
       </div>
-      <pre data-config-text="${escapeHtml(b.id)}" style="margin:0;background:#0a1422;border:1px solid #1a2a3a;border-radius:8px;padding:10px 12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.5;color:#9fb3c8;white-space:pre-wrap;word-break:break-word;max-height:300px;overflow:auto;">${escapeHtml(b.text)}</pre>
+      <pre data-config-text="${escapeHtml(b.id)}" style="margin:0;background:var(--deep3);border:1px solid var(--deep2);border-radius:8px;padding:10px 12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.5;color:var(--txt-dim);white-space:pre-wrap;word-break:break-word;max-height:300px;overflow:auto;">${escapeHtml(b.text)}</pre>
     </div>`).join("");
 }
 
@@ -14347,7 +14348,7 @@ function renderEvalSuiteHtml(stepId) {
   const suite = ensureEvalSuites()[stepId];
   if (!suite || !suite.current) {
     return `${note}
-      <p style="margin:0 0 10px;color:#8aa0b8;font-size:12px;line-height:1.5;">Promote this artifact's generated test cases into a named, versioned eval suite, then record pass/fail/n-a results over time and across model versions.</p>
+      <p style="margin:0 0 10px;color:var(--txt-dim);font-size:12px;line-height:1.5;">Promote this artifact's generated test cases into a named, versioned eval suite, then record pass/fail/n-a results over time and across model versions.</p>
       <button type="button" class="secondary-button compact" data-eval-promote="${escapeHtml(stepId)}">Promote test cases to eval suite</button>`;
   }
   const cur = suite.current;
@@ -14359,11 +14360,11 @@ function renderEvalSuiteHtml(stepId) {
     : `<span class="ds-badge ds-badge-dim">Not yet evaluated</span>`;
   const caseRows = cur.cases.map((c) => {
     const kindBadge = c.kind === "anti-goal" ? `<span class="ds-badge ds-badge-amber">Anti-goal</span>` : `<span class="ds-badge ds-badge-dim">Known-good</span>`;
-    const radios = ["pass", "fail", "n-a"].map((v) => `<label style="font-size:11px;color:#9fb3c8;margin-right:10px;cursor:pointer;"><input type="radio" name="eval-${escapeHtml(stepId)}-${escapeHtml(c.id)}" value="${v}"${v === "n-a" ? " checked" : ""}> ${v}</label>`).join("");
-    return `<div style="margin-top:8px;padding:8px 10px;background:#0a1422;border:1px solid #1a2a3a;border-radius:8px;">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><strong style="color:#cfe0f2;font-size:12px;">${escapeHtml(c.name)}</strong>${kindBadge}</div>
-      <p style="margin:4px 0 0;color:#9fb3c8;font-size:11px;line-height:1.5;"><span style="color:#5fb8a8;">Known-good:</span> ${escapeHtml(c.knownGood)}</p>
-      <p style="margin:2px 0 0;color:#9fb3c8;font-size:11px;line-height:1.5;"><span style="color:#f5a97a;">Anti-goal (must NOT):</span> ${escapeHtml(c.antiGoal)}</p>
+    const radios = ["pass", "fail", "n-a"].map((v) => `<label style="font-size:11px;color:var(--txt-dim);margin-right:10px;cursor:pointer;"><input type="radio" name="eval-${escapeHtml(stepId)}-${escapeHtml(c.id)}" value="${v}"${v === "n-a" ? " checked" : ""}> ${v}</label>`).join("");
+    return `<div style="margin-top:8px;padding:8px 10px;background:var(--deep3);border:1px solid var(--deep2);border-radius:8px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><strong style="color:var(--txt);font-size:12px;">${escapeHtml(c.name)}</strong>${kindBadge}</div>
+      <p style="margin:4px 0 0;color:var(--txt-dim);font-size:11px;line-height:1.5;"><span style="color:#5fb8a8;">Known-good:</span> ${escapeHtml(c.knownGood)}</p>
+      <p style="margin:2px 0 0;color:var(--txt-dim);font-size:11px;line-height:1.5;"><span style="color:#f5a97a;">Anti-goal (must NOT):</span> ${escapeHtml(c.antiGoal)}</p>
       <div style="margin-top:6px;">${radios}</div>
     </div>`;
   }).join("");
@@ -14374,28 +14375,28 @@ function renderEvalSuiteHtml(stepId) {
     const pass = cr.filter((x) => x.result === "pass").length;
     const fail = cr.filter((x) => x.result === "fail").length;
     const na = cr.filter((x) => x.result === "n-a").length;
-    return `<tr style="border-top:1px solid #16263a;"><td style="padding:5px 8px;color:#5b7186;font-size:11px;">#${e.seq}</td><td style="padding:5px 8px;color:#cfe0f2;font-size:11px;">${escapeHtml(t.modelLabel || "—")}</td><td style="padding:5px 8px;color:#9fb3c8;font-size:11px;">v${escapeHtml(String(t.suiteVersion || ""))}</td><td style="padding:5px 8px;color:#9fb3c8;font-size:11px;">${pass}P / ${fail}F / ${na}N</td><td style="padding:5px 8px;color:#5b7186;font-size:11px;white-space:nowrap;">${escapeHtml(when)}</td></tr>`;
+    return `<tr style="border-top:1px solid var(--sg-line);"><td style="padding:5px 8px;color:#5b7186;font-size:11px;">#${e.seq}</td><td style="padding:5px 8px;color:var(--txt);font-size:11px;">${escapeHtml(t.modelLabel || "—")}</td><td style="padding:5px 8px;color:var(--txt-dim);font-size:11px;">v${escapeHtml(String(t.suiteVersion || ""))}</td><td style="padding:5px 8px;color:var(--txt-dim);font-size:11px;">${pass}P / ${fail}F / ${na}N</td><td style="padding:5px 8px;color:#5b7186;font-size:11px;white-space:nowrap;">${escapeHtml(when)}</td></tr>`;
   }).join("");
   const diff = evalRegressionDiff(suite);
   const diffHtml = runs.length >= 2
     ? (diff.changes.length
-        ? `<p style="margin:8px 0 0;color:#9fb3c8;font-size:11px;line-height:1.5;">Since the previous run (${escapeHtml(diff.from)} → ${escapeHtml(diff.to)}): ${diff.changes.map((c) => `${escapeHtml(c.caseId)} ${escapeHtml(c.from)}→${escapeHtml(c.to)}`).join(", ")}${diff.regressed.length ? ` · <span style="color:#f5a97a;">${diff.regressed.length} regressed</span>` : ""}</p>`
+        ? `<p style="margin:8px 0 0;color:var(--txt-dim);font-size:11px;line-height:1.5;">Since the previous run (${escapeHtml(diff.from)} → ${escapeHtml(diff.to)}): ${diff.changes.map((c) => `${escapeHtml(c.caseId)} ${escapeHtml(c.from)}→${escapeHtml(c.to)}`).join(", ")}${diff.regressed.length ? ` · <span style="color:#f5a97a;">${diff.regressed.length} regressed</span>` : ""}</p>`
         : `<p style="margin:8px 0 0;color:#5fb8a8;font-size:11px;">No change since the previous run (identical results).</p>`)
     : "";
   const historyHtml = runs.length
     ? `<div style="margin-top:10px;overflow-x:auto;"><table style="width:100%;border-collapse:collapse;"><thead><tr style="text-align:left;color:#5b7186;font-size:10px;text-transform:uppercase;letter-spacing:0.05em;"><th style="padding:0 8px;">#</th><th style="padding:0 8px;">Model</th><th style="padding:0 8px;">Suite</th><th style="padding:0 8px;">Results</th><th style="padding:0 8px;">When</th></tr></thead><tbody>${recentRuns}</tbody></table></div>${diffHtml}`
-    : `<p style="margin:10px 0 0;color:#8aa0b8;font-size:12px;">Not yet evaluated — record a run to start tracking. No result is assumed until you record one.</p>`;
+    : `<p style="margin:10px 0 0;color:var(--txt-dim);font-size:12px;">Not yet evaluated — record a run to start tracking. No result is assumed until you record one.</p>`;
   return `${note}
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
-      <strong style="color:#e8f4ff;font-size:13px;">${escapeHtml(suite.name)}</strong>
+      <strong style="color:var(--txt);font-size:13px;">${escapeHtml(suite.name)}</strong>
       <span class="ds-badge ds-badge-dim">v${escapeHtml(String(cur.suiteVersion))}</span>
       ${integrityBadge}
     </div>
     <p style="margin:0 0 8px;color:#5b7186;font-size:11px;">Provenance: generated test cases · ${cur.provenance.evidenceBackedCells} evidence-backed, ${cur.provenance.inferredCells} inferred · status: ${escapeHtml(status.label)}</p>
     ${caseRows}
-    <div style="margin-top:10px;padding-top:10px;border-top:1px solid #16263a;">
-      <label style="display:block;font-size:11px;color:#8aa0b8;margin-bottom:4px;">Model / version you evaluated against (required)</label>
-      <input type="text" id="eval-model-${escapeHtml(stepId)}" placeholder="e.g. gpt-4o / 2026-05" style="width:100%;max-width:280px;background:#0a1525;color:#e8f4ff;border:1px solid #1e3350;border-radius:7px;padding:7px 9px;font-size:12px;">
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--sg-line);">
+      <label style="display:block;font-size:11px;color:var(--txt-dim);margin-bottom:4px;">Model / version you evaluated against (required)</label>
+      <input type="text" id="eval-model-${escapeHtml(stepId)}" placeholder="e.g. gpt-4o / 2026-05" style="width:100%;max-width:280px;background:var(--deep3);color:var(--txt);border:1px solid var(--sg-line);border-radius:7px;padding:7px 9px;font-size:12px;">
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
         <button type="button" class="primary-button compact" data-eval-record="${escapeHtml(stepId)}">Record run</button>
         <button type="button" class="secondary-button compact" data-eval-promote="${escapeHtml(stepId)}">Re-promote (new version)</button>
@@ -14439,7 +14440,7 @@ function artifactCompilerCardHtml(step, index) {
     ${artifactSnapshotHtml(saved, prior, "No saved package snapshot yet. Click Compile recommended package to preserve the current version.")}
     ${reviewControls}
     <details style="margin-top:10px;">
-      <summary style="font-size:11px;color:#8aa0b8;cursor:pointer;">Optional full bundle snapshot</summary>
+      <summary style="font-size:11px;color:var(--txt-dim);cursor:pointer;">Optional full bundle snapshot</summary>
       <div style="margin-top:8px;">${artifactSnapshotHtml(bundle, bundlePrior, "No full bundle snapshot yet. Click Generate full bundle to preserve the multi-surface package.")}</div>
     </details>`;
   const badgeRow = [
@@ -14449,12 +14450,12 @@ function artifactCompilerCardHtml(step, index) {
     artifactMetricPill("Integration mode", "No integrations", "ds-badge-teal")
   ].filter(Boolean).join("");
   return `
-    <div class="artifact-package-card" style="margin-top:16px;background:#09131f;border:1px solid #1e3350;border-radius:10px;padding:14px 16px;">
+    <div class="artifact-package-card" style="margin-top:16px;background:var(--deep2);border:1px solid var(--sg-line);border-radius:10px;padding:14px 16px;">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
         <div style="min-width:240px;flex:1;">
           <div class="ds-micro" style="margin-bottom:5px;">Best starting package</div>
-          <strong style="display:block;color:#e8f4ff;font-size:14px;">${escapeHtml(pkg.recommendedArtifact.label)}</strong>
-          <p style="margin:6px 0 0;color:#8aa0b8;font-size:12px;line-height:1.5;">${escapeHtml(pkg.recommendationReason)}</p>
+          <strong style="display:block;color:var(--txt);font-size:14px;">${escapeHtml(pkg.recommendedArtifact.label)}</strong>
+          <p style="margin:6px 0 0;color:var(--txt-dim);font-size:12px;line-height:1.5;">${escapeHtml(pkg.recommendationReason)}</p>
         </div>
         <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;">
           ${badgeRow}
@@ -14489,30 +14490,30 @@ function renderPolicyPanelHtml() {
   const has = policy && Array.isArray(policy.clauses) && policy.clauses.length;
   if (!has) {
     return `
-      <div class="artifact-package-card" style="margin-top:16px;background:#09131f;border:1px solid #1e3350;border-radius:10px;padding:14px 16px;">
+      <div class="artifact-package-card" style="margin-top:16px;background:var(--deep2);border:1px solid var(--sg-line);border-radius:10px;padding:14px 16px;">
         <div class="ds-micro" style="margin-bottom:5px;">AI policy grounding</div>
-        <strong style="display:block;color:#e8f4ff;font-size:14px;">No AI policy uploaded</strong>
-        <p style="margin:6px 0 10px;color:#8aa0b8;font-size:12px;line-height:1.5;">Upload your firm's AI policy to ground artifact caution and human-review language in specific policy clauses. Without one, artifacts use the generic advisory caution.</p>
+        <strong style="display:block;color:var(--txt);font-size:14px;">No AI policy uploaded</strong>
+        <p style="margin:6px 0 10px;color:var(--txt-dim);font-size:12px;line-height:1.5;">Upload your firm's AI policy to ground artifact caution and human-review language in specific policy clauses. Without one, artifacts use the generic advisory caution.</p>
         <input type="file" id="policyFileInput" accept=".txt,.md,.pdf,.doc,.docx" style="display:none;">
         <button type="button" class="secondary-button compact" id="policyUploadBtn">Upload AI policy</button>
       </div>`;
   }
   const when = Number.isNaN(Date.parse(policy.uploadedAt || "")) ? "" : new Date(Date.parse(policy.uploadedAt)).toLocaleString("en-US");
   const clauseRows = policy.clauses.map((c) => `
-    <div style="margin-top:8px;padding:8px 10px;background:#0a1422;border:1px solid #1a2a3a;border-radius:8px;">
+    <div style="margin-top:8px;padding:8px 10px;background:var(--deep3);border:1px solid var(--deep2);border-radius:8px;">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-        <span style="font-weight:700;color:#cfe0f2;font-size:12px;">${escapeHtml(c.ref)}</span>
+        <span style="font-weight:700;color:var(--txt);font-size:12px;">${escapeHtml(c.ref)}</span>
         ${provenanceBadgeHtml(c.source, c.confidence)}
       </div>
-      <p style="margin:5px 0 0;color:#9fb3c8;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word;">${escapeHtml(policyClip(c.text, 220))}</p>
+      <p style="margin:5px 0 0;color:var(--txt-dim);font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word;">${escapeHtml(policyClip(c.text, 220))}</p>
     </div>`).join("");
   return `
-    <div class="artifact-package-card" style="margin-top:16px;background:#09131f;border:1px solid #1e3350;border-radius:10px;padding:14px 16px;">
+    <div class="artifact-package-card" style="margin-top:16px;background:var(--deep2);border:1px solid var(--sg-line);border-radius:10px;padding:14px 16px;">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
         <div style="min-width:240px;flex:1;">
           <div class="ds-micro" style="margin-bottom:5px;">AI policy grounding</div>
-          <strong style="display:block;color:#e8f4ff;font-size:14px;">${escapeHtml(policy.fileName)}</strong>
-          <p style="margin:6px 0 0;color:#8aa0b8;font-size:12px;line-height:1.5;">${policy.clauses.length} clause${policy.clauses.length === 1 ? "" : "s"} captured${when ? ` · ${escapeHtml(when)}` : ""}. Artifact caution and human-review language cite these clauses; this is advisory, never compliance approval.</p>
+          <strong style="display:block;color:var(--txt);font-size:14px;">${escapeHtml(policy.fileName)}</strong>
+          <p style="margin:6px 0 0;color:var(--txt-dim);font-size:12px;line-height:1.5;">${policy.clauses.length} clause${policy.clauses.length === 1 ? "" : "s"} captured${when ? ` · ${escapeHtml(when)}` : ""}. Artifact caution and human-review language cite these clauses; this is advisory, never compliance approval.</p>
         </div>
         <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;">
           <input type="file" id="policyFileInput" accept=".txt,.md,.pdf,.doc,.docx" style="display:none;">
@@ -14520,7 +14521,7 @@ function renderPolicyPanelHtml() {
           <button type="button" class="secondary-button compact" id="policyRemoveBtn">Remove</button>
         </div>
       </div>
-      <details style="margin-top:10px;"><summary style="font-size:11px;color:#8aa0b8;cursor:pointer;">Show ${policy.clauses.length} policy clause${policy.clauses.length === 1 ? "" : "s"} (provenance: doc-extracted)</summary>${clauseRows}</details>
+      <details style="margin-top:10px;"><summary style="font-size:11px;color:var(--txt-dim);cursor:pointer;">Show ${policy.clauses.length} policy clause${policy.clauses.length === 1 ? "" : "s"} (provenance: doc-extracted)</summary>${clauseRows}</details>
       ${typeof policyGuardrailsPanelHtml === "function" ? policyGuardrailsPanelHtml(policy) : ""}
     </div>`;
 }
@@ -14539,33 +14540,33 @@ function policyGuardrailsPanelHtml(policy) {
   const rows = guardrails.map((g) => {
     const badge = (typeof provenanceBadgeHtml === "function") ? provenanceBadgeHtml(g.source, g.confidence) : "";
     const meta = [
-      g.action ? `action <strong style="color:#cfe0f2;">${esc(g.action)}</strong>` : "",
+      g.action ? `action <strong style="color:var(--txt);">${esc(g.action)}</strong>` : "",
       (g.controls && g.controls.length) ? `controls ${esc(g.controls.join(", "))}` : "",
       g.decisionOwner ? `owner ${esc(g.decisionOwner)}` : "",
       g.fit ? `fit ${esc(g.fit)}` : ""
     ].filter(Boolean).join(" · ");
-    const stateColor = g.state === "confirmed" ? "#00d4b4" : (g.state === "rejected" ? "#7a93b4" : "#f6c453");
+    const stateColor = g.state === "confirmed" ? "#00d4b4" : (g.state === "rejected" ? "var(--txt-dim)" : "#f6c453");
     const stateLabel = g.state === "confirmed" ? "confirmed" : (g.state === "rejected" ? "rejected (ignored)" : "suggested · draft");
     const actions = g.state === "confirmed"
       ? `<button type="button" class="secondary-button compact" data-policy-guardrail-reset="${esc(g.key)}">unconfirm</button>`
       : g.state === "rejected"
       ? `<button type="button" class="secondary-button compact" data-policy-guardrail-reset="${esc(g.key)}">restore</button>`
       : `<button type="button" class="secondary-button compact" data-policy-guardrail-confirm="${esc(g.key)}">confirm</button> <button type="button" class="secondary-button compact" data-policy-guardrail-reject="${esc(g.key)}">reject</button>`;
-    return `<div style="margin-top:8px;padding:8px 10px;background:#0a1422;border:1px solid #1a2a3a;border-radius:8px;">
+    return `<div style="margin-top:8px;padding:8px 10px;background:var(--deep3);border:1px solid var(--deep2);border-radius:8px;">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-        <span style="font-weight:700;color:#cfe0f2;font-size:12px;">${esc(g.role)}: ${esc(g.label)}</span>
+        <span style="font-weight:700;color:var(--txt);font-size:12px;">${esc(g.role)}: ${esc(g.label)}</span>
         ${badge}
         <span style="color:${stateColor};font-size:11px;">${esc(stateLabel)}</span>
       </div>
-      <div style="margin:4px 0 0;color:#8aa0b8;font-size:11px;">Per policy ${esc(g.clauseRef)}${g.system ? ` · system ${esc(g.system)}` : ""}${meta ? ` · ${meta}` : ""}</div>
-      <p style="margin:4px 0 6px;color:#9fb3c8;font-size:11px;line-height:1.5;white-space:pre-wrap;word-break:break-word;">"${esc(g.quote)}"</p>
+      <div style="margin:4px 0 0;color:var(--txt-dim);font-size:11px;">Per policy ${esc(g.clauseRef)}${g.system ? ` · system ${esc(g.system)}` : ""}${meta ? ` · ${meta}` : ""}</div>
+      <p style="margin:4px 0 6px;color:var(--txt-dim);font-size:11px;line-height:1.5;white-space:pre-wrap;word-break:break-word;">"${esc(g.quote)}"</p>
       <div style="display:flex;gap:6px;flex-wrap:wrap;">${actions}</div>
     </div>`;
   }).join("");
   return `
-    <div style="margin-top:12px;padding:10px 12px;background:#08111c;border:1px solid #1e3350;border-radius:9px;">
+    <div style="margin-top:12px;padding:10px 12px;background:var(--deep3);border:1px solid var(--sg-line);border-radius:9px;">
       <div class="ds-micro" style="margin-bottom:4px;">Permission &amp; entitlement guardrails · ${confirmedCount} confirmed of ${guardrails.length} suggested</div>
-      <p style="margin:0 0 6px;color:#8aa0b8;font-size:11px;line-height:1.5;">Draft permission guardrails read from the uploaded policy — what each actor (or AI/tool) may do, with which controls. Suggestions only: nothing is active until you confirm it, sensitive data is never blocked outright, and an unknown entitlement raises a question rather than a block. Confirming never changes scoring or counted totals; it makes the guardrail readable by later placement review.</p>
+      <p style="margin:0 0 6px;color:var(--txt-dim);font-size:11px;line-height:1.5;">Draft permission guardrails read from the uploaded policy — what each actor (or AI/tool) may do, with which controls. Suggestions only: nothing is active until you confirm it, sensitive data is never blocked outright, and an unknown entitlement raises a question rather than a block. Confirming never changes scoring or counted totals; it makes the guardrail readable by later placement review.</p>
       ${rows}
     </div>`;
 }
@@ -14600,10 +14601,10 @@ function renderAuditPanelHtml() {
   const reviewedCount = state.artifactCompiler?.reviewed ? Object.keys(state.artifactCompiler.reviewed).length : 0;
   if (!trail.length) {
     return `
-      <div class="artifact-package-card" style="margin-top:16px;background:#09131f;border:1px solid #1e3350;border-radius:10px;padding:14px 16px;">
+      <div class="artifact-package-card" style="margin-top:16px;background:var(--deep2);border:1px solid var(--sg-line);border-radius:10px;padding:14px 16px;">
         <div class="ds-micro" style="margin-bottom:5px;">Engagement audit trail</div>
-        <strong style="display:block;color:#e8f4ff;font-size:14px;">No audit events yet</strong>
-        <p style="margin:6px 0 0;color:#8aa0b8;font-size:12px;line-height:1.5;">Generating, regenerating, reviewing, exporting, or computing the business case records an append-only, tamper-evident entry here. A record of activity — never a compliance approval.</p>
+        <strong style="display:block;color:var(--txt);font-size:14px;">No audit events yet</strong>
+        <p style="margin:6px 0 0;color:var(--txt-dim);font-size:12px;line-height:1.5;">Generating, regenerating, reviewing, exporting, or computing the business case records an append-only, tamper-evident entry here. A record of activity — never a compliance approval.</p>
       </div>`;
   }
   const integrity = verifyAuditTrail(trail);
@@ -14614,16 +14615,16 @@ function renderAuditPanelHtml() {
   const rows = trail.slice(-12).reverse().map((e) => {
     const when = Number.isNaN(Date.parse(e.ts || "")) ? "" : new Date(Date.parse(e.ts)).toLocaleString("en-US");
     const what = [e.target?.kind, e.target?.stepId ? `step ${String(e.target.stepId).slice(0, 12)}` : ""].filter(Boolean).join(" · ");
-    return `<tr style="border-top:1px solid #16263a;">
+    return `<tr style="border-top:1px solid var(--sg-line);">
       <td style="padding:6px 8px;color:#5b7186;font-size:11px;">#${e.seq}</td>
-      <td style="padding:6px 8px;color:#cfe0f2;font-size:11px;">${escapeHtml(actionLabels[e.action] || e.action)}</td>
-      <td style="padding:6px 8px;color:#9fb3c8;font-size:11px;">${escapeHtml(what || "—")}</td>
-      <td style="padding:6px 8px;color:#9fb3c8;font-size:11px;">${escapeHtml(e.actor?.name || "—")}</td>
+      <td style="padding:6px 8px;color:var(--txt);font-size:11px;">${escapeHtml(actionLabels[e.action] || e.action)}</td>
+      <td style="padding:6px 8px;color:var(--txt-dim);font-size:11px;">${escapeHtml(what || "—")}</td>
+      <td style="padding:6px 8px;color:var(--txt-dim);font-size:11px;">${escapeHtml(e.actor?.name || "—")}</td>
       <td style="padding:6px 8px;color:#5b7186;font-size:11px;white-space:nowrap;">${escapeHtml(when)}</td>
     </tr>`;
   }).join("");
   return `
-    <div class="artifact-package-card" style="margin-top:16px;background:#09131f;border:1px solid #1e3350;border-radius:10px;padding:14px 16px;">
+    <div class="artifact-package-card" style="margin-top:16px;background:var(--deep2);border:1px solid var(--sg-line);border-radius:10px;padding:14px 16px;">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
         <div style="min-width:240px;flex:1;">
           <div class="ds-micro" style="margin-bottom:5px;">Engagement audit trail</div>
@@ -14727,21 +14728,21 @@ function recipeProvChipHtml(source) {
 function recipeBookCardHtml(row) {
   const num = String(row.index + 1).padStart(2, "0");
   if (!row.recipe) {
-    return `<div class="recipe-book-card recipe-book-empty-step" data-recipe-book-step="${escapeHtml(row.step.id)}" style="background:var(--deep2,#0b0e1c);border:1px dashed var(--sg-line,rgba(255,255,255,.10));border-radius:12px;padding:14px 16px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-      <div style="min-width:0;"><span style="color:var(--txt-faint,#737A92);font-size:12px;font-weight:700;margin-right:8px;">${num}</span><span style="color:var(--txt-dim,#A6ADC4);font-size:13px;font-weight:600;">${escapeHtml(row.name)}</span><div style="color:var(--txt-faint,#737A92);font-size:11px;margin-top:3px;">No recipe yet — add one to start the book for this step.</div></div>
+    return `<div class="recipe-book-card recipe-book-empty-step" data-recipe-book-step="${escapeHtml(row.step.id)}" style="background:var(--deep2,var(--deep3));border:1px dashed var(--sg-line,rgba(255,255,255,.10));border-radius:12px;padding:14px 16px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+      <div style="min-width:0;"><span style="color:var(--txt-faint,var(--txt-faint));font-size:12px;font-weight:700;margin-right:8px;">${num}</span><span style="color:var(--txt-dim,var(--txt-dim));font-size:13px;font-weight:600;">${escapeHtml(row.name)}</span><div style="color:var(--txt-faint,var(--txt-faint));font-size:11px;margin-top:3px;">No recipe yet — add one to start the book for this step.</div></div>
       <button type="button" class="primary-button compact" data-recipe-book-add="${escapeHtml(row.step.id)}" style="white-space:nowrap;">Add a recipe</button>
     </div>`;
   }
   const r = row.recipe;
   return `<div class="recipe-book-card" data-recipe-book-step="${escapeHtml(row.step.id)}" style="background:var(--glass,rgba(255,255,255,.045));border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:12px;padding:14px 16px;margin-bottom:10px;">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-      <span style="background:var(--deep2,#0b0e1c);color:var(--sg-cyan,#42E8FF);font-weight:700;font-size:12px;padding:3px 8px;border-radius:6px;">${num}</span>
-      <strong style="color:var(--txt,#EAEFFF);font-size:14px;">${escapeHtml(row.name)}</strong>
+      <span style="background:var(--deep2,var(--deep3));color:var(--sg-cyan,#42E8FF);font-weight:700;font-size:12px;padding:3px 8px;border-radius:6px;">${num}</span>
+      <strong style="color:var(--txt,var(--txt));font-size:14px;">${escapeHtml(row.name)}</strong>
       ${recipeStatusChipHtml(r.status)}
       ${recipeProvChipHtml(r.source)}
     </div>
-    <div style="margin-top:8px;color:var(--txt-dim,#A6ADC4);font-size:12px;line-height:1.5;">
-      <span style="color:var(--txt-faint,#737A92);">Recipe:</span> ${escapeHtml(r.pattern)} assist, attached to this step.
+    <div style="margin-top:8px;color:var(--txt-dim,var(--txt-dim));font-size:12px;line-height:1.5;">
+      <span style="color:var(--txt-faint,var(--txt-faint));">Recipe:</span> ${escapeHtml(r.pattern)} assist, attached to this step.
     </div>
     ${typeof recipeSpecCanvasFor === "function" ? recipeSpecCanvasFor(row.step.id) : ""}
   </div>`;
@@ -14750,13 +14751,13 @@ function recipeBookCardHtml(row) {
 function recipeBookStatusGroupHtml(group) {
   const meta = RECIPE_STATUS_META[group.status] || { label: String(group.status), hue: "#8C93A7" };
   return `<div class="recipe-book-status-group" style="margin-bottom:16px;">
-    <div style="display:flex;align-items:center;gap:8px;margin:0 0 8px;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-faint,#737A92);"><span style="width:7px;height:7px;border-radius:50%;background:${meta.hue};"></span>${escapeHtml(meta.label)} · ${group.rows.length}</div>
+    <div style="display:flex;align-items:center;gap:8px;margin:0 0 8px;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-faint,var(--txt-faint));"><span style="width:7px;height:7px;border-radius:50%;background:${meta.hue};"></span>${escapeHtml(meta.label)} · ${group.rows.length}</div>
     ${group.rows.map(recipeBookCardHtml).join("")}
   </div>`;
 }
 
 function recipeBookEmptyNoteHtml() {
-  return `<div class="recipe-book-empty" style="background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:12px;padding:16px 18px;margin-bottom:12px;color:var(--txt-dim,#A6ADC4);font-size:13px;line-height:1.55;">No recipes in the book yet. Each workflow step can hold a recipe that describes how AI assists it — add one to a step below to start the recipe book. Nothing is generated until you ask.</div>`;
+  return `<div class="recipe-book-empty" style="background:var(--deep2,var(--deep3));border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:12px;padding:16px 18px;margin-bottom:12px;color:var(--txt-dim,var(--txt-dim));font-size:13px;line-height:1.55;">No recipes in the book yet. Each workflow step can hold a recipe that describes how AI assists it — add one to a step below to start the recipe book. Nothing is generated until you ask.</div>`;
 }
 
 // The Recipe Book section. Returns "" when there are no steps (the recipe tab shows
@@ -14767,10 +14768,10 @@ function recipeBookHtml() {
   if (!steps.length) return "";
   const view = state.recipeBookView === "status" ? "status" : state.recipeBookView === "connection" ? "connection" : "byStep";
   const hasRecipes = recipeBookHasAnyRecipe(steps);
-  const toggleBtn = (id, label) => `<button type="button" data-recipe-book-view="${id}" class="recipe-book-view-btn${view === id ? " on" : ""}" style="background:${view === id ? "var(--glass-2,rgba(255,255,255,.07))" : "transparent"};color:${view === id ? "var(--txt,#EAEFFF)" : "var(--txt-dim,#A6ADC4)"};border:none;border-radius:8px;padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;">${label}</button>`;
+  const toggleBtn = (id, label) => `<button type="button" data-recipe-book-view="${id}" class="recipe-book-view-btn${view === id ? " on" : ""}" style="background:${view === id ? "var(--glass-2,rgba(255,255,255,.07))" : "transparent"};color:${view === id ? "var(--txt,var(--txt))" : "var(--txt-dim,var(--txt-dim))"};border:none;border-radius:8px;padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;">${label}</button>`;
   const header = `<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
-    <div><div style="font-size:1rem;font-weight:800;color:var(--txt,#EAEFFF);letter-spacing:-.02em;">Recipe Book</div><div style="font-size:12px;color:var(--txt-faint,#737A92);margin-top:2px;">The stock of AI recipes for this workflow, by step and by connection. Each recipe describes how AI assists one step or carries one handoff.</div></div>
-    <div class="recipe-book-toggle" role="tablist" aria-label="Recipe Book view" style="display:inline-flex;gap:3px;background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:10px;padding:3px;">${toggleBtn("byStep", "By step")}${toggleBtn("connection", "By connection")}${toggleBtn("status", "By status")}</div>
+    <div><div style="font-size:1rem;font-weight:800;color:var(--txt,var(--txt));letter-spacing:-.02em;">Recipes in this package</div><div style="font-size:12px;color:var(--txt-faint,var(--txt-faint));margin-top:2px;">The AI recipes included in this package, by step and by connection. Each recipe describes how AI assists one step or carries one handoff.</div></div>
+    <div class="recipe-book-toggle" role="tablist" aria-label="Recipe view" style="display:inline-flex;gap:3px;background:var(--deep2,var(--deep3));border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:10px;padding:3px;">${toggleBtn("byStep", "By step")}${toggleBtn("connection", "By connection")}${toggleBtn("status", "By status")}</div>
   </div>`;
   let body;
   if (view === "connection") {
@@ -14784,7 +14785,7 @@ function recipeBookHtml() {
   } else {
     body = recipeBookByStep(steps).map(recipeBookCardHtml).join("");
   }
-  return `<section class="recipe-book" aria-label="Recipe Book" style="background:var(--deep,#111425);border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:16px;padding:18px 20px;margin-bottom:18px;">${header}${body}</section>`;
+  return `<section class="recipe-book" aria-label="Recipes in this package" style="background:var(--deep,var(--deep2));border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:16px;padding:18px 20px;margin-bottom:18px;">${header}${body}</section>`;
 }
 
 // Wires the Recipe Book controls. View toggle re-renders the tab; "Add a recipe"
@@ -15116,18 +15117,18 @@ function recipeBookConnectionCardHtml(row) {
   const heldBadge = held
     ? `<span style="color:${HUMAN_HOLD_HUE};font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;">human-hold</span>`
     : "";
-  const title = `<strong style="color:var(--txt,#EAEFFF);font-size:14px;">${escapeHtml(row.fromName || "Step")} <span style="color:var(--txt-faint,#737A92);">&rarr;</span> ${escapeHtml(row.toName || "Step")}</strong>`;
+  const title = `<strong style="color:var(--txt,var(--txt));font-size:14px;">${escapeHtml(row.fromName || "Step")} <span style="color:var(--txt-faint,var(--txt-faint));">&rarr;</span> ${escapeHtml(row.toName || "Step")}</strong>`;
   const head = `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">${tile}${title}${r ? recipeStatusChipHtml(r.status) : ""}${r ? recipeProvChipHtml(r.source) : ""}${heldBadge}</div>`;
   if (!r) {
-    return `<div class="recipe-book-card recipe-book-connection recipe-book-empty-connection" data-recipe-book-connection="${escapeHtml(row.connId)}" style="background:var(--deep2,#0b0e1c);border:1px dashed var(--sg-line,rgba(255,255,255,.10));border-radius:12px;padding:14px 16px;margin-bottom:10px;">
+    return `<div class="recipe-book-card recipe-book-connection recipe-book-empty-connection" data-recipe-book-connection="${escapeHtml(row.connId)}" style="background:var(--deep2,var(--deep3));border:1px dashed var(--sg-line,rgba(255,255,255,.10));border-radius:12px;padding:14px 16px;margin-bottom:10px;">
       ${head}
-      <div style="color:var(--txt-faint,#737A92);font-size:11px;margin-top:6px;line-height:1.5;">No recipe yet — this connection is surfaced by the Leverage Map${held ? "; a person owns the approval here" : ""}. Connection recipes fill in from the trusted recipe library; add recipes on the adjacent steps in By step to start one.</div>
+      <div style="color:var(--txt-faint,var(--txt-faint));font-size:11px;margin-top:6px;line-height:1.5;">No recipe yet — this connection is surfaced by the Leverage Map${held ? "; a person owns the approval here" : ""}. Connection recipes fill in from the trusted recipe library; add recipes on the adjacent steps in By step to start one.</div>
     </div>`;
   }
   return `<div class="recipe-book-card recipe-book-connection" data-recipe-book-connection="${escapeHtml(row.connId)}" style="background:var(--glass,rgba(255,255,255,.045));border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:12px;padding:14px 16px;margin-bottom:10px;">
     ${head}
-    <div style="margin-top:8px;color:var(--txt-dim,#A6ADC4);font-size:12px;line-height:1.5;">
-      <span style="color:var(--txt-faint,#737A92);">Recipe:</span> ${escapeHtml(r.assist)}.
+    <div style="margin-top:8px;color:var(--txt-dim,var(--txt-dim));font-size:12px;line-height:1.5;">
+      <span style="color:var(--txt-faint,var(--txt-faint));">Recipe:</span> ${escapeHtml(r.assist)}.
     </div>
     ${typeof recipeSpecCanvasFor === "function" ? recipeSpecCanvasFor(row.connId) : ""}
   </div>`;
@@ -15138,9 +15139,9 @@ function recipeBookConnectionCardHtml(row) {
 function recipeBookConnectionSectionHtml() {
   const rows = recipeBookByConnection();
   if (!rows.length) {
-    return `<div class="recipe-book-empty" style="background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:12px;padding:16px 18px;margin-bottom:12px;color:var(--txt-dim,#A6ADC4);font-size:13px;line-height:1.55;">No connections surfaced yet — the Leverage Map highlights handoffs where AI can carry work between steps (a shared tool, a manual handoff, system-switching, or a classified transition). Capture more of the workflow's shape and the connections appear here.</div>`;
+    return `<div class="recipe-book-empty" style="background:var(--deep2,var(--deep3));border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:12px;padding:16px 18px;margin-bottom:12px;color:var(--txt-dim,var(--txt-dim));font-size:13px;line-height:1.55;">No connections surfaced yet — the Leverage Map highlights handoffs where AI can carry work between steps (a shared tool, a manual handoff, system-switching, or a classified transition). Capture more of the workflow's shape and the connections appear here.</div>`;
   }
-  const intro = `<div style="font-size:11px;color:var(--txt-faint,#737A92);margin:0 0 10px;line-height:1.5;">Connections the Leverage Map surfaced between adjacent steps. A recipe here carries the handoff; where a person owns the approval, AI assists and the person decides.</div>`;
+  const intro = `<div style="font-size:11px;color:var(--txt-faint,var(--txt-faint));margin:0 0 10px;line-height:1.5;">Connections the Leverage Map surfaced between adjacent steps. A recipe here carries the handoff; where a person owns the approval, AI assists and the person decides.</div>`;
   return intro + rows.map(recipeBookConnectionCardHtml).join("");
 }
 
@@ -15410,29 +15411,29 @@ function recipeReadinessGatesHtml(gates, summary) {
     blocked: { hue: "var(--sg-danger,#F2545B)", glyph: "✕" },
     caution: { hue: "var(--sg-amber,#FFB454)", glyph: "⚠" },
     ok: { hue: "var(--sg-green,#30D5A7)", glyph: "✓" },
-    "n-a": { hue: "var(--txt-faint,#737A92)", glyph: "·" },
+    "n-a": { hue: "var(--txt-faint,var(--txt-faint))", glyph: "·" },
   };
   const chips = order.filter((k) => gates[k] && gates[k].status).map((k) => {
     const g = gates[k]; const s = style[g.status] || style["n-a"];
-    return `<span title="${escapeHtml(String(g.reason || ""))}" style="display:inline-flex;align-items:center;gap:5px;background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line-soft,rgba(255,255,255,.10));border-radius:999px;padding:2px 9px;font-size:10px;font-weight:700;color:${s.hue};"><span aria-hidden="true">${s.glyph}</span>${escapeHtml(k)} · ${escapeHtml(String(g.status).toUpperCase())}</span>`;
+    return `<span title="${escapeHtml(String(g.reason || ""))}" style="display:inline-flex;align-items:center;gap:5px;background:var(--deep2,var(--deep3));border:1px solid var(--sg-line-soft,rgba(255,255,255,.10));border-radius:999px;padding:2px 9px;font-size:10px;font-weight:700;color:${s.hue};"><span aria-hidden="true">${s.glyph}</span>${escapeHtml(k)} · ${escapeHtml(String(g.status).toUpperCase())}</span>`;
   }).join(" ");
   if (!chips) return "";
-  const sum = summary ? `<div style="margin-top:4px;font-size:11px;color:var(--txt-faint,#737A92);">${escapeHtml(String(summary))}</div>` : "";
-  return `<div class="recipe-readiness-gates" data-readiness-gates="1" style="margin:4px 0 8px;"><div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;color:var(--txt-faint,#737A92);margin-bottom:4px;">Readiness gates — independent</div><div style="display:flex;flex-wrap:wrap;gap:5px;">${chips}</div>${sum}</div>`;
+  const sum = summary ? `<div style="margin-top:4px;font-size:11px;color:var(--txt-faint,var(--txt-faint));">${escapeHtml(String(summary))}</div>` : "";
+  return `<div class="recipe-readiness-gates" data-readiness-gates="1" style="margin:4px 0 8px;"><div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;color:var(--txt-faint,var(--txt-faint));margin-bottom:4px;">Readiness gates — independent</div><div style="display:flex;flex-wrap:wrap;gap:5px;">${chips}</div>${sum}</div>`;
 }
 
 function recipeSpecCanvasHtml(spec, unitId, gateState, nextLifecycle) {
   if (!spec || typeof spec !== "object") return "";
   const uid = escapeHtml(String(unitId || ""));
-  const labelCss = "font-size:10px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;color:var(--txt-faint,#737A92);";
+  const labelCss = "font-size:10px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;color:var(--txt-faint,var(--txt-faint));";
   const rowCss = "padding:8px 0;border-top:1px solid var(--sg-line-soft,rgba(255,255,255,.06));";
-  const confirmBtn = (field) => `<button type="button" class="recipe-spec-confirm" data-spec-confirm="${uid}" data-spec-field="${escapeHtml(field)}" style="background:transparent;border:1px solid var(--sg-line,rgba(255,255,255,.14));color:var(--txt-dim,#A6ADC4);border-radius:7px;padding:2px 9px;font-size:10px;font-weight:600;cursor:pointer;">Confirm</button>`;
+  const confirmBtn = (field) => `<button type="button" class="recipe-spec-confirm" data-spec-confirm="${uid}" data-spec-field="${escapeHtml(field)}" style="background:transparent;border:1px solid var(--sg-line,rgba(255,255,255,.14));color:var(--txt-dim,var(--txt-dim));border-radius:7px;padding:2px 9px;font-size:10px;font-weight:600;cursor:pointer;">Confirm</button>`;
   const fieldRow = (key, label, tri) => {
     const t = (tri && typeof tri === "object") ? tri : recipeSpecTriple("", "ai-inferred", null);
     const has = Boolean(t.value);
     const valueHtml = has
-      ? `<span style="color:var(--txt-dim,#A6ADC4);">${escapeHtml(t.value)}</span>`
-      : `<span style="color:var(--txt-faint,#737A92);font-style:italic;">Not captured yet — confirm to add.</span>`;
+      ? `<span style="color:var(--txt-dim,var(--txt-dim));">${escapeHtml(t.value)}</span>`
+      : `<span style="color:var(--txt-faint,var(--txt-faint));font-style:italic;">Not captured yet — confirm to add.</span>`;
     return `<div class="recipe-spec-field" data-spec-field-row="${escapeHtml(key)}" style="${rowCss}">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:3px;">
         <span style="${labelCss}">${escapeHtml(label)}</span>
@@ -15443,18 +15444,18 @@ function recipeSpecCanvasHtml(spec, unitId, gateState, nextLifecycle) {
   };
   const decomp = Array.isArray(spec.decomposition) ? spec.decomposition : [];
   const decompHtml = decomp.length
-    ? `<ol style="margin:4px 0 0;padding-left:18px;font-size:12px;line-height:1.5;color:var(--txt-dim,#A6ADC4);">${decomp.map((t) => `<li>${escapeHtml((t && t.value) || "")} ${recipeProvChipHtml((t && t.source) || "ai-inferred")}</li>`).join("")}</ol>`
-    : `<div style="font-size:12px;color:var(--txt-faint,#737A92);font-style:italic;">Sub-steps not captured yet — confirm to add. ${confirmBtn("decomposition")}</div>`;
+    ? `<ol style="margin:4px 0 0;padding-left:18px;font-size:12px;line-height:1.5;color:var(--txt-dim,var(--txt-dim));">${decomp.map((t) => `<li>${escapeHtml((t && t.value) || "")} ${recipeProvChipHtml((t && t.source) || "ai-inferred")}</li>`).join("")}</ol>`
+    : `<div style="font-size:12px;color:var(--txt-faint,var(--txt-faint));font-style:italic;">Sub-steps not captured yet — confirm to add. ${confirmBtn("decomposition")}</div>`;
   const cases = Array.isArray(spec.evalCases) ? spec.evalCases : [];
   const casesHtml = cases.length
     ? cases.map((c, i) => `<div class="recipe-spec-evalcase" style="padding:7px 0;border-top:1px solid var(--sg-line-soft,rgba(255,255,255,.06));font-size:12px;line-height:1.5;">
-        <div style="color:var(--txt-faint,#737A92);font-size:10px;font-weight:700;">CASE ${i + 1}${(c && c.notes) ? ` · ${escapeHtml(String(c.notes))}` : ""}</div>
-        <div style="color:var(--txt-dim,#A6ADC4);"><span style="color:var(--txt-faint,#737A92);">Input:</span> ${escapeHtml(String((c && c.input) || ""))}</div>
-        <div style="color:var(--txt-dim,#A6ADC4);"><span style="color:var(--txt-faint,#737A92);">Expected:</span> ${escapeHtml(String((c && c.expectedOutput) || ""))}</div>
+        <div style="color:var(--txt-faint,var(--txt-faint));font-size:10px;font-weight:700;">CASE ${i + 1}${(c && c.notes) ? ` · ${escapeHtml(String(c.notes))}` : ""}</div>
+        <div style="color:var(--txt-dim,var(--txt-dim));"><span style="color:var(--txt-faint,var(--txt-faint));">Input:</span> ${escapeHtml(String((c && c.input) || ""))}</div>
+        <div style="color:var(--txt-dim,var(--txt-dim));"><span style="color:var(--txt-faint,var(--txt-faint));">Expected:</span> ${escapeHtml(String((c && c.expectedOutput) || ""))}</div>
       </div>`).join("")
-    : `<div style="font-size:12px;color:var(--txt-faint,#737A92);font-style:italic;">No eval cases yet — confirm to add. ${confirmBtn("evalCases")}</div>`;
+    : `<div style="font-size:12px;color:var(--txt-faint,var(--txt-faint));font-style:italic;">No eval cases yet — confirm to add. ${confirmBtn("evalCases")}</div>`;
   const readiness = RECIPE_SPEC_READINESS.includes(spec.readiness) ? spec.readiness : "future";
-  const readinessChip = `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:999px;padding:2px 9px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--txt-faint,#737A92);">Readiness · ${escapeHtml(readiness)}</span>`;
+  const readinessChip = `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--deep2,var(--deep3));border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:999px;padding:2px 9px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--txt-faint,var(--txt-faint));">Readiness · ${escapeHtml(readiness)}</span>`;
   // E4 — lifecycle chip + provenance. Present only when the spec carries a lifecycle triple
   // (additive: absent => summary byte-identical to before). A one-directional human-initiated
   // advance affordance shows when the next stage's gate is met. Flat fills only, no new color.
@@ -15462,7 +15463,7 @@ function recipeSpecCanvasHtml(spec, unitId, gateState, nextLifecycle) {
     ? `<button type="button" class="recipe-lifecycle-advance" data-lifecycle-advance="${uid}" data-lifecycle-to="${escapeHtml(nextLifecycle)}" style="background:transparent;border:1px solid var(--sg-cyan,#42E8FF);color:var(--sg-cyan,#42E8FF);border-radius:7px;padding:1px 8px;font-size:9px;font-weight:700;cursor:pointer;">Advance to ${escapeHtml(nextLifecycle)}</button>`
     : "";
   const lifecycleChip = (spec.lifecycle && spec.lifecycle.value)
-    ? `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:999px;padding:2px 9px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--txt-faint,#737A92);">Lifecycle · ${escapeHtml(spec.lifecycle.value)}</span>${recipeProvChipHtml(spec.lifecycle.source)}${advanceBtn}`
+    ? `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--deep2,var(--deep3));border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:999px;padding:2px 9px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--txt-faint,var(--txt-faint));">Lifecycle · ${escapeHtml(spec.lifecycle.value)}</span>${recipeProvChipHtml(spec.lifecycle.source)}${advanceBtn}`
     : "";
   // Change 3 — the confirm gate banner. gateState undefined => no banner (byte-identical to
   // Change 1/2). true => confirmed/hardened (teal, downstream may rely on it). false => draft
@@ -15470,15 +15471,15 @@ function recipeSpecCanvasHtml(spec, unitId, gateState, nextLifecycle) {
   // teal cue (--sg-cyan); flat fills + text only, no new color, Human Pink reserved.
   const gateBanner = gateState === undefined ? "" : (gateState
     ? `<div data-spec-gate="confirmed" style="margin-bottom:8px;display:flex;align-items:center;gap:8px;background:rgba(66,232,255,.08);border:1px solid rgba(66,232,255,.30);border-radius:8px;padding:6px 10px;font-size:11px;color:var(--sg-cyan,#42E8FF);"><span style="width:6px;height:6px;border-radius:50%;background:var(--sg-cyan,#42E8FF);"></span>Confirmed — this spec is hardened (stated); downstream may rely on it.</div>`
-    : `<div data-spec-gate="draft" style="margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line,rgba(255,255,255,.14));border-radius:8px;padding:6px 10px;font-size:11px;color:var(--txt-dim,#A6ADC4);"><span>Draft until confirmed — inferred values shown; not yet a hardened artifact.</span><button type="button" class="recipe-spec-confirm-unit" data-confirm-unit="${uid}" style="background:transparent;border:1px solid var(--sg-cyan,#42E8FF);color:var(--sg-cyan,#42E8FF);border-radius:7px;padding:2px 10px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;">Confirm capture</button></div>`);
-  return `<details class="recipe-spec-canvas" data-spec-canvas="${uid}" style="margin-top:12px;background:var(--deep2,#0b0e1c);border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:10px;padding:10px 14px;">
+    : `<div data-spec-gate="draft" style="margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;background:var(--deep2,var(--deep3));border:1px solid var(--sg-line,rgba(255,255,255,.14));border-radius:8px;padding:6px 10px;font-size:11px;color:var(--txt-dim,var(--txt-dim));"><span>Draft until confirmed — inferred values shown; not yet a hardened artifact.</span><button type="button" class="recipe-spec-confirm-unit" data-confirm-unit="${uid}" style="background:transparent;border:1px solid var(--sg-cyan,#42E8FF);color:var(--sg-cyan,#42E8FF);border-radius:7px;padding:2px 10px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;">Confirm capture</button></div>`);
+  return `<details class="recipe-spec-canvas" data-spec-canvas="${uid}" style="margin-top:12px;background:var(--deep2,var(--deep3));border:1px solid var(--sg-line-soft,rgba(255,255,255,.06));border-radius:10px;padding:10px 14px;">
     <summary style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-      <span style="font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--txt,#EAEFFF);">Spec canvas — the one-page handoff</span>
+      <span style="font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--txt,var(--txt));">Spec canvas — the one-page handoff</span>
       <span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">${lifecycleChip}${readinessChip}</span>
     </summary>
     <div style="margin-top:6px;">
       ${gateBanner}
-      ${spec.readinessReason ? `<div style="margin-bottom:6px;font-size:11px;line-height:1.5;color:var(--txt-faint,#737A92);">Readiness note: ${escapeHtml(String(spec.readinessReason))}</div>` : ""}
+      ${spec.readinessReason ? `<div style="margin-bottom:6px;font-size:11px;line-height:1.5;color:var(--txt-faint,var(--txt-faint));">Readiness note: ${escapeHtml(String(spec.readinessReason))}</div>` : ""}
       ${typeof recipeReadinessGatesHtml === "function" ? recipeReadinessGatesHtml(spec.readinessGates, spec.readinessGateSummary) : ""}
       ${fieldRow("goal", "Goal", spec.goal)}
       ${fieldRow("context", "Context", spec.context)}
@@ -15800,7 +15801,7 @@ function applyPolicyConstraintsToSpec(spec, gov, pc) {
 // tokens reused (no new colors): teal/positive #00d4b4, amber/caution #FFB454, pink/blocked
 // #FF4FD8, violet/program #a78bfa, blue/accent #3b82f6, wait-grey #5b7186.
 
-const DASH = { pos: "#00d4b4", cau: "#FFB454", blk: "#FF4FD8", prog: "#a78bfa", acc: "#3b82f6", wait: "#5b7186", ink: "#EAEFFF", dim: "#A6ADC4", faint: "#737A92", line: "#16263a", panel: "#0c1726" };
+const DASH = { pos: "#00d4b4", cau: "#FFB454", blk: "#FF4FD8", prog: "#a78bfa", acc: "#3b82f6", wait: "#5b7186", ink: "var(--txt)", dim: "var(--txt-dim)", faint: "var(--txt-faint)", line: "var(--sg-line)", panel: "var(--deep2)" };
 const DASH_LIFE = ["captured", "confirmed", "specified", "in-build", "in-telemetry"];
 
 // === P5-3 · Confirmation Ladder ===============================================
@@ -15882,7 +15883,7 @@ function confirmationLadderHtml(ladder) {
   if (!ladder) return "";
   const { level, label, nextHint, missingFields, levels } = ladder;
   const esc = typeof escapeHtml === "function" ? escapeHtml : (s) => String(s == null ? "" : s);
-  const CLR = { done: "#00d4b4", current: "#3b82f6", pending: "#5b7186", panel: "#0c1726", line: "#16263a", ink: "#EAEFFF", dim: "#A6ADC4" };
+  const CLR = { done: "#00d4b4", current: "#3b82f6", pending: "#5b7186", panel: "var(--deep2)", line: "var(--sg-line)", ink: "var(--txt)", dim: "var(--txt-dim)" };
   const rungs = levels.map((l, i) => {
     const idx = i + 1;
     const st = idx < level ? "done" : idx === level ? "current" : "pending";
@@ -16176,7 +16177,7 @@ function placementExplainerHtml(explainer, surface) {
   const label = PLACEMENT_SHAPE_LABELS[shape] || esc(shape || "Unknown");
   const sfx = surface || "workbench";
   const PCLR = {
-    panel: "#0c1726", border: "#16263a", ink: "#EAEFFF", dim: "#A6ADC4",
+    panel: "var(--deep2)", border: "var(--sg-line)", ink: "var(--txt)", dim: "var(--txt-dim)",
     stated: "#00d4b4", computed: "#3b82f6", inferred: "#5b7186",
     blocker: "#FF4FD8", warn: "#f59e0b", carry: "#00d4b4"
   };
@@ -16292,7 +16293,7 @@ function dashCapacityNetHtml(lv) {
   const ch = (lv.breakdown && lv.breakdown.deployable && lv.breakdown.deployable.chain) || { theoHrs: 0, permittedHrs: 0, freedHrs: 0, realizedHrs: 0 };
   const gross = dashKpiVal(lv, "gross_capacity"), cost = dashKpiVal(lv, "cost_to_serve"), net = dashKpiVal(lv, "net_capacity"), lever = dashKpiVal(lv, "model_fit_lever"), gatedK = dashKpi(lv, "economics_gated");
   const hmax = ch.theoHrs || 1, R = (v) => Math.round(Number(v) || 0);
-  const bar = (label, val, col) => `<div style="display:flex;align-items:center;gap:8px;margin:5px 0;"><div style="width:82px;font-size:10.5px;color:${DASH.faint};text-align:right;">${label}</div><div style="flex:1;height:16px;background:#0a1422;border-radius:4px;overflow:hidden;"><div style="height:100%;width:${Math.round(100 * val / hmax)}%;background:${col};border-radius:4px;"></div></div><div style="width:54px;font-size:11px;font-weight:700;color:${DASH.ink};">${R(val)}h</div></div>`;
+  const bar = (label, val, col) => `<div style="display:flex;align-items:center;gap:8px;margin:5px 0;"><div style="width:82px;font-size:10.5px;color:${DASH.faint};text-align:right;">${label}</div><div style="flex:1;height:16px;background:var(--deep3);border-radius:4px;overflow:hidden;"><div style="height:100%;width:${Math.round(100 * val / hmax)}%;background:${col};border-radius:4px;"></div></div><div style="width:54px;font-size:11px;font-weight:700;color:${DASH.ink};">${R(val)}h</div></div>`;
   const cascade = bar("theoretical", ch.theoHrs, DASH.acc)
     + `<div style="font-size:10px;color:${DASH.acc};margin:0 0 0 90px;">↳ policy-gap (governance) −${R(ch.theoHrs - ch.permittedHrs)}h</div>`
     + bar("permitted", ch.permittedHrs, DASH.acc)
@@ -16345,7 +16346,7 @@ function dashAgendasHtml(lv) {
   const mix = dashKpiVal(lv, "readiness_mix") || {}, pg = dashKpiVal(lv, "policy_gap"), rg = dashKpiVal(lv, "realization_gap");
   const tot = Object.values(mix).reduce((a, b) => a + b, 0) || 1, W = 960;
   const segs = [["now", mix.now || 0, DASH.pos], ["gated-policy", mix["gated-policy"] || 0, DASH.cau], ["gated-economics", mix["gated-economics"] || 0, DASH.blk], ["future-capability", mix["future-capability"] || 0, DASH.prog]];
-  let x = 0; const bar = segs.filter((s) => s[1] > 0).map(([k, v, c]) => { const w = Math.round(W * v / tot); const r = `<rect x="${x}" y="0" width="${Math.max(0, w - 2)}" height="30" rx="4" fill="${c}"/><text x="${x + w / 2}" y="20" text-anchor="middle" font-size="13" font-weight="700" fill="#0d1b2e">${v}</text>`; x += w; return r; }).join("");
+  let x = 0; const bar = segs.filter((s) => s[1] > 0).map(([k, v, c]) => { const w = Math.round(W * v / tot); const r = `<rect x="${x}" y="0" width="${Math.max(0, w - 2)}" height="30" rx="4" fill="${c}"/><text x="${x + w / 2}" y="20" text-anchor="middle" font-size="13" font-weight="700" fill="var(--deep)">${v}</text>`; x += w; return r; }).join("");
   const key = segs.map(([k, v, c]) => `<span style="font-size:10.5px;color:${DASH.dim};margin-right:13px;"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${c};vertical-align:-1px;margin-right:4px;"></span>${k} ${v}</span>`).join("");
   const tile = (label, v, sub) => `<div style="background:${DASH.panel};border:1px solid ${DASH.line};border-radius:11px;padding:13px 15px;"><div style="font-size:11px;color:${DASH.faint};font-weight:600;margin-bottom:4px;">${dashProvDot("inferred")} ${label}</div><div style="font-size:20px;font-weight:800;color:${DASH.ink};">${Math.round(Number(v) || 0)} h/wk</div><div style="font-size:10.5px;color:${DASH.faint};margin-top:3px;">${sub}</div></div>`;
   return `<section class="dash-sec"><div style="font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${DASH.faint};margin:0 0 6px;">E · The agendas</div>
@@ -16478,7 +16479,7 @@ function ed11HrsLabel(h) {
 function ed11KpiCard(label, val, sub, accent) {
   return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:4px;">`
     + `<div style="font-family:'JetBrains Mono',monospace;font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:rgba(255,255,255,.4);">${escapeHtml(label)}</div>`
-    + `<div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:20px;font-weight:600;color:${accent || "#ECEAF6"};letter-spacing:-.02em;">${escapeHtml(String(val))}</div>`
+    + `<div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:20px;font-weight:600;color:${accent || "var(--txt)"};letter-spacing:-.02em;">${escapeHtml(String(val))}</div>`
     + (sub ? `<div style="font-size:11px;color:rgba(255,255,255,.38);line-height:1.3;">${escapeHtml(sub)}</div>` : "")
     + `</div>`;
 }
@@ -16529,7 +16530,7 @@ function ed11KpiTrioHtml(lv, steps, metric) {
   const net = dep.net; const gross = dep.gross;
   return `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px;">`
     + ed11KpiCard("Net value /yr", net ? ed11Dollars(net) : "—", gross ? ed11Dollars(gross) + " gross" : "Compute business case to model", "#8FB6FF")
-    + ed11KpiCard("Confirmed steps", dep.count != null ? String(dep.count) : String(confirmedAi), "with engine gate clear", "#ECEAF6")
+    + ed11KpiCard("Confirmed steps", dep.count != null ? String(dep.count) : String(confirmedAi), "with engine gate clear", "var(--txt)")
     + ed11KpiCard("AI-addressable", aiPct + "%", aiSteps.length + " of " + steps.length + " captured steps", "#8FB6FF")
     + `</div>`;
 }
@@ -16646,7 +16647,7 @@ function ed11ReturnHtml(lv) {
     `<div style="flex:1;height:16px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;display:flex;">`,
     `<div style="width:${netPct}%;background:linear-gradient(90deg,#7FC0FF,#4D8BFF);height:100%;border-radius:3px 0 0 3px;"></div>`,
     `<div style="width:${costPct}%;background:repeating-linear-gradient(45deg,rgba(242,178,60,.38) 0 3px,transparent 3px 6px);height:100%;"></div>`,
-    `</div><span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#ECEAF6;white-space:nowrap;">net ${escapeHtml(netFmt)}</span></div>`
+    `</div><span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--txt);white-space:nowrap;">net ${escapeHtml(netFmt)}</span></div>`
   ].join("") : `<div style="font-size:11px;color:rgba(255,255,255,.3);padding:6px 0;">Compute the business case to model net value.</div>`;
   return `<div style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:14px;padding:18px 18px 14px;display:flex;flex-direction:column;gap:8px;">`
     + `<div style="display:flex;align-items:center;justify-content:space-between;">`
@@ -16654,7 +16655,7 @@ function ed11ReturnHtml(lv) {
     + `<span style="width:26px;height:6px;border-radius:3px;background:#4D8BFF;box-shadow:0 0 12px rgba(77,139,255,.6);"></span></div>`
     + `<div><span style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:26px;font-weight:600;letter-spacing:-.02em;color:#8FB6FF;text-shadow:0 0 18px rgba(77,139,255,.5);">${escapeHtml(netFmt)}</span>`
     + `<span style="font-size:13px;color:rgba(255,255,255,.38);margin-left:4px;">/yr net</span></div>`
-    + `<div style="font-size:12px;color:rgba(255,255,255,.45);line-height:1.4;">${grossFmt ? `<b style="color:#ECEAF6;">after token run-cost</b> · ${escapeHtml(grossFmt)} gross` : "Compute the business case to model value."}</div>`
+    + `<div style="font-size:12px;color:rgba(255,255,255,.45);line-height:1.4;">${grossFmt ? `<b style="color:var(--txt);">after token run-cost</b> · ${escapeHtml(grossFmt)} gross` : "Compute the business case to model value."}</div>`
     + `<div style="margin:4px 0;">${wfRows}</div>`
     + `<div style="display:flex;align-items:center;justify-content:space-between;border-top:1px solid rgba(255,255,255,.08);padding-top:8px;margin-top:2px;">`
     + `<span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:${watchOk ? "#2BD8C8" : "#F2B23C"};">⚠ ${escapeHtml(watchText)}</span>`
@@ -16679,9 +16680,9 @@ function ed11TrustHtml(steps) {
     + `<div style="display:flex;align-items:center;justify-content:space-between;">`
     + `<span style="font-family:'JetBrains Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:rgba(255,255,255,.38);">Trust — will this change the team?</span>`
     + `<span style="width:26px;height:6px;border-radius:3px;background:linear-gradient(90deg,#4D8BFF,#EC4DA6);box-shadow:0 0 12px rgba(236,77,166,.5);"></span></div>`
-    + `<div><span style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:20px;font-weight:600;color:#ECEAF6;">No — it frees people </span>`
+    + `<div><span style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:20px;font-weight:600;color:var(--txt);">No — it frees people </span>`
     + `<span style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:20px;font-weight:600;color:#F58FC4;">for better work</span></div>`
-    + `<div style="font-size:12px;color:rgba(255,255,255,.45);line-height:1.4;"><b style="color:#ECEAF6;">Two-thirds of this work stays with people.</b> AI assists the addressable parts; judgment, approval, and decisions remain human-owned. Freed time moves into higher-value work.</div>`
+    + `<div style="font-size:12px;color:rgba(255,255,255,.45);line-height:1.4;"><b style="color:var(--txt);">Two-thirds of this work stays with people.</b> AI assists the addressable parts; judgment, approval, and decisions remain human-owned. Freed time moves into higher-value work.</div>`
     + `<div style="margin:4px 0;">${ownBar}</div>`
     + `<div style="display:flex;align-items:center;justify-content:space-between;border-top:1px solid rgba(255,255,255,.08);padding-top:8px;margin-top:2px;">`
     + `<span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#2BD8C8;">✓ freed time → redesigned roles, not reductions</span>`
@@ -16718,7 +16719,7 @@ function ed11SpeedHtml(steps) {
     + `<span style="width:26px;height:6px;border-radius:3px;background:#9D7BF0;box-shadow:0 0 12px rgba(157,123,240,.6);"></span></div>`
     + `<div><span style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:26px;font-weight:600;letter-spacing:-.02em;color:#B89DF5;text-shadow:0 0 18px rgba(157,123,240,.5);">${compPct ? "−" + compPct + "%" : "—"}</span>`
     + `<span style="font-size:13px;color:rgba(255,255,255,.38);margin-left:4px;">cycle-time</span></div>`
-    + `<div style="font-size:12px;color:rgba(255,255,255,.45);line-height:1.4;">${avgCutLabel !== "—" ? `<b style="color:#ECEAF6;">${escapeHtml(avgCutLabel)}</b> off the average confirmed step` : "Confirm steps in Workbench and enter time to model cycle compression."}</div>`
+    + `<div style="font-size:12px;color:rgba(255,255,255,.45);line-height:1.4;">${avgCutLabel !== "—" ? `<b style="color:var(--txt);">${escapeHtml(avgCutLabel)}</b> off the average confirmed step` : "Confirm steps in Workbench and enter time to model cycle compression."}</div>`
     + `<div style="margin:4px 0;">${compBar}</div>`
     + `<div style="display:flex;align-items:center;justify-content:space-between;border-top:1px solid rgba(255,255,255,.08);padding-top:8px;margin-top:2px;">`
     + `<span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#F2B23C;">deliberation &amp; gates kept intact</span>`
@@ -16836,36 +16837,36 @@ function a3CapacityLensEnabled(lv) {
 function a3CellHtml(cellSteps, lens) {
   const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
   if (!cellSteps || !cellSteps.length) {
-    return `<td class="a3-cell a3-empty" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05);border-radius:4px;min-width:48px;padding:4px;text-align:center;font-size:10px;color:#737A92;">—</td>`;
+    return `<td class="a3-cell a3-empty" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05);border-radius:4px;min-width:48px;padding:4px;text-align:center;font-size:10px;color:var(--txt-faint);">—</td>`;
   }
   const n = cellSteps.length;
   const names = cellSteps.map((s, i) => (typeof stepDisplayName === "function" ? stepDisplayName(s, i) : (s.name || s.id))).join(", ");
-  let bg = "#737A92";
+  let bg = "var(--txt-faint)";
   let label = String(n);
   if (lens === "shape") {
     const counts = {};
     for (const s of cellSteps) { const sh = a3ShapeFor(s); if (sh) counts[sh] = (counts[sh] || 0) + 1; }
     const dom = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
-    bg = dom ? (A3_SHAPE_COLOR[dom[0]] || "#737A92") : "#737A92";
+    bg = dom ? (A3_SHAPE_COLOR[dom[0]] || "var(--txt-faint)") : "var(--txt-faint)";
   } else if (lens === "risk") {
     const riskOrder = ["PII","MNPI","PHI","PCI","Regulated model/data","Client Confidential","Confidential","Internal","Public","Unknown"];
     let worstIdx = riskOrder.length - 1;
     for (const s of cellSteps) { const idx = riskOrder.indexOf(a3SensFor(s)); if (idx !== -1 && idx < worstIdx) worstIdx = idx; }
-    bg = A3_SENS_COLOR[riskOrder[worstIdx]] || "#737A92";
+    bg = A3_SENS_COLOR[riskOrder[worstIdx]] || "var(--txt-faint)";
   } else if (lens === "readiness") {
     const conf = cellSteps.filter(s => s.workbenchConfirmed).length;
-    bg = conf === n ? "#00d4b4" : conf === 0 ? "#737A92" : "#FFB454";
+    bg = conf === n ? "#00d4b4" : conf === 0 ? "var(--txt-faint)" : "#FFB454";
     label = `${conf}/${n}`;
   } else {
     const counts = {};
     for (const s of cellSteps) { const t = a3OppTier(s); counts[t] = (counts[t] || 0) + 1; }
     const dom = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
-    bg = A3_OPP_COLOR[dom] || "#737A92";
+    bg = A3_OPP_COLOR[dom] || "var(--txt-faint)";
   }
   const isHex = bg.startsWith("#");
   const fill = isHex ? bg + "22" : "rgba(255,255,255,.06)";
   const bord = isHex ? bg + "66" : bg;
-  return `<td class="a3-cell" style="background:${fill};border:1px solid ${bord};border-radius:4px;min-width:48px;padding:6px;text-align:center;font-size:11px;font-weight:700;color:#EAEFFF;cursor:default;" title="${esc(names)}">${label}</td>`;
+  return `<td class="a3-cell" style="background:${fill};border:1px solid ${bord};border-radius:4px;min-width:48px;padding:6px;text-align:center;font-size:11px;font-weight:700;color:var(--txt);cursor:default;" title="${esc(names)}">${label}</td>`;
 }
 
 function a3HeatmapTableHtml(steps, lens) {
@@ -16881,9 +16882,9 @@ function a3HeatmapTableHtml(steps, lens) {
       });
       return a3CellHtml(cs, lens);
     }).join("");
-    return `<tr><td style="font-size:11px;color:#A6ADC4;padding:4px 8px 4px 0;white-space:nowrap;">${esc(role)}</td>${cells}</tr>`;
+    return `<tr><td style="font-size:11px;color:var(--txt-dim);padding:4px 8px 4px 0;white-space:nowrap;">${esc(role)}</td>${cells}</tr>`;
   }).join("");
-  const ths = A3_RUNGS.map(r => `<th style="font-size:9px;font-weight:700;color:#737A92;text-transform:uppercase;letter-spacing:.06em;padding:3px 4px;text-align:center;">${A3_RUNG_LABEL[r]}</th>`).join("");
+  const ths = A3_RUNGS.map(r => `<th style="font-size:9px;font-weight:700;color:var(--txt-faint);text-transform:uppercase;letter-spacing:.06em;padding:3px 4px;text-align:center;">${A3_RUNG_LABEL[r]}</th>`).join("");
   return `<div style="overflow-x:auto;margin:8px 0 12px;"><table style="border-collapse:separate;border-spacing:3px;width:100%;"><thead><tr><th style="width:110px;"></th>${ths}</tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
@@ -16897,7 +16898,7 @@ function a3LensSelectorHtml(current) {
   return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">${
     lenses.map(l => {
       const on = l.key === current;
-      return `<button data-a3-lens="${l.key}" style="padding:4px 12px;border-radius:6px;border:1px solid ${on ? "#42E8FF" : "rgba(255,255,255,.12)"};background:${on ? "#42E8FF" : "none"};color:${on ? "#08111f" : "#A6ADC4"};font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;">${l.label}</button>`;
+      return `<button data-a3-lens="${l.key}" style="padding:4px 12px;border-radius:6px;border:1px solid ${on ? "#42E8FF" : "rgba(255,255,255,.12)"};background:${on ? "#42E8FF" : "none"};color:${on ? "var(--deep3)" : "var(--txt-dim)"};font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;">${l.label}</button>`;
     }).join("")
   }</div>`;
 }
@@ -16910,16 +16911,16 @@ function a3ShapeMixBarHtml(steps, lv) {
   for (const s of steps) { const sh = a3ShapeFor(s); if (sh) counts[sh] = (counts[sh] || 0) + 1; }
   const total = steps.length || 1;
   const bars = order.filter(sh => counts[sh]).map(sh => {
-    const color = A3_SHAPE_COLOR[sh] || "#737A92";
+    const color = A3_SHAPE_COLOR[sh] || "var(--txt-faint)";
     const pct = Math.round(counts[sh] / total * 100);
     return `<div style="flex:${counts[sh]};background:${color};height:9px;border-radius:2px;" title="${esc(shapeLabel[sh])} · ${pct}%"></div>`;
   }).join("");
   const legend = order.filter(sh => counts[sh]).map(sh => {
-    const color = A3_SHAPE_COLOR[sh] || "#737A92";
-    return `<span style="display:inline-flex;align-items:center;gap:4px;font-size:10.5px;color:#A6ADC4;"><span style="width:7px;height:7px;border-radius:50%;background:${color};display:inline-block;"></span>${esc(shapeLabel[sh])}</span>`;
+    const color = A3_SHAPE_COLOR[sh] || "var(--txt-faint)";
+    return `<span style="display:inline-flex;align-items:center;gap:4px;font-size:10.5px;color:var(--txt-dim);"><span style="width:7px;height:7px;border-radius:50%;background:${color};display:inline-block;"></span>${esc(shapeLabel[sh])}</span>`;
   }).join("");
-  if (!bars) return `<div style="font-size:11px;color:#737A92;font-style:italic;margin-bottom:10px;">No solution shapes captured — add shapes in Workbench to see the mix</div>`;
-  return `<div style="margin-bottom:12px;"><div style="font-size:10px;font-weight:600;color:#737A92;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Solution-shape mix</div><div style="display:flex;gap:2px;border-radius:4px;overflow:hidden;margin-bottom:6px;">${bars}</div><div style="display:flex;gap:10px;flex-wrap:wrap;">${legend}</div></div>`;
+  if (!bars) return `<div style="font-size:11px;color:var(--txt-faint);font-style:italic;margin-bottom:10px;">No solution shapes captured — add shapes in Workbench to see the mix</div>`;
+  return `<div style="margin-bottom:12px;"><div style="font-size:10px;font-weight:600;color:var(--txt-faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Solution-shape mix</div><div style="display:flex;gap:2px;border-radius:4px;overflow:hidden;margin-bottom:6px;">${bars}</div><div style="display:flex;gap:10px;flex-wrap:wrap;">${legend}</div></div>`;
 }
 
 function a3BlockedHtml(steps, adj) {
@@ -16928,9 +16929,9 @@ function a3BlockedHtml(steps, adj) {
   const oppGroups = { "quick-win": [], strategic: [], speculative: [], compliance: [] };
   for (const s of steps) { const t = a3OppTier(s); if (oppGroups[t]) oppGroups[t].push(s); }
   const oppRows = ["quick-win", "strategic", "speculative"].filter(t => oppGroups[t].length).map(t => {
-    const color = A3_OPP_COLOR[t] || "#737A92";
+    const color = A3_OPP_COLOR[t] || "var(--txt-faint)";
     return `<div style="margin:3px 0;font-size:11px;"><span style="font-weight:700;color:${color};">${esc(t)}</span> · ${oppGroups[t].map((s, i) => esc(getName(s, i))).join(", ")}</div>`;
-  }).join("") || `<div style="font-size:11px;color:#737A92;">No groupings — confirm steps to see opportunity clusters</div>`;
+  }).join("") || `<div style="font-size:11px;color:var(--txt-faint);">No groupings — confirm steps to see opportunity clusters</div>`;
   const blocked = [
     ...steps.filter(s => a3OppTier(s) === "compliance").map((s, i) => ({ reason: "Compliance gate", name: getName(s, i) })),
     ...steps.filter(s => (s.cls || "assembly") === "human_held").map((s, i) => ({ reason: "Human-held by design", name: getName(s, i) })),
@@ -16938,8 +16939,8 @@ function a3BlockedHtml(steps, adj) {
   ];
   const blockedRows = blocked.slice(0, 6).map(b =>
     `<div style="margin:3px 0;font-size:11px;"><span style="font-weight:700;color:#FF4FD8;">⛉ ${esc(b.reason)}</span> · ${esc(b.name)}</div>`
-  ).join("") || `<div style="font-size:11px;color:#737A92;">No blocked steps identified</div>`;
-  return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;"><div><div style="font-size:10px;font-weight:600;color:#737A92;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Grouped opportunity</div>${oppRows}</div><div><div style="font-size:10px;font-weight:600;color:#737A92;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Blocked / protected</div>${blockedRows}</div></div>`;
+  ).join("") || `<div style="font-size:11px;color:var(--txt-faint);">No blocked steps identified</div>`;
+  return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;"><div><div style="font-size:10px;font-weight:600;color:var(--txt-faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Grouped opportunity</div>${oppRows}</div><div><div style="font-size:10px;font-weight:600;color:var(--txt-faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Blocked / protected</div>${blockedRows}</div></div>`;
 }
 
 function a3RiskTableHtml(steps) {
@@ -16947,22 +16948,22 @@ function a3RiskTableHtml(steps) {
   const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
   const riskOrder = ["PII","MNPI","PHI","PCI","Regulated model/data","Client Confidential","Confidential","Internal","Public","Unknown"];
   const elevated = steps.filter(s => riskOrder.indexOf(a3SensFor(s)) < riskOrder.indexOf("Internal"));
-  if (!elevated.length) return `<div style="font-size:11px;color:#737A92;font-style:italic;margin-bottom:12px;">No elevated data-sensitivity steps captured</div>`;
+  if (!elevated.length) return `<div style="font-size:11px;color:var(--txt-faint);font-style:italic;margin-bottom:12px;">No elevated data-sensitivity steps captured</div>`;
   const getName = (s, i) => (typeof stepDisplayName === "function") ? stepDisplayName(s, i) : (s.name || s.id);
   const getSys = s => (typeof gridCellValue === "function") ? (gridCellValue(s, "systemsTools") || "—") : "—";
   const getChk = s => (typeof gridCellValue === "function") ? (gridCellValue(s, "humanCheckpoint") || "—") : "—";
   const rows = elevated.map((s, i) => {
     const sens = a3SensFor(s);
-    const color = A3_SENS_COLOR[sens] || "#737A92";
-    return `<tr><td style="font-size:11px;color:#EAEFFF;padding:4px 8px;">${esc(getName(s, i))}</td><td style="font-size:11px;padding:4px 8px;"><span style="background:${color}22;color:${color};border:1px solid ${color}55;border-radius:3px;padding:1px 6px;">${esc(sens)}</span></td><td style="font-size:11px;color:#A6ADC4;padding:4px 8px;">${esc(String(getSys(s)))}</td><td style="font-size:11px;color:#A6ADC4;padding:4px 8px;">${esc(String(getChk(s)))}</td></tr>`;
+    const color = A3_SENS_COLOR[sens] || "var(--txt-faint)";
+    return `<tr><td style="font-size:11px;color:var(--txt);padding:4px 8px;">${esc(getName(s, i))}</td><td style="font-size:11px;padding:4px 8px;"><span style="background:${color}22;color:${color};border:1px solid ${color}55;border-radius:3px;padding:1px 6px;">${esc(sens)}</span></td><td style="font-size:11px;color:var(--txt-dim);padding:4px 8px;">${esc(String(getSys(s)))}</td><td style="font-size:11px;color:var(--txt-dim);padding:4px 8px;">${esc(String(getChk(s)))}</td></tr>`;
   }).join("");
-  return `<div style="margin-bottom:12px;"><div style="font-size:10px;font-weight:600;color:#737A92;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Data &amp; control risk</div><div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;"><thead><tr><th style="font-size:9px;color:#737A92;text-align:left;padding:4px 8px;border-bottom:1px solid #16263a;">Step</th><th style="font-size:9px;color:#737A92;text-align:left;padding:4px 8px;border-bottom:1px solid #16263a;">Sensitivity</th><th style="font-size:9px;color:#737A92;text-align:left;padding:4px 8px;border-bottom:1px solid #16263a;">Systems / tools</th><th style="font-size:9px;color:#737A92;text-align:left;padding:4px 8px;border-bottom:1px solid #16263a;">Human checkpoint</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  return `<div style="margin-bottom:12px;"><div style="font-size:10px;font-weight:600;color:var(--txt-faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Data &amp; control risk</div><div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;"><thead><tr><th style="font-size:9px;color:var(--txt-faint);text-align:left;padding:4px 8px;border-bottom:1px solid var(--sg-line);">Step</th><th style="font-size:9px;color:var(--txt-faint);text-align:left;padding:4px 8px;border-bottom:1px solid var(--sg-line);">Sensitivity</th><th style="font-size:9px;color:var(--txt-faint);text-align:left;padding:4px 8px;border-bottom:1px solid var(--sg-line);">Systems / tools</th><th style="font-size:9px;color:var(--txt-faint);text-align:left;padding:4px 8px;border-bottom:1px solid var(--sg-line);">Human checkpoint</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
 function a3EmptyHtml(note) {
   const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
   const msg = note ? esc(note) : "Confirm workflow steps in the Workbench to unlock the Portfolio Lens";
-  return `<section style="margin:0 0 14px;padding:14px;background:#0c1726;border:1px solid #16263a;border-radius:10px;"><div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:15px;font-weight:700;color:#EAEFFF;margin-bottom:8px;">Portfolio Lens</div><div style="font-size:12px;color:#737A92;line-height:1.6;margin-bottom:12px;">${msg}</div><button data-a3-to-workbench style="padding:7px 16px;background:#42E8FF;color:#08111f;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Go to Workbench →</button></section>`;
+  return `<section style="margin:0 0 14px;padding:14px;background:var(--deep2);border:1px solid var(--sg-line);border-radius:10px;"><div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:15px;font-weight:700;color:var(--txt);margin-bottom:8px;">Portfolio Lens</div><div style="font-size:12px;color:var(--txt-faint);line-height:1.6;margin-bottom:12px;">${msg}</div><button data-a3-to-workbench style="padding:7px 16px;background:#42E8FF;color:var(--deep3);border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Go to Workbench →</button></section>`;
 }
 
 function a3PortfolioLensHtml(lv, steps, records) {
@@ -16974,9 +16975,9 @@ function a3PortfolioLensHtml(lv, steps, records) {
   let adj = null;
   try { if (typeof engineAdjacency === "function") adj = engineAdjacency(records || []); } catch (_) { adj = null; }
   const confirmedNote = unconfirmedN > 0
-    ? `<div style="font-size:10.5px;color:#737A92;margin-bottom:10px;">Portfolio totals include <strong style="color:#00d4b4;">${confirmed.length} confirmed step${confirmed.length !== 1 ? "s" : ""}</strong> only · ${unconfirmedN} unconfirmed not counted</div>`
+    ? `<div style="font-size:10.5px;color:var(--txt-faint);margin-bottom:10px;">Portfolio totals include <strong style="color:#00d4b4;">${confirmed.length} confirmed step${confirmed.length !== 1 ? "s" : ""}</strong> only · ${unconfirmedN} unconfirmed not counted</div>`
     : "";
-  return `<section style="margin:0 0 14px;padding:16px;background:#0c1726;border:1px solid #16263a;border-radius:10px;"><div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:15px;font-weight:700;color:#EAEFFF;margin-bottom:10px;">Portfolio Lens</div>` +
+  return `<section style="margin:0 0 14px;padding:16px;background:var(--deep2);border:1px solid var(--sg-line);border-radius:10px;"><div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:15px;font-weight:700;color:var(--txt);margin-bottom:10px;">Portfolio Lens</div>` +
     a3LensSelectorHtml(current) +
     confirmedNote +
     a3HeatmapTableHtml(allSteps, current) +
@@ -17032,7 +17033,7 @@ const A4_CAP_COLOR = {
   "populate":  "#FFB454",
   "route":     "#EC4DA6",
   "post":      "#C2528F",
-  "misc":      "#737A92"
+  "misc":      "var(--txt-faint)"
 };
 
 function a4BlockedDimLabel(dim) {
@@ -17047,16 +17048,16 @@ function a4ClusterCardHtml(group, caps) {
     .filter(c => (group.workflows || []).some(gw => (c.workflows || []).includes(gw)))
     .map(c => c.capability).slice(0, 4);
   const capPills = sharedCaps.map(cap => {
-    const color = A4_CAP_COLOR[cap] || "#737A92";
+    const color = A4_CAP_COLOR[cap] || "var(--txt-faint)";
     return `<span style="display:inline-block;font-size:9.5px;padding:1px 7px;border-radius:10px;border:1px solid ${color}55;color:${color};background:${color}11;margin:2px 2px 0 0;">${esc(cap)}</span>`;
   }).join("");
-  return `<div style="padding:12px 14px;background:#0c1726;border:1px solid #00d4b466;border-radius:8px;margin-bottom:8px;">` +
+  return `<div style="padding:12px 14px;background:var(--deep2);border:1px solid #00d4b466;border-radius:8px;margin-bottom:8px;">` +
     `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">` +
     `<span style="width:8px;height:8px;border-radius:50%;background:#00d4b4;display:inline-block;"></span>` +
-    `<span style="font-size:12px;font-weight:700;color:#EAEFFF;">Capability cluster · ${(group.workflows || []).length} workflow${(group.workflows || []).length !== 1 ? "s" : ""}</span>` +
-    `<span style="font-size:10px;color:#737A92;">${hrs}</span></div>` +
-    `<div style="font-size:11px;color:#A6ADC4;margin-bottom:${group.reason || capPills ? "6px" : "0"};">${wfList}</div>` +
-    (group.reason ? `<div style="font-size:11px;color:#737A92;font-style:italic;margin-bottom:${capPills ? "6px" : "0"};">${esc(group.reason)}</div>` : "") +
+    `<span style="font-size:12px;font-weight:700;color:var(--txt);">Capability cluster · ${(group.workflows || []).length} workflow${(group.workflows || []).length !== 1 ? "s" : ""}</span>` +
+    `<span style="font-size:10px;color:var(--txt-faint);">${hrs}</span></div>` +
+    `<div style="font-size:11px;color:var(--txt-dim);margin-bottom:${group.reason || capPills ? "6px" : "0"};">${wfList}</div>` +
+    (group.reason ? `<div style="font-size:11px;color:var(--txt-faint);font-style:italic;margin-bottom:${capPills ? "6px" : "0"};">${esc(group.reason)}</div>` : "") +
     (capPills ? `<div>${capPills}</div>` : "") +
     `</div>`;
 }
@@ -17065,14 +17066,14 @@ function a4BlockedCardHtml(blocked) {
   const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
   const wfList = (blocked.workflows || []).map(w => esc(w)).join(" ↔ ");
   const dimLabel = a4BlockedDimLabel(blocked.blockedDimension);
-  return `<div style="padding:12px 14px;background:#0c1726;border:1px solid #FF4FD866;border-radius:8px;margin-bottom:8px;">` +
+  return `<div style="padding:12px 14px;background:var(--deep2);border:1px solid #FF4FD866;border-radius:8px;margin-bottom:8px;">` +
     `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">` +
     `<span style="font-size:13px;color:#FF4FD8;">⛉</span>` +
-    `<span style="font-size:12px;font-weight:700;color:#EAEFFF;">Blocked candidate</span>` +
+    `<span style="font-size:12px;font-weight:700;color:var(--txt);">Blocked candidate</span>` +
     `<span style="font-size:9.5px;padding:1px 7px;border-radius:10px;border:1px solid #FF4FD855;color:#FF4FD8;background:#FF4FD811;">${esc(dimLabel)}</span>` +
     `</div>` +
-    `<div style="font-size:11px;color:#A6ADC4;margin-bottom:4px;">${wfList}</div>` +
-    (blocked.reason ? `<div style="font-size:11px;color:#737A92;font-style:italic;">${esc(blocked.reason)}</div>` : "") +
+    `<div style="font-size:11px;color:var(--txt-dim);margin-bottom:4px;">${wfList}</div>` +
+    (blocked.reason ? `<div style="font-size:11px;color:var(--txt-faint);font-style:italic;">${esc(blocked.reason)}</div>` : "") +
     `</div>`;
 }
 
@@ -17080,19 +17081,19 @@ function a4CapabilityPillsHtml(cap) {
   if (!cap || !cap.capabilities || !cap.capabilities.length) return "";
   const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
   const pills = cap.capabilities.map(c => {
-    const color = A4_CAP_COLOR[c.capability] || "#737A92";
+    const color = A4_CAP_COLOR[c.capability] || "var(--txt-faint)";
     const reuseStr = c.buildOnce
       ? `<span style="color:#00d4b4;font-weight:700;"> · build-once ×${c.reuseCount}</span>`
       : ` · ×${c.reuseCount}`;
     return `<span style="display:inline-flex;align-items:center;font-size:10.5px;padding:2px 9px;border-radius:12px;border:1px solid ${color}44;color:${color};background:${color}11;margin:2px 3px 2px 0;">${esc(c.capability)}${reuseStr}</span>`;
   }).join("");
-  return `<div style="margin-bottom:12px;"><div style="font-size:10px;font-weight:600;color:#737A92;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Shared AI capability inventory</div><div style="display:flex;flex-wrap:wrap;">${pills}</div></div>`;
+  return `<div style="margin-bottom:12px;"><div style="font-size:10px;font-weight:600;color:var(--txt-faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Shared AI capability inventory</div><div style="display:flex;flex-wrap:wrap;">${pills}</div></div>`;
 }
 
 function a4EmptyHtml(note) {
   const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
   const msg = note ? esc(note) : "Confirm workflow steps in the Workbench to unlock the Portfolio Constellation";
-  return `<section style="margin:0 0 14px;padding:14px;background:#0c1726;border:1px solid #16263a;border-radius:10px;"><div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:15px;font-weight:700;color:#EAEFFF;margin-bottom:8px;">Portfolio Constellation</div><div style="font-size:12px;color:#737A92;line-height:1.6;margin-bottom:12px;">${msg}</div><button data-a4-to-workbench style="padding:7px 16px;background:#42E8FF;color:#08111f;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Go to Workbench →</button></section>`;
+  return `<section style="margin:0 0 14px;padding:14px;background:var(--deep2);border:1px solid var(--sg-line);border-radius:10px;"><div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:15px;font-weight:700;color:var(--txt);margin-bottom:8px;">Portfolio Constellation</div><div style="font-size:12px;color:var(--txt-faint);line-height:1.6;margin-bottom:12px;">${msg}</div><button data-a4-to-workbench style="padding:7px 16px;background:#42E8FF;color:var(--deep3);border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Go to Workbench →</button></section>`;
 }
 
 function a4ConstellationHtml(lv, records) {
@@ -17106,25 +17107,25 @@ function a4ConstellationHtml(lv, records) {
   const caps = (cap && cap.capabilities) || [];
   const noData = !enabledGroups.length && !blocked.length && !caps.length;
   if (noData) {
-    return `<section style="margin:0 0 14px;padding:16px;background:#0c1726;border:1px solid #16263a;border-radius:10px;"><div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:15px;font-weight:700;color:#EAEFFF;margin-bottom:8px;">Portfolio Constellation</div><div style="font-size:12px;color:#737A92;">Constellation data not yet available — confirm multiple workflows to see cluster candidates</div></section>`;
+    return `<section style="margin:0 0 14px;padding:16px;background:var(--deep2);border:1px solid var(--sg-line);border-radius:10px;"><div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:15px;font-weight:700;color:var(--txt);margin-bottom:8px;">Portfolio Constellation</div><div style="font-size:12px;color:var(--txt-faint);">Constellation data not yet available — confirm multiple workflows to see cluster candidates</div></section>`;
   }
-  const summaryNote = `<div style="font-size:10.5px;color:#737A92;margin-bottom:12px;">${lv.confirmedCount} confirmed workflow${lv.confirmedCount !== 1 ? "s" : ""} · ${enabledGroups.length} enabled cluster${enabledGroups.length !== 1 ? "s" : ""} · ${blocked.length} blocked candidate${blocked.length !== 1 ? "s" : ""}</div>`;
+  const summaryNote = `<div style="font-size:10.5px;color:var(--txt-faint);margin-bottom:12px;">${lv.confirmedCount} confirmed workflow${lv.confirmedCount !== 1 ? "s" : ""} · ${enabledGroups.length} enabled cluster${enabledGroups.length !== 1 ? "s" : ""} · ${blocked.length} blocked candidate${blocked.length !== 1 ? "s" : ""}</div>`;
   const clusterCards = enabledGroups.map(g => a4ClusterCardHtml(g, caps)).join("");
   const visibleBlocked = blocked.slice(0, 8);
   const moreBlockedNote = blocked.length > 8
-    ? `<div style="font-size:11px;color:#737A92;font-style:italic;margin-top:4px;">… and ${blocked.length - 8} more blocked candidate${blocked.length - 8 !== 1 ? "s" : ""} not shown</div>`
+    ? `<div style="font-size:11px;color:var(--txt-faint);font-style:italic;margin-top:4px;">… and ${blocked.length - 8} more blocked candidate${blocked.length - 8 !== 1 ? "s" : ""} not shown</div>`
     : "";
   const blockedCards = visibleBlocked.map(b => a4BlockedCardHtml(b)).join("");
-  return `<section style="margin:0 0 14px;padding:16px;background:#0c1726;border:1px solid #16263a;border-radius:10px;">` +
-    `<div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:15px;font-weight:700;color:#EAEFFF;margin-bottom:10px;">Portfolio Constellation</div>` +
+  return `<section style="margin:0 0 14px;padding:16px;background:var(--deep2);border:1px solid var(--sg-line);border-radius:10px;">` +
+    `<div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:15px;font-weight:700;color:var(--txt);margin-bottom:10px;">Portfolio Constellation</div>` +
     summaryNote +
     a4CapabilityPillsHtml(cap) +
     `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">` +
-    `<div><div style="font-size:10px;font-weight:600;color:#737A92;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Enabled clusters (${enabledGroups.length})</div>` +
-    (clusterCards || `<div style="font-size:11px;color:#737A92;font-style:italic;">No enabled clusters yet — confirm steps and check compatibility across workflows</div>`) +
+    `<div><div style="font-size:10px;font-weight:600;color:var(--txt-faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Enabled clusters (${enabledGroups.length})</div>` +
+    (clusterCards || `<div style="font-size:11px;color:var(--txt-faint);font-style:italic;">No enabled clusters yet — confirm steps and check compatibility across workflows</div>`) +
     `</div>` +
-    `<div><div style="font-size:10px;font-weight:600;color:#737A92;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Blocked candidates (${blocked.length})</div>` +
-    (blockedCards || `<div style="font-size:11px;color:#737A92;font-style:italic;">No blocked candidates identified</div>`) +
+    `<div><div style="font-size:10px;font-weight:600;color:var(--txt-faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Blocked candidates (${blocked.length})</div>` +
+    (blockedCards || `<div style="font-size:11px;color:var(--txt-faint);font-style:italic;">No blocked candidates identified</div>`) +
     moreBlockedNote +
     `</div></div>` +
     `</section>`;
@@ -17415,10 +17416,10 @@ function renderAnalysisTabRecipe() {
     const sectionMarker = (fields) => {
       const hits = snapGaps.filter((key) => fields.includes(key));
       if (!hits.length) return "";
-      return `<span style="display:inline-flex;align-items:center;gap:6px;background:#1a1500;border:1px solid #f59e0b55;border-radius:99px;padding:2px 10px;font-size:10px;font-weight:700;color:#f5c451;text-transform:uppercase;letter-spacing:0.04em;" title="Generated before ${escapeHtml(fieldLabels(hits))} was confirmed — regenerate to refresh">⚠ Low confidence — ${escapeHtml(fieldLabels(hits))}</span>`;
+      return `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--deep2);border:1px solid #f59e0b55;border-radius:99px;padding:2px 10px;font-size:10px;font-weight:700;color:#f5c451;text-transform:uppercase;letter-spacing:0.04em;" title="Generated before ${escapeHtml(fieldLabels(hits))} was confirmed — regenerate to refresh">⚠ Low confidence — ${escapeHtml(fieldLabels(hits))}</span>`;
     };
     const p9Note = snap?.p9Unconfirmed
-      ? `<div style="margin-top:10px;background:#160d24;border:1px solid #a78bfa55;border-left:3px solid #a78bfa;border-radius:6px;padding:9px 12px;color:#c4b5fd;font-size:12px;line-height:1.5;">Provenance note: data sensitivity was unconfirmed (AI-inferred or below threshold) when this recipe was generated. Flagged for governance review — recipe produced; review data handling against firm AI policy before deploying.</div>`
+      ? `<div style="margin-top:10px;background:var(--deep2);border:1px solid #a78bfa55;border-left:3px solid #a78bfa;border-radius:6px;padding:9px 12px;color:#c4b5fd;font-size:12px;line-height:1.5;">Provenance note: data sensitivity was unconfirmed (AI-inferred or below threshold) when this recipe was generated. Flagged for governance review — recipe produced; review data handling against firm AI policy before deploying.</div>`
       : "";
     const howTo = recipeHowToUse(step);
     const meta = getStepOpportunityMeta(step);
@@ -17433,8 +17434,8 @@ function renderAnalysisTabRecipe() {
     ).join("");
     const patternBadge = `
       <span style="position:relative;display:inline-block;">
-        <button type="button" data-pattern-chip="${escapeHtml(step.id)}" title="Click to change the AI pattern" style="background:${pattern ? "#00d4b4" : "#1e3350"};color:${pattern ? "#0d1b2e" : "#8899aa"};font-weight:700;font-size:11px;padding:2px 9px;border-radius:99px;border:none;cursor:pointer;">${escapeHtml(pattern || "Set pattern")} ▾</button>
-        <span data-pattern-menu="${escapeHtml(step.id)}" style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:40;background:#0d1b2e;border:1px solid #1e3350;border-radius:8px;padding:4px 0;box-shadow:0 8px 24px rgba(0,0,0,0.45);">${patternOptions}</span>
+        <button type="button" data-pattern-chip="${escapeHtml(step.id)}" title="Click to change the AI pattern" style="background:${pattern ? "#00d4b4" : "var(--sg-line)"};color:${pattern ? "var(--deep)" : "#8899aa"};font-weight:700;font-size:11px;padding:2px 9px;border-radius:99px;border:none;cursor:pointer;">${escapeHtml(pattern || "Set pattern")} ▾</button>
+        <span data-pattern-menu="${escapeHtml(step.id)}" style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:40;background:var(--deep);border:1px solid var(--sg-line);border-radius:8px;padding:4px 0;box-shadow:0 8px 24px rgba(0,0,0,0.45);">${patternOptions}</span>
       </span>`;
 
     const timeSavedHtml = timeSaved != null
@@ -17444,18 +17445,18 @@ function renderAnalysisTabRecipe() {
     const howToHtml = howTo.map((s) => `<li style="margin-bottom:3px;">${escapeHtml(s)}</li>`).join("");
 
     return `
-      <div class="recipe-card" data-step-id="${escapeHtml(step.id)}" style="background:#0f1f33;border:1px solid #16263a;border-radius:12px;padding:18px 20px;margin-bottom:16px;">
+      <div class="recipe-card" data-step-id="${escapeHtml(step.id)}" style="background:var(--deep2);border:1px solid var(--sg-line);border-radius:12px;padding:18px 20px;margin-bottom:16px;">
         <div style="display:flex;align-items:center;gap:12px;">
           <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
-            <span style="background:#0d1b2e;color:#00d4b4;font-weight:700;font-size:13px;padding:4px 9px;border-radius:7px;">${num}</span>
+            <span style="background:var(--deep);color:#00d4b4;font-weight:700;font-size:13px;padding:4px 9px;border-radius:7px;">${num}</span>
             <strong style="font-size:16px;color:#ffffff;font-weight:700;">${escapeHtml(name)}</strong>
           </div>
           ${timeSavedHtml}
         </div>
 
         <div style="display:flex;flex-wrap:wrap;gap:20px;margin-top:12px;font-size:12px;color:#9fb2c8;align-items:center;">
-          <span><span style="color:#5b7186;">Frequency:</span> <span data-rmeta-edit="volume" data-rmeta-step="${escapeHtml(step.id)}" role="button" tabindex="0" title="Click to edit" style="cursor:pointer;border-bottom:1px dashed #2a3f5f;">${escapeHtml(frequency)} ✎</span></span>
-          <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Sensitivity:</span> <span style="width:8px;height:8px;border-radius:50%;background:${dot};display:inline-block;"></span> <span data-rmeta-edit="sensitivity" data-rmeta-step="${escapeHtml(step.id)}" role="button" tabindex="0" title="Click to edit" style="cursor:pointer;border-bottom:1px dashed #2a3f5f;">${escapeHtml(sensitivity)} ✎</span></span>
+          <span><span style="color:#5b7186;">Frequency:</span> <span data-rmeta-edit="volume" data-rmeta-step="${escapeHtml(step.id)}" role="button" tabindex="0" title="Click to edit" style="cursor:pointer;border-bottom:1px dashed var(--sg-line);">${escapeHtml(frequency)} ✎</span></span>
+          <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Sensitivity:</span> <span style="width:8px;height:8px;border-radius:50%;background:${dot};display:inline-block;"></span> <span data-rmeta-edit="sensitivity" data-rmeta-step="${escapeHtml(step.id)}" role="button" tabindex="0" title="Click to edit" style="cursor:pointer;border-bottom:1px dashed var(--sg-line);">${escapeHtml(sensitivity)} ✎</span></span>
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Pattern:</span> ${patternBadge}</span>
           ${state.workflowGrid?.workflowFamily ? `<span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:#5b7186;">Family:</span> <span style="display:inline-flex;align-items:center;gap:5px;color:#8899aa;"><span style="width:6px;height:6px;border-radius:50%;background:${WORKFLOW_FAMILY_COLOR[state.workflowGrid.workflowFamily] || "#8899aa"};display:inline-block;"></span>${escapeHtml(state.workflowGrid.workflowFamily)}</span></span>` : ""}
           <span><span style="color:#5b7186;">Pattern confidence:</span> ${confidence}%</span>
@@ -17466,33 +17467,33 @@ function renderAnalysisTabRecipe() {
 
         <div style="margin-top:16px;">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><div style="color:#00d4b4;${labelCss}">What AI Does Here</div>${sectionMarker(["systemsTools", "dataFlow"])}</div>
-          <p style="margin:0;color:#c7d4e3;font-size:13px;line-height:1.55;">${escapeHtml(whatAi)}</p>
+          <p style="margin:0;color:var(--txt-dim);font-size:13px;line-height:1.55;">${escapeHtml(whatAi)}</p>
         </div>
 
         <div style="margin-top:16px;">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;">
-            <div style="display:flex;align-items:center;gap:10px;"><div style="color:#7a93b4;${labelCss}">Prompt Template</div>${cached ? sectionMarker(["systemsTools", "volume", "dataFlow", "sensitivity", "painAndRules"]) : ""}</div>
+            <div style="display:flex;align-items:center;gap:10px;"><div style="color:var(--txt-dim);${labelCss}">Prompt Template</div>${cached ? sectionMarker(["systemsTools", "volume", "dataFlow", "sensitivity", "painAndRules"]) : ""}</div>
             <button class="primary-button compact" type="button" data-recipe-generate="${escapeHtml(step.id)}">${cached ? "Regenerate" : "Generate prompt"}</button>
           </div>
-          <div data-recipe-body="${escapeHtml(step.id)}">${cached ? "" : `<div style="background:#0a1422;border:1px dashed #1a2a3a;border-radius:8px;padding:14px 16px;color:#5b7186;font-size:12px;">No prompt yet — click "Generate prompt" to build one for this step.</div>`}</div>
+          <div data-recipe-body="${escapeHtml(step.id)}">${cached ? "" : `<div style="background:var(--deep3);border:1px dashed var(--deep2);border-radius:8px;padding:14px 16px;color:#5b7186;font-size:12px;">No prompt yet — click "Generate prompt" to build one for this step.</div>`}</div>
           ${(() => {
             const prior = state.recipeCachePrior?.[step.id];
             if (!prior?.prompt) return "";
             const was = [prior.pattern, prior.family].filter(Boolean).join(" / ");
             const when = Number.isNaN(Date.parse(prior.preservedAt || "")) ? "" : new Date(Date.parse(prior.preservedAt)).toLocaleString("en-US");
-            return `<details style="margin-top:8px;"><summary style="font-size:11px;color:#8aa0b8;cursor:pointer;">Previous recipe — preserved ${escapeHtml(when || "earlier")}${was ? ` (was ${escapeHtml(was)})` : ""}</summary><div style="margin-top:6px;background:#0a1422;border:1px solid #1a2a3a;border-radius:8px;padding:12px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.55;color:#8aa0b8;white-space:pre-wrap;word-break:break-word;">${escapeHtml(prior.prompt)}</div></details>`;
+            return `<details style="margin-top:8px;"><summary style="font-size:11px;color:var(--txt-dim);cursor:pointer;">Previous recipe — preserved ${escapeHtml(when || "earlier")}${was ? ` (was ${escapeHtml(was)})` : ""}</summary><div style="margin-top:6px;background:var(--deep3);border:1px solid var(--deep2);border-radius:8px;padding:12px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.55;color:var(--txt-dim);white-space:pre-wrap;word-break:break-word;">${escapeHtml(prior.prompt)}</div></details>`;
           })()}
         </div>
 
         <div style="margin-top:16px;">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><div style="color:#a78bda;${labelCss}">How To Use</div>${sectionMarker(["painAndRules"])}</div>
-          <ol style="margin:0;padding-left:18px;color:#c7d4e3;font-size:13px;line-height:1.5;">${howToHtml}</ol>
+          <ol style="margin:0;padding-left:18px;color:var(--txt-dim);font-size:13px;line-height:1.5;">${howToHtml}</ol>
         </div>
 
         ${p9Note}
-        <div style="margin-top:16px;background:#3a2a0a;border:1px solid #f59e0b55;border-left:3px solid #f59e0b;border-radius:6px;padding:9px 12px;color:#f5c97a;font-size:12px;line-height:1.5;">⚠ Human oversight required — AI output must be reviewed and confirmed before any action is taken.</div>
+        <div style="margin-top:16px;background:var(--deep2);border:1px solid #f59e0b55;border-left:3px solid #f59e0b;border-radius:6px;padding:9px 12px;color:#f5c97a;font-size:12px;line-height:1.5;">⚠ Human oversight required — AI output must be reviewed and confirmed before any action is taken.</div>
 
-        <div style="margin-top:14px;padding-top:12px;border-top:1px solid #16263a;display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:#5b7186;font-size:11px;">
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--sg-line);display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:#5b7186;font-size:11px;">
           <span>Source: ${escapeHtml(source)}</span><span>·</span>
           <span>Pattern confidence: ${confidence}%</span><span>·</span>
           <span class="ds-badge ${opportunityTierBadgeClass(meta.tier)}">${escapeHtml(meta.label)}</span>
@@ -17532,7 +17533,7 @@ function renderAnalysisTabRecipe() {
     businessCaseScenariosBlockForCurrentWorkflow() +
     scoringTransparencyBlockForCurrentWorkflow() +
     rb10AuditExportHtml() +
-    `<div style="margin-top:16px;"><button class="secondary-button compact" type="button" id="downloadRecipeBookBtn">Download Recipe Book</button><button type="button" id="recipe-export-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download DOCX</button><button type="button" id="recipe-pdf-btn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download PDF</button></div>`;
+    `<div style="margin-top:16px;"><button class="secondary-button compact" type="button" id="downloadRecipeBookBtn">Download Recipe Book</button><button type="button" id="recipe-export-btn" style="background:#00d4b4;color:var(--deep);border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download DOCX</button><button type="button" id="recipe-pdf-btn" style="background:#00d4b4;color:var(--deep);border:none;border-radius:6px;padding:8px 16px;font-weight:600;margin-left:8px;cursor:pointer;transition:opacity 0.2s;">⬇ Download PDF</button></div>`;
 
   wireRecipeBook(container);
   wireRb10(container);
@@ -17694,15 +17695,15 @@ function showSensitivityConfirmModal(onConfirm, options = {}) {
   const bodyText = options.body || "One or more steps are marked High sensitivity. This content will be sent to OpenAI for processing. Only proceed if this is permitted under your firm's data handling policy.";
   const overlay = document.createElement("div");
   overlay.id = "sensitivityModal";
-  overlay.style.cssText = "position:fixed;inset:0;background:#0a1525;display:flex;align-items:center;justify-content:center;z-index:1000;padding:24px;";
+  overlay.style.cssText = "position:fixed;inset:0;background:var(--deep3);display:flex;align-items:center;justify-content:center;z-index:1000;padding:24px;";
   overlay.innerHTML = `
-    <div id="sensitivityPanel" style="background:#162438;border:1px solid #1e3350;border-radius:12px;padding:32px;max-width:480px;width:100%;box-sizing:border-box;text-align:center;">
+    <div id="sensitivityPanel" style="background:var(--deep);border:1px solid var(--sg-line);border-radius:12px;padding:32px;max-width:480px;width:100%;box-sizing:border-box;text-align:center;">
       <div style="font-size:32px;line-height:1;margin-bottom:14px;">⚠️</div>
       <div style="color:#ffffff;font-size:16px;font-weight:700;margin-bottom:10px;">${heading}</div>
       <div style="color:#8899aa;font-size:13px;line-height:1.55;margin-bottom:22px;">${bodyText}</div>
       <div style="display:flex;gap:12px;justify-content:center;">
-        <button id="sensitivityCancel" type="button" style="background:#162438;color:#8899aa;border:1px solid #1e3350;border-radius:6px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
-        <button id="sensitivityProceed" type="button" style="background:#1e3350;color:#f59e0b;border:1px solid #f59e0b;border-radius:6px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;">Proceed anyway</button>
+        <button id="sensitivityCancel" type="button" style="background:var(--deep);color:#8899aa;border:1px solid var(--sg-line);border-radius:6px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
+        <button id="sensitivityProceed" type="button" style="background:var(--sg-line);color:#f59e0b;border:1px solid #f59e0b;border-radius:6px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;">Proceed anyway</button>
       </div>
     </div>`;
   const close = () => overlay.remove();
@@ -17891,10 +17892,10 @@ function openFieldEditor(step, field, anchorRect, onSaved) {
     return `
       <div style="margin-bottom:10px;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-          <span style="font-size:11px;color:#7a93b4;text-transform:uppercase;letter-spacing:0.05em;">${escapeHtml(CELL_PLAIN_NAMES[key] || key)}</span>
+          <span style="font-size:11px;color:var(--txt-dim);text-transform:uppercase;letter-spacing:0.05em;">${escapeHtml(CELL_PLAIN_NAMES[key] || key)}</span>
           ${badge}
         </div>
-        <textarea data-fedit-input="${escapeHtml(key)}" rows="2" style="width:100%;box-sizing:border-box;background:#0d1b2e;color:#dde8f5;border:1px solid #1e3350;border-radius:6px;padding:6px 8px;font-size:12px;font-family:inherit;resize:vertical;">${escapeHtml(value)}</textarea>
+        <textarea data-fedit-input="${escapeHtml(key)}" rows="2" style="width:100%;box-sizing:border-box;background:var(--deep);color:var(--txt);border:1px solid var(--sg-line);border-radius:6px;padding:6px 8px;font-size:12px;font-family:inherit;resize:vertical;">${escapeHtml(value)}</textarea>
       </div>`;
   }).join("");
 
@@ -17903,13 +17904,13 @@ function openFieldEditor(step, field, anchorRect, onSaved) {
   fieldEditorEl.setAttribute("data-field-editor", "");
   // Insert first (off-screen, uncapped) so we can measure the natural height,
   // then place it fully within the viewport.
-  fieldEditorEl.style.cssText = `position:fixed;top:-9999px;left:-9999px;z-index:90;width:${EDITOR_WIDTH}px;overflow:auto;background:#0f1f33;border:1px solid #1e3350;border-radius:10px;padding:14px 16px;box-shadow:0 10px 30px rgba(0,0,0,0.5);`;
+  fieldEditorEl.style.cssText = `position:fixed;top:-9999px;left:-9999px;z-index:90;width:${EDITOR_WIDTH}px;overflow:auto;background:var(--deep2);border:1px solid var(--sg-line);border-radius:10px;padding:14px 16px;box-shadow:0 10px 30px rgba(0,0,0,0.5);`;
   fieldEditorEl.innerHTML = `
-    <div style="font-size:12px;font-weight:700;color:#e8f4ff;margin-bottom:10px;">${escapeHtml(field.label)}</div>
+    <div style="font-size:12px;font-weight:700;color:var(--txt);margin-bottom:10px;">${escapeHtml(field.label)}</div>
     ${rowsHtml}
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px;">
-      <button type="button" data-fedit-cancel style="background:#0d1b2e;color:#8899aa;border:1px solid #1e3350;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;">Cancel</button>
-      <button type="button" data-fedit-save style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer;">Save</button>
+      <button type="button" data-fedit-cancel style="background:var(--deep);color:#8899aa;border:1px solid var(--sg-line);border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;">Cancel</button>
+      <button type="button" data-fedit-save style="background:#00d4b4;color:var(--deep);border:none;border-radius:6px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer;">Save</button>
     </div>`;
   document.body.appendChild(fieldEditorEl);
 
@@ -17975,9 +17976,9 @@ let tierChangeNotice = null;
 function tierChangeNoticeHtml() {
   if (!tierChangeNotice) return "";
   return `
-    <div data-tier-notice style="display:flex;gap:10px;align-items:flex-start;background:#0c2a26;border:1px solid #00d4b455;border-left:3px solid #00d4b4;border-radius:8px;padding:10px 14px;margin:16px 20px 0;">
+    <div data-tier-notice style="display:flex;gap:10px;align-items:flex-start;background:var(--deep2);border:1px solid #00d4b455;border-left:3px solid #00d4b4;border-radius:8px;padding:10px 14px;margin:16px 20px 0;">
       <span style="color:#00d4b4;font-size:14px;line-height:1.2;flex-shrink:0;">↻</span>
-      <span style="flex:1;min-width:0;font-size:12px;color:#bfe8df;line-height:1.5;"><strong style="color:#e8f4ff;">${escapeHtml(tierChangeNotice.stepName)}</strong> — ${escapeHtml(tierChangeNotice.message)}</span>
+      <span style="flex:1;min-width:0;font-size:12px;color:#bfe8df;line-height:1.5;"><strong style="color:var(--txt);">${escapeHtml(tierChangeNotice.stepName)}</strong> — ${escapeHtml(tierChangeNotice.message)}</span>
       <span data-tier-notice-dismiss role="button" tabindex="0" title="Dismiss" style="color:#5b7186;font-size:16px;line-height:1;cursor:pointer;flex-shrink:0;">×</span>
     </div>`;
 }
@@ -18225,7 +18226,7 @@ function bulkClassificationReviewHtml() {
       .concat(Object.keys(WORKFLOW_FAMILY_COLOR).map((name) =>
         `<option value="${escapeHtml(name)}"${name === selected ? " selected" : ""}>${escapeHtml(name)}</option>`))
       .join("");
-  const selectCss = "background:#0d1b2e;color:#dde8f5;border:1px solid #1e3350;border-radius:6px;padding:3px 8px;font-size:12px;cursor:pointer;";
+  const selectCss = "background:var(--deep);color:var(--txt);border:1px solid var(--sg-line);border-radius:6px;padding:3px 8px;font-size:12px;cursor:pointer;";
 
   let verifiedTotal = 0;
   let patternTotal = 0;
@@ -18246,13 +18247,13 @@ function bulkClassificationReviewHtml() {
       // Verified state is unknown until loaded — only the search filters these.
       if (!bulkReviewSessionVisible(name, 0, 0, bulkReviewUnverifiedOnly, bulkReviewSearchTerm)) return "";
       return `
-        <details data-bulk-session="${escapeHtml(id)}" style="border:1px solid #16263a;border-radius:8px;margin-bottom:8px;background:#0d1b2a;">
+        <details data-bulk-session="${escapeHtml(id)}" style="border:1px solid var(--sg-line);border-radius:8px;margin-bottom:8px;background:var(--deep);">
           <summary style="${sessionSummaryCss}">
-            <strong style="font-size:13px;color:#dde8f5;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(name)}</strong>
+            <strong style="font-size:13px;color:var(--txt);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(name)}</strong>
             <span style="font-size:11px;color:#5b7186;">${stepCount} step${stepCount === 1 ? "" : "s"} · not loaded</span>
           </summary>
           <div style="padding:0 12px 10px;">
-            <button type="button" data-bulk-load="${escapeHtml(id)}" style="background:#102338;color:#00d4b4;border:1px solid #1e3350;border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer;">Load classification</button>
+            <button type="button" data-bulk-load="${escapeHtml(id)}" style="background:var(--deep2);color:#00d4b4;border:1px solid var(--sg-line);border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer;">Load classification</button>
           </div>
         </details>`;
     }
@@ -18280,15 +18281,15 @@ function bulkClassificationReviewHtml() {
         </div>`;
     }).join("");
     const verifiedBadge = sessionPatterns
-      ? `<span style="font-size:11px;color:${sessionVerified === sessionPatterns ? "#00d4b4" : "#7a93b4"};">${sessionVerified}/${sessionPatterns} verified</span>`
+      ? `<span style="font-size:11px;color:${sessionVerified === sessionPatterns ? "#00d4b4" : "var(--txt-dim)"};">${sessionVerified}/${sessionPatterns} verified</span>`
       : `<span style="font-size:11px;color:#5b7186;">no patterns</span>`;
     // Item-8 filters apply AFTER the verified/pattern totals accumulate, so
     // the summary line keeps describing the whole library, not the filter.
     if (!bulkReviewSessionVisible(name, sessionVerified, sessionPatterns, bulkReviewUnverifiedOnly, bulkReviewSearchTerm)) return "";
     return `
-      <details data-bulk-session="${escapeHtml(id)}" style="border:1px solid #16263a;border-radius:8px;margin-bottom:8px;background:#0d1b2a;">
+      <details data-bulk-session="${escapeHtml(id)}" style="border:1px solid var(--sg-line);border-radius:8px;margin-bottom:8px;background:var(--deep);">
         <summary style="${sessionSummaryCss}">
-          <strong style="font-size:13px;color:#dde8f5;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(name)}</strong>
+          <strong style="font-size:13px;color:var(--txt);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(name)}</strong>
           <span style="font-size:11px;color:${familyColor};">${escapeHtml(family || "Family —")}</span>
           ${verifiedBadge}
         </summary>
@@ -18296,7 +18297,7 @@ function bulkClassificationReviewHtml() {
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px;">
             <span style="font-size:11px;color:${familyColor};">Family:</span>
             <select data-bulk-family-session="${escapeHtml(id)}" style="${selectCss}">${familyOptions(family)}</select>
-            <button type="button" data-bulk-confirm="${escapeHtml(id)}" title="Mark every pattern in this session as user-verified" style="background:#102338;color:#00d4b4;border:1px solid #1e3350;border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer;margin-left:auto;">Confirm all</button>
+            <button type="button" data-bulk-confirm="${escapeHtml(id)}" title="Mark every pattern in this session as user-verified" style="background:var(--deep2);color:#00d4b4;border:1px solid var(--sg-line);border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer;margin-left:auto;">Confirm all</button>
           </div>
           ${rows}
         </div>
@@ -18311,18 +18312,18 @@ function bulkClassificationReviewHtml() {
     : "No patterns captured yet";
   const filterControls = `
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 10px;">
-      <input id="bulkReviewSearchInput" type="search" placeholder="Search sessions..." value="${escapeHtml(bulkReviewSearchTerm)}" style="flex:1;min-width:140px;background:#0d1b2e;color:#dde8f5;border:1px solid #1e3350;border-radius:6px;padding:5px 10px;font-size:12px;" />
+      <input id="bulkReviewSearchInput" type="search" placeholder="Search sessions..." value="${escapeHtml(bulkReviewSearchTerm)}" style="flex:1;min-width:140px;background:var(--deep);color:var(--txt);border:1px solid var(--sg-line);border-radius:6px;padding:5px 10px;font-size:12px;" />
       <label style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#9fb2c8;cursor:pointer;white-space:nowrap;">
         <input id="bulkReviewUnverifiedToggle" type="checkbox"${bulkReviewUnverifiedOnly ? " checked" : ""} style="accent-color:#00d4b4;cursor:pointer;" />
         Unverified only
       </label>
     </div>`;
   return `
-    <details data-bulk-review style="margin-bottom:14px;background:#0f1f33;border:1px solid #1e3350;border-radius:10px;padding:0 12px;">
-      <summary style="cursor:pointer;padding:12px 0;font-size:13px;font-weight:700;color:#dde8f5;list-style:none;display:flex;align-items:center;gap:8px;">
+    <details data-bulk-review style="margin-bottom:14px;background:var(--deep2);border:1px solid var(--sg-line);border-radius:10px;padding:0 12px;">
+      <summary style="cursor:pointer;padding:12px 0;font-size:13px;font-weight:700;color:var(--txt);list-style:none;display:flex;align-items:center;gap:8px;">
         <i data-lucide="check-check" style="width:15px;height:15px;color:#00d4b4;"></i>
         Classification review
-        <span style="font-weight:500;font-size:11px;color:#7a93b4;margin-left:auto;">${summary}</span>
+        <span style="font-weight:500;font-size:11px;color:var(--txt-dim);margin-left:auto;">${summary}</span>
       </summary>
       <div style="padding-bottom:12px;">
         <p style="font-size:11px;color:#5b7186;margin:0 0 10px;">Confirm or correct the AI pattern and workflow family on every saved session. Edits are user-verified and saved straight to each session.</p>
@@ -18557,17 +18558,17 @@ function renderRecipeGatePanel(stepId, gate) {
   const questions = gate.askable.map((gap) => {
     const q = modelQuestionForCells(gap.cells, claimedWording) || gap.q;
     return `
-    <div data-gate-question="${escapeHtml(q)}" data-gate-cells="${escapeHtml(gap.cells.join("+"))}" role="button" tabindex="0" style="background:#0d1b2a;border:1px solid #1e3350;border-radius:8px;padding:9px 12px;margin-bottom:6px;cursor:pointer;font-size:12px;color:#cfe0f0;line-height:1.4;">
+    <div data-gate-question="${escapeHtml(q)}" data-gate-cells="${escapeHtml(gap.cells.join("+"))}" role="button" tabindex="0" style="background:var(--deep);border:1px solid var(--sg-line);border-radius:8px;padding:9px 12px;margin-bottom:6px;cursor:pointer;font-size:12px;color:var(--txt);line-height:1.4;">
       <span style="color:#f59e0b;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-right:8px;">${escapeHtml(gap.label)}</span>${escapeHtml(q)}
     </div>`;
   }).join("");
   body.innerHTML = `
-    <div style="background:#1a1500;border:1px solid #f59e0b55;border-radius:8px;padding:12px 14px;">
+    <div style="background:var(--deep2);border:1px solid #f59e0b55;border-radius:8px;padding:12px 14px;">
       <div style="font-size:12px;color:#f5c451;line-height:1.5;margin-bottom:10px;">${gate.gaps.length} recipe-critical field${gate.gaps.length === 1 ? " is" : "s are"} unconfirmed — answering these makes a sharper prompt:</div>
-      ${questions || `<div style="font-size:12px;color:#8aa0b8;margin-bottom:6px;">The open questions for these fields were already asked and answered — regenerate after the grid updates, or generate now.</div>`}
+      ${questions || `<div style="font-size:12px;color:var(--txt-dim);margin-bottom:6px;">The open questions for these fields were already asked and answered — regenerate after the grid updates, or generate now.</div>`}
       <div style="display:flex;align-items:center;gap:10px;margin-top:10px;">
-        <button type="button" data-gate-generate-anyway style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Generate anyway</button>
-        <span data-gate-dismiss role="button" tabindex="0" style="color:#8aa0b8;font-size:12px;cursor:pointer;">Keep gaps for now</span>
+        <button type="button" data-gate-generate-anyway style="background:#00d4b4;color:var(--deep);border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Generate anyway</button>
+        <span data-gate-dismiss role="button" tabindex="0" style="color:var(--txt-dim);font-size:12px;cursor:pointer;">Keep gaps for now</span>
       </div>
     </div>`;
   body.querySelectorAll("[data-gate-question]").forEach((el) => {
@@ -18621,7 +18622,7 @@ async function runRecipeGeneration(stepId) {
   const body = document.querySelector(`[data-recipe-body="${stepId}"]`);
   if (!body) return;
   body.classList.add("open");
-  body.innerHTML = `<div style="display:flex;align-items:center;gap:10px;color:#7a93b4;font-size:13px;"><span style="width:16px;height:16px;border:2px solid #1a2a3a;border-top-color:#00d4b4;border-radius:50%;display:inline-block;animation:spin 1.1s linear infinite;"></span>Generating prompt...</div>`;
+  body.innerHTML = `<div style="display:flex;align-items:center;gap:10px;color:var(--txt-dim);font-size:13px;"><span style="width:16px;height:16px;border:2px solid var(--deep2);border-top-color:#00d4b4;border-radius:50%;display:inline-block;animation:spin 1.1s linear infinite;"></span>Generating prompt...</div>`;
   try {
     const response = await fetch("/api/recipe", {
       method: "POST",
@@ -19171,7 +19172,7 @@ async function renderAnalysisTabEngineering() {
     </div>`;
 
   // --- Export toolbar (preserved) -------------------------------------------
-  const tealBtn = "background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;cursor:pointer;transition:opacity 0.2s;";
+  const tealBtn = "background:#00d4b4;color:var(--deep);border:none;border-radius:6px;padding:8px 16px;font-weight:600;cursor:pointer;transition:opacity 0.2s;";
   const toolbar = `
     <div style="margin-bottom:16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
       <button class="secondary-button compact" type="button" id="exportEngineeringDocBtn">Export Engineering Doc</button>
@@ -19215,7 +19216,7 @@ async function renderAnalysisTabEngineering() {
         <span style="font-size:0.75rem;color:var(--txt-dim);width:140px;flex-shrink:0;" title="${escapeHtml(name)}">${escapeHtml(truncate(name, 18))}</span>
         <div style="flex:1;height:22px;background:var(--deep2);border-radius:4px;overflow:hidden;position:relative;">
           <div style="height:100%;border-radius:4px;width:${width.toFixed(0)}%;${fill}">
-            <span style="display:block;font-size:0.65rem;color:#0d1b2e;padding-left:8px;line-height:22px;white-space:nowrap;">${escapeHtml(truncate(name, 10))}</span>
+            <span style="display:block;font-size:0.65rem;color:var(--deep);padding-left:8px;line-height:22px;white-space:nowrap;">${escapeHtml(truncate(name, 10))}</span>
           </div>
         </div>
         <span class="ds-chip" style="font-size:0.68rem;color:${chip.color};">${chip.label}</span>
@@ -19267,7 +19268,7 @@ async function renderAnalysisTabEngineering() {
     const nameProv = engProvenance(gridCellState(step, "name"));
     let dots = "";
     for (let d = 0; d < 3; d += 1) {
-      dots += `<span style="color:${d < priority ? "#00d4b4" : "#2a3f5f"};">${d < priority ? "●" : "○"}</span>`;
+      dots += `<span style="color:${d < priority ? "#00d4b4" : "var(--sg-line)"};">${d < priority ? "●" : "○"}</span>`;
     }
     const meta = getStepOpportunityMeta(step);
     const priorityBadge = `<span class="ds-badge ${opportunityTierBadgeClass(meta.tier)}">${escapeHtml(meta.label)}</span>`;
@@ -19554,20 +19555,20 @@ function renderDumpMode() {
     });
     const plural = (n) => (n === 1 ? "" : "s");
     confirmHtml = `
-      <div style="margin-top:12px;background:#0d1b2a;border:1px solid #1a2a3a;border-radius:8px;padding:12px;">
-        <p style="font-size:13px;color:#dde8f5;margin:0 0 10px;">Found: ${steps.length} step${plural(steps.length)}, ${personas.size} persona${plural(personas.size)}, ${systems.size} system${plural(systems.size)} — Apply to grid?</p>
+      <div style="margin-top:12px;background:var(--deep);border:1px solid var(--deep2);border-radius:8px;padding:12px;">
+        <p style="font-size:13px;color:var(--txt);margin:0 0 10px;">Found: ${steps.length} step${plural(steps.length)}, ${personas.size} persona${plural(personas.size)}, ${systems.size} system${plural(systems.size)} — Apply to grid?</p>
         <div style="display:flex;gap:8px;">
-          <button type="button" id="dumpApplyBtn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Apply</button>
-          <button type="button" id="dumpDiscardBtn" style="background:#4b5563;color:#dde8f5;border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Discard</button>
+          <button type="button" id="dumpApplyBtn" style="background:#00d4b4;color:var(--deep);border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Apply</button>
+          <button type="button" id="dumpDiscardBtn" style="background:#4b5563;color:var(--txt);border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;">Discard</button>
         </div>
       </div>`;
   }
 
   container.innerHTML = `
-    <div style="background:#0d2137;border:1px solid #1c3b57;border-radius:10px;padding:16px;margin-bottom:14px;">
-      <label for="dumpModeTextarea" style="display:block;font-size:13px;font-weight:600;color:#dde8f5;margin-bottom:8px;">Describe this process in your own words</label>
-      <textarea id="dumpModeTextarea" rows="4" placeholder="Paste meeting notes, a rough description, an email — anything. I'll extract what's relevant." style="width:100%;box-sizing:border-box;background:#06101d;border:1px solid #1a2a3a;border-radius:6px;color:#dde8f5;font-size:13px;padding:10px;resize:vertical;">${escapeHtml(dumpText)}</textarea>
-      <button type="button" id="dumpExtractBtn" style="margin-top:10px;background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;transition:opacity 0.2s;">${dumpExtracting ? "Extracting…" : "Extract and Fill"}</button>
+    <div style="background:var(--deep2);border:1px solid var(--deep2);border-radius:10px;padding:16px;margin-bottom:14px;">
+      <label for="dumpModeTextarea" style="display:block;font-size:13px;font-weight:600;color:var(--txt);margin-bottom:8px;">Describe this process in your own words</label>
+      <textarea id="dumpModeTextarea" rows="4" placeholder="Paste meeting notes, a rough description, an email — anything. I'll extract what's relevant." style="width:100%;box-sizing:border-box;background:var(--deep3);border:1px solid var(--deep2);border-radius:6px;color:var(--txt);font-size:13px;padding:10px;resize:vertical;">${escapeHtml(dumpText)}</textarea>
+      <button type="button" id="dumpExtractBtn" style="margin-top:10px;background:#00d4b4;color:var(--deep);border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;transition:opacity 0.2s;">${dumpExtracting ? "Extracting…" : "Extract and Fill"}</button>
       ${confirmHtml}
     </div>`;
 
@@ -19678,8 +19679,8 @@ function renderAiMirror() {
   const body = aiMirrorLoading
     ? `<p style="font-size:13px;color:#5b7186;font-style:italic;margin:0;">Analysing workflow…</p>`
     : aiMirrorSummary
-      ? `<p style="font-size:13px;color:#dde8f5;line-height:1.55;margin:0;">${escapeHtml(aiMirrorSummary)}</p>`
-      : `<p style="font-size:13px;color:#7a93b4;margin:0;">Click Refresh to generate a plain-English summary of the workflow so far.</p>`;
+      ? `<p style="font-size:13px;color:var(--txt);line-height:1.55;margin:0;">${escapeHtml(aiMirrorSummary)}</p>`
+      : `<p style="font-size:13px;color:var(--txt-dim);margin:0;">Click Refresh to generate a plain-English summary of the workflow so far.</p>`;
   // E3/F5 — the worker-safe multi-actor capture panel (who does each step + the controls in the hand-offs).
   // Additive: renders nothing when there are no steps / the engine isn't loaded => byte-identical to today.
   let multiActorPanel = "";
@@ -19689,10 +19690,10 @@ function renderAiMirror() {
     }
   } catch (_e) { multiActorPanel = ""; }
   container.innerHTML = `
-    <div style="background:#0d2137;border:1px solid #1c3b57;border-radius:10px;padding:16px;margin-bottom:14px;">
+    <div style="background:var(--deep2);border:1px solid var(--deep2);border-radius:10px;padding:16px;margin-bottom:14px;">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-        <h3 style="font-size:13px;font-weight:700;color:#dde8f5;margin:0;text-transform:uppercase;letter-spacing:0.04em;flex:1;">AI Understanding</h3>
-        <button type="button" id="aiMirrorRefreshBtn" style="background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:6px 14px;font-weight:600;font-size:13px;cursor:pointer;transition:opacity 0.2s;">Refresh</button>
+        <h3 style="font-size:13px;font-weight:700;color:var(--txt);margin:0;text-transform:uppercase;letter-spacing:0.04em;flex:1;">AI Understanding</h3>
+        <button type="button" id="aiMirrorRefreshBtn" style="background:#00d4b4;color:var(--deep);border:none;border-radius:6px;padding:6px 14px;font-weight:600;font-size:13px;cursor:pointer;transition:opacity 0.2s;">Refresh</button>
       </div>
       ${body}
       ${multiActorPanel}
@@ -19736,8 +19737,8 @@ function renderPatternInterview(container) {
     return;
   }
 
-  const sectionTitleStyle = "font-size:13px;font-weight:700;color:#dde8f5;margin:0 0 10px;text-transform:uppercase;letter-spacing:0.04em;";
-  const blockStyle = "background:#0d2137;border:1px solid #1c3b57;border-radius:10px;padding:16px;margin-bottom:14px;";
+  const sectionTitleStyle = "font-size:13px;font-weight:700;color:var(--txt);margin:0 0 10px;text-transform:uppercase;letter-spacing:0.04em;";
+  const blockStyle = "background:var(--deep2);border:1px solid var(--deep2);border-radius:10px;padding:16px;margin-bottom:14px;";
 
   // BLOCK 1 — read-only step pattern overview (no API).
   const zone1Cards = steps.map((step, index) => {
@@ -19749,15 +19750,15 @@ function renderPatternInterview(container) {
     const color = handoffConfidenceColor(confidence);
     const confidenceLabel = confidence === null ? "No score" : `${Math.round(confidence * 100)}%`;
     return `
-      <div style="background:#0d1b2a;border:1px solid #1a2a3a;border-left:3px solid ${color};border-radius:8px;padding:12px;">
+      <div style="background:var(--deep);border:1px solid var(--deep2);border-left:3px solid ${color};border-radius:8px;padding:12px;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
           <span style="font-size:10px;color:#5b7186;letter-spacing:0.06em;">${String(index + 1).padStart(2, "0")}</span>
-          <strong style="font-size:14px;color:#dde8f5;flex:1;">${escapeHtml(name)}</strong>
+          <strong style="font-size:14px;color:var(--txt);flex:1;">${escapeHtml(name)}</strong>
           <span class="sensitivity-badge" style="background:${color}22;color:${color};">${escapeHtml(confidenceLabel)}</span>
         </div>
         <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:12px;">
-          <span style="color:#5b7186;">Persona</span><span style="color:#9fb3c8;">${escapeHtml(persona)}</span>
-          <span style="color:#5b7186;">System</span><span style="color:#9fb3c8;">${escapeHtml(system)}</span>
+          <span style="color:#5b7186;">Persona</span><span style="color:var(--txt-dim);">${escapeHtml(persona)}</span>
+          <span style="color:#5b7186;">System</span><span style="color:var(--txt-dim);">${escapeHtml(system)}</span>
           <span style="color:#5b7186;">AI pattern</span><span style="color:${color};font-weight:600;">${escapeHtml(pattern)}</span>
         </div>
       </div>`;
@@ -19956,7 +19957,7 @@ function renderDocumentModePlaceholder(show) {
 function renderDocUploadDefault(el) {
   el.innerHTML = `
     <div style="width:100%;min-height:400px;display:flex;align-items:center;justify-content:center;">
-      <div id="docUploadZone" style="border:2px dashed #1e3350;border-radius:12px;padding:48px;text-align:center;background:#0d1b2e;max-width:480px;cursor:pointer;">
+      <div id="docUploadZone" style="border:2px dashed var(--sg-line);border-radius:12px;padding:48px;text-align:center;background:var(--deep);max-width:480px;cursor:pointer;">
         <div style="font-size:48px;line-height:1;">📄</div>
         <div style="color:#ffffff;font-size:18px;font-weight:600;margin:16px 0 8px;">Upload a document</div>
         <div style="color:#8899aa;font-size:14px;">Word, PDF, or screenshot — AI will map it to the 3-layer workflow grid</div>
@@ -19970,9 +19971,9 @@ function renderDocUploadDefault(el) {
 function renderDocUploadLoading(el) {
   el.innerHTML = `
     <div style="width:100%;min-height:400px;display:flex;align-items:center;justify-content:center;">
-      <div style="border:2px dashed #1e3350;border-radius:12px;padding:48px;text-align:center;background:#0d1b2e;max-width:480px;">
+      <div style="border:2px dashed var(--sg-line);border-radius:12px;padding:48px;text-align:center;background:var(--deep);max-width:480px;">
         <div style="display:flex;align-items:center;justify-content:center;gap:10px;color:#8899aa;font-size:14px;">
-          <span style="width:16px;height:16px;border:2px solid #1a2a3a;border-top-color:#00d4b4;border-radius:50%;display:inline-block;animation:spin 1.1s linear infinite;"></span>
+          <span style="width:16px;height:16px;border:2px solid var(--deep2);border-top-color:#00d4b4;border-radius:50%;display:inline-block;animation:spin 1.1s linear infinite;"></span>
           Reading and extracting workflow…
         </div>
       </div>
@@ -19998,11 +19999,11 @@ function wireDocUploadZone(el) {
     zone.style.borderColor = "#00d4b4";
   });
   zone.addEventListener("dragleave", () => {
-    zone.style.borderColor = "#1e3350";
+    zone.style.borderColor = "var(--sg-line)";
   });
   zone.addEventListener("drop", (event) => {
     event.preventDefault();
-    zone.style.borderColor = "#1e3350";
+    zone.style.borderColor = "var(--sg-line)";
     const file = event.dataTransfer?.files?.[0];
     if (file) handleDocumentUpload(file, el);
   });
@@ -20164,7 +20165,7 @@ function renderWorkflowSelectionPanel(el) {
     const stepCount = Array.isArray(wf?.steps) ? wf.steps.length : 0;
     const name = wf?.workflowName || "Untitled workflow";
     return `
-      <div data-workflow-card="${index}" role="button" tabindex="0" style="background:#162438;border:1px solid #1e3350;border-radius:8px;padding:16px;cursor:pointer;transition:border-color 0.15s ease;margin-bottom:12px;">
+      <div data-workflow-card="${index}" role="button" tabindex="0" style="background:var(--deep);border:1px solid var(--sg-line);border-radius:8px;padding:16px;cursor:pointer;transition:border-color 0.15s ease;margin-bottom:12px;">
         <div style="color:${color};font-size:12px;font-weight:600;letter-spacing:0.04em;margin-bottom:6px;">${escapeHtml(family || "Workflow")}</div>
         <div style="color:#ffffff;font-size:14px;font-weight:700;">${escapeHtml(name)}</div>
         <div style="color:#8899aa;font-size:12px;margin-top:4px;">${stepCount} step${stepCount === 1 ? "" : "s"}</div>
@@ -20180,7 +20181,7 @@ function renderWorkflowSelectionPanel(el) {
     </div>`;
   el.querySelectorAll("[data-workflow-card]").forEach((card) => {
     card.addEventListener("mouseenter", () => { card.style.borderColor = "#00d4b4"; });
-    card.addEventListener("mouseleave", () => { card.style.borderColor = "#1e3350"; });
+    card.addEventListener("mouseleave", () => { card.style.borderColor = "var(--sg-line)"; });
     card.addEventListener("click", () => selectPendingWorkflow(Number(card.dataset.workflowCard)));
   });
 }
@@ -21138,18 +21139,18 @@ function specStackCockpitHtml(next) {
   return `
     <div class="ds-panel ds-border-teal" style="width:100%;box-sizing:border-box;padding:14px 16px;">
       <div class="ds-micro" style="margin-bottom:4px;">Next best step</div>
-      <div class="cockpit-next-action" style="font-size:1rem;font-weight:600;color:#e2e8f0;line-height:1.4;">${escapeHtml(next?.question || "All key areas covered — ready to analyse.")}</div>
-      <div style="margin-top:6px;font-size:12px;color:#8aa0b8;line-height:1.45;">${escapeHtml(next ? questionImpactForField(next.field) : `Recommended artifact: ${recommendation}.`)}</div>
+      <div class="cockpit-next-action" style="font-size:1rem;font-weight:600;color:var(--txt);line-height:1.4;">${escapeHtml(next?.question || "All key areas covered — ready to analyse.")}</div>
+      <div style="margin-top:6px;font-size:12px;color:var(--txt-dim);line-height:1.45;">${escapeHtml(next ? questionImpactForField(next.field) : `Recommended artifact: ${recommendation}.`)}</div>
       <details class="cockpit-signals" style="margin-top:12px;" onclick="event.stopPropagation()">
-        <summary style="cursor:pointer;font-size:11px;color:#8aa0b8;">Show all signals</summary>
+        <summary style="cursor:pointer;font-size:11px;color:var(--txt-dim);">Show all signals</summary>
         <div style="margin-top:10px;">
           <div class="ds-micro" style="margin-bottom:4px;">What changed</div>
-          <div style="font-size:12px;color:#8aa0b8;line-height:1.45;">${escapeHtml(latestIntakeChangeText())}</div>
+          <div style="font-size:12px;color:var(--txt-dim);line-height:1.45;">${escapeHtml(latestIntakeChangeText())}</div>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(124px,1fr));gap:8px;margin-top:12px;min-width:0;">
           ${metrics.map((metric) => `
             <div class="ds-card-inner" style="padding:8px 10px;">
-              <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;color:#8aa0b8;"><span>${escapeHtml(metric.label)}</span><strong style="color:#00d4b4;">${metric.score}%</strong></div>
+              <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--txt-dim);"><span>${escapeHtml(metric.label)}</span><strong style="color:#00d4b4;">${metric.score}%</strong></div>
               <div class="ds-progress" style="margin-top:6px;"><div class="ds-progress-fill" style="width:${Math.max(4, Math.min(100, metric.score))}%;"></div></div>
             </div>`).join("")}
         </div>
@@ -23238,7 +23239,7 @@ function recordCard(type, record, index) {
   // PR 27: show the step's AI pattern inline as a badge on the card header
   // (matches the teal pattern badge used elsewhere; only on step cards).
   const patternBadge = (type === "steps" && String(record.pattern || "").trim())
-    ? `<span style="background:#00d4b4;color:#0d1b2e;font-size:0.65rem;font-weight:700;border-radius:99px;padding:2px 9px;text-transform:uppercase;letter-spacing:0.03em;margin-left:8px;">${escapeHtml(String(record.pattern).trim())}</span>`
+    ? `<span style="background:#00d4b4;color:var(--deep);font-size:0.65rem;font-weight:700;border-radius:99px;padding:2px 9px;text-transform:uppercase;letter-spacing:0.03em;margin-left:8px;">${escapeHtml(String(record.pattern).trim())}</span>`
     : "";
   card.innerHTML = `
     <div class="record-card-header">
@@ -25663,13 +25664,13 @@ function renderWorkflowHeaderName() {
     // Don't clobber the field mid-edit — unless the session itself just changed.
     if (document.activeElement === existing && !sessionChanged) return;
     existing.value = name;
-    existing.style.color = name ? "#e8f4ff" : "#8899aa";
+    existing.style.color = name ? "var(--txt)" : "#8899aa";
     return;
   }
   host.innerHTML = `
     <input id="workflowNameInput" type="text" value="${escapeHtml(name)}" placeholder="Unnamed workflow" aria-label="Workflow name"
       title="Click to name this workflow"
-      style="background:transparent;border:none;border-bottom:1px dashed #1e3350;color:${name ? "#e8f4ff" : "#8899aa"};font-size:15px;font-weight:700;padding:3px 0;min-width:220px;max-width:100%;outline:none;" />`;
+      style="background:transparent;border:none;border-bottom:1px dashed var(--sg-line);color:${name ? "var(--txt)" : "#8899aa"};font-size:15px;font-weight:700;padding:3px 0;min-width:220px;max-width:100%;outline:none;" />`;
   const input = host.querySelector("#workflowNameInput");
   const save = () => {
     const value = input.value.trim();
@@ -25696,11 +25697,11 @@ function renderWorkflowNamingPrompt() {
   // holds focus (chips need their highlight refreshed).
   const active = document.activeElement;
   if (active && (active.id === "namingWorkflowInput" || active.id === "namingEngagementInput")) return;
-  const inputStyle = "display:block;width:100%;margin-top:3px;background:#0d1b2e;border:1px solid #1e3350;border-radius:6px;color:#e8f4ff;font-size:13px;padding:6px 8px;outline:none;box-sizing:border-box;";
+  const inputStyle = "display:block;width:100%;margin-top:3px;background:var(--deep);border:1px solid var(--sg-line);border-radius:6px;color:var(--txt);font-size:13px;padding:6px 8px;outline:none;box-sizing:border-box;";
   const currentRole = (state.sessionMeta?.userRole || "").toLowerCase();
   const roleChip = ([key, label]) => {
     const on = currentRole ? currentRole === key : key === "consultant";
-    return `<button type="button" data-role-chip="${key}" style="border:1px solid ${on ? "#00d4b4" : "#1e3350"};background:${on ? "rgba(0,212,180,0.15)" : "#0d1b2e"};color:${on ? "#00d4b4" : "#8899aa"};border-radius:99px;font-size:12px;font-weight:600;padding:5px 12px;cursor:pointer;">${label}</button>`;
+    return `<button type="button" data-role-chip="${key}" style="border:1px solid ${on ? "#00d4b4" : "var(--sg-line)"};background:${on ? "rgba(0,212,180,0.15)" : "var(--deep)"};color:${on ? "#00d4b4" : "#8899aa"};border-radius:99px;font-size:12px;font-weight:600;padding:5px 12px;cursor:pointer;">${label}</button>`;
   };
   const chips = [["analyst", "Analyst"], ["consultant", "Consultant"], ["manager", "Manager"], ["principal", "Principal+"]].map(roleChip).join("");
   host.innerHTML = `
@@ -25722,8 +25723,8 @@ function renderWorkflowNamingPrompt() {
       const key = btn.dataset.roleChip;
       host.querySelectorAll("[data-role-chip]").forEach((b) => {
         const on = b.dataset.roleChip === key;
-        b.style.borderColor = on ? "#00d4b4" : "#1e3350";
-        b.style.background = on ? "rgba(0,212,180,0.15)" : "#0d1b2e";
+        b.style.borderColor = on ? "#00d4b4" : "var(--sg-line)";
+        b.style.background = on ? "rgba(0,212,180,0.15)" : "var(--deep)";
         b.style.color = on ? "#00d4b4" : "#8899aa";
       });
       setUserRole(key);
@@ -25801,8 +25802,8 @@ function renderSavedSessionsPanel() {
   const hiddenNote = hiddenCount ? ` · ${hiddenCount} empty hidden` : "";
   const head = `
     <div class="saved-sessions-head" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-      <i data-lucide="folder-clock" style="width:14px;height:14px;color:#7a93b4;"></i>
-      <strong style="font-size:12px;letter-spacing:0.04em;text-transform:uppercase;color:#7a93b4;">Saved Sessions</strong>
+      <i data-lucide="folder-clock" style="width:14px;height:14px;color:var(--txt-dim);"></i>
+      <strong style="font-size:12px;letter-spacing:0.04em;text-transform:uppercase;color:var(--txt-dim);">Saved Sessions</strong>
       <span style="font-size:11px;color:#5b7186;margin-left:auto;">${sessions.length} saved${hiddenNote}</span>
     </div>`;
   if (!sessions.length) {
@@ -25869,14 +25870,14 @@ function renderSavedSessionsPanel() {
     }
 
     return `
-      <button type="button" data-load-session="${escapeHtml(id)}" ${active ? 'aria-current="true"' : ""} style="display:flex;flex-direction:column;align-items:stretch;gap:2px;width:100%;text-align:left;background:${active ? "#102338" : "#0d1b2a"};border:1px solid ${active ? "#00d4b4" : "#1a2a3a"};border-radius:8px;padding:8px 10px;color:#dde8f5;cursor:pointer;">
+      <button type="button" data-load-session="${escapeHtml(id)}" ${active ? 'aria-current="true"' : ""} style="display:flex;flex-direction:column;align-items:stretch;gap:2px;width:100%;text-align:left;background:${active ? "var(--deep2)" : "var(--deep)"};border:1px solid ${active ? "#00d4b4" : "var(--deep2)"};border-radius:8px;padding:8px 10px;color:var(--txt);cursor:pointer;">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
           <strong style="font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(name)}</strong>
           ${badge ? `<span class="ds-badge ${badge.cls}" style="flex-shrink:0;">${badge.label}</span>` : ""}
         </div>
         ${engagement ? `<span style="font-size:11px;color:#5b7186;">${escapeHtml(engagement)}</span>` : ""}
-        <span style="font-size:11px;color:#7a93b4;">${meta}</span>
-        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-top:8px;padding-top:8px;border-top:1px solid #1a2a3a;font-size:11px;color:#7a93b4;">
+        <span style="font-size:11px;color:var(--txt-dim);">${meta}</span>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-top:8px;padding-top:8px;border-top:1px solid var(--deep2);font-size:11px;color:var(--txt-dim);">
           <span>${hoursHtml}</span>
           <span style="text-align:right;">${valueHtml}</span>
         </div>
@@ -26465,23 +26466,23 @@ function closeGuidedFirstRun() {
 
 function guidedFirstRunModalHtml() {
   return `
-    <div class="ds-card" style="max-width:560px;width:100%;padding:24px;background:#0d1b2e;border:1px solid #1e3350;border-radius:12px;max-height:88vh;overflow:auto;">
+    <div class="ds-card" style="max-width:560px;width:100%;padding:24px;background:var(--deep);border:1px solid var(--sg-line);border-radius:12px;max-height:88vh;overflow:auto;">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-        <strong style="font-size:1.15rem;color:#e8f4ff;">Welcome — start with a sample</strong>
+        <strong style="font-size:1.15rem;color:var(--txt);">Welcome — start with a sample</strong>
         <span class="ds-badge" style="background:#a855f722;color:#a855f7;border:1px solid #a855f755;">Illustrative</span>
       </div>
-      <p style="margin:10px 0 0;color:#8aa0b8;font-size:0.9rem;line-height:1.6;">This studio turns a described workflow into configuration-ready AI artifacts. It keeps four signals separate, and every relied-on value carries its source:</p>
-      <ul style="margin:10px 0 0;padding-left:18px;color:#9fb3c8;font-size:0.86rem;line-height:1.7;">
-        <li><strong style="color:#cfe0f2;">Extraction confidence</strong> — did we capture the workflow correctly.</li>
-        <li><strong style="color:#cfe0f2;">Opportunity</strong> — where AI assistance is most valuable.</li>
-        <li><strong style="color:#cfe0f2;">Readiness</strong> — how usable the generated artifact is.</li>
-        <li><strong style="color:#cfe0f2;">Provenance</strong> — where each value came from.</li>
+      <p style="margin:10px 0 0;color:var(--txt-dim);font-size:0.9rem;line-height:1.6;">This studio turns a described workflow into configuration-ready AI artifacts. It keeps four signals separate, and every relied-on value carries its source:</p>
+      <ul style="margin:10px 0 0;padding-left:18px;color:var(--txt-dim);font-size:0.86rem;line-height:1.7;">
+        <li><strong style="color:var(--txt);">Extraction confidence</strong> — did we capture the workflow correctly.</li>
+        <li><strong style="color:var(--txt);">Opportunity</strong> — where AI assistance is most valuable.</li>
+        <li><strong style="color:var(--txt);">Readiness</strong> — how usable the generated artifact is.</li>
+        <li><strong style="color:var(--txt);">Provenance</strong> — where each value came from.</li>
       </ul>
-      <p style="margin:12px 0 0;color:#8aa0b8;font-size:0.86rem;line-height:1.6;">Nothing is recomputed or changed silently; generation happens only on your action, and prior versions are kept. Load a clearly-labeled sample to see the grid, the four signals, and a recommended artifact — or start fresh and describe your own in Discovery.</p>
+      <p style="margin:12px 0 0;color:var(--txt-dim);font-size:0.86rem;line-height:1.6;">Nothing is recomputed or changed silently; generation happens only on your action, and prior versions are kept. Load a clearly-labeled sample to see the grid, the four signals, and a recommended artifact — or start fresh and describe your own in Discovery.</p>
       <p style="margin:10px 0 0;color:#5b7186;font-size:0.78rem;">The sample is illustrative only — synthetic data, not real measured results, and never counted in portfolio totals.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px;">
-        <button type="button" data-guided-load style="background:#a855f7;color:#0d1b2e;border:none;border-radius:8px;padding:10px 18px;font-weight:700;font-size:14px;cursor:pointer;">Load the sample workflow</button>
-        <button type="button" data-guided-dismiss style="background:#0d1b2e;color:#cfe0f2;border:1px solid #1e3350;border-radius:8px;padding:10px 18px;font-weight:600;font-size:14px;cursor:pointer;">Start fresh</button>
+        <button type="button" data-guided-load style="background:#a855f7;color:var(--deep);border:none;border-radius:8px;padding:10px 18px;font-weight:700;font-size:14px;cursor:pointer;">Load the sample workflow</button>
+        <button type="button" data-guided-dismiss style="background:var(--deep);color:var(--txt);border:1px solid var(--sg-line);border-radius:8px;padding:10px 18px;font-weight:600;font-size:14px;cursor:pointer;">Start fresh</button>
       </div>
     </div>`;
 }
@@ -41669,13 +41670,13 @@ function closeSettingsModal() {
 
 function openSettingsModal() {
   closeSettingsModal();
-  const inputBase = "box-sizing:border-box;background:#0d1b2e;border:1px solid #1e3350;color:#ffffff;border-radius:6px;padding:10px;font-size:13px;";
-  const saveBtn = "background:#00d4b4;color:#0d1b2e;border:none;border-radius:6px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;";
+  const inputBase = "box-sizing:border-box;background:var(--deep);border:1px solid var(--sg-line);color:#ffffff;border-radius:6px;padding:10px;font-size:13px;";
+  const saveBtn = "background:#00d4b4;color:var(--deep);border:none;border-radius:6px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;";
   const overlay = document.createElement("div");
   overlay.id = "settingsModal";
-  overlay.style.cssText = "position:fixed;inset:0;background:#0a1525;display:flex;align-items:center;justify-content:center;z-index:1000;padding:24px;";
+  overlay.style.cssText = "position:fixed;inset:0;background:var(--deep3);display:flex;align-items:center;justify-content:center;z-index:1000;padding:24px;";
   overlay.innerHTML = `
-    <div style="background:#162438;border:1px solid #1e3350;border-radius:12px;padding:32px;max-width:480px;width:100%;box-sizing:border-box;">
+    <div style="background:var(--deep);border:1px solid var(--sg-line);border-radius:12px;padding:32px;max-width:480px;width:100%;box-sizing:border-box;">
       <div style="color:#ffffff;font-size:18px;font-weight:700;margin-bottom:20px;">Settings</div>
       <div style="margin-bottom:24px;">
         <label style="color:#8899aa;font-size:12px;display:block;margin-bottom:6px;">OpenAI API Key</label>
@@ -41770,16 +41771,16 @@ function openDiscoveryModePicker() {
     ? `<div style="color:#8899aa;font-size:13px;margin-bottom:16px;">Your current session will be saved before starting.</div>`
     : "";
   const card = (mode, icon, title, subtitle) => `
-    <div data-mode-card="${mode}" role="button" tabindex="0" style="flex:1;min-width:240px;background:#0d1b2e;border:1px solid #1e3350;border-radius:8px;padding:24px;cursor:pointer;transition:border-color 0.15s ease;">
+    <div data-mode-card="${mode}" role="button" tabindex="0" style="flex:1;min-width:240px;background:var(--deep);border:1px solid var(--sg-line);border-radius:8px;padding:24px;cursor:pointer;transition:border-color 0.15s ease;">
       <div style="font-size:30px;line-height:1;margin-bottom:12px;">${icon}</div>
-      <div style="color:#e8f4ff;font-size:16px;font-weight:600;margin-bottom:6px;">${title}</div>
+      <div style="color:var(--txt);font-size:16px;font-weight:600;margin-bottom:6px;">${title}</div>
       <div style="color:#8899aa;font-size:13px;line-height:1.5;">${subtitle}</div>
     </div>`;
   const overlay = document.createElement("div");
   overlay.id = "discoveryModePicker";
-  overlay.style.cssText = "position:fixed;inset:0;background:#0a1525;display:flex;align-items:center;justify-content:center;z-index:1000;padding:24px;";
+  overlay.style.cssText = "position:fixed;inset:0;background:var(--deep3);display:flex;align-items:center;justify-content:center;z-index:1000;padding:24px;";
   overlay.innerHTML = `
-    <div style="background:#162438;border:1px solid #1e3350;border-radius:12px;padding:32px;max-width:760px;width:100%;box-sizing:border-box;">
+    <div style="background:var(--deep);border:1px solid var(--sg-line);border-radius:12px;padding:32px;max-width:760px;width:100%;box-sizing:border-box;">
       <div style="color:#ffffff;font-size:20px;font-weight:600;margin-bottom:16px;">Start a new discovery</div>
       ${warning}
       <div style="display:flex;gap:16px;flex-wrap:wrap;">
@@ -41792,7 +41793,7 @@ function openDiscoveryModePicker() {
     </div>`;
   overlay.querySelectorAll("[data-mode-card]").forEach((el) => {
     el.addEventListener("mouseenter", () => { el.style.borderColor = "#00d4b4"; });
-    el.addEventListener("mouseleave", () => { el.style.borderColor = "#1e3350"; });
+    el.addEventListener("mouseleave", () => { el.style.borderColor = "var(--sg-line)"; });
     el.addEventListener("click", () => startDiscoveryInMode(el.dataset.modeCard));
   });
   overlay.querySelector("[data-mode-cancel]")?.addEventListener("click", closeDiscoveryModePicker);
@@ -43015,7 +43016,7 @@ function criticalityTagHtml(step) {
   const cr = suggested
     ? ` <button type="button" data-criticality-confirm="${escapeHtml(id)}" style="background:none;border:none;color:#00d4b4;cursor:pointer;font-size:11px;padding:0;">confirm</button> <button type="button" data-criticality-reject="${escapeHtml(id)}" style="background:none;border:none;color:#ff4fc8;cursor:pointer;font-size:11px;padding:0;">reject</button>`
     : "";
-  return `Criticality: ${criticalityChipsHtml(tag.value)} ${provenanceBadgeHtml(tag.source, tag.confidence)}${suggested ? ` <span style="color:#7a93b4;">(suggested)</span>` : ""}${cr}`;
+  return `Criticality: ${criticalityChipsHtml(tag.value)} ${provenanceBadgeHtml(tag.source, tag.confidence)}${suggested ? ` <span style="color:var(--txt-dim);">(suggested)</span>` : ""}${cr}`;
 }
 // Manual multi-select toggles + AI-suggest (always available inside the expandable
 // surface). Each toggle is a button so nothing is ever hard-disabled.
@@ -43024,15 +43025,15 @@ function criticalityPickerHtml(step) {
   const current = (criticalityOf(id) || { value: [] }).value;
   const toggles = CRITICALITY_KINDS.map((k) => {
     const on = current.includes(k);
-    const bg = on ? `${CRITICALITY_HUE}1f` : "#0d1b2e";
-    const bd = on ? `${CRITICALITY_HUE}66` : "#1e3350";
-    const col = on ? CRITICALITY_HUE : "#7a93b4";
+    const bg = on ? `${CRITICALITY_HUE}1f` : "var(--deep)";
+    const bd = on ? `${CRITICALITY_HUE}66` : "var(--sg-line)";
+    const col = on ? CRITICALITY_HUE : "var(--txt-dim)";
     return `<button type="button" data-criticality-toggle="${escapeHtml(id)}::${k}" aria-pressed="${on ? "true" : "false"}" style="background:${bg};border:1px solid ${bd};color:${col};border-radius:999px;padding:2px 8px;font-size:11px;cursor:pointer;margin:2px 4px 2px 0;">${escapeHtml(CRITICALITY_LABELS[k])}</button>`;
   }).join("");
   return `<span style="display:inline-flex;align-items:flex-start;gap:6px;flex-wrap:wrap;">
-    <span style="color:#7a93b4;">Why this matters:</span>
+    <span style="color:var(--txt-dim);">Why this matters:</span>
     <span style="display:inline-flex;flex-wrap:wrap;max-width:520px;">${toggles}</span>
-    <button type="button" data-criticality-suggest="${escapeHtml(id)}" style="background:none;border:1px solid #3a2a5a;color:#a855f7;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">Suggest (AI)</button>
+    <button type="button" data-criticality-suggest="${escapeHtml(id)}" style="background:none;border:1px solid var(--sg-line);color:#a855f7;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">Suggest (AI)</button>
   </span>`;
 }
 // Per-step criticality block, appended to the composite badge's expanded <details>.
@@ -43346,27 +43347,27 @@ function portfolioTierBadgeHtml(view) {
   const hue = view.completenessHue || "#5b7186";
   const counted = view.officialCounted
     ? ` <span style="background:#00d4b41f;border:1px solid #00d4b466;color:#00d4b4;border-radius:999px;padding:1px 8px;font-size:10.5px;">Official counted</span>`
-    : ` <span style="background:#5b71861f;border:1px solid #5b718666;color:#8aa0b8;border-radius:999px;padding:1px 8px;font-size:10.5px;">Potential · not counted</span>`;
+    : ` <span style="background:#5b71861f;border:1px solid #5b718666;color:var(--txt-dim);border-radius:999px;padding:1px 8px;font-size:10.5px;">Potential · not counted</span>`;
   return `<span style="display:inline-block;background:${hue}1f;border:1px solid ${hue}66;color:${hue};border-radius:999px;padding:1px 8px;font-size:10.5px;">${escapeHtml(view.completenessTierLabel)} · ${view.pct}%</span>${counted}`;
 }
 function portfolioAxisChipsHtml(view) {
   const chips = [];
-  if (view.workIntent) chips.push(`<span style="color:#7a93b4;font-size:11px;">intent: <strong style="color:#cfe0f2;">${escapeHtml(view.workIntent.value)}</strong></span>`);
-  if (view.role) chips.push(`<span style="color:#7a93b4;font-size:11px;">role: <strong style="color:#cfe0f2;">${escapeHtml(view.role.value)}</strong></span>`);
-  if (view.department) chips.push(`<span style="color:#7a93b4;font-size:11px;">dept: <strong style="color:#cfe0f2;">${escapeHtml(view.department)}</strong></span>`);
+  if (view.workIntent) chips.push(`<span style="color:var(--txt-dim);font-size:11px;">intent: <strong style="color:var(--txt);">${escapeHtml(view.workIntent.value)}</strong></span>`);
+  if (view.role) chips.push(`<span style="color:var(--txt-dim);font-size:11px;">role: <strong style="color:var(--txt);">${escapeHtml(view.role.value)}</strong></span>`);
+  if (view.department) chips.push(`<span style="color:var(--txt-dim);font-size:11px;">dept: <strong style="color:var(--txt);">${escapeHtml(view.department)}</strong></span>`);
   const econ = view.economics ? "economics: confirmed" : (view.economicsDraft ? "economics: draft" : "economics: needs inputs");
-  chips.push(`<span style="color:#7a93b4;font-size:11px;">${escapeHtml(econ)}</span>`);
+  chips.push(`<span style="color:var(--txt-dim);font-size:11px;">${escapeHtml(econ)}</span>`);
   return chips.join('<span style="color:#3f5878;"> · </span>');
 }
 function portfolioItemRowHtml(view) {
   const crit = view.criticality ? criticalityChipsHtml(view.criticality.value) : `<span style="color:#5b7186;font-size:11px;">criticality not tagged</span>`;
   const dot = (typeof heatmapSourceDot === "function") ? heatmapSourceDot(view.provenanceState) : "";
   const missing = (view.missingRequired || []).length
-    ? `<div style="color:#7a93b4;font-size:11px;margin-top:4px;">Needs: ${escapeHtml((view.missingRequired || []).map((m) => m.label).join(", "))}</div>`
+    ? `<div style="color:var(--txt-dim);font-size:11px;margin-top:4px;">Needs: ${escapeHtml((view.missingRequired || []).map((m) => m.label).join(", "))}</div>`
     : "";
-  return `<div class="pf-item" style="background:#0c1726;border:1px solid #16263a;border-radius:10px;padding:12px 14px;margin:0 0 10px;">
+  return `<div class="pf-item" style="background:var(--deep2);border:1px solid var(--sg-line);border-radius:10px;padding:12px 14px;margin:0 0 10px;">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
-      <div style="font-size:13px;font-weight:600;color:#e2e8f0;">${escapeHtml(view.label)}${dot}</div>
+      <div style="font-size:13px;font-weight:600;color:var(--txt);">${escapeHtml(view.label)}${dot}</div>
       <div>${portfolioTierBadgeHtml(view)}</div>
     </div>
     <div style="margin-top:6px;">${crit}</div>
@@ -43375,7 +43376,7 @@ function portfolioItemRowHtml(view) {
   </div>`;
 }
 function portfolioEmptyFrameHtml(message) {
-  return `<div style="background:#0c1726;border:1px solid #16263a;border-radius:12px;padding:22px 20px;color:#8aa0b8;font-size:13px;line-height:1.6;">${escapeHtml(message)}</div>`;
+  return `<div style="background:var(--deep2);border:1px solid var(--sg-line);border-radius:12px;padding:22px 20px;color:var(--txt-dim);font-size:13px;line-height:1.6;">${escapeHtml(message)}</div>`;
 }
 function portfolioAllWorkHtml(surface) {
   const views = surface.views || [];
@@ -43383,7 +43384,7 @@ function portfolioAllWorkHtml(surface) {
   const rows = views.map(portfolioItemRowHtml).join("");
   const counts = PORTFOLIO_TRUST_TIERS.map((t) => `${(surface.potential.byTier[t.id] || []).length} ${t.label.toLowerCase()}`).join(" · ");
   return `<div>
-    <div style="color:#8aa0b8;font-size:12px;margin:0 0 12px;">Everything captured, at every completeness — ${views.length} item${views.length === 1 ? "" : "s"} (${escapeHtml(counts)}). Draft items stay draft and clearly labelled; only confirmed, gate-passed items are marked Official counted.</div>
+    <div style="color:var(--txt-dim);font-size:12px;margin:0 0 12px;">Everything captured, at every completeness — ${views.length} item${views.length === 1 ? "" : "s"} (${escapeHtml(counts)}). Draft items stay draft and clearly labelled; only confirmed, gate-passed items are marked Official counted.</div>
     ${rows}
   </div>`;
 }
@@ -43394,14 +43395,14 @@ function portfolioPreviewHtml(surface) {
   const early = views.filter((v) => v.completenessTier === "early-draft");
   const official = surface.official.views || [];
   const section = (title, caption, list) => `<div style="margin:0 0 16px;">
-      <div style="font-size:0.95rem;font-weight:600;color:#e2e8f0;margin:0 0 2px;">${escapeHtml(title)}</div>
-      <div style="color:#7a93b4;font-size:11.5px;margin:0 0 10px;">${escapeHtml(caption)}</div>
+      <div style="font-size:0.95rem;font-weight:600;color:var(--txt);margin:0 0 2px;">${escapeHtml(title)}</div>
+      <div style="color:var(--txt-dim);font-size:11.5px;margin:0 0 10px;">${escapeHtml(caption)}</div>
       ${list.length ? list.map(portfolioItemRowHtml).join("") : portfolioEmptyFrameHtml("Nothing in this band yet.")}
     </div>`;
   return `<div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 14px;">
-      <div style="background:#0c1726;border:1px solid #16263a;border-radius:10px;padding:10px 14px;"><div style="font-size:11px;color:#7a93b4;">Portfolio Potential</div><div style="font-size:20px;font-weight:700;color:#06b6d4;">${views.length}</div><div style="font-size:10.5px;color:#7a93b4;">draft + confirmed, all labelled</div></div>
-      <div style="background:#0c1726;border:1px solid #16263a;border-radius:10px;padding:10px 14px;"><div style="font-size:11px;color:#7a93b4;">Official Counted</div><div style="font-size:20px;font-weight:700;color:#00d4b4;">${surface.official.count}</div><div style="font-size:10.5px;color:#7a93b4;">confirmed + gate-passed only</div></div>
+      <div style="background:var(--deep2);border:1px solid var(--sg-line);border-radius:10px;padding:10px 14px;"><div style="font-size:11px;color:var(--txt-dim);">Portfolio Potential</div><div style="font-size:20px;font-weight:700;color:#06b6d4;">${views.length}</div><div style="font-size:10.5px;color:var(--txt-dim);">draft + confirmed, all labelled</div></div>
+      <div style="background:var(--deep2);border:1px solid var(--sg-line);border-radius:10px;padding:10px 14px;"><div style="font-size:11px;color:var(--txt-dim);">Official Counted</div><div style="font-size:20px;font-weight:700;color:#00d4b4;">${surface.official.count}</div><div style="font-size:10.5px;color:var(--txt-dim);">confirmed + gate-passed only</div></div>
     </div>
     ${section("Discussion-ready potential", "Functional drafts and above — usable for leadership discussion and prioritisation. Clearly labelled by trust state; never diluted into the official count.", potential)}
     ${section("Early drafts (visible, cautious)", "Below two-thirds captured — still shown so the landscape is complete, marked as early draft and not yet preview-eligible.", early)}
@@ -43415,12 +43416,12 @@ function portfolioRoadmapHtml(surface) {
     const list = surface.byRoadmap[b.id] || [];
     if (!list.length) return "";
     return `<div style="margin:0 0 16px;">
-      <div style="font-size:0.95rem;font-weight:600;color:#e2e8f0;">${escapeHtml(b.label)} <span style="color:#7a93b4;font-weight:400;">(${list.length})</span></div>
-      <div style="color:#7a93b4;font-size:11.5px;margin:0 0 10px;">${escapeHtml(b.hint)}</div>
+      <div style="font-size:0.95rem;font-weight:600;color:var(--txt);">${escapeHtml(b.label)} <span style="color:var(--txt-dim);font-weight:400;">(${list.length})</span></div>
+      <div style="color:var(--txt-dim);font-size:11.5px;margin:0 0 10px;">${escapeHtml(b.hint)}</div>
       ${list.map(portfolioItemRowHtml).join("")}
     </div>`;
   }).join("");
-  return `<div><div style="color:#8aa0b8;font-size:12px;margin:0 0 12px;">Grouped by next best action. A sensitive system is never a hard stop on its own — an undescribed permission becomes a confirmation question, not a wall.</div>${sections}</div>`;
+  return `<div><div style="color:var(--txt-dim);font-size:12px;margin:0 0 12px;">Grouped by next best action. A sensitive system is never a hard stop on its own — an undescribed permission becomes a confirmation question, not a wall.</div>${sections}</div>`;
 }
 function portfolioDepartmentHtml(surface) {
   const views = surface.views || [];
@@ -43434,9 +43435,9 @@ function portfolioDepartmentHtml(surface) {
       const critMix = {};
       list.forEach((v) => { (v.criticality ? v.criticality.value : []).forEach((k) => { critMix[k] = (critMix[k] || 0) + 1; }); });
       const critChips = Object.keys(critMix).length ? criticalityChipsHtml(Object.keys(critMix)) : `<span style="color:#5b7186;font-size:11px;">no criticality tagged</span>`;
-      return `<div style="background:#0c1726;border:1px solid #16263a;border-radius:10px;padding:12px 14px;margin:0 0 10px;">
-        <div style="font-size:13px;font-weight:600;color:#cfe0f2;">${escapeHtml(dep)} <span style="color:#7a93b4;font-weight:400;">— ${list.length} item${list.length === 1 ? "" : "s"}</span></div>
-        <div style="color:#7a93b4;font-size:11.5px;margin:4px 0;">${drafts} draft · ${counted} official counted</div>
+      return `<div style="background:var(--deep2);border:1px solid var(--sg-line);border-radius:10px;padding:12px 14px;margin:0 0 10px;">
+        <div style="font-size:13px;font-weight:600;color:var(--txt);">${escapeHtml(dep)} <span style="color:var(--txt-dim);font-weight:400;">— ${list.length} item${list.length === 1 ? "" : "s"}</span></div>
+        <div style="color:var(--txt-dim);font-size:11.5px;margin:4px 0;">${drafts} draft · ${counted} official counted</div>
         <div>${critChips}</div>
       </div>`;
     }).join("");
@@ -43447,7 +43448,7 @@ function portfolioDepartmentHtml(surface) {
   // workflows) — returns "" when nothing is tagged anywhere.
   const heatmap = (typeof departmentHeatmapHtml === "function") ? portfolioSafe(() => departmentHeatmapHtml(), "") : "";
   return `<div>
-    <div style="color:#8aa0b8;font-size:12px;margin:0 0 12px;">Where the work concentrates — draft vs official mix and criticality mix per department/role.</div>
+    <div style="color:var(--txt-dim);font-size:12px;margin:0 0 12px;">Where the work concentrates — draft vs official mix and criticality mix per department/role.</div>
     ${body}
     ${heatmap ? `<div style="margin-top:16px;">${heatmap}</div>` : ""}
   </div>`;
@@ -43460,8 +43461,8 @@ function portfolioRoleHtml(surface) {
       const list = surface.byRole[role];
       const onDecisions = list.filter((v) => v.workIntent && (v.workIntent.value === "approve" || v.workIntent.value === "advise" || v.workIntent.value === "escalate")).length;
       const inferred = list.filter((v) => v.role && v.role.source === "ai-inferred").length;
-      const prov = inferred ? ` <span style="color:#7a93b4;font-size:11px;">(${inferred} suggested, unconfirmed)</span>` : "";
-      return `<li style="margin:6px 0;color:#b8c7da;"><strong style="color:#cfe0f2;">${escapeHtml(role)}</strong> — sits on ${list.length} step${list.length === 1 ? "" : "s"}${onDecisions ? `, ${onDecisions} at a decision / approval / escalation` : ""}${prov}</li>`;
+      const prov = inferred ? ` <span style="color:var(--txt-dim);font-size:11px;">(${inferred} suggested, unconfirmed)</span>` : "";
+      return `<li style="margin:6px 0;color:var(--txt-dim);"><strong style="color:var(--txt);">${escapeHtml(role)}</strong> — sits on ${list.length} step${list.length === 1 ? "" : "s"}${onDecisions ? `, ${onDecisions} at a decision / approval / escalation` : ""}${prov}</li>`;
     }).join("");
     body = `<ul style="margin:0;padding-left:18px;">${body}</ul>`;
   } else {
@@ -43469,7 +43470,7 @@ function portfolioRoleHtml(surface) {
   }
   const footprint = (typeof roleFootprintHtml === "function") ? portfolioSafe(() => roleFootprintHtml(), "") : "";
   return `<div>
-    <div style="color:#8aa0b8;font-size:12px;margin:0 0 12px;">Which roles sit on decisions, approvals, handoffs and cross-functional junctions — with source/confidence shown, never overstated.</div>
+    <div style="color:var(--txt-dim);font-size:12px;margin:0 0 12px;">Which roles sit on decisions, approvals, handoffs and cross-functional junctions — with source/confidence shown, never overstated.</div>
     ${footprint ? `<div style="margin:0 0 16px;">${footprint}</div>` : ""}
     ${body}
   </div>`;
@@ -43483,21 +43484,21 @@ function portfolioHeatmapHtml(surface) {
     const hue = r.officialCounted ? "#00d4b4" : "#3b82f6";
     const shade = tierAlpha[r.completenessTier] || "3a";
     const crit = r.criticality.length ? criticalityChipsHtml(r.criticality) : `<span style="color:#5b7186;font-size:10.5px;">—</span>`;
-    const econBadge = `<span style="font-size:10.5px;color:#7a93b4;">econ: ${escapeHtml(r.economicsState)}</span>`;
-    const polBadge = `<span style="font-size:10.5px;color:#7a93b4;">policy: ${escapeHtml(r.policyState)}</span>`;
-    const wi = r.workIntent ? `<span style="font-size:10.5px;color:#7a93b4;">intent: ${escapeHtml(r.workIntent)}</span>` : "";
+    const econBadge = `<span style="font-size:10.5px;color:var(--txt-dim);">econ: ${escapeHtml(r.economicsState)}</span>`;
+    const polBadge = `<span style="font-size:10.5px;color:var(--txt-dim);">policy: ${escapeHtml(r.policyState)}</span>`;
+    const wi = r.workIntent ? `<span style="font-size:10.5px;color:var(--txt-dim);">intent: ${escapeHtml(r.workIntent)}</span>` : "";
     const dot = (typeof heatmapSourceDot === "function") ? heatmapSourceDot(r.provenanceState) : "";
-    return `<div style="display:flex;align-items:stretch;gap:0;margin:0 0 6px;border:1px solid #16263a;border-radius:8px;overflow:hidden;">
+    return `<div style="display:flex;align-items:stretch;gap:0;margin:0 0 6px;border:1px solid var(--sg-line);border-radius:8px;overflow:hidden;">
       <div style="width:8px;background:${hue}${shade};" aria-hidden="true"></div>
-      <div style="flex:1;padding:8px 12px;background:#0c1726;">
-        <div style="font-size:12.5px;color:#e2e8f0;font-weight:600;">${escapeHtml(r.label)}${dot} <span style="color:#7a93b4;font-weight:400;font-size:11px;">${r.completenessPct}% · ${escapeHtml(r.completenessTier)}</span></div>
+      <div style="flex:1;padding:8px 12px;background:var(--deep2);">
+        <div style="font-size:12.5px;color:var(--txt);font-weight:600;">${escapeHtml(r.label)}${dot} <span style="color:var(--txt-dim);font-weight:400;font-size:11px;">${r.completenessPct}% · ${escapeHtml(r.completenessTier)}</span></div>
         <div style="margin:4px 0;">${crit}</div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;">${econBadge}${polBadge}${wi}</div>
       </div>
     </div>`;
   }).join("");
   return `<div>
-    <div style="color:#8aa0b8;font-size:12px;margin:0 0 10px;">Multiple layers on one plane — shade = completeness/confidence, edge = counted vs potential, amber chips = criticality, plus economics, permission fit, work-intent and a provenance dot. Each layer is an independent axis.</div>
+    <div style="color:var(--txt-dim);font-size:12px;margin:0 0 10px;">Multiple layers on one plane — shade = completeness/confidence, edge = counted vs potential, amber chips = criticality, plus economics, permission fit, work-intent and a provenance dot. Each layer is an independent axis.</div>
     ${legend}
     ${rows}
   </div>`;
@@ -43507,19 +43508,19 @@ function portfolioConstellationHtml(surface) {
   const model = buildPortfolioClustersByAxis(surface, axis);
   const switcher = PORTFOLIO_CLUSTER_AXES.map((a) => {
     const on = a.id === model.axis;
-    return `<button type="button" data-portfolio-cluster="${a.id}" style="background:${on ? "#3b82f61f" : "#0d1b2e"};border:1px solid ${on ? "#3b82f666" : "#1e3350"};color:${on ? "#3b82f6" : "#7a93b4"};border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;margin:0 6px 6px 0;">${escapeHtml(a.label)}</button>`;
+    return `<button type="button" data-portfolio-cluster="${a.id}" style="background:${on ? "#3b82f61f" : "var(--deep)"};border:1px solid ${on ? "#3b82f666" : "var(--sg-line)"};color:${on ? "#3b82f6" : "var(--txt-dim)"};border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;margin:0 6px 6px 0;">${escapeHtml(a.label)}</button>`;
   }).join("");
   let body;
   if (!model.clusters.length) {
     body = portfolioEmptyFrameHtml(`No clusters on this axis yet. Items group once a ${escapeHtml(model.axis)} is captured across steps. Cluster grouping never invents a relationship that was not observed.`);
   } else {
-    body = model.clusters.map((c) => `<div style="background:#0c1726;border:1px solid #16263a;border-radius:10px;padding:12px 14px;margin:0 0 10px;">
-        <div style="font-size:13px;font-weight:600;color:#cfe0f2;">${escapeHtml(c.key)} <span style="color:#7a93b4;font-weight:400;">— ${c.members.length} item${c.members.length === 1 ? "" : "s"}</span></div>
-        <div style="margin-top:6px;color:#b8c7da;font-size:11.5px;">${c.members.map((v) => escapeHtml(v.label)).join(" · ")}</div>
+    body = model.clusters.map((c) => `<div style="background:var(--deep2);border:1px solid var(--sg-line);border-radius:10px;padding:12px 14px;margin:0 0 10px;">
+        <div style="font-size:13px;font-weight:600;color:var(--txt);">${escapeHtml(c.key)} <span style="color:var(--txt-dim);font-weight:400;">— ${c.members.length} item${c.members.length === 1 ? "" : "s"}</span></div>
+        <div style="margin-top:6px;color:var(--txt-dim);font-size:11.5px;">${c.members.map((v) => escapeHtml(v.label)).join(" · ")}</div>
       </div>`).join("");
   }
   return `<div>
-    <div style="color:#8aa0b8;font-size:12px;margin:0 0 10px;">Cluster the landscape by a shared axis. Reuses observed signals only — no invented adjacency.</div>
+    <div style="color:var(--txt-dim);font-size:12px;margin:0 0 10px;">Cluster the landscape by a shared axis. Reuses observed signals only — no invented adjacency.</div>
     <div style="margin:0 0 12px;">${switcher}</div>
     ${body}
   </div>`;
@@ -43538,7 +43539,7 @@ function portfolioViewSwitcherHtml() {
   const active = portfolioActiveView();
   return `<div class="pf-view-switch" style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 16px;">${PORTFOLIO_VIEWS.map((v) => {
     const on = v.id === active;
-    return `<button type="button" data-portfolio-view="${v.id}" role="tab" aria-selected="${on ? "true" : "false"}" style="background:${on ? "#06b6d41f" : "#0d1b2e"};border:1px solid ${on ? "#06b6d466" : "#1e3350"};color:${on ? "#06b6d4" : "#8aa0b8"};border-radius:8px;padding:5px 12px;font-size:12px;cursor:pointer;">${escapeHtml(v.label)}</button>`;
+    return `<button type="button" data-portfolio-view="${v.id}" role="tab" aria-selected="${on ? "true" : "false"}" style="background:${on ? "#06b6d41f" : "var(--deep)"};border:1px solid ${on ? "#06b6d466" : "var(--sg-line)"};color:${on ? "#06b6d4" : "var(--txt-dim)"};border-radius:8px;padding:5px 12px;font-size:12px;cursor:pointer;">${escapeHtml(v.label)}</button>`;
   }).join("")}</div>`;
 }
 // The Portfolio Studio body — ALWAYS rendered (a major product section is never
@@ -43547,8 +43548,8 @@ function portfolioViewSwitcherHtml() {
 function portfolioStudioBodyHtml() {
   const surface = portfolioSurfaceForCurrent();
   const header = `<div class="pf-header" style="margin:0 0 14px;">
-    <div style="font-size:1.15rem;font-weight:700;color:#e2e8f0;">Portfolio Studio</div>
-    <div style="color:#8aa0b8;font-size:12.5px;line-height:1.6;margin-top:4px;">The whole opportunity landscape — accessible at every completeness. Access is broad; trust is explicit. Portfolio Potential (draft + confirmed, labelled) stays separate from Official Counted (confirmed, gate-passed only).</div>
+    <div style="font-size:1.15rem;font-weight:700;color:var(--txt);">Portfolio Studio</div>
+    <div style="color:var(--txt-dim);font-size:12.5px;line-height:1.6;margin-top:4px;">The whole opportunity landscape — accessible at every completeness. Access is broad; trust is explicit. Portfolio Potential (draft + confirmed, labelled) stays separate from Official Counted (confirmed, gate-passed only).</div>
   </div>`;
   return `${header}${portfolioViewSwitcherHtml()}<div class="pf-body">${portfolioViewBodyHtml(surface)}</div>`;
 }

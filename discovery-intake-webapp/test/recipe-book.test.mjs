@@ -135,7 +135,7 @@ test("recipeBookHtml: header, a By step / By status toggle, and grouped output i
   const steps = [trustedStep("s1", "One"), proposedStep("s2", "Two")];
   const sb = bookSandbox({ s1: "p", s2: "p" }, "status", steps);
   const html = sb.recipeBookHtml();
-  assert.match(html, /Recipe Book/);
+  assert.match(html, /Recipes in this package/);
   assert.match(html, /data-recipe-book-view="byStep"/);
   assert.match(html, /data-recipe-book-view="status"/);
   assert.match(html, /Proposed · 1/, "status group header with count");
