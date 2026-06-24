@@ -179,7 +179,7 @@ test("ywHeroHtml: renders workflow name", () => {
 });
 
 test("ywHeroHtml: contains no cost metrics or FTE language (prohibition framing is permitted)", () => {
-  // The hero says "No cost, no headcount" as an explicit prohibition — that's correct.
+  // The hero uses neutral, descriptive copy (no cost or headcount claims).
   // What's banned: dollar amounts, FTE ratios, savings metrics as actual values.
   const { ywHeroHtml } = ywSandbox();
   const out = ywHeroHtml("My workflow", { timeBackMinutes: 90, hasLeverage: true });
@@ -307,7 +307,7 @@ test("rail-clean: C-9 compute/render functions contain no cost-metric or FTE str
 });
 
 test("rail-clean: ywHeroHtml runtime output contains no dollar amounts or FTE ratios", () => {
-  // "No cost, no headcount" in the hero is a prohibition statement — permitted.
+  // The hero uses neutral, descriptive copy — no cost or headcount claims.
   // Dollar signs, FTE ratios, and savings metrics as actual values are banned.
   const { ywHeroHtml } = ywSandbox();
   const out = ywHeroHtml("Recon", { timeBackMinutes: 120, hasLeverage: true });

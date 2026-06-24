@@ -7678,10 +7678,10 @@ function ywHeroHtml(wfName, model) {
   const esc = typeof escapeHtml === "function" ? escapeHtml : s => String(s == null ? "" : s);
   const timeLabel = ywTimeBackLabel(model.timeBackMinutes);
   const timeBadge = timeLabel
-    ? `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--gm-value)18;border:1px solid var(--gm-value)50;color:var(--gm-value);font-family:var(--gm-mono,'JetBrains Mono',monospace);font-size:12px;padding:5px 12px;border-radius:8px;margin-top:10px;">${esc(timeLabel)} per run — back to the work that needs you</span>` : "";
+    ? `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--gm-value)18;border:1px solid var(--gm-value)50;color:var(--gm-value);font-family:var(--gm-mono,'JetBrains Mono',monospace);font-size:12px;padding:5px 12px;border-radius:8px;margin-top:10px;">${esc(timeLabel)} per run (estimated)</span>` : "";
   return `<div style="padding:22px 24px 18px;border-bottom:1px solid var(--sg-line-soft);">
     <div style="font-family:var(--gm-display,'Space Grotesk',system-ui);font-size:22px;font-weight:700;color:var(--txt);line-height:1.2;">${esc(wfName || "Your workflow")}</div>
-    <div style="margin-top:6px;font-size:13.5px;color:var(--txt-dim);line-height:1.6;">Where AI clears the path — and what stays yours. No cost, no headcount, ever.</div>
+    <div style="margin-top:6px;font-size:13.5px;color:var(--txt-dim);line-height:1.6;">Where AI assists — and what stays yours.</div>
     ${timeBadge}
   </div>`;
 }
