@@ -369,3 +369,120 @@ node --check app.js      # OK (exit 0)
 node --check server.mjs  # OK (exit 0)
 npm test                 # tests 1465 / pass 1465 / fail 0 (exit 0)
 ```
+
+---
+
+## P6-3 · Permission & entitlement policy guardrails (draft, reviewable)
+
+**Status:** COMPLETE
+**Gate:** 1479/0 (+14 tests over P6-2's 1465/0)
+**Scope:** policy → draft reviewable **permission/entitlement** guardrails only —
+no unit economics (P6-4), no dashboard / portfolio-preview surfacing (P6-5), no
+corp integration, and no change to official counted rollups.
+
+Per the formal clarification, P6-3 is **Permission & Entitlement** guardrails, **not
+generic data-restriction logic**. Sensitive data, sensitive systems, login language,
+and "download from system" language are **never** treated as automatic blockers.
+Turn the already-uploaded AI policy (`state.aiPolicy` clauses from the existing
+`extractPolicyClauses` / `/api/extract-policy`) into structured, individually-
+reviewable permission guardrails — leaving the upload/extraction path, the
+clause-citation IR, and the `normalizePolicyConstraints` / `buildRecipeSpec`
+machinery untouched.
+
+### Five separated dimensions
+
+- **data sensitivity** — what data/system is involved (context, never a block)
+- **entitlement** — what the actor is allowed to do
+- **action** — read / retrieve, write, export, approve, administer
+- **control** — review, approval, logging, four-eyes, human checkpoint
+- **decision owner** — who can approve / rely on the action
+
+### Assumption rule
+
+If the capture describes work a person personally does in a system, assume they may
+have **ordinary access** to perform that work — **unless** the capture explicitly
+says access is missing / unauthorized / blocked / unknown (`ENTITLEMENT_ABSENCE_RE`).
+An unknown entitlement raises a **question**, never an automatic block.
+
+### What was built
+
+- **`buildPolicyGuardrails(policy)`** — deterministic, grounded in each clause's own
+  action verb + permission/prohibition modality. Emits permission guardrails such as
+  *role may read system*, *role may export with logging/review*, *approval requires a
+  named authority*, and *AI may assist with retrieval/extraction but not approve*.
+  A clause that is only about data sensitivity (no action/entitlement) yields nothing
+  — sensitivity is never a blocker.
+- **Tiered actions** (`ENTITLEMENT_ACTIONS`): read (tier 1, no control floor) <
+  export / write (tier 2, logging / review) < approve (tier 3, named authority). The
+  `detectActionTier` picks the highest-consequence action present, and
+  higher-consequence actions carry **stronger required controls** than read/retrieve.
+- **Review states** (suggested / confirmed / rejected) in
+  `state.policyGuardrailReviews` (backfilled `{}`). A guardrail is **draft until a
+  human confirms it**; only the decisions persist, the guardrails re-derive.
+- **`activePolicyGuardrails(policy)`** — confirmed-only read API; a policy never
+  silently activates.
+- **Entitlement read APIs (read-only)** — `stepEntitlementStatus` (assumption rule),
+  `policyEntitlementQuestionsForStep` (unknown → a missing-permission question), and
+  `policyEntitlementFitForStep` (returns `permitted` / `permitted-with-controls` /
+  `requires-authority` / `needs-permission-info` with required controls + decision
+  owner, never a hard block) for later placement / economics. None write the step.
+- **Review panel** `policyGuardrailsPanelHtml` appended into `renderPolicyPanelHtml`
+  (`""` when no grounded guardrails → byte-identical when unused): each guardrail
+  shows the actor, action, required controls, decision owner, source clause, and
+  review state, with confirm / reject / reset affordances and a "sensitive data is
+  never blocked outright; an unknown entitlement raises a question; confirming never
+  changes scoring or counted totals" caveat. Wired in `wirePolicyPanel`.
+
+### Tests (the six required guarantees + safety)
+
+1. Sensitive system + described login/read access → **not auto-blocked** (`permitted`).
+2. Sensitive system + confirmed read/export entitlement → **policy-fit with controls**.
+3. Unknown entitlement → a **missing-permission question**, not a block.
+4. Write / export / approve require **stronger controls** than read / retrieve.
+5. Draft (or confirmed) guardrails **never change** the opportunity score (functional +
+   source-level).
+6. Confirmed guardrails are **readable** downstream; rejected are **ignored**.
+   Plus: no fabrication from sensitivity-only / cue-less / empty policy; read-only (no
+   grid write, no step mutation); panel byte-identical when unused; rail-clean; no
+   Phase 5 / gate function references P6-3 symbols.
+
+### Changed files
+
+| File | Change |
+|---|---|
+| `app.js` | `state.policyGuardrailReviews` in `defaultState` + normalize backfill; the P6-3 permission/entitlement core block; `policyGuardrailsPanelHtml` + one-line append in `renderPolicyPanelHtml`; confirm/reject/reset handlers in `wirePolicyPanel` |
+| `test/p6-3-policy-guardrails.test.mjs` | 14 focused tests (new) |
+
+### Adversarial review
+
+Reviewed across two lenses (entitlement-semantics + trust/correctness), each
+finding skeptic-verified. Four findings positively confirmed the rework (assumption
+rule, sensitivity-as-context, unknown→question, control escalation, isolation). Two
+real bugs were fixed before commit, each with a regression test:
+
+1. **Negated controls** — a control named after "without" / "unless" (e.g. "may
+   approve *without* a named authority") was read as a *required* control, inverting
+   the clause. Fixed: `detectEntitlementControls` now reads only the granted portion
+   (`entitlementGrantedText`).
+2. **Spelling bias** — `ENTITLEMENT_ABSENCE_RE` and `detectEntitlementModality` only
+   matched British "authoris**ed**", missing American "authori**zed**" (and the
+   approve action verb "authorize" collided with the modal "authorized to"). Fixed:
+   `authori[sz]` spellings, and "authorize/authorise" removed from the approve action
+   verbs (the modal is handled by `detectEntitlementModality`).
+
+### What was intentionally NOT touched
+
+- No change to the existing upload/extraction path (`extractPolicyClauses`,
+  `/api/extract-policy`, `setAiPolicy`), the clause-citation IR, or the
+  `normalizePolicyConstraints` / `buildRecipeSpec` constraint machinery.
+- No unit economics (P6-4), dashboard / portfolio-preview surfacing (P6-5), or corp
+  integration. No `server.mjs`, `index.html`, `studio_engine.mjs`, scorer, gate, or
+  P6-0/P6-1/P6-2 change.
+
+### Verification (P6-3)
+
+```bash
+node --check app.js      # OK (exit 0)
+node --check server.mjs  # OK (exit 0)
+npm test                 # tests 1479 / pass 1479 / fail 0 (exit 0)
+```

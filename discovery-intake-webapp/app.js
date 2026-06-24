@@ -1184,6 +1184,12 @@ const defaultState = {
   // null = no policy → artifacts use the generic advisory caution. Read-only at
   // generation time; replacing or removing it is always an explicit user action.
   aiPolicy: null,
+  // P6-3: human review decisions for the DRAFT policy guardrails derived from the
+  // uploaded policy. Additive sidecar keyed by guardrail key → "confirmed" |
+  // "rejected" (absent = "suggested"/draft). Guardrails are re-derived
+  // deterministically from state.aiPolicy; only the review decisions persist.
+  // Never silently active — only a confirmed guardrail is readable downstream.
+  policyGuardrailReviews: {},
   // V3-4: engagement-scoped, append-only, hash-chained audit trail. Persists on
   // the session blob (NOT a new store). Written ONLY by recordAuditEvent (push of
   // a frozen entry); verifyAuditTrail makes any edit/delete/reorder detectable.
@@ -5533,6 +5539,307 @@ function policyReviewLine(policy, cellKeys) {
   }
   return "";
 }
+
+// === P6-3: Permission & entitlement policy guardrails (draft, reviewable) ====
+// Turn the ALREADY-UPLOADED AI policy (state.aiPolicy clauses from
+// extractPolicyClauses) into STRUCTURED, individually-reviewable PERMISSION /
+// ENTITLEMENT guardrails — what an actor (or AI/tool) is ALLOWED to do, with which
+// controls, and who owns approval. This is NOT generic data-restriction logic:
+// sensitive data / sensitive systems / login / "download from system" language is
+// NEVER treated as an automatic blocker.
+//
+// Four separated dimensions:
+//   • data sensitivity — what kind of data/system is involved (context, not a block)
+//   • entitlement      — what the actor is allowed to do
+//   • action           — read, retrieve, write, export, approve, administer, …
+//   • control          — review, approval, logging, four-eyes, human checkpoint
+//   • decision owner    — who can approve / rely on the action
+//
+// Assumption rule: if the capture describes work a person personally does in a
+// system, assume they may have ordinary access to perform THAT work — unless the
+// capture explicitly says access is missing, unauthorized, blocked, or unknown.
+// Unknown entitlement raises a QUESTION, never an automatic block.
+//
+// Trust rules:
+//   • Guardrails are DRAFT (ai-inferred, "suggested") until a human confirms them
+//     — never silently active. Only a CONFIRMED guardrail is readable downstream.
+//   • Higher-consequence actions (write / export / approve) require STRONGER
+//     controls than read / retrieve.
+//   • Nothing here feeds the opportunity score, the confirmation/engine gate, or
+//     any official counted rollup, and nothing writes a grid cell or a work-item
+//     field or overrides an explicit value.
+
+const POLICY_GUARDRAIL_STATES = ["suggested", "confirmed", "rejected"];
+
+// Action tiers: higher tier = higher consequence = stronger required controls.
+// controlFloor is the minimum control a CONFIRMED entitlement at that tier carries.
+const ENTITLEMENT_ACTIONS = [
+  { action: "read",    tier: 1, verbs: ["read", "retrieve", "view", "look up", "lookup", "search", "reference", "inquire", "access "], controlFloor: [] },
+  { action: "export",  tier: 2, verbs: ["download", "export", "extract", "pull a report", "pull the report", "send out", "transfer out"], controlFloor: ["logging"] },
+  { action: "write",   tier: 2, verbs: ["write", "modify", "update", "enter", "edit", "amend", "input", "create a record"], controlFloor: ["review"] },
+  { action: "approve", tier: 3, verbs: ["approve", "release", "administer", "grant", "ratif", "sign-off on", "sign off on"], controlFloor: ["named-authority"] }
+];
+
+const ENTITLEMENT_CONTROLS = [
+  { control: "logging",         cues: ["log", "logging", "audit trail", "audit log", "recorded", "audit"] },
+  { control: "review",         cues: ["review", "reviewer", "checked", "second pair", "peer review", "four eyes", "four-eyes"] },
+  { control: "approval",        cues: ["approval", "sign off", "sign-off", "signoff", "countersign"] },
+  { control: "four-eyes",       cues: ["four eyes", "four-eyes", "dual control", "maker-checker", "maker checker"] },
+  { control: "named-authority", cues: ["named authority", "approval authority", "named approver", "delegated authority", "authority matrix", "authorised approver"] },
+  { control: "human-checkpoint",cues: ["human review", "human checkpoint", "human-in-the-loop", "human in the loop", "human oversight"] }
+];
+
+// Capture language that says access is MISSING / UNAUTHORISED / BLOCKED / UNKNOWN —
+// the only thing that overturns the assumption rule (then it becomes a QUESTION).
+const ENTITLEMENT_ABSENCE_RE = /no access|not authori[sz](?:ed|able)|un-?authori[sz](?:ed)?|cannot access|can'?t access|lacks? access|do(?:es)? not have access|don'?t have access|need(?:s)? access|without access|access (?:is )?(?:missing|blocked|denied|revoked|unknown|unclear|tbd)|not sure (?:i'?m|i am|we'?re|they'?re|if|whether|of)|unsure (?:if|whether|i|about)|permission (?:is )?(?:unknown|unclear|tbd|missing)|entitlement (?:is )?(?:unknown|unclear|tbd|missing)/i;
+
+function entitlementUniq(arr) {
+  return Array.from(new Set(Array.isArray(arr) ? arr : []));
+}
+
+// The highest-consequence action verb present in some text, or null.
+function detectActionTier(text) {
+  const t = String(text == null ? "" : text).toLowerCase();
+  let best = null;
+  for (const a of ENTITLEMENT_ACTIONS) {
+    if (a.verbs.some((v) => t.includes(v))) {
+      if (!best || a.tier > best.tier) best = a;
+    }
+  }
+  return best ? { action: best.action, tier: best.tier, controlFloor: best.controlFloor.slice() } : null;
+}
+
+// The portion of a clause that GRANTS — text up to the first negation-of-
+// requirement marker. Controls named after "without" / "unless" / "no need for"
+// are explicitly NOT required, so required-control detection must ignore them.
+function entitlementGrantedText(text) {
+  const t = String(text == null ? "" : text).toLowerCase();
+  const i = t.search(/\bwithout\b|\bunless\b|\bexcept\b|\bno need\b|\bnot requir/);
+  return i >= 0 ? t.slice(0, i) : t;
+}
+
+// The REQUIRED controls a clause names (review, logging, approval, four-eyes, …).
+// Detected on the granted portion only, so a control after "without"/"unless" — one
+// the clause explicitly waives — is never read as required.
+function detectEntitlementControls(text) {
+  const t = entitlementGrantedText(text);
+  return entitlementUniq(ENTITLEMENT_CONTROLS.filter((c) => c.cues.some((cue) => t.includes(cue))).map((c) => c.control));
+}
+
+// Permission vs prohibition modality (prohibition checked first so "may not" wins).
+function detectEntitlementModality(text) {
+  const t = String(text == null ? "" : text).toLowerCase();
+  if (/may not|must not|cannot|can'?t|shall not|not permitted|not allowed|prohibit|no one may|never approve/.test(t)) return "prohibit";
+  if (/\bmay\b|\bcan\b|are allowed|is allowed|permitted to|authori[sz](?:ed)? to|able to|entitled to/.test(t)) return "permit";
+  return null;
+}
+
+// Loose subject label for a clause ("Analysts", "Operations staff", "AI/tool").
+function entitlementSubject(text, isAi) {
+  if (isAi) return "AI/tool";
+  const m = String(text == null ? "" : text).match(/([A-Z][a-zA-Z][\w/ -]{1,40}?)\s+(?:may|can|must|shall|are|is|will)\b/);
+  if (m && m[1]) return m[1].trim();
+  const words = String(text == null ? "" : text).replace(/^[\s\d.()§¶-]+/, "").split(/\s+/).slice(0, 4).join(" ");
+  return words || "the actor";
+}
+
+// Loose system label for a clause, or "".
+function entitlementSystem(text) {
+  const m = String(text == null ? "" : text).match(/\b(?:in|from|on|to|within)\s+(?:the\s+)?([a-zA-Z][\w/ -]{2,40}?\s+(?:system|platform|ledger|database|portal|application|crm|gl|tool))\b/i);
+  return m && m[1] ? m[1].trim() : "";
+}
+
+// Derive the candidate PERMISSION / ENTITLEMENT guardrails (no review state) from a
+// policy. Deterministic and grounded in the clause's own action + modality words.
+// A clause that is only about data sensitivity (no action/entitlement) yields
+// NOTHING — sensitivity is never an automatic blocker. No policy ⇒ [].
+function buildPolicyGuardrails(policy) {
+  if (!policy || !Array.isArray(policy.clauses) || !policy.clauses.length) return [];
+  const out = [];
+  for (const clause of policy.clauses) {
+    const text = String(clause.text || "");
+    const low = text.toLowerCase();
+    const action = detectActionTier(low);
+    const modality = detectEntitlementModality(low);
+    // Controls are detected on the GRANTED portion only — a control that follows
+    // "without" / "unless" / "no need for" is explicitly NOT required, so it must
+    // not be read as a required control (which would invert the clause's meaning).
+    const grantLow = entitlementGrantedText(low);
+    const controls = detectEntitlementControls(grantLow);
+    const isAi = /\b(ai|a\.i\.|tool|tools|model|assistant|copilot|bot)\b/.test(low)
+      && /\b(assist|support|help|retriev|draft|prepar|summar|extract|gather)\b/.test(low);
+    const hasAuthority = controls.includes("named-authority") || /\b(approval authority|named approver|authority matrix|delegated authority)\b/.test(grantLow);
+    const base = {
+      clauseId: clause.id,
+      clauseRef: clause.ref,
+      role: entitlementSubject(text, isAi),
+      system: entitlementSystem(text),
+      quote: (typeof policyClip === "function") ? policyClip(text, 200) : text,
+      source: "ai-inferred",
+      confidence: typeof clause.confidence === "number" ? clause.confidence : 0.6
+    };
+    // AI / tool assist boundary: AI may assist with retrieval/extraction, NOT approve.
+    if (isAi && /\bnot\b/.test(low) && /\b(approve|release|sign|authori[sz]|commit|decide)\b/.test(low)) {
+      out.push(Object.assign({}, base, {
+        key: `${clause.id}:ai-assist`, kind: "ai-assist-boundary", label: "AI assists, does not approve",
+        action: "assist", actionTier: 0, controls: [], decisionOwner: "", fit: "ai-assist-only"
+      }));
+      continue;
+    }
+    if (!action) continue; // no described action → not an entitlement guardrail
+    // Approval that requires a named authority.
+    if (action.action === "approve" && (modality === "prohibit" || hasAuthority)) {
+      out.push(Object.assign({}, base, {
+        key: `${clause.id}:approve-authority`, kind: "approval-authority", label: "Approval requires named authority",
+        action: "approve", actionTier: 3, controls: entitlementUniq(controls.concat(["named-authority"])),
+        decisionOwner: "named approval authority", fit: "requires-authority"
+      }));
+      continue;
+    }
+    // An explicit prohibition of a non-approve action (a stated restriction).
+    if (modality === "prohibit") {
+      out.push(Object.assign({}, base, {
+        key: `${clause.id}:restrict-${action.action}`, kind: "restriction", label: `Restricted: ${action.action}`,
+        action: action.action, actionTier: action.tier, controls, decisionOwner: "", fit: "restricted"
+      }));
+      continue;
+    }
+    // Only an explicit GRANT becomes a permission guardrail. An action verb without
+    // a clear permission word is ambiguous → no guardrail (never fabricate a rule).
+    if (modality !== "permit") continue;
+    // A permission (with or without controls). Required controls = those named in
+    // the clause PLUS the action tier's control floor (higher action ⇒ stronger).
+    const reqControls = entitlementUniq(controls.concat(action.controlFloor));
+    out.push(Object.assign({}, base, {
+      key: `${clause.id}:permit-${action.action}`,
+      kind: reqControls.length ? "permission-with-controls" : "permission",
+      label: `${action.action === "read" ? "May read / retrieve" : "May " + action.action}${reqControls.length ? " with controls" : ""}`,
+      action: action.action, actionTier: action.tier, controls: reqControls, decisionOwner: "",
+      fit: reqControls.length ? "permitted-with-controls" : "permitted"
+    }));
+  }
+  return out;
+}
+
+// --- Review-state sidecar (only the human decisions persist; guardrails re-derive) ---
+function ensurePolicyGuardrailReviews() {
+  if (!state.policyGuardrailReviews || typeof state.policyGuardrailReviews !== "object") state.policyGuardrailReviews = {};
+  return state.policyGuardrailReviews;
+}
+// "suggested" (draft) unless the user has explicitly confirmed or rejected it.
+function policyGuardrailState(key) {
+  const map = state.policyGuardrailReviews && typeof state.policyGuardrailReviews === "object" ? state.policyGuardrailReviews : {};
+  const v = key ? map[key] : null;
+  return v === "confirmed" || v === "rejected" ? v : "suggested";
+}
+function confirmPolicyGuardrail(key) {
+  if (!key) return false;
+  ensurePolicyGuardrailReviews()[key] = "confirmed";
+  return true;
+}
+function rejectPolicyGuardrail(key) {
+  if (!key) return false;
+  ensurePolicyGuardrailReviews()[key] = "rejected";
+  return true;
+}
+function resetPolicyGuardrail(key) {
+  const map = ensurePolicyGuardrailReviews();
+  if (!map[key]) return false;
+  delete map[key];
+  return true;
+}
+
+// The guardrails WITH their current review state attached. policy defaults to the
+// uploaded policy. Never fabricates: [] when no policy / no grounded guardrails.
+function policyGuardrails(policy) {
+  const p = policy !== undefined ? policy : ((typeof currentAiPolicy === "function") ? currentAiPolicy() : null);
+  return buildPolicyGuardrails(p).map((g) => Object.assign({}, g, { state: policyGuardrailState(g.key) }));
+}
+
+// The read API for later placement / economics logic — CONFIRMED guardrails only.
+// A draft or rejected guardrail is never returned, so a policy never silently
+// activates.
+function activePolicyGuardrails(policy) {
+  return policyGuardrails(policy).filter((g) => g.state === "confirmed");
+}
+
+// The captured text used to reason about a step's entitlement (what the actor
+// describes doing, in which system).
+function stepEntitlementText(step) {
+  const keys = ["name", "description", "personaActors", "systemsTools", "output"];
+  return keys.map((k) => (typeof gridCellValue === "function" ? (gridCellValue(step, k) || "") : "")).filter(Boolean).join(" ");
+}
+
+// The entitlement STATUS of a step's actor, per the assumption rule:
+//   "assumed-permitted" — describes an action in their work; assume ordinary access
+//   "unknown"           — capture says access is missing / unauthorised / unknown
+//   "unspecified"       — no described action to reason about
+function stepEntitlementStatus(step) {
+  const text = stepEntitlementText(step);
+  if (!text.trim()) return "unspecified";
+  if (ENTITLEMENT_ABSENCE_RE.test(text)) return "unknown";
+  return detectActionTier(text) ? "assumed-permitted" : "unspecified";
+}
+
+// Unknown entitlement → a missing-permission QUESTION (never an automatic block).
+function policyEntitlementQuestionsForStep(step) {
+  if (!step || stepEntitlementStatus(step) !== "unknown") return [];
+  const cell = (k, d) => (typeof gridCellValue === "function" ? (gridCellValue(step, k) || d) : d);
+  const action = detectActionTier(stepEntitlementText(step));
+  const act = action ? action.action : "perform this work";
+  return [{
+    field: "entitlement",
+    actionTier: action ? action.tier : 0,
+    question: `Does ${cell("personaActors", "the actor")} have ${act} entitlement on ${cell("systemsTools", "the system")}? Capture suggests access may be missing or unconfirmed — confirm the permission rather than assuming a block.`
+  }];
+}
+
+// The guardrails RELEVANT to a step — those matching the step's described action
+// (plus AI-assist boundaries). A reviewable connection from policy to a work item;
+// read-only, never writes to the step.
+function policyGuardrailsForStep(step, policy) {
+  if (!step) return [];
+  const action = detectActionTier(stepEntitlementText(step));
+  const actionName = action ? action.action : "";
+  return policyGuardrails(policy).filter((g) =>
+    g.kind === "ai-assist-boundary"
+    || g.action === actionName
+    || (g.kind === "approval-authority" && actionName === "approve"));
+}
+
+// The read-only ENTITLEMENT FIT for a step, for later placement / economics. Never
+// blocks automatically: an unknown entitlement returns a question; a sensitive
+// system with described access is "permitted"; export/write/approve carry stronger
+// required controls. Reads CONFIRMED guardrails only; never writes the step.
+function policyEntitlementFitForStep(step, policy) {
+  const status = stepEntitlementStatus(step);
+  const action = detectActionTier(stepEntitlementText(step));
+  const actionName = action ? action.action : "";
+  const actionTier = action ? action.tier : 0;
+  if (status === "unknown") {
+    return { status, action: actionName, actionTier, fit: "needs-permission-info", requiredControls: [], decisionOwner: "", questions: policyEntitlementQuestionsForStep(step) };
+  }
+  let requiredControls = action ? action.controlFloor.slice() : [];
+  let decisionOwner = "";
+  let fit = actionName ? "permitted" : "unspecified";
+  for (const g of activePolicyGuardrails(policy)) {
+    const matches = g.action === actionName || (g.kind === "approval-authority" && actionName === "approve");
+    if (!matches) continue;
+    requiredControls = entitlementUniq(requiredControls.concat(g.controls || []));
+    if (g.decisionOwner) decisionOwner = g.decisionOwner;
+    if (g.fit === "requires-authority") fit = "requires-authority";
+    else if (g.fit === "restricted") fit = (fit === "requires-authority") ? fit : "restricted";
+    else if (g.fit === "permitted-with-controls" && fit !== "requires-authority" && fit !== "restricted") fit = "permitted-with-controls";
+  }
+  if (fit === "permitted" && requiredControls.length) fit = "permitted-with-controls";
+  // Approval always carries an authority requirement (stronger than read/retrieve).
+  if (actionName === "approve" && (fit === "permitted" || fit === "permitted-with-controls")) {
+    fit = "requires-authority";
+    if (!requiredControls.includes("named-authority")) requiredControls = requiredControls.concat(["named-authority"]);
+  }
+  return { status, action: actionName, actionTier, fit, requiredControls, decisionOwner, questions: [] };
+}
+// === end P6-3: Permission & entitlement guardrails core ======================
 
 function buildAgentRecipeIr(step, workflowContext = {}, options = {}) {
   const profile = buildRecipeDeploymentProfile(step, workflowContext, options);
@@ -13852,6 +14159,52 @@ function renderPolicyPanelHtml() {
         </div>
       </div>
       <details style="margin-top:10px;"><summary style="font-size:11px;color:#8aa0b8;cursor:pointer;">Show ${policy.clauses.length} policy clause${policy.clauses.length === 1 ? "" : "s"} (provenance: doc-extracted)</summary>${clauseRows}</details>
+      ${typeof policyGuardrailsPanelHtml === "function" ? policyGuardrailsPanelHtml(policy) : ""}
+    </div>`;
+}
+
+// P6-3: the draft permission / entitlement guardrail review panel. "" when no
+// guardrails can be grounded in the policy (byte-identical-when-unused). Each
+// guardrail shows what the actor may do, the required controls, who owns approval,
+// the source clause, and its review state, with confirm/reject/reset affordances.
+// ai-inferred (grey) until confirmed; nothing here is active until the user
+// confirms it, and sensitivity is never shown as an automatic block.
+function policyGuardrailsPanelHtml(policy) {
+  const guardrails = (typeof policyGuardrails === "function") ? policyGuardrails(policy) : [];
+  if (!guardrails.length) return "";
+  const esc = typeof escapeHtml === "function" ? escapeHtml : (s) => String(s == null ? "" : s);
+  const confirmedCount = guardrails.filter((g) => g.state === "confirmed").length;
+  const rows = guardrails.map((g) => {
+    const badge = (typeof provenanceBadgeHtml === "function") ? provenanceBadgeHtml(g.source, g.confidence) : "";
+    const meta = [
+      g.action ? `action <strong style="color:#cfe0f2;">${esc(g.action)}</strong>` : "",
+      (g.controls && g.controls.length) ? `controls ${esc(g.controls.join(", "))}` : "",
+      g.decisionOwner ? `owner ${esc(g.decisionOwner)}` : "",
+      g.fit ? `fit ${esc(g.fit)}` : ""
+    ].filter(Boolean).join(" · ");
+    const stateColor = g.state === "confirmed" ? "#00d4b4" : (g.state === "rejected" ? "#7a93b4" : "#f6c453");
+    const stateLabel = g.state === "confirmed" ? "confirmed" : (g.state === "rejected" ? "rejected (ignored)" : "suggested · draft");
+    const actions = g.state === "confirmed"
+      ? `<button type="button" class="secondary-button compact" data-policy-guardrail-reset="${esc(g.key)}">unconfirm</button>`
+      : g.state === "rejected"
+      ? `<button type="button" class="secondary-button compact" data-policy-guardrail-reset="${esc(g.key)}">restore</button>`
+      : `<button type="button" class="secondary-button compact" data-policy-guardrail-confirm="${esc(g.key)}">confirm</button> <button type="button" class="secondary-button compact" data-policy-guardrail-reject="${esc(g.key)}">reject</button>`;
+    return `<div style="margin-top:8px;padding:8px 10px;background:#0a1422;border:1px solid #1a2a3a;border-radius:8px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span style="font-weight:700;color:#cfe0f2;font-size:12px;">${esc(g.role)}: ${esc(g.label)}</span>
+        ${badge}
+        <span style="color:${stateColor};font-size:11px;">${esc(stateLabel)}</span>
+      </div>
+      <div style="margin:4px 0 0;color:#8aa0b8;font-size:11px;">Per policy ${esc(g.clauseRef)}${g.system ? ` · system ${esc(g.system)}` : ""}${meta ? ` · ${meta}` : ""}</div>
+      <p style="margin:4px 0 6px;color:#9fb3c8;font-size:11px;line-height:1.5;white-space:pre-wrap;word-break:break-word;">"${esc(g.quote)}"</p>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">${actions}</div>
+    </div>`;
+  }).join("");
+  return `
+    <div style="margin-top:12px;padding:10px 12px;background:#08111c;border:1px solid #1e3350;border-radius:9px;">
+      <div class="ds-micro" style="margin-bottom:4px;">Permission &amp; entitlement guardrails · ${confirmedCount} confirmed of ${guardrails.length} suggested</div>
+      <p style="margin:0 0 6px;color:#8aa0b8;font-size:11px;line-height:1.5;">Draft permission guardrails read from the uploaded policy — what each actor (or AI/tool) may do, with which controls. Suggestions only: nothing is active until you confirm it, sensitive data is never blocked outright, and an unknown entitlement raises a question rather than a block. Confirming never changes scoring or counted totals; it makes the guardrail readable by later placement review.</p>
+      ${rows}
     </div>`;
 }
 
@@ -13864,6 +14217,17 @@ function wirePolicyPanel(container) {
     if (file) handlePolicyUpload(file);
   });
   container.querySelector("#policyRemoveBtn")?.addEventListener("click", removeAiPolicy);
+  // P6-3: draft policy-guardrail review (confirm / reject / reset). Each only
+  // changes the human review decision; nothing is activated automatically.
+  container.querySelectorAll("[data-policy-guardrail-confirm]").forEach((btn) => {
+    btn.addEventListener("click", () => { if (confirmPolicyGuardrail(btn.dataset.policyGuardrailConfirm)) { persistState(); renderAnalysisTabRecipe(); } });
+  });
+  container.querySelectorAll("[data-policy-guardrail-reject]").forEach((btn) => {
+    btn.addEventListener("click", () => { if (rejectPolicyGuardrail(btn.dataset.policyGuardrailReject)) { persistState(); renderAnalysisTabRecipe(); } });
+  });
+  container.querySelectorAll("[data-policy-guardrail-reset]").forEach((btn) => {
+    btn.addEventListener("click", () => { if (resetPolicyGuardrail(btn.dataset.policyGuardrailReset)) { persistState(); renderAnalysisTabRecipe(); } });
+  });
 }
 
 // V3-4: engagement-level audit trail panel (read-only). Lists recent append-only
@@ -40565,6 +40929,7 @@ function normalizeLoadedState(parsed = {}) {
     stepTypes: parsed.stepTypes && typeof parsed.stepTypes === "object" ? parsed.stepTypes : {},
     workIntents: parsed.workIntents && typeof parsed.workIntents === "object" ? parsed.workIntents : {},
     dismissedSubsteps: parsed.dismissedSubsteps && typeof parsed.dismissedSubsteps === "object" ? parsed.dismissedSubsteps : {},
+    policyGuardrailReviews: parsed.policyGuardrailReviews && typeof parsed.policyGuardrailReviews === "object" ? parsed.policyGuardrailReviews : {},
     // V3-16: backfill handoff/decision tags. Stored tags pass through UNCHANGED — an
     // ai-inferred tag is never promoted on load (it hardens only on explicit confirm).
     handoffTags: parsed.handoffTags && typeof parsed.handoffTags === "object" ? parsed.handoffTags : {},
