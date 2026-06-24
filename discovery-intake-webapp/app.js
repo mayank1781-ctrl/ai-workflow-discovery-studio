@@ -1165,6 +1165,19 @@ const defaultState = {
   // SEPARATE from the opportunity score. ai-inferred never auto-hardens;
   // normalizeLoadedState backfills {} and never promotes.
   roleTags: {},
+  // P6-5: criticality / importance per step (NEW descriptive axis — WHY work
+  // matters). Additive sidecar keyed by step.id → { value: [kinds], source,
+  // confidence }. MULTI-VALUE controlled vocabulary (revenue-linked,
+  // client-impacting, control-critical, …). STRICTLY SEPARATE from technical fit
+  // (opportunity), policy fit, economics, completeness and confidence — it only
+  // groups, filters and explains and NEVER feeds the opportunity score, the
+  // confirmation/engine gate, or any counted total. ai-inferred never
+  // auto-hardens; normalizeLoadedState backfills {} and never promotes.
+  criticalityTags: {},
+  // P6-5: which Portfolio Studio sub-view / cluster axis is active (display state
+  // only — never affects any total). Backfilled by normalizeLoadedState.
+  portfolioView: "all-work",
+  portfolioClusterAxis: "system",
   // B1 (Phase 2): solution-shape per step (A1 axis) — sidecar keyed by step.id, {value,source,confidence}.
   // Threaded into the engine record by appStepToEngineStep; absent => byte-identical (A1 default path).
   solutionShapes: {},
@@ -5021,7 +5034,7 @@ function patternLayerColor(pattern) {
 // C-7: 5-tab altitude-grouped nav (Workbench · Your Workflow · Recipe Book / Executive · Workforce).
 // Old values (grid/opportunities/leverage/engineering) are no longer valid tab keys; they normalise
 // to "workbench" so saved state from earlier builds lands gracefully.
-const ANALYSIS_TABS = ["workbench", "workflow", "recipe", "dashboard", "workforce"];
+const ANALYSIS_TABS = ["workbench", "workflow", "recipe", "dashboard", "workforce", "portfolio"];
 
 // Implementation-complexity bucket per pattern. Low ends Phase 2, Medium ends
 // Phase 3, High ends Phase 4. Unknown patterns default to Medium.
@@ -6934,12 +6947,14 @@ function renderAnalysisStudio() {
     panel.classList.toggle("active", panel.id === `analysis-tab-${active}`);
   });
 
-  // C-7: 5-tab routing — Workbench / Your Workflow / Recipe Book / Executive Dashboard / Workforce
+  // C-7 / P6-5: tab routing — Workbench / Your Workflow / Recipe Book / Executive
+  // Dashboard / Workforce / Portfolio Studio
   if (active === "workbench") renderAnalysisTabWorkbench();
   else if (active === "workflow") renderAnalysisTabWorkflow();
   else if (active === "recipe") renderAnalysisTabRecipe();
   else if (active === "dashboard") renderAnalysisTabDashboard();
   else if (active === "workforce") renderAnalysisTabWorkforce();
+  else if (active === "portfolio") renderAnalysisTabPortfolio();
 }
 
 // =============================================================================
@@ -10708,7 +10723,7 @@ function stepCompositeBadgeHtml(step) {
     `Readiness: ${s.readinessLabel}${s.readinessScore !== null ? ` (${s.readinessScore}/100)` : ""}`,
     `Provenance: ${s.captured} captured field${s.captured === 1 ? "" : "s"}, each with a tracked source`
   ];
-  return `<details class="step-trust-badge" style="display:inline-block;margin-left:8px;"><summary style="cursor:pointer;list-style:none;display:inline-block;"><span class="ds-badge ${posture.cls}">${escapeHtml(posture.label)}</span></summary><ul style="margin:6px 0 0;padding-left:16px;color:#8aa0b8;font-size:11px;line-height:1.5;">${dims.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}${stepTypologyHtml(step)}${stepWorkIntentHtml(step)}${stepStructuralHtml(step)}${stepFrictionHtml(step)}${stepRoleHtml(step)}</ul></details>`;
+  return `<details class="step-trust-badge" style="display:inline-block;margin-left:8px;"><summary style="cursor:pointer;list-style:none;display:inline-block;"><span class="ds-badge ${posture.cls}">${escapeHtml(posture.label)}</span></summary><ul style="margin:6px 0 0;padding-left:16px;color:#8aa0b8;font-size:11px;line-height:1.5;">${dims.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}${stepTypologyHtml(step)}${stepWorkIntentHtml(step)}${stepStructuralHtml(step)}${stepFrictionHtml(step)}${stepRoleHtml(step)}${stepCriticalityHtml(step)}</ul></details>`;
 }
 
 // V3-7: knowledge-library panel for the grid tab. Shows (1) the entries applied
@@ -11019,6 +11034,7 @@ function renderAnalysisTabGrid() {
   wireStructural(container);
   wireFriction(container);
   wireRole(container);
+  wireCriticality(container);
 }
 
 // --- TAB 2: AI Opportunities --------------------------------------------------
@@ -41262,6 +41278,13 @@ function normalizeLoadedState(parsed = {}) {
     // role is never promoted on load (it hardens only on an explicit confirm); older
     // sessions backfill to {} (byte-identical when the role lens is unused).
     roleTags: parsed.roleTags && typeof parsed.roleTags === "object" ? parsed.roleTags : {},
+    // P6-5: backfill criticality tags + portfolio view state. Stored tags pass
+    // through UNCHANGED — an ai-inferred criticality set is never promoted on load
+    // (it hardens only on an explicit confirm); older sessions backfill to {} and
+    // the default view (byte-identical when the portfolio layer is unused).
+    criticalityTags: parsed.criticalityTags && typeof parsed.criticalityTags === "object" ? parsed.criticalityTags : {},
+    portfolioView: typeof parsed.portfolioView === "string" ? parsed.portfolioView : "all-work",
+    portfolioClusterAxis: typeof parsed.portfolioClusterAxis === "string" ? parsed.portfolioClusterAxis : "system",
     // B1 (Phase 2): backfill the solution-shape sidecar + contradiction queue + policy-first frame.
     // Stored shapes pass through UNCHANGED (an ai-inferred shape hardens only on confirm); older
     // sessions backfill to the defaults (byte-identical when these are unused).
@@ -42783,3 +42806,742 @@ function workGraphFromSteps(steps, opts) {
   return items;
 }
 // === end Phase 6 · P6-0 work-graph data contract ===========================
+
+// === Phase 6 · P6-5: Portfolio Preview, Roadmap & Multi-Layer Surfacing =====
+//
+// P6-5 is a SURFACING layer, not a new scoring engine. It renders the whole
+// opportunity landscape — every captured step, at every completeness — so a
+// workflow is never hidden because it is incomplete. Access is broad; trust is
+// explicit. It READS the existing primitives and confirmed-only APIs and never
+// re-implements a gate or a scorer:
+//
+//   - workItemCompleteness / previewEligible / counted (P6-0A) — the two
+//     surfacing signals; previewEligible is provisional, counted is official.
+//   - rollupCountableItems + isUnitConfirmed (P5/P6) — the OFFICIAL-counted gate
+//     is DELEGATED, never widened. A draft / suggested / modelled / unconfirmed
+//     item is never officially counted, regardless of its percentage.
+//   - workIntentOf (P6-1), policyEntitlementFitForStep (P6-3), confirmedUnitEconomics
+//     (P6-4), roleTagOf (V3-18) — read as SEPARATE axes, each kept distinct.
+//
+// It also introduces ONE new descriptive axis — criticality / importance — that
+// captures WHY work matters. Criticality is STRICTLY SEPARATE from technical fit
+// (the opportunity score), policy/permission fit, economics, completeness, and
+// confidence. It never feeds the opportunity score, the confirmation/engine
+// gate, or any counted total; it only groups, filters, and explains.
+//
+// Portfolio Potential (draft + confirmed, clearly labelled) is kept STRUCTURALLY
+// separate from Official Counted (confirmed, gate-passed records only). Leaders
+// see potential; counted truth stays strict. Rail-clean throughout: leverage /
+// time-returned framing only — never headcount, FTE, automation-%, or reduction.
+
+// --- Criticality / importance annotation axis (NEW, descriptive-only) --------
+// A per-step sidecar keyed by step.id -> { value: [kinds], source, confidence }.
+// MULTI-VALUE (a step can be both revenue-linked AND control-critical), so it
+// mirrors the V3-16/18 provenance discipline but carries an array value rather
+// than reusing the single-value generic core. The USER is the authority; AI may
+// SUGGEST an ai-inferred set the user then confirms or rejects. ai-inferred never
+// auto-hardens; byte-identical-when-unused; never written to the grid; never a
+// numeric score; never feeds opportunity / gate / counted.
+const CRITICALITY_KINDS = [
+  "revenue-linked", "client-impacting", "control-critical", "operational-bottleneck",
+  "cross-functional-junction", "decision-point", "expertise-dependent", "high-volume",
+  "exception-heavy", "downstream-dependency"
+];
+// Plain, rail-clean labels (why the work matters — consequence, never a count).
+const CRITICALITY_LABELS = {
+  "revenue-linked": "Revenue-linked",
+  "client-impacting": "Client-impacting",
+  "control-critical": "Control-critical",
+  "operational-bottleneck": "Operational bottleneck",
+  "cross-functional-junction": "Cross-functional junction",
+  "decision-point": "Decision point",
+  "expertise-dependent": "Expertise-dependent",
+  "high-volume": "High-volume",
+  "exception-heavy": "Exception-heavy",
+  "downstream-dependency": "Downstream dependency"
+};
+const CRITICALITY_MAX = 6; // a step may carry at most six importance reasons
+const CRITICALITY_HUE = "#FFB454"; // Caution Amber (locked palette) — consequence, NOT human-hold
+
+function ensureCriticalityTags() {
+  if (!state.criticalityTags || typeof state.criticalityTags !== "object") state.criticalityTags = {};
+  return state.criticalityTags;
+}
+function isCriticalityKind(v) { return typeof v === "string" && CRITICALITY_KINDS.includes(v); }
+// Keep only on-vocab kinds, de-duplicated, in canonical order, capped. Never
+// fabricates a value; an off-vocab/empty input collapses to [].
+function sanitizeCriticalityValues(values) {
+  const arr = Array.isArray(values) ? values : [];
+  const seen = new Set();
+  const out = [];
+  CRITICALITY_KINDS.forEach((k) => { if (arr.includes(k) && !seen.has(k)) { seen.add(k); out.push(k); } });
+  return out.slice(0, CRITICALITY_MAX);
+}
+// Read API. Returns the stored tag ONLY when it still resolves to a non-empty
+// on-vocab set (off-vocab entries are dropped); else null (never fabricated).
+function criticalityOf(id) {
+  const map = state.criticalityTags && typeof state.criticalityTags === "object" ? state.criticalityTags : {};
+  const tag = id ? map[id] : null;
+  if (!tag || typeof tag !== "object") return null;
+  const value = sanitizeCriticalityValues(tag.value);
+  if (!value.length) return null;
+  return { value, source: tag.source || "user-stated", confidence: typeof tag.confidence === "number" ? tag.confidence : 1 };
+}
+// Manual write -> user-stated. Empty/off-vocab clears the key. PURE (no persist).
+function setCriticalityValues(id, values) {
+  const map = ensureCriticalityTags();
+  if (!id) return false;
+  const value = sanitizeCriticalityValues(values);
+  if (!value.length) { delete map[id]; return false; }
+  map[id] = { value, source: "user-stated", confidence: 1 };
+  return true;
+}
+// Toggle one reason on/off, manual (user-stated). PURE.
+function toggleCriticality(id, kind) {
+  if (!id || !isCriticalityKind(kind)) return false;
+  const current = (criticalityOf(id) || { value: [] }).value.slice();
+  const i = current.indexOf(kind);
+  if (i >= 0) current.splice(i, 1); else current.push(kind);
+  return setCriticalityValues(id, current) || !current.length;
+}
+// AI suggestion -> ai-inferred, ONLY after validating the set. Off-vocab/empty/
+// malformed => no key written (never fabricated). confidence clamped to [0,1]. PURE.
+function applyCriticalitySuggestion(id, suggestion) {
+  const map = ensureCriticalityTags();
+  if (!id) return false;
+  const raw = suggestion && typeof suggestion === "object"
+    ? (Array.isArray(suggestion.value) ? suggestion.value : suggestion.values)
+    : null;
+  const value = sanitizeCriticalityValues(raw);
+  if (!value.length) return false;
+  const confRaw = Number(suggestion.confidence);
+  const confidence = Number.isFinite(confRaw) && confRaw >= 0 && confRaw <= 1 ? confRaw : 0.5;
+  map[id] = { value, source: "ai-inferred", confidence };
+  return true;
+}
+// Confirm -> promote ai-inferred to user-stated (value preserved). PURE.
+function confirmCriticality(id) {
+  const tag = criticalityOf(id);
+  if (!tag) return false;
+  ensureCriticalityTags()[id] = { value: tag.value, source: "user-stated", confidence: 1 };
+  return true;
+}
+// Reject -> delete the key (back to unclassified). PURE.
+function rejectCriticality(id) {
+  const map = ensureCriticalityTags();
+  if (!map[id]) return false;
+  delete map[id];
+  return true;
+}
+// Minimal captured-text payload for the descriptive classifier (no extra PII).
+function criticalitySuggestionInput(step) {
+  return [
+    structuralCellText(step, "name"), structuralCellText(step, "description"),
+    structuralCellText(step, "rulesDecisionLogic"), structuralCellText(step, "frequencyVolume"),
+    structuralCellText(step, "regulatoryContext"), structuralCellText(step, "handoff"),
+    structuralCellText(step, "exceptionBranching")
+  ].filter(Boolean).join("\n");
+}
+// The ONLY model call in the criticality flow — the narrow descriptive endpoint
+// (NOT recipe / scoring / opportunity). Graceful: any non-200 / empty key /
+// network error / off-vocab result leaves the step UNCLASSIFIED, writes no key,
+// and never throws. Stored ai-inferred; renders as a SUGGESTION until confirmed.
+async function suggestCriticality(id) {
+  const steps = analysisGridSteps();
+  const step = steps.find((s) => s && s.id === id);
+  if (!step) return false;
+  const text = criticalitySuggestionInput(step);
+  let result;
+  try {
+    result = await requestJson("/api/suggest-criticality", { method: "POST", body: { text } });
+  } catch (error) {
+    toast("Suggestion unavailable — criticality left unclassified.");
+    return false;
+  }
+  if (!applyCriticalitySuggestion(id, result)) {
+    toast("No confident suggestion — criticality left unclassified.");
+    return false;
+  }
+  persistState();
+  render();
+  toast("Suggested criticality — confirm or reject.");
+  return true;
+}
+// Flat-fill amber chips for a set of reasons (always a text label; never a shade
+// ramp on a meaning-bearing element).
+function criticalityChipsHtml(values) {
+  return (Array.isArray(values) ? values : []).map((k) =>
+    `<span style="display:inline-block;background:${CRITICALITY_HUE}1f;border:1px solid ${CRITICALITY_HUE}66;color:${CRITICALITY_HUE};border-radius:999px;padding:1px 8px;font-size:11px;margin:2px 4px 2px 0;">${escapeHtml(CRITICALITY_LABELS[k] || k)}</span>`
+  ).join("");
+}
+// Display block — "" when unset (byte-identical-when-unused). ai-inferred renders
+// distinct via provenanceBadgeHtml + "(suggested)" + confirm/reject.
+function criticalityTagHtml(step) {
+  const id = step && step.id;
+  const tag = criticalityOf(id);
+  if (!tag) return "";
+  const suggested = tag.source === "ai-inferred";
+  const cr = suggested
+    ? ` <button type="button" data-criticality-confirm="${escapeHtml(id)}" style="background:none;border:none;color:#00d4b4;cursor:pointer;font-size:11px;padding:0;">confirm</button> <button type="button" data-criticality-reject="${escapeHtml(id)}" style="background:none;border:none;color:#ff4fc8;cursor:pointer;font-size:11px;padding:0;">reject</button>`
+    : "";
+  return `Criticality: ${criticalityChipsHtml(tag.value)} ${provenanceBadgeHtml(tag.source, tag.confidence)}${suggested ? ` <span style="color:#7a93b4;">(suggested)</span>` : ""}${cr}`;
+}
+// Manual multi-select toggles + AI-suggest (always available inside the expandable
+// surface). Each toggle is a button so nothing is ever hard-disabled.
+function criticalityPickerHtml(step) {
+  const id = step && step.id;
+  const current = (criticalityOf(id) || { value: [] }).value;
+  const toggles = CRITICALITY_KINDS.map((k) => {
+    const on = current.includes(k);
+    const bg = on ? `${CRITICALITY_HUE}1f` : "#0d1b2e";
+    const bd = on ? `${CRITICALITY_HUE}66` : "#1e3350";
+    const col = on ? CRITICALITY_HUE : "#7a93b4";
+    return `<button type="button" data-criticality-toggle="${escapeHtml(id)}::${k}" aria-pressed="${on ? "true" : "false"}" style="background:${bg};border:1px solid ${bd};color:${col};border-radius:999px;padding:2px 8px;font-size:11px;cursor:pointer;margin:2px 4px 2px 0;">${escapeHtml(CRITICALITY_LABELS[k])}</button>`;
+  }).join("");
+  return `<span style="display:inline-flex;align-items:flex-start;gap:6px;flex-wrap:wrap;">
+    <span style="color:#7a93b4;">Why this matters:</span>
+    <span style="display:inline-flex;flex-wrap:wrap;max-width:520px;">${toggles}</span>
+    <button type="button" data-criticality-suggest="${escapeHtml(id)}" style="background:none;border:1px solid #3a2a5a;color:#a855f7;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">Suggest (AI)</button>
+  </span>`;
+}
+// Per-step criticality block, appended to the composite badge's expanded <details>.
+function stepCriticalityHtml(step) {
+  if (!step || !step.id) return "";
+  const tag = criticalityTagHtml(step);
+  return `<li style="list-style:none;margin-left:-16px;margin-top:6px;">${tag}${tag ? "<br>" : ""}${criticalityPickerHtml(step)}</li>`;
+}
+function wireCriticality(container) {
+  if (!container) return;
+  container.querySelectorAll("[data-criticality-toggle]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const [id, kind] = String(btn.dataset.criticalityToggle).split("::");
+      toggleCriticality(id, kind); persistState(); render();
+    });
+  });
+  container.querySelectorAll("[data-criticality-suggest]").forEach((btn) => {
+    btn.addEventListener("click", () => suggestCriticality(btn.dataset.criticalitySuggest));
+  });
+  container.querySelectorAll("[data-criticality-confirm]").forEach((btn) => {
+    btn.addEventListener("click", () => { if (confirmCriticality(btn.dataset.criticalityConfirm)) { persistState(); render(); toast("Criticality confirmed."); } });
+  });
+  container.querySelectorAll("[data-criticality-reject]").forEach((btn) => {
+    btn.addEventListener("click", () => { if (rejectCriticality(btn.dataset.criticalityReject)) { persistState(); render(); toast("Suggestion rejected — criticality cleared."); } });
+  });
+}
+
+// --- Trust tiers + roadmap buckets (pure) ------------------------------------
+// Completeness posture (P6-5 plan): four trust tiers folded from the five P6-0A
+// completeness bands. The tier is a COMPLETENESS label only — it never decides
+// official-counted status (the confirmation/engine gate does that, separately).
+const PORTFOLIO_TRUST_TIERS = [
+  { id: "early-draft",            label: "Early draft / needs capture", hue: "#5b7186", max: 65 },
+  { id: "functional-draft",       label: "Functional draft",            hue: "#3b82f6", max: 79 },
+  { id: "high-confidence-draft",  label: "High-confidence draft",       hue: "#06b6d4", max: 94 },
+  { id: "portfolio-ready",        label: "Portfolio-ready draft",       hue: "#00d4b4", max: 100 }
+];
+function portfolioCompletenessTier(pct) {
+  const p = Number.isFinite(pct) ? pct : 0;
+  return PORTFOLIO_TRUST_TIERS.find((t) => p <= t.max) || PORTFOLIO_TRUST_TIERS[0];
+}
+// Roadmap "next best action" buckets. Sensitive data is NEVER a bucket — there is
+// no "blocked" outcome; an unknown permission becomes a confirmation QUESTION.
+const PORTFOLIO_ROADMAP_BUCKETS = [
+  { id: "ready-for-pilot",               label: "Ready for pilot",                        hint: "Confirmed and counted, or a high-confidence draft with permission and economics in hand." },
+  { id: "needs-decomposition",           label: "Needs decomposition",                    hint: "A compound step doing several things — break it into work-actions first." },
+  { id: "needs-entitlement-confirmation", label: "Needs entitlement / permission confirmation", hint: "Access is undescribed — confirm the permission rather than assuming a block." },
+  { id: "needs-policy-review",           label: "Needs policy / control review",          hint: "Permitted with controls or requiring a named authority — route for review." },
+  { id: "control-heavy",                 label: "Technically possible but control-heavy", hint: "Several controls apply — worth doing, with the control overhead acknowledged." },
+  { id: "needs-economics-estimate",      label: "Needs economics estimate",               hint: "No economics captured yet — supply the department inputs to estimate." },
+  { id: "economics-promising-uncertain", label: "Economics promising but uncertain",      hint: "Economics drafted but assumptions are unconfirmed — review before counting." }
+];
+function portfolioRoadmapBucketMeta(id) {
+  return PORTFOLIO_ROADMAP_BUCKETS.find((b) => b.id === id) || PORTFOLIO_ROADMAP_BUCKETS[0];
+}
+// One item -> exactly one bucket, by priority. Criticality is deliberately NOT an
+// input here — it stays an orthogonal display/grouping axis, never a router.
+function portfolioRoadmapAction(view) {
+  const v = view || {};
+  if (v.officialCounted) return "ready-for-pilot";
+  if (v.compound) return "needs-decomposition";
+  const fit = v.policyFit || {};
+  if (fit.fit === "needs-permission-info" || fit.status === "unknown") return "needs-entitlement-confirmation";
+  if (fit.fit === "requires-authority" || fit.fit === "restricted") return "needs-policy-review";
+  if (v.controlHeavy) return "control-heavy";
+  if (fit.fit === "permitted-with-controls") return "needs-policy-review";
+  if (v.economics) { return v.previewEligible ? "ready-for-pilot" : "needs-economics-estimate"; }
+  if (v.economicsDraft) return "economics-promising-uncertain";
+  if (v.previewEligible) return "ready-for-pilot";
+  return "needs-economics-estimate";
+}
+
+// --- Per-item view + portfolio surface model (pure, testable) ----------------
+// `entry` = { id, label, item (a P6-0 work item for completeness), confirmed,
+//   workIntent, role, criticality, policyFit, economics, economicsDraft,
+//   compound, department, systems, controlHeavy }. Completeness + the official
+//   gate are DELEGATED (workItemCompleteness with the injected confirmed verdict);
+//   nothing here re-implements a gate or a scorer.
+function portfolioItemView(entry) {
+  const e = entry || {};
+  const item = e.item || {};
+  const confirmed = e.confirmed === true;
+  const c = workItemCompleteness(item, { confirmed });
+  const tier = portfolioCompletenessTier(c.pct);
+  // Provenance state across the present descriptive axes (weakest claim wins).
+  const provStates = [];
+  const pushProv = (src) => { if (src) provStates.push(provenanceToState(src)); };
+  if (e.workIntent) pushProv(e.workIntent.source);
+  if (e.role) pushProv(e.role.source);
+  if (e.criticality) pushProv(e.criticality.source);
+  const provenanceState = provStates.length ? leastAssertedState(provStates) : (confirmed ? "stated" : "computed");
+  const view = {
+    id: e.id || item.id || "",
+    label: e.label || (item.label && item.label.value) || "Work item",
+    level: item.level || "step",
+    pct: c.pct,
+    bandLabel: c.label,
+    completenessTier: tier.id,
+    completenessTierLabel: tier.label,
+    completenessHue: tier.hue,
+    previewEligible: c.previewEligible,            // provisional (>=80% + safety, real captured)
+    officialCounted: c.counted,                    // OFFICIAL — delegates to the confirmation gate
+    confirmed,
+    missingRequired: c.missingRequired,
+    workIntent: e.workIntent || null,
+    role: e.role || null,
+    criticality: e.criticality || null,            // { value:[kinds], source } | null — orthogonal axis
+    policyFit: e.policyFit || null,
+    economics: e.economics || null,                // confirmed-only economics (null when draft/absent)
+    economicsDraft: Boolean(e.economicsDraft),
+    compound: Boolean(e.compound),
+    department: e.department || null,
+    systems: Array.isArray(e.systems) ? e.systems : [],
+    controlHeavy: Boolean(e.controlHeavy),
+    provenanceState
+  };
+  view.roadmapAction = portfolioRoadmapAction(view);
+  return view;
+}
+// Build the whole portfolio surface from enriched entries. Keeps Portfolio
+// Potential (all labelled items) and Official Counted (gate-passed, de-duped)
+// STRUCTURALLY separate. isConfirmedFn is DELEGATED for the official de-dup so the
+// strict confirmation gate is never re-implemented.
+function buildPortfolioSurface(entries, opts) {
+  const list = Array.isArray(entries) ? entries : [];
+  const o = opts || {};
+  const isConfirmedFn = typeof o.isConfirmedFn === "function" ? o.isConfirmedFn : (it) => {
+    const m = list.find((x) => x && x.item && x.item.id === it.id);
+    return m ? m.confirmed === true : false;
+  };
+  const views = list.map(portfolioItemView);
+  // Portfolio Potential — every captured item, draft or confirmed, by trust tier.
+  const byTier = {};
+  PORTFOLIO_TRUST_TIERS.forEach((t) => { byTier[t.id] = []; });
+  views.forEach((v) => { (byTier[v.completenessTier] = byTier[v.completenessTier] || []).push(v); });
+  // Official Counted — DELEGATED gate (rollupCountableItems) AND the per-item
+  // safety gate (counted). A high percentage never bypasses the gate.
+  const items = list.map((e) => e.item).filter(Boolean);
+  const officialItems = rollupCountableItems(items, isConfirmedFn).filter((it) => {
+    const e = list.find((x) => x && x.item && x.item.id === it.id);
+    return e ? workItemCompleteness(it, { confirmed: e.confirmed === true }).counted : false;
+  });
+  const officialIds = new Set(officialItems.map((it) => it.id));
+  const officialViews = views.filter((v) => officialIds.has(v.id));
+  // Grouping axes (each a SEPARATE lens — never collapsed into a single score).
+  const group = (keyFn) => {
+    const out = {};
+    views.forEach((v) => { const keys = keyFn(v); (Array.isArray(keys) ? keys : [keys]).forEach((k) => { if (k == null || k === "") return; (out[k] = out[k] || []).push(v); }); });
+    return out;
+  };
+  const byDepartment = group((v) => v.department);
+  const byRole = group((v) => v.role && v.role.value);
+  const byWorkIntent = group((v) => v.workIntent && v.workIntent.value);
+  const byCriticality = group((v) => (v.criticality ? v.criticality.value : []));
+  const byRoadmap = {};
+  PORTFOLIO_ROADMAP_BUCKETS.forEach((b) => { byRoadmap[b.id] = []; });
+  views.forEach((v) => { (byRoadmap[v.roadmapAction] = byRoadmap[v.roadmapAction] || []).push(v); });
+  return {
+    views,
+    potential: { total: views.length, byTier },
+    official: { count: officialItems.length, items: officialItems, views: officialViews },
+    byDepartment, byRole, byWorkIntent, byCriticality, byRoadmap
+  };
+}
+// The multi-layer heatmap model — each row combines MORE THAN TWO independent
+// dimensions (completeness/confidence, criticality, economics, policy fit,
+// workIntent, role, systems, provenance). Rendered through shade + badges + dots,
+// never a single collapsed score and never a shade ramp standing in for a label.
+function buildPortfolioHeatmap(surface) {
+  const s = surface || { views: [] };
+  const rows = (s.views || []).map((v) => ({
+    id: v.id,
+    label: v.label,
+    completenessTier: v.completenessTier,        // confidence/completeness layer (shade)
+    completenessPct: v.pct,
+    criticality: v.criticality ? v.criticality.value : [], // importance layer (hue badges)
+    economicsState: v.economics ? "confirmed" : (v.economicsDraft ? "draft" : "none"), // economics layer
+    policyState: v.policyFit ? (v.policyFit.fit || v.policyFit.status || "unspecified") : "unspecified", // policy/permission layer
+    workIntent: v.workIntent ? v.workIntent.value : null, // workIntent layer (badge)
+    role: v.role ? v.role.value : null,           // role layer
+    systems: v.systems,                           // system layer
+    officialCounted: v.officialCounted,
+    provenanceState: v.provenanceState            // provenance layer (dot)
+  }));
+  // The independent dimensions this heatmap layers (proves >2 combinable axes).
+  const dimensions = ["completeness", "criticality", "economics", "policy", "workIntent", "role", "systems", "provenance"];
+  return { rows, dimensions };
+}
+// Cluster the surface by a chosen axis (system / workIntent / role / department /
+// criticality / roadmap). Pure regrouping — reuses the surface's own group maps.
+const PORTFOLIO_CLUSTER_AXES = [
+  { id: "system", label: "System" },
+  { id: "workIntent", label: "Work intent" },
+  { id: "role", label: "Role" },
+  { id: "department", label: "Department" },
+  { id: "criticality", label: "Criticality" },
+  { id: "roadmap", label: "Next action" }
+];
+function buildPortfolioClustersByAxis(surface, axis) {
+  const s = surface || {};
+  const a = PORTFOLIO_CLUSTER_AXES.some((x) => x.id === axis) ? axis : "system";
+  let map = {};
+  if (a === "workIntent") map = s.byWorkIntent || {};
+  else if (a === "role") map = s.byRole || {};
+  else if (a === "department") map = s.byDepartment || {};
+  else if (a === "criticality") map = s.byCriticality || {};
+  else if (a === "roadmap") map = s.byRoadmap || {};
+  else { // system — derive from each view's systems list
+    (s.views || []).forEach((v) => { (v.systems || []).forEach((sys) => { if (!sys) return; (map[sys] = map[sys] || []).push(v); }); });
+  }
+  const clusters = Object.keys(map).filter((k) => (map[k] || []).length).sort().map((key) => ({ key, members: map[key] }));
+  return { axis: a, clusters };
+}
+
+// --- Integration: current workflow -> enriched portfolio entries -------------
+function portfolioSafe(fn, fallback) { try { return fn(); } catch (e) { return fallback === undefined ? null : fallback; } }
+// The department a step belongs to: the engagement department tag if set, else
+// the step's role (a reasonable structural proxy), else "Unassigned".
+function portfolioStepDepartment(step) {
+  const dep = state.sessionMeta && state.sessionMeta.departmentTag;
+  if (dep && dep.value) return String(dep.value);
+  const role = (typeof roleTagOf === "function" && step && step.id) ? roleTagOf(step.id) : null;
+  if (role && role.value) return String(role.value);
+  return "Unassigned";
+}
+// Project one captured grid step into a portfolio entry: a P6-0 work item built
+// HONESTLY from the captured cells (so completeness reflects real capture) plus
+// the descriptive axes read from their own sidecars / confirmed-only APIs.
+function portfolioEntryFromStep(step, index) {
+  const id = step && step.id;
+  const cell = (k) => (typeof gridCellValue === "function") ? String(gridCellValue(step, k) || "") : "";
+  const policy = (typeof currentAiPolicy === "function") ? portfolioSafe(() => currentAiPolicy(), null) : null;
+  const dataTier = (typeof engineDataTier === "function") ? portfolioSafe(() => engineDataTier(step), "") : "";
+  const entStatus = (typeof stepEntitlementStatus === "function") ? portfolioSafe(() => stepEntitlementStatus(step), "") : "";
+  const action = (typeof detectActionTier === "function")
+    ? portfolioSafe(() => detectActionTier(`${cell("rulesDecisionLogic")} ${cell("output")} ${cell("description")}`), null) : null;
+  const wi = (typeof workIntentOf === "function") ? workIntentOf(id) : null;
+  const role = (typeof roleTagOf === "function") ? roleTagOf(id) : null;
+  const crit = criticalityOf(id);
+  const policyFit = (typeof policyEntitlementFitForStep === "function")
+    ? portfolioSafe(() => policyEntitlementFitForStep(step, policy), null) : null;
+  const economics = (typeof confirmedUnitEconomics === "function") ? portfolioSafe(() => confirmedUnitEconomics(step), null) : null;
+  const economicsDraft = !economics && Boolean(state.economicsAssumptions && typeof state.economicsAssumptions === "object"
+    && Object.keys(state.economicsAssumptions).some((k) => k.indexOf(id + ":") === 0));
+  const compound = (typeof detectCompoundStep === "function") ? Boolean(portfolioSafe(() => detectCompoundStep(step), false)) : false;
+  const requiredControls = (policyFit && Array.isArray(policyFit.requiredControls)) ? policyFit.requiredControls : [];
+  const controlHeavy = requiredControls.length >= 2;
+  const labelText = cell("name") || (typeof stepDisplayName === "function" ? stepDisplayName(step, index) : "") || "Step";
+  // Honest completeness mapping from captured cells (surfacing, not invention).
+  const item = makeWorkItem({
+    id,
+    level: "step",
+    label: workItemField(labelText, labelText ? "user-stated" : "", labelText ? 1 : undefined),
+    class: workItemField(step.cls || ""),
+    workIntent: wi ? workItemField(wi.value, wi.source, wi.confidence) : workItemField(""),
+    actionVerb: workItemField(action ? action.action : ""),
+    systems: workItemField(cell("systemsTools")),
+    dataTier: workItemField(dataTier || ""),
+    entitlement: workItemField(entStatus && entStatus !== "unspecified" ? entStatus : ""),
+    control: workItemField(cell("regulatoryContext")),
+    policyCap: workItemField(requiredControls.length ? requiredControls.join(", ") : ""),
+    decisionOwnership: workItemField(cell("humanCheckpoint")),
+    handoff: workItemField(cell("handoff")),
+    solutionPlacement: workItemField(step.solutionShape || (step.cells && step.cells.aiPattern && step.cells.aiPattern.value) || ""),
+    economics: workItemField(economics ? "confirmed" : (economicsDraft ? "draft" : "")),
+    origin: "captured",
+    confirmationState: (typeof isUnitConfirmed === "function" && isUnitConfirmed(id)) ? "confirmed" : "captured"
+  });
+  return {
+    id,
+    label: labelText,
+    item,
+    confirmed: (typeof isUnitConfirmed === "function") ? isUnitConfirmed(id) === true : false,
+    workIntent: wi ? { value: wi.value, source: wi.source } : null,
+    role: role ? { value: role.value, source: role.source } : null,
+    criticality: crit ? { value: crit.value, source: crit.source } : null,
+    policyFit,
+    economics,
+    economicsDraft,
+    compound,
+    department: portfolioStepDepartment(step),
+    systems: cell("systemsTools") ? [cell("systemsTools")] : [],
+    controlHeavy
+  };
+}
+function portfolioEntries() {
+  const steps = (typeof analysisGridSteps === "function") ? analysisGridSteps() : [];
+  return (Array.isArray(steps) ? steps : []).map((step, i) => portfolioEntryFromStep(step, i));
+}
+function portfolioSurfaceForCurrent() {
+  return buildPortfolioSurface(portfolioEntries(), {
+    isConfirmedFn: (it) => (typeof isUnitConfirmed === "function" ? isUnitConfirmed(it.id) === true : false)
+  });
+}
+
+// --- Render (read-only surfacing; no grid write, no model call, no recompute) -
+const PORTFOLIO_VIEWS = [
+  { id: "all-work",      label: "All Work" },
+  { id: "preview",       label: "Portfolio Preview" },
+  { id: "roadmap",       label: "Roadmap" },
+  { id: "department",    label: "Department" },
+  { id: "role",          label: "Role Influence" },
+  { id: "heatmap",       label: "Multi-Layer Heatmap" },
+  { id: "constellation", label: "Constellation" }
+];
+function portfolioActiveView() {
+  const v = state.portfolioView;
+  return PORTFOLIO_VIEWS.some((x) => x.id === v) ? v : "all-work";
+}
+function portfolioTierBadgeHtml(view) {
+  const hue = view.completenessHue || "#5b7186";
+  const counted = view.officialCounted
+    ? ` <span style="background:#00d4b41f;border:1px solid #00d4b466;color:#00d4b4;border-radius:999px;padding:1px 8px;font-size:10.5px;">Official counted</span>`
+    : ` <span style="background:#5b71861f;border:1px solid #5b718666;color:#8aa0b8;border-radius:999px;padding:1px 8px;font-size:10.5px;">Potential · not counted</span>`;
+  return `<span style="display:inline-block;background:${hue}1f;border:1px solid ${hue}66;color:${hue};border-radius:999px;padding:1px 8px;font-size:10.5px;">${escapeHtml(view.completenessTierLabel)} · ${view.pct}%</span>${counted}`;
+}
+function portfolioAxisChipsHtml(view) {
+  const chips = [];
+  if (view.workIntent) chips.push(`<span style="color:#7a93b4;font-size:11px;">intent: <strong style="color:#cfe0f2;">${escapeHtml(view.workIntent.value)}</strong></span>`);
+  if (view.role) chips.push(`<span style="color:#7a93b4;font-size:11px;">role: <strong style="color:#cfe0f2;">${escapeHtml(view.role.value)}</strong></span>`);
+  if (view.department) chips.push(`<span style="color:#7a93b4;font-size:11px;">dept: <strong style="color:#cfe0f2;">${escapeHtml(view.department)}</strong></span>`);
+  const econ = view.economics ? "economics: confirmed" : (view.economicsDraft ? "economics: draft" : "economics: needs inputs");
+  chips.push(`<span style="color:#7a93b4;font-size:11px;">${escapeHtml(econ)}</span>`);
+  return chips.join('<span style="color:#3f5878;"> · </span>');
+}
+function portfolioItemRowHtml(view) {
+  const crit = view.criticality ? criticalityChipsHtml(view.criticality.value) : `<span style="color:#5b7186;font-size:11px;">criticality not tagged</span>`;
+  const dot = (typeof heatmapSourceDot === "function") ? heatmapSourceDot(view.provenanceState) : "";
+  const missing = (view.missingRequired || []).length
+    ? `<div style="color:#7a93b4;font-size:11px;margin-top:4px;">Needs: ${escapeHtml((view.missingRequired || []).map((m) => m.label).join(", "))}</div>`
+    : "";
+  return `<div class="pf-item" style="background:#0c1726;border:1px solid #16263a;border-radius:10px;padding:12px 14px;margin:0 0 10px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
+      <div style="font-size:13px;font-weight:600;color:#e2e8f0;">${escapeHtml(view.label)}${dot}</div>
+      <div>${portfolioTierBadgeHtml(view)}</div>
+    </div>
+    <div style="margin-top:6px;">${crit}</div>
+    <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">${portfolioAxisChipsHtml(view)}</div>
+    ${missing}
+  </div>`;
+}
+function portfolioEmptyFrameHtml(message) {
+  return `<div style="background:#0c1726;border:1px solid #16263a;border-radius:12px;padding:22px 20px;color:#8aa0b8;font-size:13px;line-height:1.6;">${escapeHtml(message)}</div>`;
+}
+function portfolioAllWorkHtml(surface) {
+  const views = surface.views || [];
+  if (!views.length) return portfolioEmptyFrameHtml("No work captured yet. Start in Discovery — every step you capture appears here as an early draft and grows more confident as you fill it in. Nothing is hidden while a workflow is incomplete.");
+  const rows = views.map(portfolioItemRowHtml).join("");
+  const counts = PORTFOLIO_TRUST_TIERS.map((t) => `${(surface.potential.byTier[t.id] || []).length} ${t.label.toLowerCase()}`).join(" · ");
+  return `<div>
+    <div style="color:#8aa0b8;font-size:12px;margin:0 0 12px;">Everything captured, at every completeness — ${views.length} item${views.length === 1 ? "" : "s"} (${escapeHtml(counts)}). Draft items stay draft and clearly labelled; only confirmed, gate-passed items are marked Official counted.</div>
+    ${rows}
+  </div>`;
+}
+function portfolioPreviewHtml(surface) {
+  const views = surface.views || [];
+  if (!views.length) return portfolioEmptyFrameHtml("No portfolio potential yet — capture a workflow in Discovery to populate the preview. Functional drafts (two-thirds captured) become discussion-ready; high-confidence drafts become strong preview candidates.");
+  const potential = views.filter((v) => v.completenessTier !== "early-draft");
+  const early = views.filter((v) => v.completenessTier === "early-draft");
+  const official = surface.official.views || [];
+  const section = (title, caption, list) => `<div style="margin:0 0 16px;">
+      <div style="font-size:0.95rem;font-weight:600;color:#e2e8f0;margin:0 0 2px;">${escapeHtml(title)}</div>
+      <div style="color:#7a93b4;font-size:11.5px;margin:0 0 10px;">${escapeHtml(caption)}</div>
+      ${list.length ? list.map(portfolioItemRowHtml).join("") : portfolioEmptyFrameHtml("Nothing in this band yet.")}
+    </div>`;
+  return `<div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 14px;">
+      <div style="background:#0c1726;border:1px solid #16263a;border-radius:10px;padding:10px 14px;"><div style="font-size:11px;color:#7a93b4;">Portfolio Potential</div><div style="font-size:20px;font-weight:700;color:#06b6d4;">${views.length}</div><div style="font-size:10.5px;color:#7a93b4;">draft + confirmed, all labelled</div></div>
+      <div style="background:#0c1726;border:1px solid #16263a;border-radius:10px;padding:10px 14px;"><div style="font-size:11px;color:#7a93b4;">Official Counted</div><div style="font-size:20px;font-weight:700;color:#00d4b4;">${surface.official.count}</div><div style="font-size:10.5px;color:#7a93b4;">confirmed + gate-passed only</div></div>
+    </div>
+    ${section("Discussion-ready potential", "Functional drafts and above — usable for leadership discussion and prioritisation. Clearly labelled by trust state; never diluted into the official count.", potential)}
+    ${section("Early drafts (visible, cautious)", "Below two-thirds captured — still shown so the landscape is complete, marked as early draft and not yet preview-eligible.", early)}
+    ${section("Official counted", "Confirmed and gate-passed records only — the strict, undiluted count.", official)}
+  </div>`;
+}
+function portfolioRoadmapHtml(surface) {
+  const views = surface.views || [];
+  if (!views.length) return portfolioEmptyFrameHtml("No roadmap yet — capture a workflow and each step is grouped by its next best action (ready for pilot, needs decomposition, needs permission confirmation, needs policy review, control-heavy, needs economics, economics uncertain).");
+  const sections = PORTFOLIO_ROADMAP_BUCKETS.map((b) => {
+    const list = surface.byRoadmap[b.id] || [];
+    if (!list.length) return "";
+    return `<div style="margin:0 0 16px;">
+      <div style="font-size:0.95rem;font-weight:600;color:#e2e8f0;">${escapeHtml(b.label)} <span style="color:#7a93b4;font-weight:400;">(${list.length})</span></div>
+      <div style="color:#7a93b4;font-size:11.5px;margin:0 0 10px;">${escapeHtml(b.hint)}</div>
+      ${list.map(portfolioItemRowHtml).join("")}
+    </div>`;
+  }).join("");
+  return `<div><div style="color:#8aa0b8;font-size:12px;margin:0 0 12px;">Grouped by next best action. A sensitive system is never a hard stop on its own — an undescribed permission becomes a confirmation question, not a wall.</div>${sections}</div>`;
+}
+function portfolioDepartmentHtml(surface) {
+  const views = surface.views || [];
+  const deptKeys = Object.keys(surface.byDepartment || {}).sort();
+  let body = "";
+  if (deptKeys.length) {
+    body = deptKeys.map((dep) => {
+      const list = surface.byDepartment[dep];
+      const counted = list.filter((v) => v.officialCounted).length;
+      const drafts = list.length - counted;
+      const critMix = {};
+      list.forEach((v) => { (v.criticality ? v.criticality.value : []).forEach((k) => { critMix[k] = (critMix[k] || 0) + 1; }); });
+      const critChips = Object.keys(critMix).length ? criticalityChipsHtml(Object.keys(critMix)) : `<span style="color:#5b7186;font-size:11px;">no criticality tagged</span>`;
+      return `<div style="background:#0c1726;border:1px solid #16263a;border-radius:10px;padding:12px 14px;margin:0 0 10px;">
+        <div style="font-size:13px;font-weight:600;color:#cfe0f2;">${escapeHtml(dep)} <span style="color:#7a93b4;font-weight:400;">— ${list.length} item${list.length === 1 ? "" : "s"}</span></div>
+        <div style="color:#7a93b4;font-size:11.5px;margin:4px 0;">${drafts} draft · ${counted} official counted</div>
+        <div>${critChips}</div>
+      </div>`;
+    }).join("");
+  } else {
+    body = portfolioEmptyFrameHtml("No department or role tagged yet for this workflow. Tag a role on each step in the Workbench to see where work concentrates.");
+  }
+  // Reuse the existing cross-workflow department heatmap (by role across saved
+  // workflows) — returns "" when nothing is tagged anywhere.
+  const heatmap = (typeof departmentHeatmapHtml === "function") ? portfolioSafe(() => departmentHeatmapHtml(), "") : "";
+  return `<div>
+    <div style="color:#8aa0b8;font-size:12px;margin:0 0 12px;">Where the work concentrates — draft vs official mix and criticality mix per department/role.</div>
+    ${body}
+    ${heatmap ? `<div style="margin-top:16px;">${heatmap}</div>` : ""}
+  </div>`;
+}
+function portfolioRoleHtml(surface) {
+  const roleKeys = Object.keys(surface.byRole || {}).sort();
+  let body = "";
+  if (roleKeys.length) {
+    body = roleKeys.map((role) => {
+      const list = surface.byRole[role];
+      const onDecisions = list.filter((v) => v.workIntent && (v.workIntent.value === "approve" || v.workIntent.value === "advise" || v.workIntent.value === "escalate")).length;
+      const inferred = list.filter((v) => v.role && v.role.source === "ai-inferred").length;
+      const prov = inferred ? ` <span style="color:#7a93b4;font-size:11px;">(${inferred} suggested, unconfirmed)</span>` : "";
+      return `<li style="margin:6px 0;color:#b8c7da;"><strong style="color:#cfe0f2;">${escapeHtml(role)}</strong> — sits on ${list.length} step${list.length === 1 ? "" : "s"}${onDecisions ? `, ${onDecisions} at a decision / approval / escalation` : ""}${prov}</li>`;
+    }).join("");
+    body = `<ul style="margin:0;padding-left:18px;">${body}</ul>`;
+  } else {
+    body = portfolioEmptyFrameHtml("No role assigned yet. Assign a role on each step in the Workbench — the influence view never overstates certainty when evidence is thin.");
+  }
+  const footprint = (typeof roleFootprintHtml === "function") ? portfolioSafe(() => roleFootprintHtml(), "") : "";
+  return `<div>
+    <div style="color:#8aa0b8;font-size:12px;margin:0 0 12px;">Which roles sit on decisions, approvals, handoffs and cross-functional junctions — with source/confidence shown, never overstated.</div>
+    ${footprint ? `<div style="margin:0 0 16px;">${footprint}</div>` : ""}
+    ${body}
+  </div>`;
+}
+function portfolioHeatmapHtml(surface) {
+  const model = buildPortfolioHeatmap(surface);
+  if (!model.rows.length) return portfolioEmptyFrameHtml("No work to map yet. The heatmap combines completeness, criticality, economics, permission fit and work-intent on one plane once a workflow is captured.");
+  const legend = (typeof heatmapLegendHtml === "function") ? heatmapLegendHtml() : "";
+  const tierAlpha = { "early-draft": "3a", "functional-draft": "7a", "high-confidence-draft": "b3", "portfolio-ready": "b3" };
+  const rows = model.rows.map((r) => {
+    const hue = r.officialCounted ? "#00d4b4" : "#3b82f6";
+    const shade = tierAlpha[r.completenessTier] || "3a";
+    const crit = r.criticality.length ? criticalityChipsHtml(r.criticality) : `<span style="color:#5b7186;font-size:10.5px;">—</span>`;
+    const econBadge = `<span style="font-size:10.5px;color:#7a93b4;">econ: ${escapeHtml(r.economicsState)}</span>`;
+    const polBadge = `<span style="font-size:10.5px;color:#7a93b4;">policy: ${escapeHtml(r.policyState)}</span>`;
+    const wi = r.workIntent ? `<span style="font-size:10.5px;color:#7a93b4;">intent: ${escapeHtml(r.workIntent)}</span>` : "";
+    const dot = (typeof heatmapSourceDot === "function") ? heatmapSourceDot(r.provenanceState) : "";
+    return `<div style="display:flex;align-items:stretch;gap:0;margin:0 0 6px;border:1px solid #16263a;border-radius:8px;overflow:hidden;">
+      <div style="width:8px;background:${hue}${shade};" aria-hidden="true"></div>
+      <div style="flex:1;padding:8px 12px;background:#0c1726;">
+        <div style="font-size:12.5px;color:#e2e8f0;font-weight:600;">${escapeHtml(r.label)}${dot} <span style="color:#7a93b4;font-weight:400;font-size:11px;">${r.completenessPct}% · ${escapeHtml(r.completenessTier)}</span></div>
+        <div style="margin:4px 0;">${crit}</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">${econBadge}${polBadge}${wi}</div>
+      </div>
+    </div>`;
+  }).join("");
+  return `<div>
+    <div style="color:#8aa0b8;font-size:12px;margin:0 0 10px;">Multiple layers on one plane — shade = completeness/confidence, edge = counted vs potential, amber chips = criticality, plus economics, permission fit, work-intent and a provenance dot. Each layer is an independent axis.</div>
+    ${legend}
+    ${rows}
+  </div>`;
+}
+function portfolioConstellationHtml(surface) {
+  const axis = PORTFOLIO_CLUSTER_AXES.some((x) => x.id === state.portfolioClusterAxis) ? state.portfolioClusterAxis : "system";
+  const model = buildPortfolioClustersByAxis(surface, axis);
+  const switcher = PORTFOLIO_CLUSTER_AXES.map((a) => {
+    const on = a.id === model.axis;
+    return `<button type="button" data-portfolio-cluster="${a.id}" style="background:${on ? "#3b82f61f" : "#0d1b2e"};border:1px solid ${on ? "#3b82f666" : "#1e3350"};color:${on ? "#3b82f6" : "#7a93b4"};border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;margin:0 6px 6px 0;">${escapeHtml(a.label)}</button>`;
+  }).join("");
+  let body;
+  if (!model.clusters.length) {
+    body = portfolioEmptyFrameHtml(`No clusters on this axis yet. Items group once a ${escapeHtml(model.axis)} is captured across steps. Cluster grouping never invents a relationship that was not observed.`);
+  } else {
+    body = model.clusters.map((c) => `<div style="background:#0c1726;border:1px solid #16263a;border-radius:10px;padding:12px 14px;margin:0 0 10px;">
+        <div style="font-size:13px;font-weight:600;color:#cfe0f2;">${escapeHtml(c.key)} <span style="color:#7a93b4;font-weight:400;">— ${c.members.length} item${c.members.length === 1 ? "" : "s"}</span></div>
+        <div style="margin-top:6px;color:#b8c7da;font-size:11.5px;">${c.members.map((v) => escapeHtml(v.label)).join(" · ")}</div>
+      </div>`).join("");
+  }
+  return `<div>
+    <div style="color:#8aa0b8;font-size:12px;margin:0 0 10px;">Cluster the landscape by a shared axis. Reuses observed signals only — no invented adjacency.</div>
+    <div style="margin:0 0 12px;">${switcher}</div>
+    ${body}
+  </div>`;
+}
+function portfolioViewBodyHtml(surface) {
+  const view = portfolioActiveView();
+  if (view === "preview") return portfolioPreviewHtml(surface);
+  if (view === "roadmap") return portfolioRoadmapHtml(surface);
+  if (view === "department") return portfolioDepartmentHtml(surface);
+  if (view === "role") return portfolioRoleHtml(surface);
+  if (view === "heatmap") return portfolioHeatmapHtml(surface);
+  if (view === "constellation") return portfolioConstellationHtml(surface);
+  return portfolioAllWorkHtml(surface);
+}
+function portfolioViewSwitcherHtml() {
+  const active = portfolioActiveView();
+  return `<div class="pf-view-switch" style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 16px;">${PORTFOLIO_VIEWS.map((v) => {
+    const on = v.id === active;
+    return `<button type="button" data-portfolio-view="${v.id}" role="tab" aria-selected="${on ? "true" : "false"}" style="background:${on ? "#06b6d41f" : "#0d1b2e"};border:1px solid ${on ? "#06b6d466" : "#1e3350"};color:${on ? "#06b6d4" : "#8aa0b8"};border-radius:8px;padding:5px 12px;font-size:12px;cursor:pointer;">${escapeHtml(v.label)}</button>`;
+  }).join("")}</div>`;
+}
+// The Portfolio Studio body — ALWAYS rendered (a major product section is never
+// hidden because a workflow is incomplete). The view switcher and a clear,
+// cautious state are shown even with zero captured steps.
+function portfolioStudioBodyHtml() {
+  const surface = portfolioSurfaceForCurrent();
+  const header = `<div class="pf-header" style="margin:0 0 14px;">
+    <div style="font-size:1.15rem;font-weight:700;color:#e2e8f0;">Portfolio Studio</div>
+    <div style="color:#8aa0b8;font-size:12.5px;line-height:1.6;margin-top:4px;">The whole opportunity landscape — accessible at every completeness. Access is broad; trust is explicit. Portfolio Potential (draft + confirmed, labelled) stays separate from Official Counted (confirmed, gate-passed only).</div>
+  </div>`;
+  return `${header}${portfolioViewSwitcherHtml()}<div class="pf-body">${portfolioViewBodyHtml(surface)}</div>`;
+}
+function renderAnalysisTabPortfolio() {
+  const container = document.getElementById("analysis-tab-portfolio");
+  if (!container) return;
+  container.innerHTML = portfolioStudioBodyHtml();
+  wirePortfolio(container);
+}
+function wirePortfolio(container) {
+  if (!container) return;
+  container.querySelectorAll("[data-portfolio-view]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.portfolioView = btn.dataset.portfolioView;
+      if (typeof persistState === "function") persistState();
+      renderAnalysisTabPortfolio();
+    });
+  });
+  container.querySelectorAll("[data-portfolio-cluster]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.portfolioClusterAxis = btn.dataset.portfolioCluster;
+      if (typeof persistState === "function") persistState();
+      renderAnalysisTabPortfolio();
+    });
+  });
+}
+// === end Phase 6 · P6-5 portfolio surfacing ================================

@@ -583,3 +583,129 @@ node --check app.js      # OK (exit 0)
 node --check server.mjs  # OK (exit 0)
 npm test                 # tests 1490 / pass 1490 / fail 0 (exit 0)
 ```
+
+---
+
+## P6-5 · Portfolio Preview, Roadmap & Multi-Layer Surfacing
+
+**Status:** COMPLETE
+**Gate:** 1513/0 (+23 tests over P6-4's 1490/0)
+**Scope:** a **surfacing layer only** — it renders the existing P6-0A / P6-1..P6-4
+signals and adds ONE new descriptive axis (criticality). No new scoring engine, no
+change to the opportunity score, the confirmation/engine gate, or official counted
+rollups. No corp integration, no push/PR.
+
+P6-5 fills the gap the P6-0A contract left open: `workItemCompleteness` already
+computed `previewEligible` / `counted`, but **nothing rendered them** (the comment
+at the work-graph block named "Portfolio Preview surfaces (heatmap / constellation
+/ roadmap)" as the intended target). P6-5 is that render layer. The product rule it
+honours: *access is broad, trust is explicit* — a workflow is never hidden because
+it is incomplete; completeness changes labels, styling, and filters, not access.
+
+### Completeness posture (folded from the 5 P6-0A bands → 4 trust tiers)
+
+| Completeness | Trust tier | Behaviour |
+|---:|---|---|
+| 0–65% | Early draft / needs capture | Visible, clearly cautioned |
+| 66–79% | Functional draft | Discussion-ready |
+| 80–94% | High-confidence draft | Strong preview candidate (`previewEligible`) |
+| 95–100% | Portfolio-ready draft | — |
+
+**Official Counted is a SEPARATE, gate-driven signal**, not a percentage tier: an
+item is officially counted only when `workItemCompleteness(item,{confirmed}).counted`
+is true — i.e. the confirmation gate (`isUnitConfirmed`) **and** every mandatory
+safety field. A 100%-complete but *unconfirmed* item is in **Portfolio Potential**,
+never in **Official Counted**. The two are kept structurally separate.
+
+### What was built
+
+- **Criticality / importance axis** (NEW descriptive sidecar, `state.criticalityTags`):
+  a per-step **multi-value** `{value:[kinds], source, confidence}` over a 10-value
+  controlled vocabulary (revenue-linked, client-impacting, control-critical,
+  operational-bottleneck, cross-functional-junction, decision-point,
+  expertise-dependent, high-volume, exception-heavy, downstream-dependency). Manual
+  toggles + AI-suggest, mirroring the established provenance discipline:
+  `criticalityOf` / `setCriticalityValues` / `toggleCriticality` /
+  `applyCriticalitySuggestion` / `confirmCriticality` / `rejectCriticality`, a
+  descriptive `/api/suggest-criticality` endpoint (mirrors `handleSuggestRole`),
+  render + `wireCriticality`, mounted in the per-step composite trust badge. It is
+  **STRICTLY SEPARATE** from technical fit (opportunity), policy fit, economics,
+  completeness and confidence — it only groups / filters / explains.
+- **Pure portfolio model** (testable): `portfolioCompletenessTier`,
+  `portfolioRoadmapAction` (7 next-action buckets), `portfolioItemView`,
+  `buildPortfolioSurface` (Portfolio Potential vs Official Counted, with the
+  official de-dup **delegated** to `rollupCountableItems` + `isUnitConfirmed`),
+  `buildPortfolioHeatmap` (multi-dimensional rows), `buildPortfolioClustersByAxis`.
+- **Integration glue** (`portfolioEntryFromStep` / `portfolioEntries` /
+  `portfolioSurfaceForCurrent`): projects the captured grid honestly into work
+  items, reading each axis from its own sidecar / confirmed-only API
+  (`workIntentOf`, `roleTagOf`, `criticalityOf`, `policyEntitlementFitForStep`,
+  `confirmedUnitEconomics`). Every cross-fn call is `typeof`-guarded + wrapped.
+- **New "Portfolio Studio" Analysis tab** (`renderAnalysisTabPortfolio` + the
+  rail button / panel in `index.html` + `ANALYSIS_TABS` + dispatch) hosting an
+  internal switcher over **7 views**: All Work, Portfolio Preview, Roadmap (by next
+  best action), Department, Role Influence, Multi-Layer Heatmap, Constellation.
+  Department/Role reuse the existing `departmentHeatmapHtml` / `roleFootprintHtml`.
+  Every view renders a real, cautious state even at zero completeness (never a dead
+  end, never "blocked").
+
+### Safety / trust rules encoded
+
+- **Official counted unchanged** — delegated to `isUnitConfirmed` /
+  `rollupCountableItems` / `counted`; never widened. A high percentage never
+  bypasses the gate or a missing mandatory safety field (proven: a 100% unconfirmed
+  item, and a confirmed item missing a safety field, are both *not* counted).
+- **Criticality orthogonal** — no scorer / gate / economics / policy / completeness
+  function references the criticality tokens, and vice-versa (proven both ways +
+  functionally: setting criticality moves neither completeness/counted nor the
+  roadmap bucket).
+- **Sensitive ≠ blocked** — there is no "blocked" outcome; an unknown permission
+  routes to *needs entitlement / permission confirmation* (a question), not a wall.
+- **Drafts stay drafts** — suggested/inferred values surface with labels, never as
+  official fact; ai-inferred criticality never auto-hardens (load passes it through
+  unchanged); read-only (no `patchField`, no model call in the surfacing path).
+- **Rail-clean** — leverage / time-returned / consequence framing only; no
+  headcount / FTE / automation-% / reduction / eliminate language; locked palette
+  only (criticality uses Caution Amber `#FFB454`; Human Pink stays reserved); no
+  gradient on any data surface.
+
+### Changed files
+
+| File | Change |
+|---|---|
+| `app.js` | `criticalityTags` / `portfolioView` / `portfolioClusterAxis` in `defaultState` + normalize backfill; the criticality sidecar (vocab, mutators, render, `wireCriticality`) mounted in the step trust badge + wire batch; the P6-5 portfolio model + 7 view builders + `renderAnalysisTabPortfolio` / `wirePortfolio`; `ANALYSIS_TABS` + `renderAnalysisStudio` dispatch |
+| `index.html` | "Portfolio Studio" rail button (Portfolio group) + `analysis-tab-portfolio` panel |
+| `server.mjs` | `handleSuggestCriticality` + `/api/suggest-criticality` route (descriptive classifier, allowed-set validated, rail-clean prompt) |
+| `test/p6-5-portfolio.test.mjs` | 23 focused tests (new) |
+| `test/trust-legibility.test.mjs` | one `stepCriticalityHtml: () => ""` badge stub (same pattern as every prior axis) |
+
+### Adversarial review
+
+Reviewed across five lenses (official-counted-gate, criticality-orthogonality,
+rails/color, integration-runtime, test-rigor), 12 raw findings each
+skeptic-verified. **No production defect** was confirmed — all four "rejected"
+findings were false positives, and every confirmed finding was a **test-strength
+gap**, not a code bug. Fixed before commit: (1) the Department/Role views were
+stubbed, not executed — now extracted and run for real across all 7 views; (2)
+added a table-driven roadmap test pinning all 7 buckets and the permission-before-
+control priority order; (3) strengthened the criticality-independence proof through
+the consuming surface, the heatmap layer-independence proof, and the empty-state
+guidance assertions; (4) added an end-to-end integration smoke test that executes
+the real grid→entry→surface glue. (One copy reword — "auto-blocked" → "a hard stop"
+— came directly from the strengthened rail test catching the substring.)
+
+### What was intentionally NOT touched
+
+- The opportunity scorer (`getStepOpportunityMeta`), recipe readiness, the
+  confirmation/engine gate (`isUnitConfirmed` / `recipeGateCheck` /
+  `rollupCountableItems` / engine `isConfirmed`), counted rollups, the business
+  case, the engine cost model, and the P6-1..P6-4 sidecars — all read-only.
+- `studio_engine.mjs`. No corp integration. No push / PR.
+
+### Verification (P6-5)
+
+```bash
+node --check app.js      # OK (exit 0)
+node --check server.mjs  # OK (exit 0)
+npm test                 # tests 1513 / pass 1513 / fail 0 (exit 0)
+```

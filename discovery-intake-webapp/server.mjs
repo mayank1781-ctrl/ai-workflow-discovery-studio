@@ -1673,6 +1673,11 @@ const server = http.createServer(async (req, res) => {
       return await handleSuggestWorkIntent(req, res);
     }
 
+    // P6-5: descriptive criticality / importance classifier (NOT scoring). Additive.
+    if (req.method === "POST" && requestUrl.pathname === "/api/suggest-criticality") {
+      return await handleSuggestCriticality(req, res);
+    }
+
     if (req.method === "POST" && requestUrl.pathname === "/api/realtime/session") {
       return await handleRealtimeSession(req, res);
     }
@@ -2640,6 +2645,69 @@ async function handleSuggestRole(req, res) {
     const confRaw = Number(parsed && parsed.confidence);
     const confidence = Number.isFinite(confRaw) && confRaw >= 0 && confRaw <= 1 ? confRaw : 0.5;
     return sendJson(res, 200, value ? { value, confidence } : { value: null });
+  } catch (error) {
+    return sendJson(res, 502, { error: error.message || "Suggestion unavailable" });
+  }
+}
+
+// P6-5: descriptive criticality / importance classifier — WHY a step matters
+// (consequence), NEVER a numeric score and never the recipe/scoring/opportunity
+// paths. MULTI-VALUE: returns a SET of on-vocabulary reasons (or null). Validates
+// each reason server-side against the allowed set. LEVERAGE / consequence framing
+// ONLY: never computes/returns opportunity, ROI, headcount, FTE, or automatable-%.
+const CRITICALITY_KINDS_SERVER = [
+  "revenue-linked", "client-impacting", "control-critical", "operational-bottleneck",
+  "cross-functional-junction", "decision-point", "expertise-dependent", "high-volume",
+  "exception-heavy", "downstream-dependency"
+];
+const CRITICALITY_MAX_SERVER = 6;
+const CRITICALITY_SUGGEST_SYSTEM_PROMPT = `You classify WHY a workflow step matters — its consequence / importance — choosing from a fixed set of reasons. Allowed reasons (use these exact lowercase strings): revenue-linked, client-impacting, control-critical, operational-bottleneck, cross-functional-junction, decision-point, expertise-dependent, high-volume, exception-heavy, downstream-dependency. A step may carry several reasons or none. Respond ONLY as JSON: {"value":["<reason>", ...],"confidence":<number 0..1>}. Return an empty array if none clearly apply. This is DESCRIPTIVE classification ONLY — never assess value, ROI, opportunity, savings, automation, and never produce a headcount, an FTE count, or any percentage of work that can be automated.`;
+
+async function handleSuggestCriticality(req, res) {
+  if (!getOpenAiKey()) {
+    return sendJson(res, 400, { error: "OPENAI_API_KEY is not configured." });
+  }
+  let body;
+  try {
+    body = await readJson(req);
+  } catch {
+    return sendJson(res, 400, { error: "Invalid request body" });
+  }
+  const text = body && typeof body.text === "string" ? body.text : "";
+  if (!text.trim()) return sendJson(res, 200, { value: null });
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${getOpenAiKey()}` },
+      body: JSON.stringify({
+        model: HARVEST_MODEL,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: CRITICALITY_SUGGEST_SYSTEM_PROMPT },
+          { role: "user", content: text }
+        ]
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      return sendJson(res, 502, { error: data.error?.message || "Suggestion failed" });
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(data.choices?.[0]?.message?.content || "");
+    } catch {
+      return sendJson(res, 200, { value: null });
+    }
+    // Server-side allowed-set validation — keep only on-vocabulary reasons, unique,
+    // capped; an off-set/empty/malformed result → no suggestion (never fabricated).
+    const raw = parsed && Array.isArray(parsed.value) ? parsed.value : [];
+    const seen = new Set();
+    const value = [];
+    CRITICALITY_KINDS_SERVER.forEach((k) => { if (raw.includes(k) && !seen.has(k)) { seen.add(k); value.push(k); } });
+    const capped = value.slice(0, CRITICALITY_MAX_SERVER);
+    const confRaw = Number(parsed && parsed.confidence);
+    const confidence = Number.isFinite(confRaw) && confRaw >= 0 && confRaw <= 1 ? confRaw : 0.5;
+    return sendJson(res, 200, capped.length ? { value: capped, confidence } : { value: null });
   } catch (error) {
     return sendJson(res, 502, { error: error.message || "Suggestion unavailable" });
   }
