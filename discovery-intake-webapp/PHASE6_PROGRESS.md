@@ -1,9 +1,14 @@
 # Phase 6 Progress
 
+> **Status: SEALED at `59c2f7f` (P6-5), verified at P6-6.** Gate 1513/0, eval
+> 0/24 dangerous-wrong. Phase 6 = the additive range `fa908a8..59c2f7f` on
+> `phase-4`. Not pushed. See **P6-6 · Final Phase 6 Seal** at the end for the full
+> boundary attestation and integration-readiness notes.
+
 Phase 6 turns the app from "classified workflow steps" into "policy-aware AI
 placement and economics at the right grain." Build order: **P6-0** data
 contract → P6-1 work intent → P6-2 substep decomposition → P6-3 policy upload →
-P6-4 unit economics → P6-5 dashboards → P6-6 eval & rails.
+P6-4 unit economics → P6-5 dashboards → P6-6 eval & rails (final seal).
 
 ---
 
@@ -708,4 +713,123 @@ the real grid→entry→surface glue. (One copy reword — "auto-blocked" → "a
 node --check app.js      # OK (exit 0)
 node --check server.mjs  # OK (exit 0)
 npm test                 # tests 1513 / pass 1513 / fail 0 (exit 0)
+```
+
+---
+
+## P6-6 · Final Phase 6 Seal
+
+**Status:** SEALED ✅
+**Gate:** 1513/0 (no change — P6-6 is verification + documentation only, no feature)
+**Eval:** dangerous-wrong **0/24**, pass-rate 100%
+**Scope:** end-to-end verification of the whole Phase 6 chain, the seal record, and
+integration-readiness notes. **No product feature added.** No push, no PR, no corp
+integration.
+
+### The Phase 6 commit stack (all on `phase-4`, committed, NOT pushed)
+
+| Phase | Commit | Purpose | Gate |
+|---|---:|---|---:|
+| (Phase 5 seal) | `3344259` | baseline | 1387/0 |
+| P6-0 | `fa908a8` | Flexible work-graph data contract (schema) | 1424/0 |
+| P6-0A | `b55452b` | workIntent axis + previewEligible / counted | 1433/0 |
+| P6-1 | `1704d2c` | Work Intent / Step Function tags | 1450/0 |
+| P6-2 | `830a108` | Substep / work-action decomposition (suggestion only) | 1465/0 |
+| P6-3 | `71e7a2e` | Permission & entitlement guardrails (draft) | 1479/0 |
+| P6-4 | `9fa37a7` | AI unit economics (separate economic-fit layer) | 1490/0 |
+| P6-5 | `59c2f7f` | Portfolio Studio surfacing + criticality axis | 1513/0 |
+
+### The Phase 6 story (what it turned the app into)
+
+A **policy-aware, economically-literate work-pattern compiler at the right grain**,
+layered strictly additively on the Phase 5 trust spine. Discovery captures the
+workflow grid; P6-0/0A give it a flexible, provenance-aware work-graph contract with
+a completeness ladder (`previewEligible` / `counted`); P6-1 names *what* each step
+does (work intent); P6-2 suggests its substeps (draft only); P6-3 reads the AI
+policy into permission/entitlement guardrails (sensitive ≠ blocked); P6-4 adds a
+separate, reviewable economic-fit lens; P6-5 finally **renders** the whole landscape
+in the Portfolio Studio and adds a criticality/importance axis. Each layer is a
+distinct, separately-provenanced lens — none collapses into another, none feeds the
+opportunity score, the confirmation/engine gate, or counted totals.
+
+### Seal verification (objective evidence)
+
+1. **No scoring change** — `getStepOpportunityMeta` (the sole opportunity source)
+   and `scoreRecipeReadiness` are **byte-identical** between the Phase 5 seal
+   (`3344259`) and P6-5 (`59c2f7f`).
+2. **No confirmation/engine-gate change** — `recipeGateCheck`, `isUnitConfirmed`,
+   `confirmedView`, `hardenedRecipeSpec`, `confirmUnit`, `buildConfirmationLadder`
+   are **byte-identical** across Phase 6.
+3. **No counted-rollup / engine change** — `studio_engine.mjs` (the official
+   counted rollup, `isConfirmed`, the surface-aware rail authority) is
+   **byte-identical** across the entire Phase 6 range; `dashboardRecords` /
+   `appWorkflowToIntake` / `bridgeMissingFields` are byte-identical; the new
+   work-graph `rollupCountableItems` *delegates* the confirmed-ness check to
+   `isUnitConfirmed`, never re-implementing it.
+4. **No business-case change** — `computeBusinessCaseNow` / `applyBusinessCaseSnapshot`
+   are byte-identical.
+5. **Purely additive** — across all of Phase 6 there are **0 source-logic deletions**
+   in `app.js` / `server.mjs` / `index.html`; the only `git diff` "deletions" are
+   five single-line *replacements* that append new calls to existing mount points
+   (the `ANALYSIS_TABS` array, the tab-routing comment, the composite trust badge
+   `<details>` chain, the Workbench step body, and one test stub line).
+6. **Rail-clean** — a sweep of every added line shows the banned vocabulary
+   (headcount / FTE / automation-% / reduction / eliminate) appears **only** inside
+   the *negative refusal clauses* of the two descriptive-classifier prompts
+   (work-intent, criticality), i.e. the rails being enforced, not violated.
+7. **Eval** — the deterministic eval/rubric produces **0/24 dangerous-wrong**
+   outcomes; the eval suite still reads "not yet evaluated" with no fabricated pass.
+8. **Full gate** — `node --check app.js` / `server.mjs` exit 0; `npm test` =
+   1513 / 1513 / 0.
+9. **Browser smoke (demo mode, `AUTH_ENABLED=false`, isolated port + `DATA_DIR`)** —
+   the SPA loads with **no console errors**; the **Portfolio Studio** rail tab and
+   panel render; **all 7 views** (All Work, Portfolio Preview, Roadmap, Department,
+   Role Influence, Multi-Layer Heatmap, Constellation) render real content with no
+   exception and **no "blocked" outcome**; the criticality badge renders all 10
+   importance toggles; the real view-switch click path (`wirePortfolio`) works; the
+   render matches the Signal-Glass dark surface and the locked palette.
+
+### Boundary attestation (the P6-6 confirm list)
+
+- ✅ No hidden scoring changes (byte-identical proof).
+- ✅ No counted-rollup changes (engine byte-identical; new rollup delegates the gate).
+- ✅ No confirmation/engine-gate changes (byte-identical proof).
+- ✅ **Portfolio Potential stays separate from Official Counted** — the trust *tier*
+  is a completeness label; *Official Counted* is gate-driven (`counted` =
+  `isUnitConfirmed` + mandatory safety + not modelled/suggested). A 100%-complete
+  but unconfirmed item is Potential, never Official.
+- ✅ Draft / inferred / suggested values are labelled (`[ai-inferred]`, "(suggested)",
+  "draft, not counted") and never read as official fact; ai-inferred never
+  auto-hardens (load passes sidecars through unchanged).
+- ✅ Technical fit (opportunity), policy/permission fit, economic fit, completeness/
+  confidence, and criticality remain **separate axes** (isolation tests both
+  directions + functional deepEqual, across all six layers).
+- ✅ No headcount / reduction framing anywhere (rail sweep + per-layer rail tests).
+- ✅ Nothing pushed; no PR; no corp integration.
+
+### Integration readiness (for the later coherent package)
+
+- The whole of Phase 6 is the **additive, self-contained range
+  `fa908a8..59c2f7f`** on `phase-4`, on top of the Phase 5 chain (`568fb49..3344259`).
+- It is intended to ship as **one coherent Phase 4/5/6 update**, NOT scattered P6-x
+  PRs. Apply P4 → P5 → P6 onto the admin-approved Phase 2/3 base, then a single PR.
+- **Do not push or open a PR until the exact approved base / remote / target branch
+  is provided.** Remote, personal GitHub, and corp Bitbucket details are
+  deliberately not assumed here.
+
+### What was intentionally NOT touched (in P6-6)
+
+- No application code changed — P6-6 added **only** this seal section. The scorer,
+  readiness, confirmation/engine gate, counted rollups, business case, engine, and
+  the P6-0..P6-5 layers are all unchanged.
+
+### Verification (P6-6)
+
+```bash
+git diff --quiet 3344259 59c2f7f -- studio_engine.mjs   # UNCHANGED (engine intact)
+node --check app.js      # OK (exit 0)
+node --check server.mjs  # OK (exit 0)
+npm test                 # tests 1513 / pass 1513 / fail 0 (exit 0)
+# eval: dangerous-wrong 0/24 · pass-rate 100%
+# browser smoke (demo mode): Portfolio Studio + all 7 views render, 0 console errors
 ```
