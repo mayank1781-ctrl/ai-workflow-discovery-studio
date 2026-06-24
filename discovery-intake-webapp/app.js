@@ -1480,7 +1480,12 @@ function bindEvents() {
     toast("Session saved locally.");
   });
 
-  document.getElementById("topbarNewButton")?.addEventListener("click", openDiscoveryModePicker);
+  // Discovery polish: the topbar New button starts a clean Discovery interview
+  // session directly (current session saved first inside createNewSession),
+  // instead of forking into the interview/document mode picker. Document
+  // analysis is reachable in-session via "Add supporting doc"; the sample stays
+  // in Help / Guided tour (guidedTourButton + the first-run overlay).
+  document.getElementById("topbarNewButton")?.addEventListener("click", () => createNewSession({ appMode: "interview" }));
   // V3-9: re-open the guided walkthrough / load the sample at any time (the
   // first-run overlay also auto-opens once on a clean start).
   document.getElementById("guidedTourButton")?.addEventListener("click", () => {
@@ -1545,7 +1550,11 @@ function bindEvents() {
   els.sessionOwnerInput?.addEventListener("input", updateSessionMetadataFromControls);
   els.sessionDataClassificationSelect?.addEventListener("change", updateSessionMetadataFromControls);
   els.sessionStatusSelect?.addEventListener("change", updateSessionMetadataFromControls);
-  els.newSessionButton?.addEventListener("click", openDiscoveryModePicker);
+  // Discovery polish: New defaults to a clean interview session (the current
+  // session is saved first inside createNewSession). The old mode picker's
+  // "Analyse a document" path is merged into the in-session "Add supporting doc"
+  // affordance, so New no longer forks into a separate document mode.
+  els.newSessionButton?.addEventListener("click", () => createNewSession({ appMode: "interview" }));
   els.duplicateSessionButton?.addEventListener("click", () => duplicateCurrentSession());
   els.saveSessionLibraryButton?.addEventListener("click", () => {
     persistState();
@@ -4189,7 +4198,10 @@ const LIVE_GRID_LAYERS = [
   }
 ];
 
-let liveGridCollapsed = false;
+// Discovery polish: the live extraction grid is a capture-feedback detail that
+// duplicates the Workflow Steps cards; start it collapsed so the steps view is
+// the primary captured surface. Users can still expand it on demand.
+let liveGridCollapsed = true;
 let liveGridPrev = null;
 
 function hexToRgba(hex, alpha) {
@@ -4778,6 +4790,31 @@ function renderInlineKeyQuestions() {
     container.innerHTML = "";
     return;
   }
+  // Discovery polish: one PRIMARY next action (the top item, full card) plus a
+  // compact review list of the rest — instead of several equally-weighted cards.
+  // Every entry keeps its data-gap-* hooks so the wiring below is unchanged.
+  const [primary, ...rest] = top3;
+  const primaryCard = `
+    <button data-gap-question="${escapeHtml(primary.question)}" data-gap-key="${escapeHtml(primary.key)}" data-action-lane="${escapeHtml(primary.lane)}" type="button" style="width:100%;min-width:0;text-align:left;background:#0d1b2a;border:1px solid #1e3350;border-left:3px solid ${primary.accent};border-radius:8px;padding:10px 12px;cursor:pointer;color:#cfe0f0;line-height:1.4;transition:border-color 0.15s ease;">
+      <span style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:7px;">
+        <span style="font-size:10px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:${primary.accent};">${escapeHtml(primary.lane)}</span>
+        <span style="font-size:10px;color:#5b7186;">${escapeHtml(primary.treatment)}</span>
+      </span>
+      <span style="display:block;font-size:13px;color:${primary.confirm ? "#aebbd0" : "#e8f4ff"};">${escapeHtml(primary.question)}</span>
+      <span style="display:block;margin-top:7px;font-size:11px;color:#8aa0b8;"><strong style="color:#c8d8e8;">Why this matters:</strong> ${escapeHtml(primary.why)}</span>
+      <span style="display:block;margin-top:5px;font-size:11px;color:#5b7186;"><strong>Improves:</strong> ${escapeHtml(primary.improves)} · ${escapeHtml(primary.source)}</span>
+    </button>`;
+  const restList = rest.length ? `
+    <div style="margin-top:10px;">
+      <div class="ds-micro" style="color:#5b7186;margin-bottom:6px;">Also worth confirming</div>
+      <div style="display:flex;flex-direction:column;gap:2px;">
+        ${rest.map((field) => `
+          <button data-gap-question="${escapeHtml(field.question)}" data-gap-key="${escapeHtml(field.key)}" data-action-lane="${escapeHtml(field.lane)}" type="button" style="width:100%;min-width:0;text-align:left;background:transparent;border:none;border-left:2px solid ${field.accent};border-radius:0;padding:5px 0 5px 10px;cursor:pointer;color:#aebbd0;line-height:1.4;display:flex;gap:8px;align-items:baseline;">
+            <span style="font-size:9px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:${field.accent};flex-shrink:0;">${escapeHtml(field.lane)}</span>
+            <span style="font-size:12px;color:#aebbd0;min-width:0;">${escapeHtml(field.question)}</span>
+          </button>`).join("")}
+      </div>
+    </div>` : "";
   container.innerHTML = `
     <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-end;margin-bottom:8px;flex-wrap:wrap;">
       <div>
@@ -4786,18 +4823,8 @@ function renderInlineKeyQuestions() {
       </div>
       <span class="ds-badge ds-badge-dim">${top3.length} active</span>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;min-width:0;">
-      ${top3.map((field) => `
-        <button data-gap-question="${escapeHtml(field.question)}" data-gap-key="${escapeHtml(field.key)}" data-action-lane="${escapeHtml(field.lane)}" type="button" style="width:100%;min-width:0;text-align:left;background:#0d1b2a;border:1px solid #1e3350;border-left:3px solid ${field.accent};border-radius:8px;padding:10px 12px;cursor:pointer;color:#cfe0f0;line-height:1.4;transition:border-color 0.15s ease;">
-          <span style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:7px;">
-            <span style="font-size:10px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:${field.accent};">${escapeHtml(field.lane)}</span>
-            <span style="font-size:10px;color:#5b7186;">${escapeHtml(field.treatment)}</span>
-          </span>
-          <span style="display:block;font-size:13px;color:${field.confirm ? "#aebbd0" : "#e8f4ff"};">${escapeHtml(field.question)}</span>
-          <span style="display:block;margin-top:7px;font-size:11px;color:#8aa0b8;"><strong style="color:#c8d8e8;">Why this matters:</strong> ${escapeHtml(field.why)}</span>
-          <span style="display:block;margin-top:5px;font-size:11px;color:#5b7186;"><strong>Improves:</strong> ${escapeHtml(field.improves)} · ${escapeHtml(field.source)}</span>
-        </button>`).join("")}
-    </div>`;
+    ${primaryCard}
+    ${restList}`;
   container.querySelectorAll("[data-gap-question]").forEach((el) => {
     const choose = () => {
       // Asked-question memory: tapping IS asking. Dedupe lives on intent.
@@ -19758,9 +19785,13 @@ function patternInterviewContainer() {
 function renderDiscoveryPatternInterview() {
   const container = patternInterviewContainer();
   if (!container) return;
-  const active = document.activeElement;
-  if (active && container.contains(active) && (active.tagName === "TEXTAREA" || active.tagName === "INPUT")) return;
-  renderPatternInterview(container);
+  // Discovery polish: the read-only "Step Pattern Overview" is relocated out of
+  // the Discovery interview (it belongs with the structured views in Analysis
+  // Studio, where the same per-step AI-pattern data is already available). Hide
+  // the block here so Discovery stays focused on capture. The builder
+  // (renderPatternInterview) is retained for any future relocation.
+  container.hidden = true;
+  if (container.innerHTML !== "") container.innerHTML = "";
 }
 
 
@@ -40875,7 +40906,7 @@ function updateProgressUi() {
   if (els.discoveryCompletionPill && els.discoveryCompletionLabel && els.discoveryCompletionFill) {
     const sessionCompletion = calculateDiscoverySessionProgress(progress.percent);
     els.discoveryCompletionPill.style.setProperty("--completion", `${sessionCompletion}%`);
-    els.discoveryCompletionLabel.textContent = `Session ${sessionCompletion}%`;
+    els.discoveryCompletionLabel.textContent = `Solution readiness ${sessionCompletion}%`;
     els.discoveryCompletionFill.style.width = `${sessionCompletion}%`;
   }
 }

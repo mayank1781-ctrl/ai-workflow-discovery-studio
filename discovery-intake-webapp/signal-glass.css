@@ -231,8 +231,11 @@ body[data-app-mode="interview"] .workspace{
    signal-glass.css loads last → beats cockpit.css cascade for the studio layout.
    ========================================================================== */
 
-/* Analysis Studio becomes a flex row: rail (left) + content area (right) */
-.analysis-studio{
+/* Analysis Studio becomes a flex row: rail (left) + content area (right).
+   Scoped to :not([hidden]) so the [hidden] attribute that app.js sets in
+   interview mode wins — otherwise display:flex !important kept the Analysis
+   Studio shell visible underneath Discovery (a duplicate shell). */
+.analysis-studio:not([hidden]){
   display:flex !important;
   flex-direction:row !important;
   align-items:stretch;
@@ -503,3 +506,32 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:fo
 .pm-detail-k{ font-size:9.5px;font-weight:600;color:var(--txt-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px; }
 .pm-detail-v{ font-size:11.5px;color:var(--txt-dim);line-height:1.5; }
 .wb-confirmed-badge{ font-size:12px; font-weight:700; color:var(--sg-green,#00d4b4); }
+
+/* ============================================================================
+   Discovery simplification polish (presentation only)
+   - the Live transcript is collapsed by default (a quiet disclosure)
+   - lighter capture density on the Discovery surface
+   Uses only locked Signal Glass tokens; no new hex, no gradient.
+   ========================================================================== */
+
+/* Collapsed Live transcript — a quiet, de-emphasised disclosure that keeps the
+   Text Intake composer as the prominent surface. */
+.transcript-disclosure{ margin-top:4px; padding-top:10px; border-top:1px solid var(--sg-line-soft); }
+.transcript-disclosure > .transcript-summary{ list-style:none; cursor:pointer; display:flex; align-items:baseline; gap:8px; }
+.transcript-disclosure > .transcript-summary::-webkit-details-marker{ display:none; }
+.transcript-disclosure > .transcript-summary::before{
+  content:"\25B8"; /* ▸ */ font-size:10px; line-height:1; color:var(--txt-faint); transition:transform .15s ease;
+}
+.transcript-disclosure[open] > .transcript-summary::before{ transform:rotate(90deg); }
+.transcript-summary .transcript-summary-title{ font-size:13px; font-weight:600; }
+body[data-app-mode="interview"] .transcript-summary .transcript-summary-title{ color:var(--txt-dim); }
+.transcript-disclosure #conversationLog{ margin-top:10px; }
+
+/* Lighter capture density — tighten the secondary action rows and the hero
+   rhythm a touch so Discovery reads less busy (the design system is unchanged;
+   only spacing is trimmed). */
+body[data-app-mode="interview"] .discovery-hero-grid{ gap:18px; }
+body[data-app-mode="interview"] .support-actions.quiet-actions{ gap:6px; margin-top:8px; }
+body[data-app-mode="interview"] .voice-actions.secondary-voice-actions{ gap:8px; }
+body[data-app-mode="interview"] .conversation-card{ gap:10px; }
+body[data-app-mode="interview"] #voiceHint.hint{ margin:6px 0; }
