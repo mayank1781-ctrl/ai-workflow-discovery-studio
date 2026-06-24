@@ -1445,21 +1445,30 @@ document.addEventListener("DOMContentLoaded", () => {
   if (confluenceParam === "connected") { toast("Confluence connected successfully"); history.replaceState({}, "", window.location.pathname + window.location.hash); }
   if (confluenceParam === "error") { toast("Confluence connection failed — check Atlassian app settings"); history.replaceState({}, "", window.location.pathname + window.location.hash); }
 
-  window.mermaid?.initialize({
-    startOnLoad: false,
-    securityLevel: "loose",
-    theme: "base",
-    themeVariables: {
-      primaryColor: "var(--deep2)",
-      primaryTextColor: "#f8fafc",
-      primaryBorderColor: "#8b5cf6",
-      lineColor: "#60a5fa",
-      secondaryColor: "var(--deep2)",
-      tertiaryColor: "var(--deep3)",
-      edgeLabelBackground: "var(--deep2)",
-      fontFamily: "Inter, ui-sans-serif, system-ui"
-    }
-  });
+  // Mermaid themeVariables must be LITERAL colours — it cannot resolve CSS custom
+  // properties (passing var(--deep2) throws "Unsupported color format" and would
+  // abort the rest of this DOMContentLoaded handler, leaving the app inert). Use
+  // the light-theme literal equivalents, and keep the call in a narrow try/catch
+  // so a future Mermaid hiccup can never block bindEvents() and the rest of init.
+  try {
+    window.mermaid?.initialize({
+      startOnLoad: false,
+      securityLevel: "loose",
+      theme: "base",
+      themeVariables: {
+        primaryColor: "#F4F7FC",
+        primaryTextColor: "#15243B",
+        primaryBorderColor: "#8b5cf6",
+        lineColor: "#60a5fa",
+        secondaryColor: "#F4F7FC",
+        tertiaryColor: "#E9EFF7",
+        edgeLabelBackground: "#FFFFFF",
+        fontFamily: "Inter, ui-sans-serif, system-ui"
+      }
+    });
+  } catch (mermaidErr) {
+    console.warn("Mermaid theme init skipped (non-fatal):", mermaidErr);
+  }
   bindEvents();
   setupVoice();
   setupEvidenceDictation();
